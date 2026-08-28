@@ -45,6 +45,13 @@ for (const name of ["office3d.html", "tower.html", "index.html"]) {
   // the served favicon route does not exist off-origin
   html = html.replace(/<link rel="icon"[^>]*>\n?/, "");
 
+  // Standalone pages have no server, so the app routes have to point somewhere real.
+  // Supply published URLs via env; otherwise the links are left as-is.
+  const TOWER = process.env.ARTIFACT_TOWER_URL;
+  const FLOOR = process.env.ARTIFACT_FLOOR_URL;
+  if (TOWER) html = html.replace(/href="\/tower"/g, () => `href="${TOWER}" target="_blank" rel="noopener"`);
+  if (FLOOR) html = html.replace(/href="\/floor\/50"/g, () => `href="${FLOOR}" target="_blank" rel="noopener"`);
+
   const out = path.join(OUT, name);
   fs.writeFileSync(out, html);
   built.push({ name, bytes: html.length, inlined: !html.includes("/vendor/three/") });

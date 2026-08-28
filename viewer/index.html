@@ -257,15 +257,20 @@ footer .spacer{margin-left:auto}
     slabs.appendChild(r);
   }
   const spark = document.getElementById("spark");
+  // Spokes from a hub, not bars through the centre — eleven full-diameter bars overlap
+  // into a solid disc and stop reading as a spark at all.
   for (let i = 0; i < 11; i++) {
     const a = (i / 11) * 360;
     const r = document.createElementNS(ns, "rect");
-    r.setAttribute("x", "-1.9"); r.setAttribute("y", "-15");
-    r.setAttribute("width", "3.8"); r.setAttribute("height", "30");
-    r.setAttribute("rx", "1.9"); r.setAttribute("fill", "#d97757");
+    r.setAttribute("x", "-1.15"); r.setAttribute("y", "-16");
+    r.setAttribute("width", "2.3"); r.setAttribute("height", "11.5");
+    r.setAttribute("rx", "1.15"); r.setAttribute("fill", "#d97757");
     r.setAttribute("transform", `rotate(${a})`);
     spark.appendChild(r);
   }
+  const hub = document.createElementNS(ns, "circle");
+  hub.setAttribute("r", "2.6"); hub.setAttribute("fill", "#d97757");
+  spark.appendChild(hub);
   const anim = document.createElementNS(ns, "animateTransform");
   anim.setAttribute("attributeName", "transform"); anim.setAttribute("type", "rotate");
   anim.setAttribute("from", "0"); anim.setAttribute("to", "360");
