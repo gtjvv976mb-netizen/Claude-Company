@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS calls (
   mint          TEXT NOT NULL,
   symbol        TEXT,
   category      TEXT,
+  launchpad     TEXT,
   status        TEXT NOT NULL DEFAULT 'live',   -- live | closed
   conviction    REAL,
   entry_ref     REAL,          -- the mark when the call was published
@@ -57,16 +58,16 @@ CREATE INDEX IF NOT EXISTS idx_call_events ON call_events(call_id, id DESC);
 export function openCall(c) {
   try {
     const info = db.prepare(`
-      INSERT INTO calls (mint,symbol,category,conviction,entry_ref,entry_lo,entry_hi,stop,target,
+      INSERT INTO calls (mint,symbol,category,launchpad,conviction,entry_ref,entry_lo,entry_hi,stop,target,
                          thesis,invalidation,flags_at_call,liq_at_call,rt_loss_at_call,opened_at,report_file)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-      c.mint, c.symbol ?? null, c.category ?? null, c.conviction ?? null,
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      c.mint, c.symbol ?? null, c.category ?? null, c.launchpad ?? null, c.conviction ?? null,
       c.entryRef ?? null, c.entryLo ?? null, c.entryHi ?? null, c.stop ?? null, c.target ?? null,
       c.thesis ?? null, c.invalidation ?? null,
       JSON.stringify(c.flags ?? []), c.liqUsd ?? null, c.rtLossPct ?? null,
       Date.now(), c.reportFile ?? null);
     const call = getCall(info.lastInsertRowid);
-    emit("call:open", { callId: call.id, mint: call.mint, symbol: call.symbol, category: call.category });
+    emit("call:open", { callId: call.id, mint: call.mint, symbol: call.symbol, category: call.category, launchpad: call.launchpad });
     return call;
   } catch (e) {
     // A live call on this mint already exists; the desk does not stack calls on one coin.

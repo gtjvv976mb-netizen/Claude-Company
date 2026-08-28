@@ -1,4 +1,4 @@
-import { sweep, classify, CATEGORY_RISK } from "./market.js";
+import { sweep, classify, CATEGORY_RISK, launchpad } from "./market.js";
 import { gather, screen } from "./data/evidence.js";
 import { workup } from "./desk.js";
 import { openCall, liveCalls, liveCallFor, evaluateExit, closeCall, noteEvent } from "./calls.js";
@@ -35,6 +35,11 @@ export function rank(c) {
   if (!p) return { score: 0, why: ["no pair data"] };
   const why = [];
   let s = 0;
+
+  // A coin still on its bonding curve has no AMM depth for the exit probe to measure, so
+  // it fails `cannot_exit` at the screen anyway. Ranking it highly only burns a slot the
+  // desk was always going to refuse.
+  if (c.onCurve) { s -= 30; why.push("still on a bonding curve — no measurable exit"); }
 
   const liq = p.liquidityUsd ?? 0;
   const vol24 = p.volume?.h24 ?? 0;
@@ -91,10 +96,12 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
   // 4. Only now does anything cost money.
   const picks = [];
   for (const c of scored.slice(0, workups)) {
-    const rec = await runFor(null, () => workup(cycle, c.mint, `house scan · ${c.category}`));
+    const hook = `house scan · ${c.category}${c.launchpad ? ` · ${c.launchpad}` : ""}`;
+    const rec = await runFor(null, () => workup(cycle, c.mint, hook));
     if (!rec || rec.outcome === "no_data") continue;
     if (rec.finalDecision === "APPROVED") {
-      picks.push({ rec, category: c.category, conviction: rec.pm?.conviction ?? rec.conviction ?? null });
+      picks.push({ rec, category: c.category, launchpad: c.launchpad,
+        conviction: rec.pm?.conviction ?? rec.conviction ?? null });
     }
   }
 
@@ -106,7 +113,7 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
   for (const p of picks.slice(0, topN)) {
     const ev = p.rec.ev ?? {};
     const call = openCall({
-      mint: p.rec.mint, symbol: p.rec.symbol ?? ev.symbol, category: p.category,
+      mint: p.rec.mint, symbol: p.rec.symbol ?? ev.symbol, category: p.category, launchpad: p.launchpad,
       conviction: p.conviction,
       entryRef: ev.pair?.priceUsd ?? null,
       stop: p.rec.ticket?.stop_price ?? null,

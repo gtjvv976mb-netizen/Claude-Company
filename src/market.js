@@ -12,10 +12,46 @@ import { emit } from "./lib/bus.js";
  * the deterministic floors.
  */
 
+// Angles chosen to reach each launchpad's book, not just whatever is trending.
 const ANGLES = [
-  "pumpswap", "pumpfun", "SOL", "USDC", "raydium", "meteora", "orca",
-  "pump", "AI", "agent", "cat", "dog", "meme", "coin",
+  // launchpads
+  "pumpswap", "pumpfun", "pump", "letsbonk", "bonk", "launchlab", "bags", "BAGS",
+  "moonshot", "moon", "boop", "believe", "fomo", "meteoradbc", "daos",
+  // venues the graduates end up on
+  "raydium", "meteora", "orca", "SOL", "USDC",
+  // themes
+  "AI", "agent", "cat", "dog", "meme",
 ];
+
+/**
+ * Which launchpad minted this coin.
+ *
+ * Measured against the live market rather than assumed: launchpads brand themselves
+ * twice over — a vanity suffix on the mint address, and their own dexId while the coin
+ * is still on its bonding curve. Either alone is unreliable (a graduate migrates to
+ * Raydium and loses the dexId; some pads do not use a vanity suffix), so both are used.
+ */
+const PADS = [
+  { id: "pump.fun",     suffix: /pump$/,  dexes: ["pumpswap", "pumpfun"] },
+  { id: "letsbonk.fun", suffix: /bonk$/,  dexes: ["launchlab"] },
+  { id: "bags.fm",      suffix: /BAGS$/,  dexes: ["bags"] },
+  { id: "moonshot",     suffix: /moon$/,  dexes: ["moonshot"] },
+  { id: "boop.fun",     suffix: /boop$/,  dexes: ["boop"] },
+  { id: "trix",         suffix: /TRiX$/,  dexes: [] },
+  { id: "meteora-dbc",  suffix: null,     dexes: ["meteoradbc"] },
+];
+
+export function launchpad(mint, dexId) {
+  for (const p of PADS) {
+    if (p.suffix && p.suffix.test(mint)) return p.id;
+    if (dexId && p.dexes.includes(dexId)) return p.id;
+  }
+  return null;
+}
+
+/** Still on its bonding curve — it has not graduated to an open AMM yet. */
+export const onCurve = (dexId) =>
+  ["pumpfun", "launchlab", "bags", "meteoradbc", "boop", "moonshot"].includes(dexId);
 
 export async function sweep({ angles = ANGLES } = {}) {
   emit("stage", { stage: "scout", note: `sweeping ${angles.length} angles` });
@@ -38,9 +74,15 @@ export async function sweep({ angles = ANGLES } = {}) {
   }
 
   const out = [...best.entries()].map(([mint, pair]) => ({
-    mint, pair: shapePair(pair), raw: pair,
+    mint,
+    pair: shapePair(pair),
+    raw: pair,
+    launchpad: launchpad(mint, pair.dexId),
+    onCurve: onCurve(pair.dexId),
   }));
-  emit("scout:universe", { total: out.length, fresh: out.length });
+  const pads = {};
+  for (const t of out) if (t.launchpad) pads[t.launchpad] = (pads[t.launchpad] || 0) + 1;
+  emit("scout:universe", { total: out.length, fresh: out.length, launchpads: pads });
   return out;
 }
 
@@ -62,9 +104,10 @@ export function classify({ pair, mint }) {
   const liq = pair?.liquidityUsd ?? 0;
   const hasSite = (pair?.websites?.length ?? 0) > 0;
   const socials = pair?.socials?.length ?? 0;
-  const pumpLineage = /pump$/.test(mint) || pair?.dex === "pumpswap" || pair?.dex === "pumpfun";
+  const pad = launchpad(mint, pair?.dex);
+  const pumpLineage = Boolean(pad);
 
-  if (pumpLineage) why.push("pump.fun lineage");
+  if (pad) why.push(`${pad} launch`);
   if (hasSite) why.push("has a website");
   if (age != null) why.push(`${Math.round(age)}h old`);
 
@@ -85,7 +128,7 @@ export function classify({ pair, mint }) {
   // three-hour-old pump.fun coin with a landing page is the norm, not the exception — that
   // site is marketing, not evidence of a product.
   if (pumpLineage && age != null && age < 24 * 30) {
-    why.push(hasSite ? "recent launchpad token; website is marketing at this age" : "recent launchpad token with no website");
+    why.push(hasSite ? `recent ${pad} launch; a website is marketing at this age` : `recent ${pad} launch, no website`);
     return { category: "memecoin", confidence: hasSite ? 0.6 : 0.7, why };
   }
   if (hasSite && socials > 0 && age != null && age > 24 * 14) {
