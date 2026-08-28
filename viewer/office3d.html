@@ -1088,7 +1088,11 @@ STAFF.forEach((spec, i) => {
   });
   el.addEventListener("pointermove", (e) => {
     if (!dragging) return;
-    camYaw -= (e.clientX - px) * 0.006;
+    // Drag right should turn the world right, as every 3D viewer does. Our camera is
+    // parameterised x=cos(yaw), z=sin(yaw) while OrbitControls uses x=sin(t), z=cos(t) —
+    // a reflection, so yaw = pi/2 - t. OrbitControls subtracts on a right drag, which
+    // means ours has to ADD. Subtracting inverted the horizontal orbit.
+    camYaw += (e.clientX - px) * 0.006;
     camElev = THREE.MathUtils.clamp(camElev + (e.clientY - py) * 0.004, 0.22, 1.35);
     px = e.clientX; py = e.clientY;
     placeCamera();
