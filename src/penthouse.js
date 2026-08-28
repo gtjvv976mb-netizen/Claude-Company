@@ -54,7 +54,10 @@ export function rank(c) {
   // Depth: enough to exit, not so much that nothing moves it.
   if (liq > 75_000) { s += 15; why.push("liquid enough to exit"); }
   if (liq > 400_000) { s += 10; why.push("deep book"); }
-  if (liq > 5_000_000) { s -= 8; why.push("very large — less room to run"); }
+  // Was -8 above $5m, which demoted every real asset on the chain. A $5m book is not
+  // "too big to move" — it is the smallest size at which an exit is dependable. Only
+  // genuinely enormous caps get the penalty now.
+  if (liq > 25_000_000) { s -= 5; why.push("very large — less room to run"); }
 
   // Turnover relative to depth: real interest, but wash above a point.
   const volToLiq = liq > 0 ? vol24 / liq : 0;
@@ -71,11 +74,44 @@ export function rank(c) {
   // Age: old enough to have a tape, young enough to still move.
   if (age > 24 && age < 24 * 21) { s += 12; why.push("has a tape but is still young"); }
   if (age < 12) { s -= 15; why.push("too new to read"); }
+  // The ranker could reward youth and nothing else, so a coin that had actually survived
+  // scored worse than one that had not been tested. Durability is evidence too.
+  if (age > 24 * 90 && liq > 750_000) { s += 14; why.push("survived long enough to have a base rate"); }
+  if (age > 24 * 365) { s += 6; why.push("more than a year old"); }
 
   const txns = (p.txns?.h24?.buys ?? 0) + (p.txns?.h24?.sells ?? 0);
   if (txns > 500) { s += 8; why.push("actively traded"); }
 
   return { score: Math.round(s), why };
+}
+
+/** Categories with a survivable base rate, as opposed to a launchpad lottery ticket. */
+const SUBSTANTIVE = new Set(["established", "utility", "infra", "defi", "ai"]);
+
+/**
+ * Pick who gets the expensive seats.
+ *
+ * Ranking on score alone sent three memecoins to the desk every cycle, and the red team
+ * refuted all of them — correctly, because "most tokens of this profile go to zero" is
+ * true and nothing about an 80-hour-old coin overcomes it. A verdict that is structurally
+ * guaranteed carries no information. So at least one slot is reserved for a coin with a
+ * real base rate behind it, and the refusal starts meaning something.
+ */
+export function selectShortlist(scored, workups) {
+  const substantive = scored.filter((c) => SUBSTANTIVE.has(c.category));
+  const speculative = scored.filter((c) => !SUBSTANTIVE.has(c.category));
+  const reserved = Math.min(substantive.length, Math.max(1, Math.floor(workups / 2)));
+
+  const picked = substantive.slice(0, reserved);
+  for (const c of speculative) {
+    if (picked.length >= workups) break;
+    picked.push(c);
+  }
+  for (const c of substantive.slice(reserved)) {         // backfill if speculation ran dry
+    if (picked.length >= workups) break;
+    picked.push(c);
+  }
+  return picked.sort((a, b) => b.score - a.score);
 }
 
 export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TOP_N } = {}) {
@@ -94,13 +130,15 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
     scored.push({ ...c, category: cat.category, categoryWhy: cat.why, score: r.score, rankWhy: r.why });
   }
   scored.sort((a, b) => b.score - a.score);
-  emit("scout:shortlist", { count: Math.min(workups, scored.length), considered: universe.length });
+  const shortlist = selectShortlist(scored, workups);
+  emit("scout:shortlist", { count: shortlist.length, considered: universe.length,
+    mix: shortlist.map((c) => c.category) });
 
   // 4. Only now does anything cost money.
   const picks = [];
   let workedUp = 0;
   let stopped = null;
-  for (const c of scored.slice(0, workups)) {
+  for (const c of shortlist) {
     const usedSoFar = spend.usd - startSpend;
     if (usedSoFar >= CYCLE_BUDGET_USD) {
       stopped = `budget: $${usedSoFar.toFixed(2)} of $${CYCLE_BUDGET_USD}`;
