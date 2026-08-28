@@ -11,6 +11,7 @@ import * as leasing from "./leasing.js";
 import * as rooms from "./rooms.js";
 import * as calls from "./calls.js";
 import * as copy from "./copy.js";
+import * as perf from "./perf.js";
 
 /** Serves the trading floor and streams the desk's real events to it. */
 export function startOffice(port = Number(process.env.PORT) || 4949) {
@@ -137,6 +138,28 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           return json(200, { live: calls.liveCalls(), recent: calls.recentCalls(20), stats: calls.stats() });
         }
         if (url.pathname === "/api/calls/stats") return json(200, calls.stats());
+
+        // The house record, computed from chain data rather than self-reported.
+        if (url.pathname === "/api/record") return json(200, perf.houseRecord());
+
+        const perfMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/(record|sync)$/);
+        if (perfMatch) {
+          const floorNo = Number(perfMatch[1]);
+          if (perfMatch[2] === "record") return json(200, perf.recordFor(floorNo));
+          // sync: follow the owner's own wallet and record any fills on their calls
+          if (!me) return json(401, { error: "sign in with your wallet first" });
+          const lease = leasing.leaseFor(floorNo);
+          if (!lease || lease.wallet !== me) return json(403, { error: "this is not your floor" });
+          const taken = copy.feedFor(floorNo, 40).filter((d) => d.verdict === "offered");
+          let scanned = 0, settled = 0;
+          for (const d of taken) {
+            const r = await perf.scanFills({ floorNo, callId: d.call_id, wallet: me, mint: d.mint });
+            if (r.ok) scanned += r.fills ?? 0;
+            const s2 = perf.settle({ floorNo, callId: d.call_id, wallet: me });
+            if (s2.ok) settled++;
+          }
+          return json(200, { ok: true, fillsFound: scanned, settled, record: perf.recordFor(floorNo) });
+        }
 
         // ── a floor's copy settings and its personal feed ──
         const copyMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/(copy|feed|take)$/);
