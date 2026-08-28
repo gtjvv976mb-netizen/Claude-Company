@@ -35,6 +35,16 @@ body{margin:0;background:var(--charcoal);color:var(--ink);
 .home{color:var(--on-dark);text-decoration:none;font-size:11px;letter-spacing:.12em;
   text-transform:uppercase;font-weight:600;border:1px solid rgba(244,236,216,.3);padding:5px 11px;border-radius:5px}
 .home:hover{background:var(--amber);color:#2a2018;border-color:var(--amber)}
+button.home{font-family:inherit;cursor:pointer;background:transparent;color:var(--on-dark)}
+button.home.on{background:var(--good,#4f8f52);color:#fff;border-color:transparent}
+.wallet{padding:12px 16px;border-bottom:1px solid var(--panel-line);font-size:12px;color:var(--ink-soft);display:none}
+.wallet.on{display:block}
+.wallet .addr{font-family:"JetBrains Mono",monospace;color:var(--ink);font-size:11.5px}
+.wallet .bal{margin-top:5px}
+.wallet .bal b{font-family:"JetBrains Mono",monospace;color:var(--ink)}
+.wallet .mine{margin-top:6px;color:var(--good,#4f8f52);font-weight:600}
+.msg{margin-top:10px;font-size:12px;line-height:1.5}
+.msg.err{color:var(--bad,#b0503f)} .msg.ok{color:var(--good,#4f8f52)}
 
 .wrap{display:grid;grid-template-columns:minmax(0,1fr) 340px;height:calc(100vh - 58px)}
 @media (max-width:980px){.wrap{grid-template-columns:1fr}.rail{display:none}}
@@ -85,6 +95,7 @@ body{margin:0;background:var(--charcoal);color:var(--ink);
   <div class="spacer"></div>
   <div class="stat">Desks taken <b id="s-taken">—</b></div>
   <div class="stat">Available <b id="s-free">—</b></div>
+  <button class="home" id="wbtn" type="button">Connect wallet</button>
   <a class="home" href="/">Home</a>
 </div>
 
@@ -95,6 +106,7 @@ body{margin:0;background:var(--charcoal);color:var(--ink);
       <h2>The Directory</h2>
       <p>Every floor is one desk: fourteen agents researching Solana, and a CEO who signs.</p>
     </div>
+    <div class="wallet" id="wallet"></div>
     <div class="sel" id="sel"></div>
     <div class="list" id="list"></div>
     <p class="note">Floors are cosmetic tenancy in a research tool. Leasing one does not buy
@@ -373,12 +385,9 @@ function renderSel() {
   if (f.state === "vacant") {
     const p = document.createElement("div");
     p.className = "price";
-    p.innerHTML = `<b>${PRICE_USDC} USDC</b> · one-time · yours to keep`;
+    p.innerHTML = `<b>1,000,000 $CLAUDECO</b> · one floor per wallet`;
     selEl.appendChild(p);
-    const buy = document.createElement("a");
-    buy.className = "btn primary"; buy.href = `/buy?floor=${f.n}`;
-    buy.textContent = `Take Desk ${String(f.n).padStart(2, "0")}`;
-    act.appendChild(buy);
+
   }
   const enter = document.createElement("a");
   enter.className = f.state === "vacant" ? "btn ghost" : "btn primary";
@@ -386,6 +395,7 @@ function renderSel() {
   enter.textContent = f.state === "vacant" ? "Look inside" : "Enter the floor";
   act.appendChild(enter);
   selEl.appendChild(act);
+  if (typeof window.__leaseUI === "function") window.__leaseUI(f, selEl);
 }
 
 function select(n, focus) {
@@ -489,4 +499,177 @@ function frame() {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+</script>
+
+<script type="module">
+/* ═══════════════════════════════════════════════════════════════════════════
+   WALLET — connect, prove, lease.
+
+   The only thing a visitor ever signs here is a plain text message. It is not a
+   transaction, it moves no funds, and it cannot be replayed: the nonce behind it is
+   single-use and expires in five minutes. Paying for a floor is a transfer the visitor
+   builds in their own wallet, to a published address — never a blob this site composed.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const api = (p, opts = {}) => fetch(p, {
+  ...opts,
+  headers: { "content-type": "application/json", ...(token() ? { authorization: "Bearer " + token() } : {}), ...(opts.headers || {}) },
+}).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
+
+const token = () => { try { return localStorage.getItem("cc_token"); } catch { return null; } };
+const setToken = (t) => { try { t ? localStorage.setItem("cc_token", t) : localStorage.removeItem("cc_token"); } catch {} };
+
+const wbtn = document.getElementById("wbtn");
+const wpanel = document.getElementById("wallet");
+let ME = null, CFG = null;
+
+const short = (a) => a ? a.slice(0, 4) + "…" + a.slice(-4) : "";
+const fmt = (baseUnits, dec) => (Number(BigInt(baseUnits) / 10n ** BigInt(Math.max(0, dec - 3))) / 1000)
+  .toLocaleString(undefined, { maximumFractionDigits: 3 });
+
+async function loadConfig() {
+  const { body } = await api("/api/lease/config");
+  CFG = body;
+  return body;
+}
+
+async function refreshMe() {
+  if (!token()) { ME = null; renderWallet(); return; }
+  const { status, body } = await api("/api/me");
+  if (status !== 200) { setToken(null); ME = null; } else ME = body;
+  renderWallet();
+  if (ME?.lease) select(ME.lease.floor_no, false);
+  renderSel();
+}
+
+function renderWallet() {
+  if (!ME) {
+    wpanel.classList.remove("on");
+    wbtn.textContent = "Connect wallet";
+    wbtn.classList.remove("on");
+    return;
+  }
+  wbtn.textContent = short(ME.wallet);
+  wbtn.classList.add("on");
+  wpanel.classList.add("on");
+  wpanel.innerHTML = "";
+  const a = document.createElement("div");
+  a.className = "addr"; a.textContent = ME.wallet;
+  const bal = document.createElement("div");
+  bal.className = "bal";
+  bal.innerHTML = "Credited: <b></b> $CLAUDECO";
+  bal.querySelector("b").textContent = fmt(ME.balanceBaseUnits, ME.decimals);
+  wpanel.append(a, bal);
+  if (ME.lease) {
+    const m = document.createElement("div");
+    m.className = "mine";
+    m.textContent = `You hold floor ${ME.lease.floor_no}`;
+    wpanel.appendChild(m);
+  }
+}
+
+async function connect() {
+  if (ME) {                                   // already signed in → sign out
+    await api("/api/auth/signout", { method: "POST", body: "{}" });
+    setToken(null); ME = null; renderWallet(); renderSel(); return;
+  }
+  const provider = window.solana;
+  if (!provider?.isPhantom) {
+    window.open("https://phantom.app/download", "_blank", "noopener");
+    return;
+  }
+  try {
+    const { publicKey } = await provider.connect();
+    const wallet = publicKey.toString();
+    const { body: n } = await api("/api/auth/nonce", { method: "POST", body: JSON.stringify({ wallet }) });
+    if (!n?.message) throw new Error(n?.error || "could not start sign-in");
+
+    const encoded = new TextEncoder().encode(n.message);
+    const signed = await provider.signMessage(encoded, "utf8");
+    // Phantom returns bytes; the server wants base58
+    const sigB58 = b58(signed.signature ?? signed);
+
+    const { status, body } = await api("/api/auth/verify", {
+      method: "POST", body: JSON.stringify({ wallet, nonce: n.nonce, signature: sigB58 }),
+    });
+    if (status !== 200) throw new Error(body.error || "sign-in failed");
+    setToken(body.token);
+    await refreshMe();
+  } catch (e) {
+    if (!/User rejected|4001/i.test(String(e?.message))) alert("Sign-in failed: " + (e?.message || e));
+  }
+}
+
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+function b58(bytes) {
+  const arr = [...bytes]; const digits = [];
+  for (const byte of arr) {
+    let carry = byte;
+    for (let i = 0; i < digits.length; i++) { carry += digits[i] << 8; digits[i] = carry % 58; carry = (carry / 58) | 0; }
+    while (carry) { digits.push(carry % 58); carry = (carry / 58) | 0; }
+  }
+  let out = "";
+  for (let k = 0; k < arr.length && arr[k] === 0; k++) out += "1";
+  return out + digits.reverse().map((d) => B58[d]).join("");
+}
+
+wbtn.addEventListener("click", connect);
+
+/* ── lease action, injected into the selection panel ─────────────────────── */
+window.__leaseUI = function (f, selEl) {
+  if (!CFG) return;
+  const wrap = document.createElement("div");
+  wrap.className = "msg";
+
+  if (f.state !== "vacant") {
+    if (ME?.lease?.floor_no === f.n) { wrap.className = "msg ok"; wrap.textContent = "This floor is yours."; selEl.appendChild(wrap); }
+    return;
+  }
+  if (!CFG.ready) { wrap.textContent = "Leasing opens once the treasury is configured."; selEl.appendChild(wrap); return; }
+
+  const btn = document.createElement("button");
+  btn.className = "btn primary"; btn.type = "button";
+  btn.style.marginTop = "12px";
+
+  if (!ME) {
+    btn.textContent = "Connect wallet to lease";
+    btn.onclick = connect;
+  } else if (ME.lease) {
+    btn.disabled = true;
+    btn.style.opacity = ".55";
+    btn.textContent = `You already hold floor ${ME.lease.floor_no}`;
+    wrap.textContent = "One floor per wallet.";
+    selEl.appendChild(wrap);
+  } else if (BigInt(ME.balanceBaseUnits) < BigInt(ME.priceBaseUnits)) {
+    btn.textContent = `Send ${CFG.priceTokens.toLocaleString()} $CLAUDECO`;
+    btn.onclick = () => {
+      wrap.innerHTML = "";
+      const p = document.createElement("div");
+      p.innerHTML = `Send <b>${CFG.priceTokens.toLocaleString()} $CLAUDECO</b> from your wallet to:`;
+      const code = document.createElement("div");
+      code.style.cssText = "font-family:'JetBrains Mono',monospace;font-size:11px;word-break:break-all;margin:8px 0;color:var(--ink)";
+      code.textContent = CFG.treasury;
+      const note = document.createElement("div");
+      note.textContent = "The building watches the chain and credits you automatically, usually within a minute. Then press Lease.";
+      wrap.append(p, code, note);
+    };
+  } else {
+    btn.textContent = `Lease floor ${f.n}`;
+    btn.onclick = async () => {
+      btn.disabled = true; btn.textContent = "Leasing…";
+      const { status, body } = await api("/api/lease/allocate", { method: "POST", body: JSON.stringify({ floorNo: f.n }) });
+      if (status === 200) {
+        wrap.className = "msg ok"; wrap.textContent = `Floor ${f.n} is yours.`;
+        await refreshMe(); await loadFloors();
+      } else {
+        wrap.className = "msg err"; wrap.textContent = body.error || "could not lease that floor";
+        btn.disabled = false; btn.textContent = `Lease floor ${f.n}`;
+      }
+    };
+  }
+  selEl.appendChild(btn);
+  selEl.appendChild(wrap);
+};
+
+loadConfig().then(refreshMe);
+setInterval(() => { if (ME) refreshMe(); }, 20000);   // pick up credits as the scanner finds them
 </script>

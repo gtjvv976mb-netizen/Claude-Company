@@ -2,7 +2,8 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { ROOT } from "../config.js";
 
-const db = new DatabaseSync(path.join(ROOT, "claude-co.db"));
+// CLAUDE_CO_DB lets tests run against a throwaway file instead of the live journal.
+const db = new DatabaseSync(process.env.CLAUDE_CO_DB || path.join(ROOT, "claude-co.db"));
 db.exec(`
 CREATE TABLE IF NOT EXISTS seen (
   mint TEXT PRIMARY KEY, symbol TEXT, first_seen INTEGER, last_seen INTEGER, looks INTEGER DEFAULT 0

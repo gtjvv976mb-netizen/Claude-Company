@@ -6,10 +6,12 @@ import { bus, backlog } from "./lib/bus.js";
 import { spend } from "./lib/llm.js";
 import * as store from "./lib/store.js";
 import * as tower from "./tower.js";
+import * as auth from "./auth.js";
+import * as leasing from "./leasing.js";
 
 /** Serves the trading floor and streams the desk's real events to it. */
 export function startOffice(port = 4949) {
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${port}`);
 
     if (url.pathname === "/events") {
@@ -47,6 +49,67 @@ export function startOffice(port = 4949) {
         return;
       }
       res.writeHead(404); res.end("no such asset"); return;
+    }
+
+    // ── leasing API ─────────────────────────────────────────────────────────
+    if (url.pathname.startsWith("/api/")) {
+      const json = (code, body) => {
+        res.writeHead(code, { "content-type": "application/json; charset=utf-8",
+          "cache-control": "no-store", "access-control-allow-origin": "*",
+          "access-control-allow-headers": "content-type,authorization" });
+        res.end(JSON.stringify(body));
+      };
+      if (req.method === "OPTIONS") { json(204, {}); return; }
+
+      const bearer = (req.headers.authorization || "").replace(/^Bearer /, "") || null;
+      const me = auth.walletFor(bearer);
+
+      const readBody = () => new Promise((resolve) => {
+        let raw = ""; let over = false;
+        req.on("data", (c) => { raw += c; if (raw.length > 8192) { over = true; req.destroy(); } });
+        req.on("end", () => { if (over) return resolve(null); try { resolve(JSON.parse(raw || "{}")); } catch { resolve(null); } });
+      });
+
+      try {
+        if (url.pathname === "/api/lease/config") {
+          return json(200, { ...leasing.config(), floors: tower.FLOORS, hq: tower.HQ_FLOOR });
+        }
+        if (url.pathname === "/api/auth/nonce" && req.method === "POST") {
+          const body = await readBody();
+          if (!body?.wallet) return json(400, { error: "wallet required" });
+          try { return json(200, auth.issueNonce(body.wallet)); }
+          catch (e) { return json(400, { error: e.message }); }
+        }
+        if (url.pathname === "/api/auth/verify" && req.method === "POST") {
+          const body = await readBody();
+          if (!body?.wallet || !body?.nonce || !body?.signature) return json(400, { error: "wallet, nonce, signature required" });
+          const r = auth.verifySignature({ wallet: body.wallet, nonce: body.nonce, signatureB58: body.signature });
+          return json(r.ok ? 200 : 401, r);
+        }
+        if (url.pathname === "/api/auth/signout" && req.method === "POST") {
+          if (bearer) auth.signOut(bearer);
+          return json(200, { ok: true });
+        }
+        if (url.pathname === "/api/me") {
+          if (!me) return json(401, { error: "not signed in" });
+          const lease = leasing.leaseOf(me);
+          return json(200, {
+            wallet: me,
+            balanceBaseUnits: leasing.balanceOf(me).toString(),
+            priceBaseUnits: leasing.PRICE_BASE_UNITS.toString(),
+            decimals: leasing.DECIMALS,
+            lease, credits: leasing.creditsFor(me),
+          });
+        }
+        if (url.pathname === "/api/lease/allocate" && req.method === "POST") {
+          if (!me) return json(401, { error: "sign in with your wallet first" });
+          const body = await readBody();
+          const r = leasing.allocate({ wallet: me, floorNo: body?.floorNo, name: body?.name ?? null });
+          return json(r.ok ? 200 : 409, r);
+        }
+      } catch (e) {
+        return json(500, { error: String(e.message) });
+      }
     }
 
     if (url.pathname === "/api/tower/floors") {
