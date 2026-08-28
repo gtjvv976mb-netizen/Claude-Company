@@ -1,0 +1,206 @@
+import * as ds from "./data/dexscreener.js";
+import { gather, screen } from "./data/evidence.js";
+import { ANALYSTS, runAnalyst, runNarrative } from "./agents/analysts.js";
+import { runScout, runRedTeam, runRisk, runPM, runExecution } from "./agents/decision.js";
+import { complianceCheck } from "./agents/compliance.js";
+import { runCEO } from "./agents/ceo.js";
+import { writeOrderSlip } from "./order.js";
+import { emit } from "./lib/bus.js";
+import { spend } from "./lib/llm.js";
+import { cfg } from "./config.js";
+import * as store from "./lib/store.js";
+import { writeReport } from "./report.js";
+
+const cycleId = () => new Date().toISOString().replace(/[:.]/g, "-");
+
+/** Confidence-weighted composite of the five analyst seats. */
+function composite(analysts) {
+  let num = 0, den = 0;
+  for (const [k, a] of Object.entries(analysts)) {
+    const w = (cfg.weights[k] ?? 0) * (a.confidence ?? 0.5);
+    num += (a.score ?? 50) * w;
+    den += w;
+  }
+  return den > 0 ? num / den : 50;
+}
+
+/** Stage 0: build the raw universe from public feeds. */
+export async function buildUniverse() {
+  emit("stage", { stage: "scout", note: "pulling feeds" });
+  const [b, p] = await Promise.all([ds.boosted(), ds.profiles()]);
+  const seen = new Map();
+  for (const t of [...b, ...p]) {
+    if (!seen.has(t.mint)) seen.set(t.mint, t);
+    else seen.get(t.mint).hook += `, ${t.hook}`;
+  }
+
+  const fresh = [];
+  for (const t of seen.values()) {
+    const killed = store.recentKill(t.mint);
+    if (killed) { emit("scout:skip", { mint: t.mint, reason: `killed ${killed.seat}: ${killed.reason}` }); continue; }
+    fresh.push(t);
+  }
+  emit("scout:universe", { total: seen.size, fresh: fresh.length });
+  return fresh;
+}
+
+/**
+ * The full workup for one token. Returns a record regardless of outcome — a kill is
+ * a result the desk wants written down, not a silent drop.
+ */
+export async function workup(cycle, mint, hook = "") {
+  emit("token:start", { mint, hook });
+
+  const ev = await gather(mint, hook);
+  if (!ev.ok) {
+    emit("token:end", { mint, outcome: "no_data", detail: ev.error });
+    return { mint, outcome: "no_data", error: ev.error };
+  }
+  store.touchSeen(mint, ev.symbol);
+  emit("token:evidence", { mint, symbol: ev.symbol, liq: ev.pairs.totalLiquidityUsd, price: ev.pair?.priceUsd });
+
+  // --- Stage 1: deterministic screen. No tokens spent. ---
+  const sc = screen(ev);
+  emit("seat:verdict", { seat: "Screener", mint, symbol: ev.symbol, pass: sc.pass, detail: sc.fails.map((f) => f.code).join(", ") });
+  if (!sc.pass) {
+    store.recordVerdict(cycle, mint, ev.symbol, "Screener",
+      { verdict: "FAIL", kill: true, kill_reason: sc.fails.map((f) => `${f.code}: ${f.detail}`).join("; ") });
+    const rec = { mint, symbol: ev.symbol, outcome: "screened_out", fails: sc.fails, ev,
+      finalDecision: "screened_out" };
+    rec.reportFile = writeReport(cycle, rec);
+    emit("token:end", { mint, symbol: ev.symbol, outcome: "screened_out",
+      detail: sc.fails.map((f) => f.code).join(", "), report: rec.reportFile });
+    return rec;
+  }
+
+  // --- Stages 2-6: five independent analysts, in parallel. ---
+  emit("stage", { stage: "analysis", mint, symbol: ev.symbol });
+  const keys = ["forensics", "liquidity", "flow", "technical"];
+  const settled = await Promise.allSettled([
+    ...keys.map((k) => runAnalyst(k, ev)),
+    runNarrative(ev),
+  ]);
+  const allKeys = [...keys, "narrative"];
+
+  const analysts = {};
+  const seatFailures = [];
+  settled.forEach((r, i) => {
+    const k = allKeys[i];
+    if (r.status === "fulfilled") {
+      analysts[k] = r.value;
+      store.recordVerdict(cycle, mint, ev.symbol, k, r.value);
+      emit("seat:verdict", { seat: ANALYSTS[k]?.label ?? "Narrative", mint, symbol: ev.symbol,
+        score: r.value.score, confidence: r.value.confidence, kill: r.value.kill });
+    } else {
+      seatFailures.push({ seat: k, error: String(r.reason?.message || r.reason) });
+      emit("seat:failed", { seat: k, mint, error: String(r.reason?.message || r.reason) });
+    }
+  });
+
+  // A desk missing half its analysts is not a desk. Refuse to decide on a thin book.
+  if (Object.keys(analysts).length < 3) {
+    emit("token:end", { mint, symbol: ev.symbol, outcome: "insufficient_coverage" });
+    return { mint, symbol: ev.symbol, outcome: "insufficient_coverage", seatFailures, ev, analysts };
+  }
+
+  const killer = Object.entries(analysts).find(([, a]) => a.kill);
+  if (killer) {
+    const rec = { mint, symbol: ev.symbol, outcome: "killed", killedBy: killer[0],
+      reason: killer[1].kill_reason, ev, analysts, finalDecision: "killed" };
+    rec.reportFile = writeReport(cycle, rec);
+    emit("token:end", { mint, symbol: ev.symbol, outcome: "killed",
+      detail: `${killer[0]}: ${killer[1].kill_reason}`, report: rec.reportFile });
+    return rec;
+  }
+
+  // --- Stage 7-9: adversary, risk, decision. ---
+  const weighted = composite(analysts);
+  emit("stage", { stage: "redteam", mint, symbol: ev.symbol, weighted: Number(weighted.toFixed(1)) });
+  const redteam = await runRedTeam(ev, analysts);
+  store.recordVerdict(cycle, mint, ev.symbol, "redteam", { verdict: redteam.verdict, confidence: redteam.confidence, ...redteam });
+  emit("seat:verdict", { seat: "Red Team", mint, symbol: ev.symbol, detail: redteam.verdict, kill: redteam.verdict === "refuted" });
+
+  const risk = await runRisk(ev, analysts, redteam);
+  store.recordVerdict(cycle, mint, ev.symbol, "risk", { score: risk.position_size_usd, confidence: risk.confidence, ...risk });
+  emit("seat:verdict", { seat: "Risk", mint, symbol: ev.symbol, detail: `$${risk.position_size_usd}` });
+
+  const pm = await runPM(ev, analysts, redteam, risk, weighted);
+  store.recordVerdict(cycle, mint, ev.symbol, "pm", { verdict: pm.decision, score: pm.conviction, ...pm });
+  emit("seat:verdict", { seat: "PM", mint, symbol: ev.symbol, detail: pm.decision, score: pm.conviction });
+
+  // --- Stage 10: the unsigned ticket, only if proposing. ---
+  let ticket = null;
+  if (pm.decision === "PROPOSE" && risk.position_size_usd > 0 && redteam.verdict !== "refuted") {
+    ticket = await runExecution(ev, pm, risk);
+    emit("seat:verdict", { seat: "Execution", mint, symbol: ev.symbol, detail: "ticket drafted" });
+  }
+
+  // --- Stage 11: compliance veto (code, not model). ---
+  const comp = complianceCheck({ pm, risk, redteam, ticket, ev });
+  emit("seat:verdict", { seat: "Compliance", mint, symbol: ev.symbol, pass: comp.pass,
+    detail: comp.violations.map((v) => v.code).join(", ") || "clear" });
+
+  let finalDecision = pm.decision;
+  if (!comp.pass) finalDecision = "VETOED";
+
+  const record = { mint, symbol: ev.symbol, outcome: "decided", weighted, ev, analysts,
+    redteam, risk, pm, ticket, compliance: comp, finalDecision };
+
+  // --- Stage 12: the CEO. Only a clean proposal reaches the door. ---
+  if (finalDecision === "PROPOSE") {
+    emit("stage", { stage: "ceo", mint, symbol: ev.symbol });
+    const ceo = await runCEO({ ev, pm, risk, redteam, ticket, compliance: comp });
+    record.ceo = ceo;
+    store.recordVerdict(cycle, mint, ev.symbol, "ceo",
+      { verdict: ceo.ruling, score: ceo.order_size_usd, confidence: ceo.confidence, ...ceo });
+    emit("seat:verdict", { seat: "CEO", mint, symbol: ev.symbol, detail: ceo.ruling,
+      score: ceo.order_size_usd, one_line: ceo.one_line });
+
+    record.order = await writeOrderSlip(cycle, { ev, ceo, pm, risk, ticket });
+    finalDecision = ceo.ruling === "APPROVE" ? "APPROVED" : ceo.ruling === "HOLD" ? "HELD" : "DECLINED";
+    record.finalDecision = finalDecision;
+    record.proposalId = store.recordProposal(cycle, ev, { ...pm, decision: finalDecision }, risk, ticket);
+  }
+
+  // --- Stage 12: scribe. ---
+  const file = writeReport(cycle, record);
+  record.reportFile = file;
+  emit("token:end", { mint, symbol: ev.symbol, outcome: finalDecision, conviction: pm.conviction,
+    thesis: pm.thesis, size: record.order?.size ?? risk.position_size_usd, stop: ticket?.stop_price,
+    gmgn: record.order?.links?.gmgn, report: file });
+  return record;
+}
+
+/** A full desk cycle: scout the universe, then work up the shortlist. */
+export async function runCycle({ limit = cfg.maxCandidates, mints = null } = {}) {
+  const cycle = cycleId();
+  emit("cycle:start", { cycle });
+  const results = [];
+
+  let shortlist;
+  if (mints?.length) {
+    shortlist = mints.map((m) => ({ mint: m, why_now: "operator-specified", interest: 100 }));
+    emit("scout:manual", { count: shortlist.length });
+  } else {
+    const universe = await buildUniverse();
+    if (!universe.length) {
+      emit("cycle:end", { cycle, note: "empty universe" });
+      return { cycle, results: [] };
+    }
+    const scouted = await runScout(universe.slice(0, 60));
+    shortlist = (scouted.picks || []).slice(0, limit);
+    emit("scout:shortlist", { count: shortlist.length, picks: shortlist.map((p) => p.mint) });
+  }
+
+  for (const pick of shortlist.slice(0, limit)) {
+    try {
+      results.push(await workup(cycle, pick.mint, pick.why_now));
+    } catch (e) {
+      emit("token:end", { mint: pick.mint, outcome: "error", detail: String(e?.message || e) });
+      results.push({ mint: pick.mint, outcome: "error", error: String(e?.message || e) });
+    }
+  }
+
+  emit("cycle:end", { cycle, count: results.length, spendUsd: Number(spend.usd.toFixed(4)) });
+  return { cycle, results, spend: { ...spend } };
+}

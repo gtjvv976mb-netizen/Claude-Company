@@ -1,0 +1,1314 @@
+<title>Claude Co Trading Floor</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<style>
+/* Palette lifted from the Markets & Makers art standard (artStandard.ts OFFICIAL_PALETTE),
+   so the office reads as the same world. Claude's coral is #d97757, which sits a hair off
+   the house coral #df7655 — close enough to belong, distinct enough to be the CEO. */
+:root{
+  --cream:#f0e4c7; --path-stone:#cfc7ad; --timber:#a96934; --timber-dark:#5f3e29;
+  --teal:#267f82; --solar-navy:#287e9d; --amber:#e0ad3d; --glass-aqua:#73c9d2;
+  --metal:#70828a; --terracotta:#bf623c; --coral:#df7655; --leaf:#66a348;
+  --charcoal:#30454a; --water:#21b8c4; --claude:#d97757;
+
+  --ink:#22343a; --ink-soft:#5b6f72; --ink-faint:#8a9a99;
+  --panel:#f6edd8; --panel-line:#ddceac; --card:#fffaf0; --card-line:#e6d8ba;
+  --good:#4f8f52; --warn:#c08a2e; --bad:#b0503f;
+  --on-dark:#f4ecd8;
+}
+:root:not([data-theme="light"]){
+  @media (prefers-color-scheme: dark){
+    --ink:#eadfc6; --ink-soft:#a9b7b2; --ink-faint:#7b8a88;
+    --panel:#1b2b2f; --panel-line:#2d4247; --card:#22343a; --card-line:#354c51;
+    --good:#7bbd80; --warn:#e0ad3d; --bad:#d9806e;
+  }
+}
+:root[data-theme="dark"]{
+  --ink:#eadfc6; --ink-soft:#a9b7b2; --ink-faint:#7b8a88;
+  --panel:#1b2b2f; --panel-line:#2d4247; --card:#22343a; --card-line:#354c51;
+  --good:#7bbd80; --warn:#e0ad3d; --bad:#d9806e;
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; background:var(--charcoal); color:var(--ink);
+  font-family:Archivo,system-ui,-apple-system,"Segoe UI",sans-serif;
+  -webkit-font-smoothing:antialiased; overflow:hidden;
+}
+
+.topbar{
+  position:relative; z-index:5;
+  display:flex; align-items:baseline; gap:16px; flex-wrap:wrap;
+  padding:12px 20px; background:var(--charcoal); color:var(--on-dark);
+  border-bottom:3px solid var(--amber);
+}
+.firm{font-family:"Instrument Serif",Georgia,serif; font-size:26px; line-height:1}
+.firm em{font-style:italic; color:var(--amber)}
+.tag{font-size:11px; text-transform:uppercase; letter-spacing:.14em; color:rgba(244,236,216,.6); font-weight:600}
+.topbar .spacer{margin-left:auto}
+.stat{display:flex; gap:6px; align-items:baseline; font-size:12px; color:rgba(244,236,216,.72)}
+.stat b{font-family:"JetBrains Mono",ui-monospace,monospace; font-size:13px; color:var(--amber); font-variant-numeric:tabular-nums}
+.live{display:inline-flex; align-items:center; gap:7px; font-size:11px; letter-spacing:.12em; text-transform:uppercase; font-weight:600}
+.live .dot{width:8px;height:8px;border-radius:50%;background:var(--leaf); animation:pulse 2.4s infinite}
+.live.sim .dot{background:var(--amber); animation:none}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(102,163,72,.7)}70%{box-shadow:0 0 0 9px rgba(102,163,72,0)}100%{box-shadow:0 0 0 0 rgba(102,163,72,0)}}
+
+.wrap{display:grid; grid-template-columns:minmax(0,1fr) 330px; height:calc(100vh - 58px)}
+@media (max-width:1000px){ .wrap{grid-template-columns:1fr} .rail{display:none} }
+
+#stage{position:relative; min-width:0; overflow:hidden}
+#stage canvas{display:block; width:100%; height:100%; cursor:grab}
+#stage canvas.dragging{cursor:grabbing}
+.hint{
+  position:absolute; left:14px; bottom:12px; z-index:3;
+  font-size:10.5px; letter-spacing:.1em; text-transform:uppercase;
+  color:rgba(244,236,216,.62); background:rgba(48,69,74,.6);
+  padding:5px 10px; border-radius:5px; backdrop-filter:blur(3px);
+}
+.loading{
+  position:absolute; inset:0; z-index:4; display:grid; place-content:center; gap:10px;
+  background:var(--charcoal); color:var(--on-dark); text-align:center;
+}
+.loading.gone{display:none}
+.loading .t{font-family:"Instrument Serif",Georgia,serif; font-size:24px}
+.loading .s{font-size:12px; color:rgba(244,236,216,.6); letter-spacing:.1em; text-transform:uppercase}
+
+.rail{background:var(--panel); border-left:1px solid var(--panel-line); display:flex; flex-direction:column; min-height:0}
+.railhead{padding:11px 15px; border-bottom:1px solid var(--panel-line); display:flex; align-items:center; justify-content:space-between; gap:8px}
+.railhead h2{margin:0; font-family:"Instrument Serif",Georgia,serif; font-weight:400; font-size:19px}
+.tabs{display:flex; gap:4px}
+.tab{font:inherit; font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase;
+  padding:5px 10px; border-radius:5px; border:1px solid var(--panel-line); background:transparent; color:var(--ink-soft); cursor:pointer}
+.tab[aria-selected="true"]{background:var(--teal); color:var(--cream); border-color:var(--teal)}
+.tab:focus-visible{outline:2px solid var(--amber); outline-offset:2px}
+
+.tape{flex:1; min-height:0; overflow-y:auto; padding:10px 13px; font-family:"JetBrains Mono",ui-monospace,monospace; font-size:11.5px; line-height:1.6}
+.tape .row{display:flex; gap:8px; padding:2px 0; border-bottom:1px dotted var(--panel-line)}
+.tape .t{color:var(--ink-faint); flex:none; font-variant-numeric:tabular-nums}
+.tape .who{flex:none; font-weight:500}
+.tape .msg{color:var(--ink-soft); overflow-wrap:anywhere}
+.tape .row.hi .msg{color:var(--ink); font-weight:500}
+.tape .row.bad .who{color:var(--bad)} .tape .row.good .who{color:var(--good)} .tape .row.warn .who{color:var(--warn)}
+
+.inbox{flex:1; min-height:0; overflow-y:auto; padding:13px; display:none; flex-direction:column; gap:11px}
+.inbox.on{display:flex} .tape.off{display:none}
+.memo{background:var(--card); border:1px solid var(--card-line); border-radius:8px; padding:12px}
+.memo header{display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin-bottom:6px}
+.memo .sym{font-family:"Instrument Serif",Georgia,serif; font-size:20px; color:var(--ink)}
+.memo .verdict{font-size:10px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; padding:3px 7px; border-radius:4px}
+.v-PROPOSE,.v-APPROVED{background:var(--good); color:#fff}
+.v-WATCH,.v-HELD{background:var(--warn); color:#26201a}
+.v-DECLINED,.v-VETOED,.v-killed,.v-screened_out{background:var(--bad); color:#fff}
+.v-PASS{background:var(--ink-faint); color:#fff}
+.memo p{margin:0 0 6px; font-size:12.5px; line-height:1.5; color:var(--ink-soft)}
+.memo .kv{display:flex; gap:12px; font-family:"JetBrains Mono",monospace; font-size:11px; color:var(--ink-faint); flex-wrap:wrap}
+.memo .kv b{color:var(--ink); font-variant-numeric:tabular-nums}
+.memo .place{display:inline-flex; align-items:center; gap:6px; margin-top:9px; padding:6px 11px;
+  background:var(--teal); color:var(--cream); border-radius:5px; text-decoration:none;
+  font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase}
+.memo .place:hover{background:var(--claude); color:#2a1a14}
+.memo .place:focus-visible{outline:2px solid var(--amber); outline-offset:2px}
+.memo .unsigned{margin-top:7px; font-size:10.5px; color:var(--ink-faint); line-height:1.45}
+.empty{color:var(--ink-faint); font-size:12.5px; text-align:center; padding:26px 12px; line-height:1.6}
+
+.legend{padding:9px 13px; border-top:1px solid var(--panel-line); display:flex; flex-wrap:wrap; gap:5px 9px}
+.legend span{display:flex; align-items:center; gap:5px; font-size:10.5px; color:var(--ink-soft)}
+.legend i{width:9px;height:9px;border-radius:2px; display:block}
+.note{padding:9px 13px; font-size:10.5px; color:var(--ink-faint); border-top:1px solid var(--panel-line); line-height:1.5}
+</style>
+
+<div class="topbar">
+  <div class="firm">Claude <em>&amp;</em> Co.</div>
+  <div class="tag">Solana Research Desk</div>
+  <div class="spacer"></div>
+  <div class="stat">Under review <b id="s-token">—</b></div>
+  <div class="stat">Approved <b id="s-props">0</b></div>
+  <div class="stat">Spend <b id="s-spend">$0.00</b></div>
+  <div class="live" id="s-live"><span class="dot"></span><span id="s-livetext">Connecting</span></div>
+</div>
+
+<div class="wrap">
+  <div id="stage">
+    <div class="loading" id="loading">
+      <div class="t">Opening the floor…</div>
+      <div class="s">Claude &amp; Co.</div>
+    </div>
+    <div class="hint">Drag to orbit · scroll to zoom</div>
+  </div>
+  <aside class="rail">
+    <div class="railhead">
+      <h2>The Floor</h2>
+      <div class="tabs" role="tablist">
+        <button class="tab" id="tab-tape" role="tab" aria-selected="true">Tape</button>
+        <button class="tab" id="tab-inbox" role="tab" aria-selected="false">CEO Inbox</button>
+      </div>
+    </div>
+    <div class="tape" id="tape"></div>
+    <div class="inbox" id="inbox"></div>
+    <div class="legend" id="legend"></div>
+    <p class="note">Every figure is one agent. They move because a pipeline stage actually
+      started or finished — not on a timer. Research only: nothing here is executed.</p>
+  </aside>
+</div>
+
+<script type="module">
+import * as THREE from "/vendor/three/three.module.js"; /*__INLINE_THREE__*/
+"use strict";
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CLAUDE & CO. — the trading floor, in three dimensions.
+
+   Built to the Markets & Makers house style, read out of that codebase:
+   true-isometric orthographic camera, AgX tone mapping, a three-light rig,
+   flat MeshStandardMaterial props, and blocky box-built citizens.
+
+   The room follows M&M's cutaway idiom: walls are 0.45-high sills and there is
+   no front wall and no ceiling. That is not laziness — it is how that game
+   solves camera occlusion, architecturally rather than in code, so nothing ever
+   needs hiding or fading between the camera and a character.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const P = {                       // Markets & Makers OFFICIAL_PALETTE
+  cream:0xf0e4c7, pathStone:0xcfc7ad, timber:0xa96934, timberDark:0x5f3e29,
+  teal:0x267f82, solarNavy:0x287e9d, amber:0xe0ad3d, glassAqua:0x73c9d2,
+  metal:0x70828a, terracotta:0xbf623c, coral:0xdf7655, leaf:0x66a348,
+  charcoal:0x30454a, water:0x21b8c4,
+  claude:0xd97757,                // Claude's own coral — the CEO, and only the CEO
+  floor:0xc4b596, path:0xb2a385, wall:0x84836c, trim:0x6d5738, sky:0x243d3a,
+};
+
+/* ── renderer ─────────────────────────────────────────────────────────────── */
+const stageEl = document.getElementById("stage");
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));   // DPR cap: phones melt without it
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.AgXToneMapping;
+renderer.toneMappingExposure = 1.12;
+renderer.shadowMap.enabled = (navigator.hardwareConcurrency ?? 4) >= 6;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+stageEl.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(P.sky);
+scene.fog = new THREE.Fog(0xcde9d6, 56, 132);  // far corner ~33% rather than the house 74%
+
+/* ── the isometric rig ────────────────────────────────────────────────────────
+   OFFICIAL_PRESENTATION_CAMERA: orthographic, yaw 45°, elevation 35.264°.
+   35.264° is atan(1/√2), the true isometric angle — not 35, not 30.          */
+const ISO_ELEV = THREE.MathUtils.degToRad(35.264);
+const camera = new THREE.OrthographicCamera(-24, 24, 16, -16, 0.1, 300);
+const camTarget = new THREE.Vector3(0, 1.1, -1.6);
+let camYaw = Math.PI / 4, camElev = ISO_ELEV, camDist = 62, camWorldWidth = 38;
+
+function placeCamera() {
+  const h = Math.sin(camElev) * camDist;
+  const r = Math.cos(camElev) * camDist;
+  camera.position.set(camTarget.x + Math.cos(camYaw) * r, camTarget.y + h, camTarget.z + Math.sin(camYaw) * r);
+  camera.lookAt(camTarget);
+}
+function resize() {
+  const w = stageEl.clientWidth || 1, h = stageEl.clientHeight || 1;
+  renderer.setSize(w, h, false);
+  const halfW = camWorldWidth / 2, halfH = halfW * (h / w);
+  camera.left = -halfW; camera.right = halfW; camera.top = halfH; camera.bottom = -halfH;
+  camera.updateProjectionMatrix();
+  placeCamera();
+}
+addEventListener("resize", resize);
+
+/* ── lights: three, exactly as the interior rig ───────────────────────────── */
+scene.add(new THREE.HemisphereLight(0xf0fff2, 0x38564b, 1.28));
+const sun = new THREE.DirectionalLight(0xffdf9d, 2.7);
+sun.position.set(-24, 40, 26);
+sun.castShadow = renderer.shadowMap.enabled;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -30; sun.shadow.camera.right = 30;
+sun.shadow.camera.top = 26; sun.shadow.camera.bottom = -26;
+sun.shadow.camera.near = 8; sun.shadow.camera.far = 110;
+sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.03;
+scene.add(sun, sun.target);
+const fill = new THREE.DirectionalLight(0x7edee1, 0.75);
+fill.position.set(30, 18, -22);
+scene.add(fill);
+
+/* ── shared materials, deduped by key (M&M propMaterial idiom) ───────────── */
+const matCache = new Map();
+function mat(colour, rough = 0.82, metal = 0) {
+  const key = `${colour}:${rough}:${metal}`;
+  let m = matCache.get(key);
+  if (!m) { m = new THREE.MeshStandardMaterial({ color: colour, roughness: rough, metalness: metal }); matCache.set(key, m); }
+  return m;
+}
+const BOX = new THREE.BoxGeometry(1, 1, 1);      // one geometry, scaled per box
+function box(parent, size, at, colour, rough, metal) {
+  const m = new THREE.Mesh(BOX, mat(colour, rough, metal));
+  m.scale.set(size[0], size[1], size[2]);
+  m.position.set(at[0], at[1], at[2]);
+  m.castShadow = renderer.shadowMap.enabled;
+  m.receiveShadow = true;
+  parent.add(m);
+  return m;
+}
+const cylCache = new Map();
+function cyl(parent, r, h, at, colour, seg = 10) {
+  const key = `${r}:${h}:${seg}`;
+  let g = cylCache.get(key);
+  if (!g) { g = new THREE.CylinderGeometry(r, r, h, seg); cylCache.set(key, g); }
+  const m = new THREE.Mesh(g, mat(colour));
+  m.position.set(at[0], at[1], at[2]);
+  m.castShadow = renderer.shadowMap.enabled;
+  m.receiveShadow = true;
+  parent.add(m);
+  return m;
+}
+
+/* ═══ THE ROOM ════════════════════════════════════════════════════════════ */
+const HALF_W = 17, HALF_D = 12.5;               // a 34 × 25 floor
+const room = new THREE.Group();
+scene.add(room);
+
+(function buildShell() {
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(HALF_W * 2, HALF_D * 2),
+    new THREE.MeshStandardMaterial({ color: P.floor, roughness: 0.94 })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.receiveShadow = true;
+  room.add(floor);
+
+  const grid = new THREE.GridHelper(HALF_D * 2, HALF_D * 2, 0x86795c, 0xae9f7b);
+  grid.scale.x = HALF_W / HALF_D;
+  grid.position.y = 0.012;
+  grid.material.transparent = true;
+  grid.material.opacity = 0.28;
+  room.add(grid);
+
+  // walkway down the middle of the bullpen
+  const path = new THREE.Mesh(
+    new THREE.PlaneGeometry(5.2, HALF_D * 2 - 3),
+    new THREE.MeshStandardMaterial({ color: P.path, roughness: 0.92 })
+  );
+  path.rotation.x = -Math.PI / 2;
+  path.position.set(0, 0.018, 1.2);
+  path.receiveShadow = true;
+  room.add(path);
+
+  // Sills, not walls: 0.45 high, so nothing can stand between camera and staff.
+  const S = 0.45, T = 0.5;
+  box(room, [HALF_W * 2 + T, S, T], [0, 0.2, -HALF_D - 0.05], P.wall, 0.88);
+  box(room, [T, S, HALF_D * 2 + 0.4], [-HALF_W - 0.05, 0.2, 0], P.wall, 0.88);
+  box(room, [T, S, HALF_D * 2 + 0.4], [HALF_W + 0.05, 0.2, 0], P.wall, 0.88);
+
+  // Back glazing + teal mullions, above the far sill only.
+  const glass = new THREE.MeshPhysicalMaterial({
+    color: P.glassAqua, transmission: 0.35, transparent: true, opacity: 0.56,
+    roughness: 0.18, metalness: 0.05,
+  });
+  for (const x of [-14.4, -11.2, 11.2, 14.4]) {
+    const g = new THREE.Mesh(BOX, glass);
+    g.scale.set(2.3, 3.2, 0.15); g.position.set(x, 2.2, -HALF_D + 0.1);
+    room.add(g);
+    box(room, [0.14, 3.45, 0.28], [x - 1.25, 2.2, -HALF_D + 0.18], 0x1c6667, 0.72);
+    box(room, [0.14, 3.45, 0.28], [x + 1.25, 2.2, -HALF_D + 0.18], 0x1c6667, 0.72);
+  }
+  // corner posts + back lintel
+  box(room, [HALF_W * 2 + T, 0.3, 0.38], [0, 4.72, -HALF_D + 0.03], P.trim, 0.82);
+  for (const x of [-HALF_W + 0.3, HALF_W - 0.3]) {
+    box(room, [0.38, 4.5, 0.42], [x, 2.3, -HALF_D + 0.25], P.trim, 0.82);
+    box(room, [0.38, 4.5, 0.42], [x, 2.3, HALF_D - 0.25], P.trim, 0.82);
+  }
+  // two edge rafters only — the roof stays open over the playable floor
+  for (const x of [-HALF_W + 1.2, HALF_W - 1.2]) {
+    const beam = box(room, [0.16, 0.18, HALF_D * 2 - 0.6], [x, 4.55, 0], P.trim, 0.82);
+    beam.rotation.x = -0.035;
+  }
+})();
+
+/* ═══ LAYOUT ══════════════════════════════════════════════════════════════
+   Desk, standing spot and station coordinates. Everything downstream — the
+   furniture, the walk targets, the errands — reads from this one table, so the
+   room you see and the floor they walk on cannot drift apart.                */
+const DAIS_Y = 0.35;                              // the executive suite is raised
+
+const STAFF = [
+  { id:"CEO",        role:"Signs, or doesn't", desk:[0,-9.6],    stand:[0,-11.0],    y:DAIS_Y, claude:true },
+  { id:"Scout",      role:"Sourcing",          desk:[-15.4,-6.5],stand:[-13.8,-6.5], apron:0x8d6cae },
+  { id:"Screener",   role:"Hard filters",      desk:[-15.4,-1.0],stand:[-13.8,-1.0], apron:0x5c7d8a },
+  { id:"Compliance", role:"Veto",              desk:[-15.4,4.5], stand:[-13.8,4.5],  apron:0x8d9298 },
+  { id:"Forensics",  role:"Token safety",      desk:[-9.5,-5.6], stand:[-9.5,-4.1],  apron:0xbf4a3c },
+  { id:"Liquidity",  role:"Can we exit?",      desk:[-3.2,-5.6], stand:[-3.2,-4.1],  apron:0x2f9fb0 },
+  { id:"Flow",       role:"Real demand?",      desk:[3.2,-5.6],  stand:[3.2,-4.1],   apron:0xe0b040 },
+  { id:"Technical",  role:"Entry location",    desk:[-6.6,-0.6], stand:[-6.6,0.9],   apron:0x4e6ba8 },
+  { id:"Narrative",  role:"Is it true?",       desk:[6.6,-0.6],  stand:[6.6,0.9],    apron:0xd7758f },
+  { id:"PM",         role:"Decides",           desk:[15.4,-7.0], stand:[13.8,-7.0],  apron:0x287e9d },
+  { id:"Red Team",   role:"Break it",          desk:[15.4,-1.0], stand:[13.8,-1.0],  apron:0x8c2f27 },
+  { id:"Risk",       role:"How much",          desk:[15.4,5.5],  stand:[13.8,5.5],   apron:0x70828a },
+  { id:"Execution",  role:"The ticket",        desk:[2.5,8.2],   stand:[2.5,6.7],    apron:0x5f9445 },
+  { id:"Scribe",     role:"The journal",       desk:[-5.5,8.2],  stand:[-5.5,6.7],   apron:0xc8863c },
+];
+
+const SPOTS = {
+  ceoDoor:  [0, -6.6],        // the threshold. Staff stop here; only the CEO goes in.
+  printer:  [-11.6, 3.4],
+  cooler:   [10.6, 3.4],
+  shredder: [-15.0, 1.7],
+  archive:  [-11.0, 8.8],
+  meeting:  [0, 3.4],
+};
+
+/* ═══ FURNITURE ═══════════════════════════════════════════════════════════ */
+const TIMBER = 0x8a6540, STEEL = 0x76858a, DARK = 0x3c4a4d;
+
+function buildDesk(at, yaw, y = 0, accent = P.teal) {
+  const g = new THREE.Group();
+  g.position.set(at[0], y, at[1]);
+  g.rotation.y = yaw;
+  box(g, [1.05, 0.07, 2.0], [0, 0.74, 0], TIMBER);                 // top
+  box(g, [0.78, 0.02, 1.62], [0.02, 0.785, 0], accent, 0.9);       // felt pad
+  for (const [dx, dz] of [[-0.42,-0.86],[0.42,-0.86],[-0.42,0.86],[0.42,0.86]])
+    cyl(g, 0.045, 0.72, [dx, 0.37, dz], STEEL, 8);
+  box(g, [0.06, 0.30, 0.62], [-0.22, 0.93, 0], DARK);              // monitor stand + panel
+  box(g, [0.05, 0.46, 0.80], [-0.30, 1.16, 0], DARK);
+  box(g, [0.02, 0.38, 0.72], [-0.335, 1.16, 0], P.glassAqua, 0.35);
+  box(g, [0.30, 0.02, 0.52], [0.16, 0.79, 0], DARK);               // keyboard
+  box(g, [0.24, 0.05, 0.32], [0.10, 0.81, 0.72], P.cream, 0.9);    // paper tray
+  cyl(g, 0.055, 0.11, [0.16, 0.84, -0.62], P.terracotta, 8);       // mug
+  room.add(g);
+  return g;
+}
+
+function buildChair(at, yaw, y = 0) {
+  const g = new THREE.Group();
+  g.position.set(at[0], y, at[1]);
+  g.rotation.y = yaw;
+  box(g, [0.44, 0.07, 0.46], [0, 0.44, 0], DARK);
+  box(g, [0.08, 0.46, 0.44], [-0.20, 0.68, 0], DARK);
+  cyl(g, 0.04, 0.42, [0, 0.22, 0], STEEL, 8);
+  cyl(g, 0.24, 0.05, [0, 0.03, 0], STEEL, 10);
+  room.add(g);
+  return g;
+}
+
+function buildPlant(at) {
+  const g = new THREE.Group();
+  g.position.set(at[0], 0, at[1]);
+  cyl(g, 0.26, 0.42, [0, 0.21, 0], P.terracotta, 10);
+  const leaf = mat(P.leaf, 0.88);
+  for (const [dx, dy, dz, r] of [[0,0.72,0,0.42],[-0.24,0.58,0.1,0.28],[0.22,0.6,-0.12,0.26],[0.04,0.95,0.06,0.24]]) {
+    const m = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 0), leaf);
+    m.position.set(dx, dy, dz);
+    m.castShadow = renderer.shadowMap.enabled;
+    g.add(m);
+  }
+  room.add(g);
+}
+
+(function buildStations() {
+  // printer
+  const pr = new THREE.Group(); pr.position.set(SPOTS.printer[0], 0, SPOTS.printer[1]); room.add(pr);
+  box(pr, [1.0, 0.62, 0.78], [0, 0.31, 0], STEEL);
+  box(pr, [0.86, 0.10, 0.62], [0, 0.68, 0], DARK);
+  box(pr, [0.70, 0.02, 0.44], [0.06, 0.74, 0], P.cream, 0.9);
+  box(pr, [0.20, 0.06, 0.20], [-0.3, 0.66, 0.34], P.amber, 0.6);
+
+  // shredder, beside the screener
+  const sh = new THREE.Group(); sh.position.set(SPOTS.shredder[0], 0, SPOTS.shredder[1]); room.add(sh);
+  box(sh, [0.62, 0.78, 0.56], [0, 0.39, 0], DARK);
+  box(sh, [0.50, 0.05, 0.10], [0, 0.80, 0], P.terracotta, 0.6);
+
+  // water cooler
+  const co = new THREE.Group(); co.position.set(SPOTS.cooler[0], 0, SPOTS.cooler[1]); room.add(co);
+  box(co, [0.40, 0.92, 0.40], [0, 0.46, 0], 0xe8eef0, 0.5);
+  cyl(co, 0.20, 0.44, [0, 1.16, 0], P.water, 12);
+
+  // the journal — archive shelving
+  const ar = new THREE.Group(); ar.position.set(SPOTS.archive[0], 0, SPOTS.archive[1]); room.add(ar);
+  box(ar, [3.0, 0.09, 0.5], [0, 0.62, 0], TIMBER);
+  box(ar, [3.0, 0.09, 0.5], [0, 1.20, 0], TIMBER);
+  box(ar, [0.09, 1.5, 0.5], [-1.45, 0.75, 0], TIMBER);
+  box(ar, [0.09, 1.5, 0.5], [1.45, 0.75, 0], TIMBER);
+  const spines = [P.cream, P.amber, P.teal, P.terracotta, P.pathStone];
+  for (let i = 0; i < 22; i++) {
+    const shelf = i < 11 ? 0.90 : 1.48;
+    box(ar, [0.12, 0.42, 0.30], [-1.30 + (i % 11) * 0.26, shelf, 0], spines[i % spines.length], 0.9);
+  }
+
+  // meeting rug
+  const rug = new THREE.Mesh(new THREE.CircleGeometry(3.0, 32),
+    new THREE.MeshStandardMaterial({ color: P.teal, roughness: 0.95, transparent: true, opacity: 0.34 }));
+  rug.rotation.x = -Math.PI / 2; rug.position.set(SPOTS.meeting[0], 0.022, SPOTS.meeting[1]);
+  rug.receiveShadow = true; room.add(rug);
+
+  for (const at of [[-16, 11.4], [16, 11.4], [-16, -11.4], [16, -11.4], [9.2, 9.6]]) buildPlant(at);
+})();
+
+/* ═══ THE EXECUTIVE SUITE ═════════════════════════════════════════════════
+   Raised on a dais so the CEO reads clearly over the front sill, and fronted
+   in glass with a brass door. It is the only room the other agents don't enter. */
+(function buildSuite() {
+  const X0 = -5.5, X1 = 5.5, Z0 = -HALF_D, Z1 = -7.5;
+  const g = new THREE.Group(); room.add(g);
+
+  const dais = box(g, [X1 - X0, DAIS_Y, Z1 - Z0], [0, DAIS_Y / 2, (Z0 + Z1) / 2], P.pathStone, 0.9);
+  dais.receiveShadow = true;
+  box(g, [X1 - X0, 0.05, 0.12], [0, DAIS_Y, Z1 - 0.02], P.amber, 0.5, 0.35);   // brass nosing
+
+  const rug = new THREE.Mesh(new THREE.PlaneGeometry(8.4, 3.4),
+    new THREE.MeshStandardMaterial({ color: P.teal, roughness: 0.95, transparent: true, opacity: 0.38 }));
+  rug.rotation.x = -Math.PI / 2; rug.position.set(0, DAIS_Y + 0.01, -9.9);
+  rug.receiveShadow = true; g.add(rug);
+
+  // front glass, flanking a 2.6-wide brass doorway
+  const glass = new THREE.MeshPhysicalMaterial({
+    color: P.glassAqua, transmission: 0.4, transparent: true, opacity: 0.42,
+    roughness: 0.14, metalness: 0.05,
+  });
+  for (const [cx, w] of [[-3.55, 3.9], [3.55, 3.9]]) {
+    const pane = new THREE.Mesh(BOX, glass);
+    pane.scale.set(w, 2.5, 0.1); pane.position.set(cx, DAIS_Y + 1.25, Z1);
+    g.add(pane);
+    box(g, [0.12, 2.6, 0.22], [cx - w / 2, DAIS_Y + 1.3, Z1], 0x1c6667, 0.72);
+    box(g, [0.12, 2.6, 0.22], [cx + w / 2, DAIS_Y + 1.3, Z1], 0x1c6667, 0.72);
+  }
+  // brass door frame over the gap
+  box(g, [0.16, 2.9, 0.3], [-1.3, DAIS_Y + 1.45, Z1], P.amber, 0.45, 0.4);
+  box(g, [0.16, 2.9, 0.3], [1.3, DAIS_Y + 1.45, Z1], P.amber, 0.45, 0.4);
+  box(g, [2.9, 0.22, 0.34], [0, DAIS_Y + 2.85, Z1], P.amber, 0.45, 0.4);
+  // side sills
+  box(g, [0.4, 0.45, Z1 - Z0], [X0, DAIS_Y + 0.22, (Z0 + Z1) / 2], P.wall, 0.88);
+  box(g, [0.4, 0.45, Z1 - Z0], [X1, DAIS_Y + 0.22, (Z0 + Z1) / 2], P.wall, 0.88);
+
+  // the threshold staff stop at
+  const line = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.08),
+    new THREE.MeshStandardMaterial({ color: P.amber, roughness: 0.6, transparent: true, opacity: 0.55 }));
+  line.rotation.x = -Math.PI / 2; line.position.set(0, 0.02, -6.9);
+  room.add(line);
+})();
+
+/* ═══ THE STAFF ═══════════════════════════════════════════════════════════
+   The M&M citizen, box for box: 15 joints, 21 boxes, one vertex-coloured
+   MeshStandardMaterial. The one departure is the rig — M&M binds a real
+   SkinnedMesh with keyframed AnimationClips; here each joint is a plain
+   Object3D and the poses are driven procedurally, because this floor needs
+   sit / stand / carry / type blends that no fixed clip covers. The geometry,
+   proportions and colour discipline are unchanged, so the silhouette matches. */
+
+const JOINT_REST = {
+  Hips:[0,0.86,0], Spine:[0,1.02,0], Chest:[0,1.18,0], Neck:[0,1.40,0], Head:[0,1.47,0],
+  ShoulderL:[0,1.36,0.20], UpperArmL:[0,1.32,0.26], LowerArmL:[0,1.11,0.26],
+  ShoulderR:[0,1.36,-0.20], UpperArmR:[0,1.32,-0.26], LowerArmR:[0,1.11,-0.26],
+  UpperLegL:[0,0.84,0.10], LowerLegL:[0,0.44,0.10],
+  UpperLegR:[0,0.84,-0.10], LowerLegR:[0,0.44,-0.10],
+};
+const JOINT_PARENT = {
+  Spine:"Hips", Chest:"Spine", Neck:"Chest", Head:"Neck",
+  ShoulderL:"Chest", UpperArmL:"ShoulderL", LowerArmL:"UpperArmL",
+  ShoulderR:"Chest", UpperArmR:"ShoulderR", LowerArmR:"UpperArmR",
+  UpperLegL:"Hips", LowerLegL:"UpperLegL", UpperLegR:"Hips", LowerLegR:"UpperLegR",
+};
+// [joint, size, world-rest centre, palette key] — verbatim from the house rig.
+const BODY = [
+  ["Head",[0.30,0.30,0.30],[0,1.62,0],"skin"],
+  ["Head",[0.32,0.09,0.32],[0,1.79,0],"hair"],
+  ["Head",[0.04,0.05,0.30],[-0.15,1.70,0],"hair"],
+  ["Head",[0.02,0.05,0.05],[0.155,1.65,0.07],"eye"],
+  ["Head",[0.02,0.05,0.05],[0.155,1.65,-0.07],"eye"],
+  ["Neck",[0.14,0.06,0.14],[0,1.42,0],"skin"],
+  ["Chest",[0.24,0.26,0.42],[0,1.28,0],"shirt"],
+  ["Spine",[0.24,0.20,0.40],[0,1.06,0],"shirt"],
+  ["Spine",[0.03,0.30,0.28],[0.13,1.06,0],"apron"],
+  ["Chest",[0.03,0.16,0.20],[0.13,1.30,0],"apron"],
+  ["Hips",[0.24,0.14,0.38],[0,0.90,0],"trousers"],
+  ["UpperArmL",[0.13,0.22,0.13],[0,1.22,0.26],"shirt"],
+  ["LowerArmL",[0.12,0.24,0.12],[0,0.98,0.26],"skin"],
+  ["UpperArmR",[0.13,0.22,0.13],[0,1.22,-0.26],"shirt"],
+  ["LowerArmR",[0.12,0.24,0.12],[0,0.98,-0.26],"skin"],
+  ["UpperLegL",[0.16,0.40,0.16],[0,0.64,0.10],"trousers"],
+  ["LowerLegL",[0.15,0.34,0.15],[0,0.27,0.10],"trousers"],
+  ["LowerLegL",[0.20,0.09,0.17],[0.02,0.05,0.10],"boots"],
+  ["UpperLegR",[0.16,0.40,0.16],[0,0.64,-0.10],"trousers"],
+  ["LowerLegR",[0.15,0.34,0.15],[0,0.27,-0.10],"trousers"],
+  ["LowerLegR",[0.20,0.09,0.17],[0.02,0.05,-0.10],"boots"],
+];
+
+// Solarpunk workwear: light shirts, dark teal trousers, an apron in the seat's
+// colour, hair from black to auburn. Only the apron varies — it is the identifier.
+const SKINS = [0xd9a074,0xc98c5f,0xe0b088,0xb87a4e,0xd2996d,0xa9714a,0xe3b98f,0xc08653];
+const HAIRS = [0x2e2622,0x4a2f1e,0x1f1b18,0x6a3620,0x2a2320,0x35211a,0x1d1916,0x7a4526];
+const SHIRTS = [0xf2ead6,0xf0e7d2,0xeae2cc,0xf4ecd8,0xe6dcc0,0xfbf6e8,0xe4d9bf];
+const TROUSERS = [0x2f4f5a,0x33565c,0x2c4653,0x395a60,0x35434c,0x2b5560,0x3d4d55];
+const BOOTS = [0x4a3b2e,0x453629,0x3f342a,0x3a322b,0x42352b,0x39302a];
+
+const bodyMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0 });
+
+/**
+ * One body, one geometry, one draw call. Every box is authored in absolute rest-pose
+ * world coordinates and bound rigidly to a single bone at weight 1 — no blending, no
+ * stretching, which is what keeps the blocky silhouette exact. This is the house rig.
+ */
+const JOINT_ORDER = Object.keys(JOINT_REST);
+function buildBodyGeometry(specs) {
+  const parts = specs.map((s) => {
+    const g = new THREE.BoxGeometry(s.size[0], s.size[1], s.size[2]).toNonIndexed();
+    g.translate(s.at[0], s.at[1], s.at[2]);      // absolute rest-pose position
+    g.deleteAttribute("uv");
+    return { g, colour: s.colour, bone: s.bone };
+  });
+  const total = parts.reduce((n, p) => n + p.g.attributes.position.count, 0);
+  const pos = new Float32Array(total * 3), nor = new Float32Array(total * 3), col = new Float32Array(total * 3);
+  const si = new Uint16Array(total * 4), sw = new Float32Array(total * 4);
+  const c = new THREE.Color();
+  let o = 0;
+  for (const { g, colour, bone } of parts) {
+    const n = g.attributes.position.count;
+    pos.set(g.attributes.position.array, o * 3);
+    nor.set(g.attributes.normal.array, o * 3);
+    c.setHex(colour, THREE.SRGBColorSpace);   // hexes are sRGB; convert to linear working space
+    for (let i = 0; i < n; i++) {
+      const k = o + i;
+      col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b;
+      si[k * 4] = bone; sw[k * 4] = 1;        // rigid: one bone, full weight
+    }
+    o += n; g.dispose();
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  out.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+  out.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  out.setAttribute("skinIndex", new THREE.BufferAttribute(si, 4));
+  out.setAttribute("skinWeight", new THREE.BufferAttribute(sw, 4));
+  out.computeBoundingSphere();
+  return out;
+}
+
+/** Claude's mark: a radial spark. The CEO wears it instead of a face. */
+function buildSpark(radius, rays, thickness, colour, emissive = 0.55) {
+  const g = new THREE.Group();
+  const m = new THREE.MeshStandardMaterial({
+    color: colour, roughness: 0.45, metalness: 0.1,
+    emissive: new THREE.Color(colour), emissiveIntensity: emissive,
+  });
+  for (let i = 0; i < rays; i++) {
+    const a = (i / rays) * Math.PI * 2;
+    const ray = new THREE.Mesh(BOX, m);
+    ray.scale.set(radius, thickness, thickness * 0.7);   // a spoke, long on its own X
+    ray.rotation.z = a;
+    ray.position.set(Math.cos(a) * radius * 0.5, Math.sin(a) * radius * 0.5, 0);
+    g.add(ray);
+  }
+  const hub = new THREE.Mesh(new THREE.SphereGeometry(thickness * 1.15, 12, 10), m);
+  g.add(hub);
+  return g;
+}
+
+function buildAvatar(spec, index) {
+  const root = new THREE.Group();
+  const joints = {};
+  for (const name of JOINT_ORDER) { joints[name] = new THREE.Bone(); joints[name].name = name; }
+  for (const name of JOINT_ORDER) {
+    const rest = JOINT_REST[name], parent = JOINT_PARENT[name];
+    const pRest = parent ? JOINT_REST[parent] : [0, 0, 0];
+    joints[name].position.set(rest[0] - pRest[0], rest[1] - pRest[1], rest[2] - pRest[2]);
+    (parent ? joints[parent] : root).add(joints[name]);
+  }
+
+  const claude = !!spec.claude;
+  const pal = claude
+    ? { skin: P.cream, hair: P.claude, eye: P.claude, shirt: P.claude,
+        trousers: 0xb85f42, apron: P.cream, boots: 0x8f4832 }
+    : { skin: SKINS[index % SKINS.length], hair: HAIRS[(index * 3 + 1) % HAIRS.length],
+        eye: 0x2a2320, shirt: SHIRTS[index % SHIRTS.length],
+        trousers: TROUSERS[(index * 2) % TROUSERS.length],
+        apron: spec.apron ?? P.leaf, boots: BOOTS[index % BOOTS.length] };
+
+  // The CEO has no hair and no eyes — the spark stands in for a face.
+  const parts = claude ? BODY.filter((b) => b[3] !== "hair" && b[3] !== "eye") : BODY;
+
+  const specs = parts.map(([joint, size, centre, key]) => ({
+    size, at: centre, colour: pal[key], bone: JOINT_ORDER.indexOf(joint),
+  }));
+  const mesh = new THREE.SkinnedMesh(buildBodyGeometry(specs), bodyMat);
+  mesh.castShadow = renderer.shadowMap.enabled;
+  mesh.receiveShadow = true;
+  root.add(mesh);
+
+  // Order matters: world matrices must exist before the skeleton is built and bound,
+  // because the inverse-bind matrices come from the rest-pose world transforms.
+  root.updateMatrixWorld(true);
+  mesh.bind(new THREE.Skeleton(JOINT_ORDER.map((n) => joints[n])), new THREE.Matrix4());
+
+  let spark = null;
+  if (claude) {
+    // Claude's mark, hovering just off the brow. The CEO has no face; it has this.
+    spark = buildSpark(0.30, 11, 0.055, P.claude, 1.15);
+    spark.position.set(0.26, 0.42, 0);
+    joints.Head.add(spark);
+  }
+
+  // the sheet of paper they carry
+  const doc = new THREE.Mesh(BOX, mat(P.cream, 0.9));
+  doc.scale.set(0.02, 0.22, 0.17);
+  doc.position.set(0.16, 0.96, 0);
+  doc.visible = false;
+  root.add(doc);
+
+  return { root, joints, doc, spark };
+}
+
+/* ── canvas labels (the M&M sign-sprite idiom) ───────────────────────────── */
+const labelCache = new Map();
+function labelTexture(text, { bg = "#22343a", fg = "#f4ecd8", accent = "#e0ad3d" } = {}) {
+  const key = `${text}|${bg}|${fg}|${accent}`;
+  if (labelCache.has(key)) return labelCache.get(key);
+  const pad = 26, fs = 46;
+  const c = document.createElement("canvas");
+  const ctx = c.getContext("2d");
+  ctx.font = `700 ${fs}px Archivo, system-ui, sans-serif`;
+  c.width = Math.ceil(ctx.measureText(text).width) + pad * 2;
+  c.height = fs + pad * 2;
+  const x = c.getContext("2d");
+  x.font = `700 ${fs}px Archivo, system-ui, sans-serif`;
+  x.textBaseline = "middle";
+  const r = 18;
+  x.fillStyle = bg;
+  x.beginPath(); x.roundRect(0, 0, c.width, c.height, r); x.fill();
+  x.strokeStyle = accent; x.lineWidth = 4;
+  x.beginPath(); x.roundRect(2, 2, c.width - 4, c.height - 4, r - 2); x.stroke();
+  x.fillStyle = fg;
+  x.fillText(text, pad, c.height / 2 + 2);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+  labelCache.set(key, tex);
+  return tex;
+}
+function makeSprite(text, scale = 1, opts) {
+  const tex = labelTexture(text, opts);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+  const aspect = tex.image.width / tex.image.height;
+  s.scale.set(0.62 * scale * aspect, 0.62 * scale, 1);
+  s.renderOrder = 10;
+  return s;
+}
+
+/* ── the worker ───────────────────────────────────────────────────────────── */
+const SPEED = 2.9;                     // world units per second
+const clock = new THREE.Clock();
+const workers = {};
+
+class Worker {
+  constructor(spec, index) {
+    this.spec = spec;
+    this.id = spec.id;
+    this.baseY = spec.y ?? 0;
+    this.home = { x: spec.stand[0], z: spec.stand[1] };
+    this.deskAt = { x: spec.desk[0], z: spec.desk[1] };
+    this.x = this.home.x; this.z = this.home.z;
+    this.path = null;
+    this.chain = Promise.resolve();
+    this.phase = Math.random() * Math.PI * 2;
+    this.seated = 0;                   // 0..1 blend
+    this.wantSeated = true;
+    this.typing = false;
+
+    const built = buildAvatar(spec, index);
+    this.g = built.root; this.joints = built.joints; this.doc = built.doc; this.spark = built.spark;
+    this.g.position.set(this.x, this.baseY, this.z);
+    this.faceTowards(this.deskAt.x, this.deskAt.z);
+    scene.add(this.g);
+
+    this.nameSprite = makeSprite(spec.id, spec.claude ? 1.15 : 0.92,
+      spec.claude ? { bg: "#8a3f22", accent: "#f0c9a0" } : undefined);
+    this.nameSprite.position.set(0, 2.28, 0);
+    this.nameSprite.visible = false;
+    this.g.add(this.nameSprite);
+
+    this.bubble = null;
+  }
+
+  faceTowards(tx, tz) {
+    const dx = tx - this.x, dz = tz - this.z;
+    if (Math.abs(dx) < 1e-6 && Math.abs(dz) < 1e-6) return;
+    this.g.rotation.y = Math.atan2(-dz, dx);   // the rig's front axis is +X
+  }
+
+  moveTo(x, z) {
+    return new Promise((res) => {
+      if (Math.hypot(x - this.x, z - this.z) < 0.05) return res();
+      this.wantSeated = false;
+      this.faceTowards(x, z);
+      this.path = { x, z, done: res };
+    });
+  }
+
+  goHome() {
+    return this.moveTo(this.home.x, this.home.z).then(() => {
+      this.faceTowards(this.deskAt.x, this.deskAt.z);
+      this.wantSeated = true;
+    });
+  }
+
+  say(text, ms = 3200) {
+    if (this.bubble) { this.g.remove(this.bubble); this.bubble = null; }
+    const s = makeSprite(text.length > 42 ? text.slice(0, 41) + "…" : text, 0.8,
+      { bg: "#f6edd8", fg: "#22343a", accent: "#267f82" });
+    s.position.set(0, 2.62, 0);
+    this.g.add(s);
+    this.bubble = s;
+    clearTimeout(this._sayT);
+    this._sayT = setTimeout(() => { if (this.bubble === s) { this.g.remove(s); this.bubble = null; } }, ms);
+  }
+
+  carry(on, kind = "") {
+    this.doc.visible = !!on;
+    this.doc.material = mat(kind === "red" ? 0xd98878 : kind === "green" ? 0xa9cf9f : P.cream, 0.9);
+  }
+
+  busy(on) { this.typing = !!on; }
+
+  run(fn) { this.chain = this.chain.then(fn).catch(() => {}); return this.chain; }
+
+  update(dt, t) {
+    // walk
+    let moving = false;
+    if (this.path) {
+      const dx = this.path.x - this.x, dz = this.path.z - this.z;
+      const d = Math.hypot(dx, dz);
+      const step = SPEED * dt;
+      if (d <= step) {
+        this.x = this.path.x; this.z = this.path.z;
+        const done = this.path.done; this.path = null; done();
+      } else {
+        this.x += (dx / d) * step; this.z += (dz / d) * step;
+        moving = true;
+      }
+      this.g.position.x = this.x; this.g.position.z = this.z;
+    }
+    this.nameSprite.visible = moving || !!this.bubble;
+
+    // seated blend
+    const target = this.wantSeated && !moving ? 1 : 0;
+    this.seated += (target - this.seated) * Math.min(1, dt * 7);
+
+    const J = this.joints;
+    const s = this.seated;
+    if (moving) {
+      const w = t * 8.4 + this.phase;
+      const sw = Math.sin(w) * 0.55;
+      J.UpperLegL.rotation.z = sw;   J.UpperLegR.rotation.z = -sw;
+      J.LowerLegL.rotation.z = -Math.max(0, Math.sin(w + 0.6)) * 0.5;
+      J.LowerLegR.rotation.z = -Math.max(0, Math.sin(w + 0.6 + Math.PI)) * 0.5;
+      J.UpperArmL.rotation.z = -sw * 0.62;  J.UpperArmR.rotation.z = sw * 0.62;
+      J.Chest.rotation.y = Math.sin(w) * 0.06;
+      this.g.position.y = this.baseY + Math.abs(Math.sin(w)) * 0.035;
+    } else {
+      // seated pose: thighs forward, shins back down, hips dropped onto the chair
+      J.UpperLegL.rotation.z = 1.45 * s;  J.UpperLegR.rotation.z = 1.45 * s;
+      J.LowerLegL.rotation.z = -1.45 * s; J.LowerLegR.rotation.z = -1.45 * s;
+      const breathe = Math.sin(t * 1.6 + this.phase) * 0.02;
+      J.Chest.rotation.y = breathe;
+      const type = this.typing ? Math.sin(t * 15 + this.phase) * 0.16 : 0;
+      J.UpperArmL.rotation.z = 0.42 * s + type;
+      J.UpperArmR.rotation.z = 0.42 * s - type;
+      J.LowerArmL.rotation.z = -0.75 * s;
+      J.LowerArmR.rotation.z = -0.75 * s;
+      this.g.position.y = this.baseY - 0.30 * s;
+    }
+    if (this.spark) {
+      this.spark.rotation.z = t * 0.55;
+      this.spark.position.y = 0.30 + Math.sin(t * 1.3) * 0.03;
+    }
+  }
+}
+
+/* ── desks and chairs ─────────────────────────────────────────────────────── */
+const deskYaw = (spec) => Math.atan2(-(spec.desk[1] - spec.stand[1]), spec.desk[0] - spec.stand[0]);
+for (const spec of STAFF) {
+  const yaw = deskYaw(spec);
+  buildDesk(spec.desk, yaw + Math.PI / 2, spec.y ?? 0, spec.claude ? P.claude : P.teal);
+  buildChair(spec.stand, yaw, spec.y ?? 0);
+}
+
+/* ── bake the room ────────────────────────────────────────────────────────────
+   Nothing in `room` ever moves, so it has no business costing hundreds of draw
+   calls. The house rule is "merge, do not instance": collapse every opaque
+   static mesh into one geometry per (roughness, metalness) finish, baking each
+   mesh's colour into vertex colours and its world transform into the vertices.
+   Transparent things — glass, rugs — are left alone; they need their own sorting. */
+function bakeStatic(root) {
+  root.updateMatrixWorld(true);
+  const doomed = [], buckets = new Map();
+  root.traverse((o) => {
+    if (!o.isMesh || o.material.transparent || o.isSprite) return;
+    const m = o.material;
+    const key = `${m.roughness}:${m.metalness}`;
+    (buckets.get(key) || buckets.set(key, []).get(key)).push(o);
+    doomed.push(o);
+  });
+
+  const c = new THREE.Color();
+  for (const [key, meshes] of buckets) {
+    const geos = meshes.map((o) => {
+      const g = o.geometry.clone().applyMatrix4(o.matrixWorld).toNonIndexed();
+      g.deleteAttribute("uv");
+      const n = g.attributes.position.count;
+      const col = new Float32Array(n * 3);
+      c.copy(o.material.color);          // already linear-space on the material
+      for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+      g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+      return g;
+    });
+    const total = geos.reduce((n, g) => n + g.attributes.position.count, 0);
+    const pos = new Float32Array(total * 3), nor = new Float32Array(total * 3), col = new Float32Array(total * 3);
+    let o = 0;
+    for (const g of geos) {
+      const n = g.attributes.position.count;
+      pos.set(g.attributes.position.array, o * 3);
+      nor.set(g.attributes.normal.array, o * 3);
+      col.set(g.attributes.color.array, o * 3);
+      o += n; g.dispose();
+    }
+    const merged = new THREE.BufferGeometry();
+    merged.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    merged.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+    merged.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    merged.computeBoundingSphere();
+
+    const [rough, metal] = key.split(":").map(Number);
+    const mesh = new THREE.Mesh(merged, new THREE.MeshStandardMaterial({
+      vertexColors: true, roughness: rough, metalness: metal,
+    }));
+    mesh.castShadow = renderer.shadowMap.enabled;
+    mesh.receiveShadow = true;
+    mesh.name = `baked-${key}`;
+    root.add(mesh);
+  }
+  for (const m of doomed) m.parent?.remove(m);
+  return buckets.size;
+}
+const bakedBuckets = bakeStatic(room);
+
+/* ── the staff ────────────────────────────────────────────────────────────── */
+STAFF.forEach((spec, i) => {
+  workers[spec.id] = new Worker(spec, i);
+  const plate = makeSprite(spec.id, 0.58, spec.claude ? { bg: "#8a3f22", accent: "#f0c9a0" } : undefined);
+  plate.position.set(spec.desk[0], (spec.y ?? 0) + 1.18, spec.desk[1]);
+  scene.add(plate);
+});
+
+/* ── camera controls ──────────────────────────────────────────────────────── */
+(function controls() {
+  const el = renderer.domElement;
+  let dragging = false, px = 0, py = 0;
+  el.addEventListener("pointerdown", (e) => {
+    dragging = true; px = e.clientX; py = e.clientY;
+    el.classList.add("dragging"); el.setPointerCapture(e.pointerId);
+  });
+  el.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    camYaw -= (e.clientX - px) * 0.006;
+    camElev = THREE.MathUtils.clamp(camElev + (e.clientY - py) * 0.004, 0.22, 1.35);
+    px = e.clientX; py = e.clientY;
+    placeCamera();
+  });
+  const stop = (e) => { dragging = false; el.classList.remove("dragging"); try { el.releasePointerCapture(e.pointerId); } catch {} };
+  el.addEventListener("pointerup", stop);
+  el.addEventListener("pointercancel", stop);
+  el.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    camWorldWidth = THREE.MathUtils.clamp(camWorldWidth + e.deltaY * 0.03, 12, 74);
+    resize();
+  }, { passive: false });
+})();
+
+/* ── render loop ──────────────────────────────────────────────────────────── */
+resize();
+window.__floor = { THREE, renderer, scene, camera, workers, room,
+  stats: () => ({
+    shadows: renderer.shadowMap.enabled,
+    drawCalls: renderer.info.render.calls,
+    triangles: renderer.info.render.triangles,
+    programs: renderer.info.programs?.length,
+    geometries: renderer.info.memory.geometries,
+    textures: renderer.info.memory.textures,
+    camWorldWidth, camYaw, camElev, bakedBuckets,
+  }) };
+let elapsed = 0;
+function frame() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  elapsed += dt;
+  for (const id in workers) workers[id].update(dt, elapsed);
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+document.getElementById("loading").classList.add("gone");
+
+/* ═══ THE TAPE, THE INBOX, THE LEGEND ═════════════════════════════════════ */
+const tapeEl = document.getElementById("tape"), inboxEl = document.getElementById("inbox");
+let approvedCount = 0, lastOrder = null, current = { symbol: "—" };
+const setStat = (id, v) => { document.getElementById(id).textContent = v; };
+const short = (m) => (m ? m.slice(0, 4) + "…" + m.slice(-4) : "");
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function tape(seat, msg, cls = "") {
+  const row = document.createElement("div");
+  row.className = "row " + cls;
+  row.innerHTML = `<span class="t">${new Date().toLocaleTimeString([], { hour12: false })}</span><span class="who"></span><span class="msg"></span>`;
+  row.querySelector(".who").textContent = seat;
+  row.querySelector(".msg").textContent = msg;
+  tapeEl.appendChild(row);
+  while (tapeEl.children.length > 240) tapeEl.firstChild.remove();
+  tapeEl.scrollTop = tapeEl.scrollHeight;
+}
+
+function memo({ symbol, decision, thesis, conviction, size, stop, gmgn }) {
+  const m = document.createElement("div");
+  m.className = "memo";
+  m.innerHTML = `<header><span class="sym"></span><span class="verdict v-${decision}"></span></header><p class="th"></p><div class="kv"></div>`;
+  m.querySelector(".sym").textContent = symbol;
+  m.querySelector(".verdict").textContent = decision;
+  m.querySelector(".th").textContent = thesis || "—";
+  const kv = m.querySelector(".kv");
+  for (const [k, v] of [["Conviction", conviction != null ? conviction + "/100" : null],
+                        ["Size", size != null ? "$" + size : null],
+                        ["Stop", stop != null ? "$" + stop : null]]) {
+    if (v == null) continue;
+    const s = document.createElement("span");
+    s.innerHTML = k + " <b></b>";
+    s.querySelector("b").textContent = v;
+    kv.appendChild(s);
+  }
+  if (gmgn) {
+    const a = document.createElement("a");
+    a.className = "place"; a.href = gmgn; a.target = "_blank"; a.rel = "noopener noreferrer";
+    a.textContent = "Place it on GMGN →";
+    m.appendChild(a);
+    const n = document.createElement("p");
+    n.className = "unsigned";
+    n.textContent = "Unsigned. Claude Co prepared this order but cannot sign or send it — that is yours.";
+    m.appendChild(n);
+  }
+  inboxEl.querySelector(".empty")?.remove();
+  inboxEl.prepend(m);
+  if (decision === "APPROVED" || decision === "PROPOSE") setStat("s-props", String(++approvedCount));
+}
+inboxEl.innerHTML = `<p class="empty">Nothing on the CEO's desk yet.<br>Approved orders land here.</p>`;
+
+document.getElementById("tab-tape").onclick = () => switchTab(true);
+document.getElementById("tab-inbox").onclick = () => switchTab(false);
+function switchTab(showTape) {
+  tapeEl.classList.toggle("off", !showTape);
+  inboxEl.classList.toggle("on", !showTape);
+  document.getElementById("tab-tape").setAttribute("aria-selected", String(showTape));
+  document.getElementById("tab-inbox").setAttribute("aria-selected", String(!showTape));
+}
+const legendEl = document.getElementById("legend");
+for (const s of STAFF) {
+  const sp = document.createElement("span");
+  const hex = "#" + (s.claude ? P.claude : s.apron).toString(16).padStart(6, "0");
+  sp.innerHTML = `<i style="background:${hex}"></i>`;
+  sp.appendChild(document.createTextNode(s.id));
+  legendEl.appendChild(sp);
+}
+
+/* ── a puff of paper over someone's head ──────────────────────────────────── */
+function puff(worker, text) {
+  const s = makeSprite(text, 0.7, { bg: "#e0ad3d", fg: "#2a2018", accent: "#8a6540" });
+  s.position.set(worker.x, (worker.baseY) + 2.1, worker.z);
+  scene.add(s);
+  const t0 = performance.now();
+  (function rise() {
+    const k = (performance.now() - t0) / 1100;
+    if (k >= 1) { scene.remove(s); s.material.dispose(); return; }
+    s.position.y = worker.baseY + 2.1 + k * 0.9;
+    s.material.opacity = 1 - k * k;
+    requestAnimationFrame(rise);
+  })();
+}
+
+const who = (n) => workers[n] || null;
+
+async function errand(p, spot, glyph, msg) {
+  await p.moveTo(spot[0], spot[1]);
+  if (glyph) puff(p, glyph);
+  if (msg) p.say(msg);
+  await pause(620);
+  await p.goHome();
+}
+
+const queues = {};
+async function deliver(from, toId, msg, kind = "") {
+  const to = who(toId);
+  if (!to) return;
+  from.carry(true, kind);
+  from.say(msg);
+  // Several analysts report to the same seat at once — fan them out so they queue
+  // at the door like people instead of stacking on one spot.
+  const slot = (queues[toId] = ((queues[toId] ?? -1) + 1) % 4);
+  const dx = to.home.x > 0 ? -1 : 1;
+  await from.moveTo(to.home.x + dx * (1.5 + slot * 0.35), to.home.z + (slot - 1.5) * 0.7);
+  puff(from, "▤");
+  from.carry(false);
+  to.carry(true, kind);
+  await from.goHome();
+}
+
+/* ═══ BEHAVIOUR — one pipeline event, one thing a person does ════════════ */
+const ANALYSTS = ["Forensics", "Liquidity", "Flow", "Technical", "Narrative"];
+
+const HANDLERS = {
+  "cycle:start": (e) => {
+    tape("Floor", `Cycle ${String(e.cycle).slice(0, 16)} opened`, "hi");
+    const p = who("Scout");
+    p.run(async () => { p.say("Morning. Pulling the feeds."); await errand(p, SPOTS.printer, "▤", "New listings in"); p.carry(true); });
+  },
+  "scout:universe": (e) => {
+    tape("Scout", `${e.total} names in, ${e.fresh} fresh`);
+    who("Scout").run(async () => who("Scout").say(`${e.fresh} fresh of ${e.total}`));
+  },
+  "scout:skip": (e) => tape("Scout", `skip ${short(e.mint)} — ${e.reason}`, "warn"),
+  "scout:manual": (e) => tape("Scout", `Operator named ${e.count} directly`, "hi"),
+  "scout:shortlist": (e) => {
+    tape("Scout", `Shortlist: ${e.count} for full workup`, "hi");
+    const p = who("Scout");
+    p.run(async () => { await errand(p, SPOTS.meeting, "▤", `${e.count} worth our time`); p.carry(true); });
+  },
+  "token:start": (e) => {
+    tape("Floor", `── ${short(e.mint)} ${e.hook ? "— " + e.hook : ""}`, "hi");
+    const s = who("Scout"), sc = who("Screener");
+    s.run(() => deliver(s, "Screener", "One for you."));
+    sc.run(async () => { sc.busy(true); sc.say("Running the floors…"); });
+  },
+  "token:evidence": (e) => {
+    current.symbol = e.symbol; setStat("s-token", e.symbol);
+    tape("Evidence", `${e.symbol} @ $${e.price} · liquidity $${Math.round(e.liq || 0).toLocaleString()}`);
+  },
+  "seat:thinking": (e) => { const p = who(e.seat); if (p) p.run(async () => { await p.goHome(); p.busy(true); p.say("…", 2000); }); },
+  "seat:searching": (e) => {
+    tape(e.seat, "searching the web");
+    const p = who(e.seat); if (p) p.run(async () => { p.busy(true); p.say("Searching the web…", 6000); });
+  },
+  "seat:retry": (e) => tape(e.seat, `retry ${e.attempt} — ${e.error}`, "warn"),
+  "seat:failed": (e) => {
+    tape(e.seat, `seat failed — ${e.error}`, "bad");
+    const p = who(e.seat); if (p) p.run(async () => { p.busy(false); p.say("I couldn't get that."); });
+  },
+
+  "seat:verdict": (e) => {
+    const p = who(e.seat);
+    const score = e.score != null ? ` ${Math.round(e.score)}/100` : "";
+    tape(e.seat, `${e.detail || ""}${score}`.trim() || "reported",
+      e.kill || e.pass === false ? "bad" : e.pass === true ? "good" : "");
+    if (!p) return;
+    p.busy(false);
+
+    if (e.seat === "Screener") {
+      p.run(async () => {
+        if (e.pass === false) {
+          p.carry(true, "red");
+          await errand(p, SPOTS.shredder, "✂", e.detail || "Doesn't clear the floor");
+          p.carry(false); p.say("Shredded.");
+        } else {
+          p.say("Clears. Copies to the bullpen.");
+          await p.moveTo(SPOTS.meeting[0], SPOTS.meeting[1]);
+          puff(p, "▤▤");
+          p.carry(false);
+          for (const a of ANALYSTS) who(a)?.run(async () => who(a).carry(true));
+          await p.goHome();
+        }
+      });
+      return;
+    }
+    if (ANALYSTS.includes(e.seat)) {
+      p.run(async () => {
+        p.carry(true, e.kill ? "red" : "");
+        await p.moveTo(SPOTS.printer[0], SPOTS.printer[1]);
+        puff(p, "▤");
+        await deliver(p, "Red Team", e.kill ? "This one's disqualifying." : `Scored it${score}.`, e.kill ? "red" : "");
+      });
+      return;
+    }
+    if (e.seat === "Red Team") {
+      p.run(async () => { puff(p, e.detail === "refuted" ? "✕" : "!"); await deliver(p, "Risk", `It ${e.detail}.`, e.detail === "refuted" ? "red" : ""); });
+      return;
+    }
+    if (e.seat === "Risk") { p.run(() => deliver(p, "PM", `Sized at ${e.detail}.`)); return; }
+
+    if (e.seat === "PM") {
+      p.run(async () => {
+        p.carry(true, e.detail === "PROPOSE" ? "green" : "");
+        p.say(`${e.detail}${score}`);
+        if (e.detail === "PROPOSE") {
+          // Only a proposal goes up, and the PM stops at the threshold. Nobody
+          // else crosses into that office.
+          await p.moveTo(SPOTS.ceoDoor[0], SPOTS.ceoDoor[1]);
+          puff(p, "✉");
+          p.say("For the CEO.");
+          p.carry(false);
+          const ceo = who("CEO");
+          ceo?.run(async () => { ceo.carry(true, "green"); ceo.say("Something's come under the door."); });
+        } else {
+          await p.moveTo(SPOTS.meeting[0], SPOTS.meeting[1]);
+          puff(p, "▤"); p.carry(false);
+        }
+        await p.goHome();
+      });
+      return;
+    }
+    if (e.seat === "CEO") {
+      p.run(async () => {
+        p.busy(false);
+        puff(p, e.detail === "APPROVE" ? "✓" : e.detail === "HOLD" ? "‖" : "✕");
+        p.say(e.one_line || e.detail, 5600);
+        p.carry(true, e.detail === "APPROVE" ? "green" : "red");
+      });
+      return;
+    }
+    if (e.seat === "Execution") { p.run(() => deliver(p, "Compliance", "Ticket drafted — unsigned.", "green")); return; }
+    if (e.seat === "Compliance") {
+      p.run(async () => {
+        puff(p, e.pass ? "✓" : "⊘");
+        p.say(e.pass ? "Clear." : `Vetoed: ${e.detail}`);
+        await pause(700);
+        await deliver(p, "Scribe", e.pass ? "For the journal." : "Vetoed — file it.", e.pass ? "green" : "red");
+      });
+    }
+  },
+
+  "order:building": (e) => {
+    tape("CEO", `preparing an unsigned order for ${e.symbol}`, "hi");
+    who("CEO")?.run(async () => who("CEO").say("Preparing the order. I'll sign it myself."));
+  },
+  "order:slip": (e) => {
+    tape("CEO", `${e.ruling} — ${e.symbol} $${e.size} · ${e.file}`, e.ruling === "APPROVE" ? "good" : "warn");
+    if (e.gmgn) tape("Order", `GMGN: ${e.gmgn}`, "hi");
+    const p = who("CEO");
+    p?.run(async () => {
+      await p.moveTo(SPOTS.ceoDoor[0], SPOTS.ceoDoor[1] - 1.2);
+      puff(p, "↧");
+      p.carry(false);
+      p.say(e.ruling === "APPROVE" ? "Signed slip — place it on GMGN." : `${e.ruling}.`, 4600);
+      await p.goHome();
+    });
+    lastOrder = e;
+  },
+
+  "token:end": (e) => {
+    const good = e.outcome === "APPROVED" || e.outcome === "PROPOSE";
+    tape("Floor", `${e.symbol || short(e.mint)} → ${e.outcome}${e.detail ? " (" + e.detail + ")" : ""}`,
+      good ? "good" : e.outcome === "WATCH" || e.outcome === "HELD" ? "warn" : "bad");
+    setStat("s-token", "—");
+    const sc = who("Scribe");
+    sc.run(async () => { sc.carry(true, good ? "green" : ""); await errand(sc, SPOTS.archive, "▤", `${e.symbol || "?"}: ${e.outcome}`); sc.carry(false); });
+    memo({
+      symbol: e.symbol || short(e.mint), decision: e.outcome,
+      thesis: e.thesis || e.detail || (good ? "Approved by the CEO." : "Filed to the journal."),
+      conviction: e.conviction ?? null, size: e.size ?? null, stop: e.stop ?? null,
+      gmgn: e.gmgn || (lastOrder && lastOrder.symbol === e.symbol ? lastOrder.gmgn : null),
+    });
+    lastOrder = null;
+  },
+  "cycle:end": (e) => {
+    tape("Floor", `Cycle closed — ${e.count ?? 0} names, $${e.spendUsd ?? 0} spent`, "hi");
+    if (e.spendUsd != null) setStat("s-spend", "$" + Number(e.spendUsd).toFixed(2));
+  },
+  "seat:done": (e) => { if (e.usd != null) setStat("s-spend", "$" + Number(e.usd).toFixed(2)); },
+};
+function handle(ev) { HANDLERS[ev.type]?.(ev); }
+
+/* ── idle life: people are not statues between events ─────────────────────── */
+const CHATTER = ["Coffee?", "Seen the volume on that?", "Mine's a pass.", "Printer's jammed again.",
+  "Anything good today?", "I'd want a tighter stop.", "Liquidity's thin out there.", "Long week."];
+setInterval(() => {
+  const roam = STAFF.filter((s) => !s.claude);      // the CEO stays in the office
+  const spec = roam[Math.floor(Math.random() * roam.length)];
+  const p = workers[spec.id];
+  if (!p || p.typing || p.doc.visible || p.path) return;
+  if (Math.random() < 0.45) p.run(async () => { await errand(p, SPOTS.cooler, "≈", ""); });
+  else p.run(async () => p.say(CHATTER[Math.floor(Math.random() * CHATTER.length)], 2400));
+}, 5400);
+
+/* ═══ THE FEED ════════════════════════════════════════════════════════════
+   Live when served by the desk; a scripted demo shift when opened standalone. */
+const liveEl = document.getElementById("s-live"), liveText = document.getElementById("s-livetext");
+function goSim(reason) { liveEl.classList.add("sim"); liveText.textContent = "Demo shift"; liveEl.title = reason; runDemo(); }
+
+if (location.search.includes("demo")) {
+  goSim("demo mode requested");
+} else if (location.protocol.startsWith("http")) {
+  const es = new EventSource("/events");
+  let ok = false;
+  es.addEventListener("hello", () => { ok = true; liveText.textContent = "Live"; tape("Floor", "Connected to the desk."); });
+  es.onmessage = (m) => { try { handle(JSON.parse(m.data)); } catch {} };
+  es.onerror = () => { if (!ok) { es.close(); goSim("no desk process on this origin"); } };
+  setTimeout(() => { if (!ok) { es.close(); goSim("desk did not answer"); } }, 2500);
+} else {
+  goSim("opened as a file");
+}
+
+async function runDemo() {
+  const SYMS = [
+    { s:"VELA",  price:"0.0412",  liq:284000,  outcome:"APPROVED",     conv:71, rt:"wounded", size:420, stop:0.0331 },
+    { s:"MOCHI", price:"0.00118", liq:96500,   outcome:"screened_out", fail:"wash_suspect" },
+    { s:"ORBIT", price:"1.284",   liq:1420000, outcome:"WATCH",        conv:48, rt:"wounded" },
+    { s:"GRIFT", price:"0.00042", liq:180000,  outcome:"DECLINED",     conv:64, rt:"refuted", size:0 },
+  ];
+  const W = (ms) => new Promise((r) => setTimeout(r, ms));
+  for (let cyc = 0; ; cyc++) {
+    handle({ type:"cycle:start", cycle:"demo-" + cyc }); await W(2800);
+    handle({ type:"scout:universe", total:58 + cyc, fresh:21 }); await W(2400);
+    handle({ type:"scout:shortlist", count:SYMS.length }); await W(2800);
+
+    for (const t of SYMS) {
+      const mint = "So" + Math.random().toString(36).slice(2, 10) + "pump";
+      const gmgn = `https://gmgn.ai/sol/token/${mint}?tab=buy`;
+      handle({ type:"token:start", mint, hook:"unusual volume" }); await W(2200);
+      handle({ type:"token:evidence", mint, symbol:t.s, price:t.price, liq:t.liq }); await W(1800);
+
+      if (t.outcome === "screened_out") {
+        handle({ type:"seat:verdict", seat:"Screener", symbol:t.s, pass:false, detail:t.fail }); await W(4200);
+        handle({ type:"token:end", mint, symbol:t.s, outcome:"screened_out", detail:t.fail }); await W(3000);
+        continue;
+      }
+      handle({ type:"seat:verdict", seat:"Screener", symbol:t.s, pass:true, detail:"clears the floor" }); await W(2600);
+      for (const s of ANALYSTS) handle({ type:"seat:thinking", seat:s });
+      handle({ type:"seat:searching", seat:"Narrative" });
+      for (const s of ANALYSTS) {
+        await W(1700 + Math.random() * 1500);
+        handle({ type:"seat:verdict", seat:s, symbol:t.s, score:40 + Math.round(Math.random() * 50), confidence:0.6 });
+      }
+      await W(3000);
+      handle({ type:"seat:thinking", seat:"Red Team" }); await W(2800);
+      handle({ type:"seat:verdict", seat:"Red Team", symbol:t.s, detail:t.rt }); await W(3000);
+      handle({ type:"seat:verdict", seat:"Risk", symbol:t.s, detail:"$" + (t.size ?? 0) }); await W(3000);
+      handle({ type:"seat:verdict", seat:"PM", symbol:t.s, detail:t.outcome === "WATCH" ? "WATCH" : "PROPOSE", score:t.conv });
+      await W(3200);
+
+      if (t.outcome !== "WATCH") {
+        handle({ type:"seat:verdict", seat:"Execution", symbol:t.s, detail:"ticket drafted" }); await W(2800);
+        handle({ type:"seat:verdict", seat:"Compliance", symbol:t.s, pass:true, detail:"clear" }); await W(3000);
+        handle({ type:"seat:thinking", seat:"CEO" }); await W(3200);
+        handle({ type:"seat:verdict", seat:"CEO", symbol:t.s, detail:t.outcome === "APPROVED" ? "APPROVE" : "DECLINE",
+          one_line: t.outcome === "APPROVED" ? "Small size, tight stop. I'll sign it."
+                                             : "The red team landed and nobody answered it. No." });
+        await W(3200);
+        if (t.outcome === "APPROVED") {
+          handle({ type:"order:building", symbol:t.s }); await W(2400);
+          handle({ type:"order:slip", symbol:t.s, ruling:"APPROVE", size:t.size, file:`reports/ORDER__${t.s}.md`, gmgn });
+          await W(3200);
+        }
+      }
+      handle({ type:"token:end", mint, symbol:t.s, outcome:t.outcome, conviction:t.conv, size:t.size, stop:t.stop,
+        gmgn: t.outcome === "APPROVED" ? gmgn : null });
+      await W(3400);
+    }
+    handle({ type:"cycle:end", count:SYMS.length, spendUsd:(2.4 + cyc * 1.7).toFixed(2) });
+    await W(6000);
+  }
+}
+</script>

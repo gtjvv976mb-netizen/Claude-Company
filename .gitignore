@@ -1,0 +1,11 @@
+node_modules/
+dist/
+
+# secrets — never commit
+.env
+.env.local
+
+# generated at runtime
+claude-co.db
+claude-co.db-*
+reports/*.md

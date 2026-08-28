@@ -1,0 +1,22 @@
+{
+  "name": "claude-co",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "An automated Solana research desk staffed by purpose-built agents, one per stage of forming a trade. Purpose-built agents, one per stage of the trade-forming process. Proposal-only: it never signs, never sends.",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "desk": "node src/index.js run",
+    "one": "node src/index.js one",
+    "watch": "node src/index.js watch",
+    "ledger": "node src/index.js ledger",
+    "doctor": "node src/index.js doctor"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.70.0",
+    "three": "^0.180.0",
+    "zod": "^3.25.0"
+  }
+}

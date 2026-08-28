@@ -1,0 +1,943 @@
+<title>Claude Co Trading Floor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<style>
+:root{
+  --ink:#2A2622; --ink-soft:#6B6155; --ink-faint:#9A8F80;
+  --floor:#E8DCC8; --floor-alt:#DFD1B8; --floor-edge:#CDBB9C;
+  --wall:#3D3630; --wall-soft:#574C42;
+  --felt:#2F5D50; --felt-soft:#43786A;
+  --brass:#B8863B; --brass-lite:#D7AE6A;
+  --paper:#FBF7EF; --paper-edge:#E0D6C4;
+  --glass:rgba(210,232,236,.30); --glass-line:#8FA9A6;
+  --good:#3F7D5C; --warn:#C08A2E; --bad:#A8433A;
+  --panel:#F4EDE0; --panel-line:#D3C6AE;
+  --shadow:rgba(42,38,34,.20);
+  --lamp:rgba(255,214,140,0);
+  /* Ink for things printed on paper. Deliberately NOT redefined per theme:
+     paper is light in both themes, so its ink must stay dark in both. */
+  --on-paper:#2A2622; --on-paper-soft:#5F564A; --on-paper-faint:#6E6558;
+}
+:root:not([data-theme="light"]){
+  @media (prefers-color-scheme: dark){
+    --ink:#F0E7D8; --ink-soft:#B3A692; --ink-faint:#7D7263;
+    --floor:#2B2621; --floor-alt:#332D26; --floor-edge:#1D1915;
+    --wall:#15120F; --wall-soft:#241F1A;
+    --felt:#1E4038; --felt-soft:#2C5C50;
+    --brass:#D7AE6A; --brass-lite:#F0D19A;
+    --paper:#EFE6D6; --paper-edge:#C9BDA8;
+    --glass:rgba(120,168,172,.16); --glass-line:#4E6B69;
+    --good:#5FA57C; --warn:#DBA746; --bad:#C9645A;
+    --panel:#221D19; --panel-line:#3A322A;
+    --shadow:rgba(0,0,0,.55);
+    --lamp:rgba(255,206,122,.30);
+  }
+}
+:root[data-theme="dark"]{
+  --ink:#F0E7D8; --ink-soft:#B3A692; --ink-faint:#7D7263;
+  --floor:#2B2621; --floor-alt:#332D26; --floor-edge:#1D1915;
+  --wall:#15120F; --wall-soft:#241F1A;
+  --felt:#1E4038; --felt-soft:#2C5C50;
+  --brass:#D7AE6A; --brass-lite:#F0D19A;
+  --paper:#EFE6D6; --paper-edge:#C9BDA8;
+  --glass:rgba(120,168,172,.16); --glass-line:#4E6B69;
+  --good:#5FA57C; --warn:#DBA746; --bad:#C9645A;
+  --panel:#221D19; --panel-line:#3A322A;
+  --shadow:rgba(0,0,0,.55);
+  --lamp:rgba(255,206,122,.30);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--floor-edge); color:var(--ink);
+  font-family:Archivo,system-ui,-apple-system,"Segoe UI",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ---------- chrome ---------- */
+.topbar{
+  display:flex; align-items:baseline; gap:16px; flex-wrap:wrap;
+  padding:14px 20px; background:var(--wall); color:var(--paper);
+  border-bottom:3px solid var(--brass);
+}
+.firm{font-family:"Instrument Serif",Georgia,serif; font-size:26px; letter-spacing:.2px; line-height:1}
+.firm em{font-style:italic; color:var(--brass-lite)}
+.tag{
+  font-size:11px; text-transform:uppercase; letter-spacing:.14em;
+  color:rgba(251,247,239,.62); font-weight:600;
+}
+.topbar .spacer{margin-left:auto}
+.stat{display:flex; gap:6px; align-items:baseline; font-size:12px; color:rgba(251,247,239,.72)}
+.stat b{font-family:"JetBrains Mono",ui-monospace,monospace; font-size:13px; color:var(--brass-lite); font-variant-numeric:tabular-nums}
+.live{display:inline-flex; align-items:center; gap:7px; font-size:11px; letter-spacing:.12em; text-transform:uppercase; font-weight:600}
+.live .dot{width:8px;height:8px;border-radius:50%;background:var(--good); box-shadow:0 0 0 0 var(--good); animation:pulse 2.4s infinite}
+.live.sim .dot{background:var(--warn); animation:none}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(63,125,92,.6)}70%{box-shadow:0 0 0 9px rgba(63,125,92,0)}100%{box-shadow:0 0 0 0 rgba(63,125,92,0)}}
+
+.wrap{display:grid; grid-template-columns:minmax(0,1fr) 336px; gap:0; height:calc(100vh - 62px); min-height:520px}
+@media (max-width:1080px){ .wrap{grid-template-columns:1fr; height:auto} }
+
+.stageholder{
+  position:relative; overflow:hidden; background:var(--floor-edge);
+  display:flex; align-items:center; justify-content:center; padding:16px;
+}
+.stage{position:relative; width:1440px; height:990px; transform-origin:center center; flex:none}
+
+/* ---------- people ---------- */
+.person{
+  position:absolute; width:44px; height:52px; left:0; top:0;
+  transition:transform 1s cubic-bezier(.37,.16,.28,1);
+  will-change:transform; z-index:20;
+}
+.person .body{position:relative; width:44px; height:52px; transform-origin:50% 92%}
+.person.walking .body{animation:step .46s ease-in-out infinite}
+@keyframes step{0%,100%{transform:translateY(0) rotate(-1.6deg)}50%{transform:translateY(-3px) rotate(1.6deg)}}
+.person .shadow{position:absolute; left:9px; top:40px; width:26px; height:9px; border-radius:50%; background:var(--shadow); filter:blur(1.5px)}
+.person .torso{
+  position:absolute; left:8px; top:19px; width:28px; height:24px; border-radius:11px 11px 7px 7px;
+  background:var(--c); box-shadow:inset 0 -5px 0 rgba(0,0,0,.14);
+}
+.person .head{
+  position:absolute; left:12px; top:2px; width:20px; height:20px; border-radius:50%;
+  background:var(--skin); box-shadow:inset -3px -3px 0 rgba(0,0,0,.09);
+}
+.person .hair{position:absolute; left:11px; top:1px; width:22px; height:11px; border-radius:11px 11px 3px 3px; background:var(--hair)}
+.person .tagname{
+  position:absolute; left:50%; top:50px; transform:translateX(-50%);
+  opacity:0; transition:opacity .25s;
+  font-size:9.5px; font-weight:700; letter-spacing:.05em; white-space:nowrap;
+  color:var(--on-paper); background:var(--paper); padding:1.5px 5px; border-radius:3px;
+  border:1px solid var(--paper-edge); text-transform:uppercase;
+}
+.person .doc{
+  position:absolute; left:30px; top:22px; width:13px; height:16px; background:var(--paper);
+  border:1px solid var(--paper-edge); border-radius:1.5px; opacity:0;
+  transform:rotate(-8deg); transition:opacity .18s; box-shadow:0 1px 2px var(--shadow);
+}
+.person.carrying .doc{opacity:1}
+.person .doc.red{background:#E8C4BF; border-color:var(--bad)}
+.person .doc.green{background:#C9E0D2; border-color:var(--good)}
+.person .bubble{
+  position:absolute; left:50%; bottom:58px; transform:translateX(-50%) scale(.9);
+  background:var(--paper); color:var(--on-paper); border:1.5px solid var(--wall);
+  border-radius:9px; padding:5px 9px; font-size:11px; font-weight:600; white-space:nowrap;
+  opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; z-index:40;
+  box-shadow:0 3px 8px var(--shadow); max-width:230px; overflow:hidden; text-overflow:ellipsis;
+}
+.person .bubble::after{
+  content:""; position:absolute; left:50%; bottom:-7px; margin-left:-6px;
+  border:6px solid transparent; border-top-color:var(--wall);
+}
+.person.talking .bubble{opacity:1; transform:translateX(-50%) scale(1)}
+.person.away .tagname, .person:hover .tagname{opacity:1}
+.person.busy .torso{animation:type .3s ease-in-out infinite alternate}
+@keyframes type{from{transform:translateY(0)}to{transform:translateY(-1.5px)}}
+
+.fx{position:absolute; pointer-events:none; z-index:30; font-size:20px; opacity:0}
+.fx.go{animation:rise 1.1s ease-out forwards}
+@keyframes rise{0%{opacity:0; transform:translateY(0) scale(.7)}25%{opacity:1}100%{opacity:0; transform:translateY(-38px) scale(1.15)}}
+
+/* ---------- right rail ---------- */
+.rail{background:var(--panel); border-left:1px solid var(--panel-line); display:flex; flex-direction:column; min-height:0}
+.railhead{
+  padding:12px 16px; border-bottom:1px solid var(--panel-line);
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+}
+.railhead h2{margin:0; font-family:"Instrument Serif",Georgia,serif; font-weight:400; font-size:19px}
+.tabs{display:flex; gap:4px}
+.tab{
+  font:inherit; font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase;
+  padding:5px 10px; border-radius:5px; border:1px solid var(--panel-line);
+  background:transparent; color:var(--ink-soft); cursor:pointer;
+}
+.tab[aria-selected="true"]{background:var(--wall); color:var(--paper); border-color:var(--wall)}
+.tab:focus-visible{outline:2px solid var(--brass); outline-offset:2px}
+.tape{
+  flex:1; min-height:0; overflow-y:auto; padding:10px 14px;
+  font-family:"JetBrains Mono",ui-monospace,monospace; font-size:11.5px; line-height:1.65;
+}
+.tape .row{display:flex; gap:8px; padding:2px 0; border-bottom:1px dotted var(--panel-line)}
+.tape .t{color:var(--ink-faint); flex:none; font-variant-numeric:tabular-nums}
+.tape .who{flex:none; font-weight:500}
+.tape .msg{color:var(--ink-soft); overflow-wrap:anywhere}
+.tape .row.hi .msg{color:var(--ink); font-weight:500}
+.tape .row.bad .who{color:var(--bad)} .tape .row.good .who{color:var(--good)} .tape .row.warn .who{color:var(--warn)}
+
+.inbox{flex:1; min-height:0; overflow-y:auto; padding:14px; display:none; flex-direction:column; gap:12px}
+.inbox.on{display:flex} .tape.off{display:none}
+.memo{background:var(--paper); border:1px solid var(--paper-edge); border-radius:8px; padding:12px 13px; box-shadow:0 1px 3px var(--shadow)}
+.memo header{display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin-bottom:6px}
+.memo .sym{font-family:"Instrument Serif",Georgia,serif; font-size:20px; color:var(--on-paper)}
+.memo .verdict{font-size:10px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; padding:3px 7px; border-radius:4px}
+.v-PROPOSE,.v-APPROVED{background:var(--good); color:#fff}
+.v-WATCH,.v-HELD{background:var(--warn); color:#2A2622}
+.v-DECLINED{background:var(--bad); color:#fff}
+.v-PASS{background:var(--ink-faint); color:#fff} .v-VETOED,.v-killed,.v-screened_out{background:var(--bad); color:#fff}
+.memo p{margin:0 0 6px; font-size:12.5px; line-height:1.5; color:var(--on-paper-soft)}
+.memo .kv{display:flex; gap:12px; font-family:"JetBrains Mono",monospace; font-size:11px; color:var(--on-paper-faint); flex-wrap:wrap}
+.memo .kv b{color:var(--on-paper); font-variant-numeric:tabular-nums}
+.memo .place{
+  display:inline-flex; align-items:center; gap:6px; margin-top:9px; padding:6px 11px;
+  background:var(--wall); color:var(--paper); border-radius:5px; text-decoration:none;
+  font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+}
+.memo .place:hover{background:var(--brass); color:#2A2622}
+.memo .place:focus-visible{outline:2px solid var(--brass); outline-offset:2px}
+.memo .unsigned{margin-top:7px; font-size:10.5px; color:var(--on-paper-faint); line-height:1.45}
+.empty{color:var(--ink-faint); font-size:12.5px; text-align:center; padding:28px 12px; line-height:1.6}
+
+.legend{padding:10px 14px; border-top:1px solid var(--panel-line); display:flex; flex-wrap:wrap; gap:6px 10px}
+.legend span{display:flex; align-items:center; gap:5px; font-size:10.5px; color:var(--ink-soft)}
+.legend i{width:9px;height:9px;border-radius:50%; display:block}
+
+.note{padding:9px 14px; font-size:10.5px; color:var(--ink-faint); border-top:1px solid var(--panel-line); line-height:1.5}
+
+@media (prefers-reduced-motion: reduce){
+  .person{transition-duration:.35s}
+  .person.walking .body, .person.busy .torso{animation:none}
+  .fx.go{animation-duration:.4s}
+  .live .dot{animation:none}
+}
+</style>
+
+<div class="topbar">
+  <div class="firm">Claude <em>&amp;</em> Co.</div>
+  <div class="tag">Solana Research Desk</div>
+  <div class="spacer"></div>
+  <div class="stat">Under review <b id="s-token">—</b></div>
+  <div class="stat">Proposals <b id="s-props">0</b></div>
+  <div class="stat">Spend <b id="s-spend">$0.00</b></div>
+  <div class="live" id="s-live"><span class="dot"></span><span id="s-livetext">Connecting</span></div>
+</div>
+
+<div class="wrap">
+  <div class="stageholder" id="holder">
+    <div class="stage" id="stage">
+      <svg id="room" width="1440" height="990" aria-label="Floor plan of the Claude Co research desk"></svg>
+    </div>
+  </div>
+
+  <aside class="rail">
+    <div class="railhead">
+      <h2>The Floor</h2>
+      <div class="tabs" role="tablist">
+        <button class="tab" id="tab-tape" role="tab" aria-selected="true">Tape</button>
+        <button class="tab" id="tab-inbox" role="tab" aria-selected="false">CEO Inbox</button>
+      </div>
+    </div>
+    <div class="tape" id="tape"></div>
+    <div class="inbox" id="inbox"></div>
+    <div class="legend" id="legend"></div>
+    <p class="note">Every figure on this floor is one agent. They move because a real
+      pipeline stage started or finished — not on a timer. Research only: nothing here is executed.</p>
+  </aside>
+</div>
+
+<script>
+(() => {
+"use strict";
+const SVGNS = "http://www.w3.org/2000/svg";
+const stage = document.getElementById("stage");
+const room = document.getElementById("room");
+
+/* ============================ THE FLOOR PLAN ============================
+   Rooms, desks and walk targets come from one table, so the furniture the
+   viewer sees and the coordinates the staff walk to can never drift apart. */
+
+const OFFICES = [
+  { id:"pm",   x:1060, y:200, w:356, h:240, label:"Portfolio Manager" },
+  { id:"red",  x:1060, y:480, w:356, h:220, label:"Red Team"          },
+  { id:"risk", x:1060, y:730, w:356, h:220, label:"Risk"              },
+];
+
+// The executive suite. Its door is the one thing on this floor the desk cannot open.
+const SUITE = { x:520, y:24, w:400, h:176 };
+
+const STAFF = [
+  { id:"CEO",        name:"CEO",        role:"Signs, or doesn't", c:"#B8863B", desk:[640,60,170,74],  stand:[725,172], exec:true },
+  { id:"Scout",      name:"Scout",      role:"Sourcing",       c:"#7C6BA8", desk:[70,250,200,76],   stand:[170,362] },
+  { id:"Screener",   name:"Screener",   role:"Hard filters",   c:"#5C7D8A", desk:[70,460,200,76],   stand:[170,572] },
+  { id:"Forensics",  name:"Forensics",  role:"Token safety",   c:"#A8433A", desk:[330,260,180,74],  stand:[420,372] },
+  { id:"Liquidity",  name:"Liquidity",  role:"Can we exit?",   c:"#2F5D50", desk:[560,260,180,74],  stand:[650,372] },
+  { id:"Flow",       name:"Flow",       role:"Real demand?",   c:"#B8863B", desk:[790,260,180,74],  stand:[880,372] },
+  { id:"Technical",  name:"Technical",  role:"Entry location", c:"#4E6BA8", desk:[420,470,180,74],  stand:[510,582] },
+  { id:"Narrative",  name:"Narrative",  role:"Is it true?",    c:"#8A5A7D", desk:[730,470,180,74],  stand:[820,582] },
+  { id:"PM",         name:"PM",         role:"Decides",        c:"#2C4A6E", desk:[1150,290,170,74], stand:[1235,402] },
+  { id:"Red Team",   name:"Red Team",   role:"Break it",       c:"#8C2F27", desk:[1150,545,170,74], stand:[1235,657] },
+  { id:"Risk",       name:"Risk",       role:"How much",       c:"#5A5248", desk:[1150,795,170,74], stand:[1235,907] },
+  { id:"Execution",  name:"Execution",  role:"The ticket",     c:"#3F7D5C", desk:[560,800,200,76],  stand:[660,912] },
+  { id:"Compliance", name:"Compliance", role:"Veto",           c:"#6B6155", desk:[70,690,200,76],   stand:[170,802] },
+  { id:"Scribe",     name:"Scribe",     role:"The journal",    c:"#94764A", desk:[320,800,180,76],  stand:[410,912] },
+];
+
+const SPOTS = {
+  ceoDoor:  [720, 244],   // the threshold. Staff stop here; only the CEO is inside.
+  printer:  [352, 736],
+  cooler:   [962, 736],
+  shredder: [292, 572],
+  meeting:  [660, 700],
+  archive:  [410, 790],
+};
+
+const SKINS = ["#E8C4A0","#C89268","#8D5F3D","#F0D5B8","#A57248","#6B4426"];
+const HAIRS = ["#2A2622","#4A3520","#6B4E2E","#1C1815","#8A6B45","#3D2A1F"];
+
+/* ============================ DRAW THE ROOM ============================ */
+const el = (t, a = {}) => { const n = document.createElementNS(SVGNS, t); for (const k in a) n.setAttribute(k, a[k]); return n; };
+const add = (p, t, a) => { const n = el(t, a); p.appendChild(n); return n; };
+
+function text(p, x, y, s, o = {}) {
+  const n = add(p, "text", {
+    x, y, "text-anchor": o.anchor || "middle",
+    "font-family": o.serif ? "Instrument Serif, Georgia, serif" : "Archivo, sans-serif",
+    "font-size": o.size || 12, "font-weight": o.weight || 600,
+    fill: o.fill || "var(--ink-soft)", "letter-spacing": o.ls || "0.08em",
+  });
+  n.textContent = s;
+  return n;
+}
+
+function buildRoom() {
+  room.innerHTML = "";
+  const defs = add(room, "defs");
+
+  // Parquet floor
+  const pat = add(defs, "pattern", { id:"parquet", width:64, height:64, patternUnits:"userSpaceOnUse" });
+  add(pat, "rect", { width:64, height:64, fill:"var(--floor)" });
+  add(pat, "rect", { x:0, y:0, width:30, height:30, fill:"var(--floor-alt)", opacity:.55 });
+  add(pat, "rect", { x:34, y:34, width:30, height:30, fill:"var(--floor-alt)", opacity:.55 });
+
+  const glow = add(defs, "radialGradient", { id:"lamp" });
+  add(glow, "stop", { offset:"0%",   "stop-color":"var(--lamp)" });
+  add(glow, "stop", { offset:"100%", "stop-color":"transparent" });
+
+  add(room, "rect", { x:0, y:0, width:1440, height:990, fill:"var(--floor-edge)" });
+  add(room, "rect", { x:24, y:24, width:1392, height:942, fill:"url(#parquet)" });
+  add(room, "rect", { x:24, y:24, width:1392, height:942, fill:"none", stroke:"var(--wall)", "stroke-width":10 });
+
+  // --- the executive suite: the CEO's office, with the door the desk stops at ---
+  const S = SUITE;
+  add(room, "rect", { x:S.x, y:S.y, width:S.w, height:S.h, fill:"var(--wall-soft)", opacity:.55 });
+  add(room, "rect", { x:S.x, y:S.y, width:S.w, height:S.h, fill:"none", stroke:"var(--brass)", "stroke-width":4 });
+  // carpet
+  add(room, "rect", { x:S.x+16, y:S.y+16, width:S.w-32, height:S.h-32, fill:"var(--felt)", opacity:.30 });
+  // brass door in the bottom wall, and the threshold staff do not cross
+  add(room, "rect", { x:660, y:S.y+S.h-6, width:120, height:12, fill:"var(--floor)" });
+  add(room, "rect", { x:664, y:S.y+S.h-4, width:112, height:9, rx:2, fill:"var(--brass)", opacity:.85 });
+  add(room, "circle", { cx:770, cy:S.y+S.h+1, r:4, fill:"var(--brass-lite)" });
+  add(room, "line", { x1:660, y1:S.y+S.h+22, x2:780, y2:S.y+S.h+22,
+    stroke:"var(--brass)", "stroke-width":2, "stroke-dasharray":"6 6", opacity:.55 });
+  text(room, 720, S.y+S.h+40, "SLIP IT UNDER THE DOOR", { size:8.5, fill:"var(--ink-faint)", ls:"0.2em" });
+  // nameplate
+  add(room, "rect", { x:S.x+120, y:S.y+8, width:160, height:30, rx:3, fill:"var(--wall)", opacity:.92 });
+  add(room, "rect", { x:S.x+120, y:S.y+8, width:160, height:30, rx:3, fill:"none", stroke:"var(--brass)", "stroke-width":1.5 });
+  text(room, S.x+200, S.y+30, "C E O", { serif:true, size:20, fill:"var(--brass-lite)", ls:"0.3em", weight:400 });
+  // window behind the desk
+  add(room, "rect", { x:S.x+40, y:S.y+44, width:110, height:56, rx:3, fill:"var(--glass)", stroke:"var(--glass-line)", "stroke-width":2 });
+  add(room, "line", { x1:S.x+95, y1:S.y+44, x2:S.x+95, y2:S.y+100, stroke:"var(--glass-line)", "stroke-width":1.5, opacity:.6 });
+
+  // --- glass offices ---
+  for (const o of OFFICES) {
+    add(room, "rect", { x:o.x, y:o.y, width:o.w, height:o.h, fill:"var(--glass)" });
+    add(room, "rect", { x:o.x, y:o.y, width:o.w, height:o.h, fill:"none",
+      stroke:"var(--glass-line)", "stroke-width":4 });
+    // doorway gap on the left wall
+    add(room, "rect", { x:o.x - 3, y:o.y + o.h/2 - 26, width:7, height:52, fill:"var(--floor)" });
+    add(room, "rect", { x:o.x + 12, y:o.y + 12, width:o.w - 24, height:26, rx:4,
+      fill:"var(--wall)", opacity:.9 });
+    text(room, o.x + o.w/2, o.y + 30, o.label.toUpperCase(),
+      { size:11, fill:"var(--paper)", ls:"0.18em", weight:700 });
+    // vertical mullions
+    for (let mx = o.x + 56; mx < o.x + o.w - 20; mx += 56)
+      add(room, "line", { x1:mx, y1:o.y, x2:mx, y2:o.y + o.h, stroke:"var(--glass-line)", "stroke-width":1.5, opacity:.4 });
+  }
+
+  // --- rugs ---
+  add(room, "ellipse", { cx:660, cy:706, rx:145, ry:74, fill:"var(--felt)", opacity:.20 });
+  add(room, "ellipse", { cx:660, cy:706, rx:145, ry:74, fill:"none", stroke:"var(--felt)", "stroke-width":3, opacity:.45 });
+  text(room, 660, 656, "THE FLOOR", { size:9.5, fill:"var(--ink-faint)", ls:"0.24em" });
+
+  // --- desks ---
+  for (const s of STAFF) {
+    const [x, y, w, h] = s.desk;
+    add(room, "circle", { cx:x + w/2, cy:y + h/2, r:Math.max(w,h)*0.95, fill:"url(#lamp)" });
+    add(room, "rect", { x:x+4, y:y+6, width:w, height:h, rx:6, fill:"var(--shadow)", opacity:.5 });
+    add(room, "rect", { x, y, width:w, height:h, rx:6, fill:"var(--wall-soft)" });
+    add(room, "rect", { x:x+7, y:y+7, width:w-14, height:h-14, rx:4, fill:"var(--felt)", opacity:.85 });
+    // monitor
+    add(room, "rect", { x:x + w/2 - 30, y:y + 12, width:60, height:34, rx:3, fill:"var(--wall)" });
+    add(room, "rect", { x:x + w/2 - 26, y:y + 16, width:52, height:26, rx:2, fill:"var(--glass-line)", opacity:.75 });
+    add(room, "rect", { x:x + w/2 - 9, y:y + 46, width:18, height:5, fill:"var(--wall)" });
+    // paper tray + mug
+    add(room, "rect", { x:x + 14, y:y + h - 26, width:26, height:16, rx:2, fill:"var(--paper)", stroke:"var(--paper-edge)" });
+    add(room, "circle", { cx:x + w - 24, cy:y + h - 18, r:7, fill:"var(--brass)", opacity:.75 });
+    text(room, x + w/2, y + h + 17, s.name.toUpperCase(), { size:10, fill:"var(--ink)", ls:"0.14em", weight:700 });
+    text(room, x + w/2, y + h + 30, s.role, { size:9.5, fill:"var(--ink-faint)", ls:"0.04em", weight:500 });
+  }
+
+  // --- printer ---
+  add(room, "rect", { x:310, y:680, width:84, height:52, rx:5, fill:"var(--wall-soft)" });
+  add(room, "rect", { x:322, y:670, width:60, height:14, rx:3, fill:"var(--paper)", stroke:"var(--paper-edge)" });
+  add(room, "rect", { x:320, y:706, width:64, height:8, rx:2, fill:"var(--wall)" });
+  text(room, 352, 750, "PRINTER", { size:9, fill:"var(--ink-faint)", ls:"0.18em" });
+
+  // --- shredder (where the screener's rejects go) ---
+  add(room, "rect", { x:262, y:532, width:60, height:46, rx:4, fill:"var(--wall)" });
+  add(room, "rect", { x:272, y:540, width:40, height:5, rx:2.5, fill:"var(--bad)" });
+  text(room, 292, 596, "SHREDDER", { size:9, fill:"var(--ink-faint)", ls:"0.16em" });
+
+  // --- water cooler ---
+  add(room, "rect", { x:942, y:674, width:40, height:56, rx:5, fill:"var(--glass-line)", opacity:.5 });
+  add(room, "rect", { x:948, y:660, width:28, height:22, rx:8, fill:"var(--glass)", stroke:"var(--glass-line)", "stroke-width":2 });
+  text(room, 962, 750, "COOLER", { size:9, fill:"var(--ink-faint)", ls:"0.18em" });
+
+  // --- archive shelving (the journal) ---
+  add(room, "rect", { x:310, y:742, width:200, height:34, rx:4, fill:"var(--wall-soft)" });
+  for (let i = 0; i < 11; i++)
+    add(room, "rect", { x:318 + i*17, y:748, width:12, height:22, rx:1.5,
+      fill:i % 3 ? "var(--paper)" : "var(--brass)", opacity:.9 });
+  text(room, 410, 734, "THE JOURNAL", { size:9, fill:"var(--ink-faint)", ls:"0.18em" });
+
+  // --- plants ---
+  for (const [px, py] of [[60,930],[1390,930],[60,110],[1010,930],[1390,110]]) {
+    add(room, "circle", { cx:px, cy:py, r:15, fill:"var(--wall-soft)" });
+    add(room, "circle", { cx:px, cy:py-9, r:17, fill:"var(--felt)", opacity:.85 });
+    add(room, "circle", { cx:px-9, cy:py-3, r:11, fill:"var(--felt-soft)", opacity:.8 });
+    add(room, "circle", { cx:px+9, cy:py-4, r:10, fill:"var(--felt-soft)", opacity:.7 });
+  }
+}
+buildRoom();
+
+/* ============================ THE STAFF ============================ */
+const SPEED = 210; // px per second
+
+class Person {
+  constructor(spec, i) {
+    Object.assign(this, spec);
+    this.x = spec.stand[0]; this.y = spec.stand[1];
+    this.chain = Promise.resolve();
+    const d = document.createElement("div");
+    d.className = "person";
+    d.style.setProperty("--c", spec.c);
+    d.style.setProperty("--skin", SKINS[i % SKINS.length]);
+    d.style.setProperty("--hair", HAIRS[(i * 3 + 1) % HAIRS.length]);
+    d.innerHTML =
+      `<div class="bubble"></div><div class="body">` +
+      `<div class="shadow"></div><div class="torso"></div>` +
+      `<div class="hair"></div><div class="head"></div>` +
+      `<div class="doc"></div></div><div class="tagname">${spec.name}</div>`;
+    d.style.transform = `translate(${this.x - 22}px, ${this.y - 44}px)`;
+    stage.appendChild(d);
+    this.el = d;
+    this.bubbleEl = d.querySelector(".bubble");
+    this.docEl = d.querySelector(".doc");
+  }
+
+  moveTo(x, y) {
+    return new Promise((res) => {
+      const dist = Math.hypot(x - this.x, y - this.y);
+      if (dist < 2) return res();
+      const ms = Math.max(320, (dist / SPEED) * 1000);
+      this.el.style.transitionDuration = ms + "ms";
+      this.el.classList.add("walking");
+      this.el.style.zIndex = String(20 + Math.round(y / 10));
+      this.el.style.transform = `translate(${x - 22}px, ${y - 44}px)`;
+      this.x = x; this.y = y;
+      const home = Math.hypot(x - this.stand[0], y - this.stand[1]) < 12;
+      this.el.classList.toggle("away", !home);
+      setTimeout(() => { this.el.classList.remove("walking"); res(); }, ms + 30);
+    });
+  }
+
+  say(msg, ms = 2600) {
+    if (!msg) return;
+    this.bubbleEl.textContent = msg;
+    this.el.classList.add("talking");
+    clearTimeout(this._say);
+    this._say = setTimeout(() => this.el.classList.remove("talking"), ms);
+  }
+
+  carry(on, kind = "") {
+    this.el.classList.toggle("carrying", !!on);
+    this.docEl.className = "doc" + (kind ? " " + kind : "");
+  }
+
+  busy(on) { this.el.classList.toggle("busy", !!on); }
+
+  goHome() { return this.moveTo(this.stand[0], this.stand[1]); }
+
+  /** Serialise this person's actions — an employee does one thing at a time. */
+  run(fn) {
+    this.chain = this.chain.then(fn).catch(() => {});
+    return this.chain;
+  }
+}
+
+const staff = {};
+STAFF.forEach((s, i) => { staff[s.id] = new Person(s, i); });
+const who = (n) => staff[n] || null;
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function fx(x, y, glyph) {
+  const d = document.createElement("div");
+  d.className = "fx"; d.textContent = glyph;
+  d.style.left = (x - 10) + "px"; d.style.top = (y - 46) + "px";
+  stage.appendChild(d);
+  requestAnimationFrame(() => d.classList.add("go"));
+  setTimeout(() => d.remove(), 1300);
+}
+
+/** Walk to a spot, do a beat, walk home. */
+async function errand(p, spot, glyph, msg, carryKind) {
+  await p.moveTo(spot[0], spot[1]);
+  if (glyph) fx(p.x, p.y, glyph);
+  p.say(msg);
+  await pause(560);
+  if (carryKind !== undefined) p.carry(!!carryKind, carryKind || "");
+  await p.goHome();
+}
+
+/** Hand a document from one desk to another. */
+const queues = {};
+async function deliver(from, toId, msg, kind = "") {
+  const to = who(toId); if (!to) return;
+  from.carry(true, kind);
+  from.say(msg);
+  // Several analysts often report to the same seat at once. Fan them out so they
+  // queue at the door like people, rather than stacking on a single pixel.
+  const slot = (queues[toId] = ((queues[toId] ?? -1) + 1) % 5);
+  await from.moveTo(to.stand[0] - 74 - slot * 8, to.stand[1] - 34 + slot * 30);
+  fx(from.x, from.y, "📄");
+  from.carry(false);
+  to.carry(true, kind);
+  await from.goHome();
+}
+
+/* ============================ THE TAPE & THE INBOX ============================ */
+const tapeEl = document.getElementById("tape");
+const inboxEl = document.getElementById("inbox");
+let proposalCount = 0;
+
+function tape(seat, msg, cls = "") {
+  const row = document.createElement("div");
+  row.className = "row " + cls;
+  const t = new Date().toLocaleTimeString([], { hour12:false });
+  row.innerHTML = `<span class="t">${t}</span><span class="who">${seat}</span><span class="msg"></span>`;
+  row.querySelector(".msg").textContent = msg;
+  tapeEl.appendChild(row);
+  while (tapeEl.children.length > 260) tapeEl.firstChild.remove();
+  tapeEl.scrollTop = tapeEl.scrollHeight;
+}
+
+function memo({ symbol, decision, thesis, conviction, size, stop, gmgn }) {
+  const m = document.createElement("div");
+  m.className = "memo";
+  m.innerHTML =
+    `<header><span class="sym"></span><span class="verdict v-${decision}">${decision}</span></header>` +
+    `<p class="th"></p><div class="kv"></div>`;
+  m.querySelector(".sym").textContent = symbol;
+  m.querySelector(".th").textContent = thesis || "—";
+  const kv = m.querySelector(".kv");
+  const bits = [];
+  if (conviction != null) bits.push(["Conviction", conviction + "/100"]);
+  if (size != null) bits.push(["Size", "$" + size]);
+  if (stop != null) bits.push(["Stop", "$" + stop]);
+  for (const [k, v] of bits) {
+    const s = document.createElement("span");
+    s.innerHTML = k + " <b></b>";
+    s.querySelector("b").textContent = v;
+    kv.appendChild(s);
+  }
+  if (gmgn) {
+    const a = document.createElement("a");
+    a.className = "place"; a.href = gmgn; a.target = "_blank"; a.rel = "noopener noreferrer";
+    a.textContent = "Place it on GMGN →";
+    m.appendChild(a);
+    const n = document.createElement("p");
+    n.className = "unsigned";
+    n.textContent = "Unsigned. Claude Co prepared this order but cannot sign or send it — that is yours.";
+    m.appendChild(n);
+  }
+  inboxEl.querySelector(".empty")?.remove();
+  inboxEl.prepend(m);
+  if (decision === "APPROVED" || decision === "PROPOSE") {
+    proposalCount++;
+    document.getElementById("s-props").textContent = String(proposalCount);
+  }
+}
+inboxEl.innerHTML = `<p class="empty">Nothing on the CEO's desk yet.<br>Proposals that clear compliance land here.</p>`;
+
+document.getElementById("tab-tape").onclick = () => switchTab(true);
+document.getElementById("tab-inbox").onclick = () => switchTab(false);
+function switchTab(showTape) {
+  tapeEl.classList.toggle("off", !showTape);
+  inboxEl.classList.toggle("on", !showTape);
+  document.getElementById("tab-tape").setAttribute("aria-selected", String(showTape));
+  document.getElementById("tab-inbox").setAttribute("aria-selected", String(!showTape));
+}
+
+const legend = document.getElementById("legend");
+for (const s of STAFF) {
+  const sp = document.createElement("span");
+  sp.innerHTML = `<i style="background:${s.c}"></i>`;
+  sp.appendChild(document.createTextNode(s.name));
+  legend.appendChild(sp);
+}
+
+/* ============================ BEHAVIOUR ============================
+   Each pipeline event becomes something a person physically does. The mapping is
+   literal on purpose: if you can see it happening, you can see where it stalled. */
+
+let current = { symbol: "—" };
+let lastOrder = null;
+const setStat = (id, v) => { document.getElementById(id).textContent = v; };
+const short = (m) => (m ? m.slice(0, 4) + "…" + m.slice(-4) : "");
+
+const HANDLERS = {
+  "cycle:start": (e) => {
+    tape("Floor", `Cycle ${String(e.cycle).slice(0, 16)} opened`, "hi");
+    const p = who("Scout");
+    p.run(async () => {
+      p.say("Morning. Pulling the feeds.");
+      await errand(p, SPOTS.printer, "🖨", "New listings in", "");
+      p.carry(true);
+    });
+  },
+
+  "scout:universe": (e) => {
+    tape("Scout", `${e.total} names in, ${e.fresh} fresh`);
+    who("Scout").run(async () => who("Scout").say(`${e.fresh} fresh of ${e.total}`));
+  },
+
+  "scout:skip": (e) => tape("Scout", `skip ${short(e.mint)} — ${e.reason}`, "warn"),
+
+  "scout:shortlist": (e) => {
+    tape("Scout", `Shortlist: ${e.count} for full workup`, "hi");
+    const p = who("Scout");
+    p.run(async () => {
+      await errand(p, SPOTS.meeting, "📋", `${e.count} worth our time`, "");
+      p.carry(true);
+    });
+  },
+
+  "scout:manual": (e) => tape("Scout", `Operator named ${e.count} directly`, "hi"),
+
+  "token:start": (e) => {
+    tape("Floor", `── ${short(e.mint)} ${e.hook ? "— " + e.hook : ""}`, "hi");
+    const s = who("Scout"), sc = who("Screener");
+    s.run(() => deliver(s, "Screener", "One for you.", ""));
+    sc.run(async () => { sc.busy(true); sc.say("Running the floors…"); });
+  },
+
+  "token:evidence": (e) => {
+    current.symbol = e.symbol;
+    setStat("s-token", e.symbol);
+    tape("Evidence", `${e.symbol} @ $${e.price} · liquidity $${Math.round(e.liq || 0).toLocaleString()}`);
+  },
+
+  "seat:thinking": (e) => {
+    const p = who(e.seat); if (!p) return;
+    p.run(async () => { await p.goHome(); p.busy(true); p.say("…"); });
+  },
+
+  "seat:searching": (e) => {
+    const p = who(e.seat); if (!p) return;
+    tape(e.seat, "searching the web");
+    p.run(async () => { p.busy(true); p.say("Searching the web…", 6000); });
+  },
+
+  "seat:retry": (e) => tape(e.seat, `retry ${e.attempt} — ${e.error}`, "warn"),
+  "seat:failed": (e) => {
+    tape(e.seat, `seat failed — ${e.error}`, "bad");
+    const p = who(e.seat); if (p) p.run(async () => { p.busy(false); p.say("I couldn't get that."); });
+  },
+
+  "seat:verdict": (e) => {
+    const p = who(e.seat);
+    const score = e.score != null ? ` ${Math.round(e.score)}/100` : "";
+    const cls = e.kill || e.pass === false ? "bad" : e.pass === true ? "good" : "";
+    tape(e.seat, `${e.detail || ""}${score}`.trim() || "reported", cls);
+    if (!p) return;
+    p.busy(false);
+
+    // The screener is the cheap gate: everything it rejects goes in the shredder.
+    if (e.seat === "Screener") {
+      p.run(async () => {
+        if (e.pass === false) {
+          p.carry(true, "red");
+          await errand(p, SPOTS.shredder, "✂️", e.detail || "Doesn't clear the floor", "");
+          p.say("Shredded.");
+        } else {
+          p.say("Clears. Copies to the bullpen.");
+          await p.moveTo(SPOTS.meeting[0], SPOTS.meeting[1]);
+          fx(p.x, p.y, "📑");
+          p.carry(false);
+          for (const a of ["Forensics","Liquidity","Flow","Technical","Narrative"])
+            who(a)?.run(async () => who(a).carry(true));
+          await p.goHome();
+        }
+      });
+      return;
+    }
+
+    // Analysts print their note and walk it to the red team.
+    if (["Forensics","Liquidity","Flow","Technical","Narrative"].includes(e.seat)) {
+      p.run(async () => {
+        p.carry(true, e.kill ? "red" : "");
+        await p.moveTo(SPOTS.printer[0], SPOTS.printer[1]);
+        fx(p.x, p.y, "🖨");
+        await deliver(p, "Red Team", e.kill ? "This one's disqualifying." : `Scored it${score}.`, e.kill ? "red" : "");
+      });
+      return;
+    }
+
+    if (e.seat === "Red Team") {
+      p.run(async () => {
+        fx(p.x, p.y, e.detail === "refuted" ? "🛑" : e.detail === "wounded" ? "⚠️" : "🩹");
+        await deliver(p, "Risk", `It ${e.detail}.`, e.detail === "refuted" ? "red" : "");
+      });
+      return;
+    }
+
+    if (e.seat === "Risk") {
+      p.run(() => deliver(p, "PM", `Sized at ${e.detail}.`, ""));
+      return;
+    }
+
+    if (e.seat === "PM") {
+      p.run(async () => {
+        p.carry(true, e.detail === "PROPOSE" ? "green" : "");
+        p.say(`${e.detail}${score}`);
+        if (e.detail === "PROPOSE") {
+          // Only a proposal goes up. The PM stops at the threshold — nobody else
+          // goes into that office — and slides it under the door.
+          await p.moveTo(SPOTS.ceoDoor[0], SPOTS.ceoDoor[1]);
+          fx(p.x, p.y, "✉️");
+          p.say("For the CEO.");
+          p.carry(false);
+          const ceo = who("CEO");
+          ceo?.run(async () => { ceo.carry(true, "green"); ceo.say("Something's come under the door."); });
+        } else {
+          await p.moveTo(SPOTS.meeting[0], SPOTS.meeting[1]);
+          fx(p.x, p.y, "🗄");
+          p.carry(false);
+        }
+        await p.goHome();
+      });
+      return;
+    }
+
+    if (e.seat === "CEO") {
+      p.run(async () => {
+        p.busy(false);
+        const glyph = e.detail === "APPROVE" ? "✍️" : e.detail === "HOLD" ? "⏸" : "🚫";
+        fx(p.x, p.y, glyph);
+        p.say(e.one_line || e.detail, 5200);
+        p.carry(true, e.detail === "APPROVE" ? "green" : "red");
+      });
+      return;
+    }
+
+    if (e.seat === "Execution") {
+      p.run(() => deliver(p, "Compliance", "Ticket drafted — unsigned.", "green"));
+      return;
+    }
+
+    if (e.seat === "Compliance") {
+      p.run(async () => {
+        fx(p.x, p.y, e.pass ? "✅" : "⛔");
+        p.say(e.pass ? "Clear." : `Vetoed: ${e.detail}`);
+        await pause(700);
+        await deliver(p, "Scribe", e.pass ? "For the journal." : "Vetoed — file it.", e.pass ? "green" : "red");
+      });
+    }
+  },
+
+  "token:end": (e) => {
+    const good = e.outcome === "APPROVED" || e.outcome === "PROPOSE";
+    tape("Floor", `${e.symbol || short(e.mint)} → ${e.outcome}${e.detail ? " (" + e.detail + ")" : ""}`,
+      good ? "good" : e.outcome === "WATCH" ? "warn" : "bad");
+    setStat("s-token", "—");
+    const sc = who("Scribe");
+    sc.run(async () => {
+      sc.carry(true, good ? "green" : "");
+      await errand(sc, SPOTS.archive, "🗂", `${e.symbol || "?"}: ${e.outcome}`, "");
+    });
+    memo({
+      symbol: e.symbol || short(e.mint),
+      decision: e.outcome,
+      thesis: e.thesis || e.detail || (good ? "Proposal filed for the CEO." : "Filed to the journal."),
+      conviction: e.conviction ?? null,
+      size: e.size ?? null, stop: e.stop ?? null,
+      gmgn: e.gmgn || (lastOrder && lastOrder.symbol === e.symbol ? lastOrder.gmgn : null),
+    });
+    lastOrder = null;
+  },
+
+  "order:building": (e) => {
+    tape("CEO", `preparing an unsigned order for ${e.symbol}`, "hi");
+    who("CEO")?.run(async () => who("CEO").say("Preparing the order. I'll sign it myself."));
+  },
+
+  "order:slip": (e) => {
+    tape("CEO", `${e.ruling} — ${e.symbol} $${e.size} · slip: ${e.file}`,
+      e.ruling === "APPROVE" ? "good" : "warn");
+    if (e.gmgn) tape("Order", `GMGN: ${e.gmgn}`, "hi");
+    const p = who("CEO");
+    p?.run(async () => {
+      await p.moveTo(SPOTS.ceoDoor[0], SPOTS.ceoDoor[1] - 34);
+      fx(p.x, p.y, "📤");
+      p.carry(false);
+      p.say(e.ruling === "APPROVE" ? "Signed order slip — place it on GMGN." : `${e.ruling}.`, 4200);
+      await p.goHome();
+    });
+    lastOrder = e;
+  },
+
+  "cycle:end": (e) => {
+    tape("Floor", `Cycle closed — ${e.count ?? 0} names, $${e.spendUsd ?? 0} spent`, "hi");
+    if (e.spendUsd != null) setStat("s-spend", "$" + Number(e.spendUsd).toFixed(2));
+  },
+
+  "seat:done": (e) => { if (e.usd != null) setStat("s-spend", "$" + Number(e.usd).toFixed(2)); },
+};
+
+function handle(ev) { HANDLERS[ev.type]?.(ev); }
+
+/* ---------- idle life: people are not statues between events ---------- */
+const CHATTER = ["Coffee?","Seen the volume on that?","Mine's a pass.","Printer's jammed again.",
+  "Anything good today?","I'd want a tighter stop.","Liquidity's thin out there.","Long week."];
+setInterval(() => {
+  const roam = STAFF.filter((x) => !x.exec);            // the CEO stays in the office
+  const p = roam[Math.floor(Math.random() * roam.length)];
+  const per = staff[p.id];
+  if (!per || per.el.classList.contains("busy") || per.el.classList.contains("carrying")) return;
+  if (Math.random() < 0.5) {
+    per.run(async () => { await errand(per, SPOTS.cooler, "💧", "", ""); });
+  } else {
+    per.run(async () => per.say(CHATTER[Math.floor(Math.random() * CHATTER.length)], 2200));
+  }
+}, 5200);
+
+/* ---------- fit the floor to the viewport ---------- */
+function fit() {
+  const h = document.getElementById("holder");
+  const s = Math.min((h.clientWidth - 32) / 1440, (h.clientHeight - 32) / 990);
+  stage.style.transform = `scale(${Math.max(0.28, Math.min(s, 1.05))})`;
+}
+addEventListener("resize", fit); fit(); setTimeout(fit, 120);
+
+/* ============================ THE FEED ============================
+   Live when served by the desk; a scripted demo shift when opened standalone. */
+const liveEl = document.getElementById("s-live"), liveText = document.getElementById("s-livetext");
+
+function goSim(reason) {
+  liveEl.classList.add("sim");
+  liveText.textContent = "Demo shift";
+  liveEl.title = reason;
+  runDemo();
+}
+
+if (location.search.includes("demo")) {
+  goSim("demo mode requested");
+} else if (location.protocol.startsWith("http")) {
+  const es = new EventSource("/events");
+  let ok = false;
+  es.addEventListener("hello", () => { ok = true; liveText.textContent = "Live"; tape("Floor", "Connected to the desk."); });
+  es.onmessage = (m) => { try { handle(JSON.parse(m.data)); } catch {} };
+  es.onerror = () => { if (!ok) { es.close(); goSim("no desk process on this origin"); } };
+  setTimeout(() => { if (!ok) { es.close(); goSim("desk did not answer"); } }, 2500);
+} else {
+  goSim("opened as a file");
+}
+
+/* A representative shift, with the timings a real cycle actually has. */
+async function runDemo() {
+  const SYMS = [
+    { s:"VELA", price:"0.0412", liq:284000, outcome:"APPROVED", conv:71, rt:"wounded", size:420, stop:0.0331 },
+    { s:"MOCHI", price:"0.00118", liq:96500, outcome:"screened_out", fail:"wash_suspect" },
+    { s:"ORBIT", price:"1.284", liq:1420000, outcome:"WATCH", conv:48, rt:"wounded" },
+    { s:"GRIFT", price:"0.00042", liq:180000, outcome:"DECLINED", conv:64, rt:"refuted", size:0 },
+  ];
+  const W = (ms) => new Promise((r) => setTimeout(r, ms));
+  for (let cyc = 0; ; cyc++) {
+    handle({ type:"cycle:start", cycle:"demo-" + cyc });
+    await W(2600);
+    handle({ type:"scout:universe", total: 58 + cyc, fresh: 21 });
+    await W(2200);
+    handle({ type:"scout:shortlist", count: SYMS.length });
+    await W(2600);
+
+    for (const t of SYMS) {
+      const mint = "So" + Math.random().toString(36).slice(2, 10) + "pump";
+      handle({ type:"token:start", mint, hook:"unusual volume" });
+      await W(2000);
+      handle({ type:"token:evidence", mint, symbol:t.s, price:t.price, liq:t.liq });
+      await W(1600);
+
+      if (t.outcome === "screened_out") {
+        handle({ type:"seat:verdict", seat:"Screener", symbol:t.s, pass:false, detail:t.fail });
+        await W(3600);
+        handle({ type:"token:end", mint, symbol:t.s, outcome:"screened_out", detail:t.fail });
+        await W(2600);
+        continue;
+      }
+
+      handle({ type:"seat:verdict", seat:"Screener", symbol:t.s, pass:true, detail:"clears the floor" });
+      await W(2400);
+
+      const seats = ["Forensics","Liquidity","Flow","Technical","Narrative"];
+      for (const s of seats) handle({ type:"seat:thinking", seat:s });
+      handle({ type:"seat:searching", seat:"Narrative" });
+      for (const s of seats) {
+        await W(1500 + Math.random() * 1400);
+        handle({ type:"seat:verdict", seat:s, symbol:t.s,
+          score: 40 + Math.round(Math.random() * 50), confidence: 0.6 });
+      }
+      await W(2600);
+
+      handle({ type:"seat:thinking", seat:"Red Team" });
+      await W(2600);
+      handle({ type:"seat:verdict", seat:"Red Team", symbol:t.s, detail:t.rt });
+      await W(2600);
+      handle({ type:"seat:verdict", seat:"Risk", symbol:t.s, detail:"$" + (t.size ?? 0) });
+      await W(2600);
+      handle({ type:"seat:verdict", seat:"PM", symbol:t.s,
+        detail: t.outcome === "WATCH" ? "WATCH" : "PROPOSE", score:t.conv });
+      await W(2800);
+
+      if (t.outcome !== "WATCH") {
+        handle({ type:"seat:verdict", seat:"Execution", symbol:t.s, detail:"ticket drafted" });
+        await W(2600);
+        handle({ type:"seat:verdict", seat:"Compliance", symbol:t.s, pass:true, detail:"clear" });
+        await W(2800);
+      }
+      if (t.outcome === "APPROVED" || t.outcome === "DECLINED") {
+        handle({ type:"seat:thinking", seat:"CEO" });
+        await W(3000);
+        handle({ type:"seat:verdict", seat:"CEO", symbol:t.s, detail: t.outcome === "APPROVED" ? "APPROVE" : "DECLINE",
+          one_line: t.outcome === "APPROVED"
+            ? "Small size, tight stop. I'll sign it."
+            : "The red team landed and nobody answered it. No." });
+        await W(3000);
+        if (t.outcome === "APPROVED") {
+          handle({ type:"order:building", symbol:t.s });
+          await W(2200);
+          handle({ type:"order:slip", symbol:t.s, ruling:"APPROVE", size:t.size,
+            file:`reports/ORDER__${t.s}.md`, gmgn:`https://gmgn.ai/sol/token/${mint}?tab=buy` });
+          await W(3000);
+        }
+      }
+      handle({ type:"token:end", mint, symbol:t.s, outcome:t.outcome,
+        conviction:t.conv, size:t.size, stop:t.stop,
+        gmgn: t.outcome === "APPROVED" ? `https://gmgn.ai/sol/token/${mint}?tab=buy` : null });
+      await W(3200);
+    }
+    handle({ type:"cycle:end", count:SYMS.length, spendUsd:(2.4 + cyc * 1.7).toFixed(2) });
+    await W(6000);
+  }
+}
+})();
+</script>

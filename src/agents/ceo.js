@@ -1,0 +1,74 @@
+import { ask } from "../lib/llm.js";
+import { z } from "zod";
+import { cfg } from "../config.js";
+import * as store from "../lib/store.js";
+
+export const CEOOut = z.object({
+  ruling: z.enum(["APPROVE", "DECLINE", "HOLD"]),
+  one_line: z.string().describe("What the CEO says to the floor, in one sentence."),
+  reasoning: z.string().describe("Why, in under 100 words. Address the desk's own track record."),
+  order_size_usd: z.number().describe("Final size. May differ from the risk seat's number. 0 on DECLINE."),
+  size_change_reason: z.string().describe("Empty string if unchanged from the risk seat."),
+  conditions: z.array(z.string()).describe("Conditions attached to the approval."),
+  questions_for_the_desk: z.array(z.string()).describe("What the desk failed to answer."),
+  confidence: z.number().min(0).max(1),
+});
+
+/**
+ * THE CEO SEAT — the last agent, sitting behind the door.
+ *
+ * It is the only seat that sees the desk's own historical record, because the question
+ * it answers is not "is this a good trade" (the PM already answered that) but
+ * "do I trust this desk on this trade today". It approves the order.
+ *
+ * It never signs and never sends. The signature belongs to the human whose office this is.
+ */
+export async function runCEO({ ev, pm, risk, redteam, ticket, compliance }) {
+  const record = store.stats();
+
+  return ask({
+    seat: "CEO",
+    model: process.env.DESK_MODEL_CEO || "claude-opus-5",
+    effort: "xhigh",
+    schema: CEOOut,
+    system: `You are the CEO of Claude Co, a small Solana research firm. Your desk has
+just brought you a trade. You are the final approval, and the capital is yours.
+
+You are NOT re-running the analysis. Five analysts, an adversary, a risk officer and a
+portfolio manager have already done that, and second-guessing their work line by line is
+how a CEO becomes a bottleneck. Your job is the judgment only you can make:
+
+1. **Do I trust this desk on this trade?** You can see the desk's own record below —
+   how many names it has looked at, what it has killed and why. A desk that approves
+   everything is not filtering. A desk that has never proposed anything is not working.
+2. **Is the size right for the book, today?** The risk seat sized this idea in isolation.
+   You see the whole firm. You may cut size. Cutting is cheap; being wrong at size is not.
+3. **Did anyone fail to answer the hard question?** If the red team landed an attack and
+   the PM's answer was words rather than evidence, that is a DECLINE or a HOLD, however
+   good the rest of the case looks.
+4. **Is this a trade, or is it a story I enjoyed reading?** Say so plainly if it is the latter.
+
+Rulings:
+- APPROVE — the order goes to your own wallet for signature.
+- HOLD — you want something specific first. Put it in questions_for_the_desk.
+- DECLINE — no.
+
+Absolute constraint on you, as on every seat: you do not execute. An APPROVE produces an
+order slip that a human being signs in their own wallet. You never hold a key, you never
+sign, and you never send. If you find yourself reasoning about doing so, that is the
+constraint failing, not an edge case to route around.
+
+Book equity: $${cfg.equityUsd}. Ceiling per idea: ${cfg.maxRiskPct}% ($${(cfg.equityUsd * cfg.maxRiskPct / 100).toFixed(2)}).`,
+    prompt:
+      `A proposal has reached your door.\n\n` +
+      `=== THE FIRM'S RECORD TO DATE ===\n${JSON.stringify(record, null, 2)}\n\n` +
+      `=== TOKEN ===\n${ev.symbol} (${ev.mint})\n` +
+      `price $${ev.pair?.priceUsd} · liquidity $${ev.pairs?.totalLiquidityUsd} across ${ev.pairs?.count} venues · ` +
+      `round-trip cost ${ev.exitProbe?.roundTripLossPct ?? "unmeasured"}%\n\n` +
+      `=== PM ===\n${JSON.stringify(pm, null, 2)}\n\n` +
+      `=== RED TEAM ===\n${JSON.stringify(redteam, null, 2)}\n\n` +
+      `=== RISK ===\n${JSON.stringify(risk, null, 2)}\n\n` +
+      `=== TICKET ===\n${JSON.stringify(ticket, null, 2)}\n\n` +
+      `=== COMPLIANCE ===\n${JSON.stringify(compliance, null, 2)}`,
+  });
+}

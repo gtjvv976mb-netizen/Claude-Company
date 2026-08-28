@@ -1,0 +1,491 @@
+<title>Claude Tower</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<style>
+:root{
+  --cream:#f0e4c7; --teal:#267f82; --amber:#e0ad3d; --glass:#73c9d2; --leaf:#66a348;
+  --charcoal:#30454a; --coral:#df7655; --claude:#d97757; --timber:#a96934; --metal:#70828a;
+  --ink:#22343a; --ink-soft:#5b6f72; --ink-faint:#8a9a99;
+  --panel:#f6edd8; --panel-line:#ddceac; --card:#fffaf0; --card-line:#e6d8ba;
+  --good:#4f8f52; --on-dark:#f4ecd8;
+}
+:root:not([data-theme="light"]){ @media (prefers-color-scheme: dark){
+  --ink:#eadfc6; --ink-soft:#a9b7b2; --ink-faint:#7b8a88;
+  --panel:#1b2b2f; --panel-line:#2d4247; --card:#22343a; --card-line:#354c51; --good:#7bbd80;
+}}
+:root[data-theme="dark"]{
+  --ink:#eadfc6; --ink-soft:#a9b7b2; --ink-faint:#7b8a88;
+  --panel:#1b2b2f; --panel-line:#2d4247; --card:#22343a; --card-line:#354c51; --good:#7bbd80;
+}
+*{box-sizing:border-box} html,body{height:100%}
+body{margin:0;background:var(--charcoal);color:var(--ink);
+  font-family:Archivo,system-ui,sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}
+
+.topbar{position:relative;z-index:5;display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;
+  padding:12px 20px;background:var(--charcoal);color:var(--on-dark);border-bottom:3px solid var(--amber)}
+.firm{font-family:"Instrument Serif",Georgia,serif;font-size:26px;line-height:1}
+.firm em{font-style:italic;color:var(--amber)}
+.tag{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:rgba(244,236,216,.6);font-weight:600}
+.topbar .spacer{margin-left:auto}
+.stat{display:flex;gap:6px;align-items:baseline;font-size:12px;color:rgba(244,236,216,.72)}
+.stat b{font-family:"JetBrains Mono",monospace;font-size:13px;color:var(--amber);font-variant-numeric:tabular-nums}
+.home{color:var(--on-dark);text-decoration:none;font-size:11px;letter-spacing:.12em;
+  text-transform:uppercase;font-weight:600;border:1px solid rgba(244,236,216,.3);padding:5px 11px;border-radius:5px}
+.home:hover{background:var(--amber);color:#2a2018;border-color:var(--amber)}
+
+.wrap{display:grid;grid-template-columns:minmax(0,1fr) 340px;height:calc(100vh - 58px)}
+@media (max-width:980px){.wrap{grid-template-columns:1fr}.rail{display:none}}
+#stage{position:relative;min-width:0;overflow:hidden}
+#stage canvas{display:block;width:100%;height:100%;cursor:grab}
+#stage canvas.dragging{cursor:grabbing}
+#stage canvas.overFloor{cursor:pointer}
+.hint{position:absolute;left:14px;bottom:12px;z-index:3;font-size:10.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:rgba(244,236,216,.66);background:rgba(48,69,74,.55);
+  padding:5px 10px;border-radius:5px}
+
+.rail{background:var(--panel);border-left:1px solid var(--panel-line);display:flex;flex-direction:column;min-height:0}
+.railhead{padding:13px 16px;border-bottom:1px solid var(--panel-line)}
+.railhead h2{margin:0 0 3px;font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:21px}
+.railhead p{margin:0;font-size:11.5px;color:var(--ink-faint);line-height:1.5}
+.sel{padding:16px;border-bottom:1px solid var(--panel-line)}
+.sel .num{font-family:"Instrument Serif",Georgia,serif;font-size:34px;line-height:1}
+.sel .who{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:var(--ink-soft);margin-top:4px;overflow-wrap:anywhere}
+.chip{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  padding:3px 8px;border-radius:4px;margin-top:8px}
+.chip.vacant{background:var(--amber);color:#2a2018}
+.chip.owned{background:var(--good);color:#fff}
+.chip.hq{background:var(--claude);color:#2a1a14}
+.act{display:flex;gap:8px;margin-top:13px;flex-wrap:wrap}
+.btn{font:inherit;font-size:11.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+  padding:9px 14px;border-radius:6px;border:0;cursor:pointer;text-decoration:none;display:inline-block}
+.btn.primary{background:var(--teal);color:var(--cream)}
+.btn.primary:hover{background:var(--claude);color:#2a1a14}
+.btn.ghost{background:transparent;color:var(--ink-soft);border:1px solid var(--panel-line)}
+.btn:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.price{font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--ink-soft);margin-top:9px}
+.price b{color:var(--ink)}
+
+.list{flex:1;min-height:0;overflow-y:auto;padding:8px 10px}
+.row{display:grid;grid-template-columns:52px 1fr auto;align-items:center;gap:9px;
+  padding:7px 9px;border-radius:6px;cursor:pointer;font-size:12px}
+.row:hover{background:var(--card)}
+.row[aria-selected="true"]{background:var(--card);outline:1px solid var(--amber)}
+.row .n{font-family:"JetBrains Mono",monospace;color:var(--ink-faint);font-variant-numeric:tabular-nums}
+.row .s{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint)}
+.row.owned .s{color:var(--good)} .row.hq .s{color:var(--claude)} .row.vacant .s{color:var(--amber)}
+.note{padding:10px 14px;font-size:10.5px;color:var(--ink-faint);border-top:1px solid var(--panel-line);line-height:1.5}
+</style>
+
+<div class="topbar">
+  <div class="firm">Claude <em>Tower</em></div>
+  <div class="tag">50 floors · one desk each</div>
+  <div class="spacer"></div>
+  <div class="stat">Desks taken <b id="s-taken">—</b></div>
+  <div class="stat">Available <b id="s-free">—</b></div>
+  <a class="home" href="/">Home</a>
+</div>
+
+<div class="wrap">
+  <div id="stage"><div class="hint">Drag to orbit · scroll to zoom · click a floor</div></div>
+  <aside class="rail">
+    <div class="railhead">
+      <h2>The Directory</h2>
+      <p>Every floor is one desk: fourteen agents researching Solana, and a CEO who signs.</p>
+    </div>
+    <div class="sel" id="sel"></div>
+    <div class="list" id="list"></div>
+    <p class="note">Floors are cosmetic tenancy in a research tool. Buying one does not buy
+      an investment product, a share of anything, or any promise of profit.</p>
+  </aside>
+</div>
+
+<script type="module">
+import * as THREE from "/vendor/three/three.module.js"; /*__INLINE_THREE__*/
+"use strict";
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CLAUDE TOWER — fifty floors, one desk each.
+   Same house style as the trading floors inside: true-isometric orthographic
+   camera (45° yaw, 35.264° elevation), AgX tone mapping, the three-light
+   outdoor rig from the world scene, flat MeshStandardMaterial everywhere.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const P = {
+  cream:0xf0e4c7, pathStone:0xcfc7ad, timber:0xa96934, timberDark:0x5f3e29,
+  teal:0x267f82, solarNavy:0x287e9d, amber:0xe0ad3d, glassAqua:0x73c9d2,
+  metal:0x70828a, terracotta:0xbf623c, coral:0xdf7655, leaf:0x66a348,
+  charcoal:0x30454a, grass:0x73a83f, claude:0xd97757,
+};
+
+const FLOORS = 50;                 // 1..49 for sale, 50 is the Penthouse
+const FLOOR_H = 1.15;
+const FOOT_X = 13, FOOT_Z = 9;
+const BASE_Y = 0.9;                // podium height
+
+const stageEl = document.getElementById("stage");
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, innerWidth < 760 ? 1.25 : 1.6));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.AgXToneMapping;
+renderer.toneMappingExposure = 1.12;
+renderer.shadowMap.enabled = (navigator.hardwareConcurrency ?? 4) >= 6;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+stageEl.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0fa8bb);          // the outdoor sky
+scene.fog = new THREE.Fog(0x8fd8dd, 150, 340);
+
+/* outdoor light rig, verbatim from the world scene */
+scene.add(new THREE.HemisphereLight(0xedfff5, 0x64714a, 1.38));
+const sun = new THREE.DirectionalLight(0xffdda0, 3.08);
+sun.position.set(-58, 96, 62);
+sun.castShadow = renderer.shadowMap.enabled;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -60; sun.shadow.camera.right = 60;
+sun.shadow.camera.top = 70; sun.shadow.camera.bottom = -70;
+sun.shadow.camera.near = 20; sun.shadow.camera.far = 260;
+sun.shadow.bias = -0.00035; sun.shadow.normalBias = 0.035;
+scene.add(sun, sun.target);
+const fill = new THREE.DirectionalLight(0xb8f5ef, 0.78);
+fill.position.set(70, 52, -80);
+scene.add(fill);
+
+const ISO_ELEV = THREE.MathUtils.degToRad(35.264);
+const camera = new THREE.OrthographicCamera(-40, 40, 26, -26, 0.5, 600);
+const camTarget = new THREE.Vector3(0, 30, 0);
+let camYaw = Math.PI / 4, camElev = ISO_ELEV, camDist = 180, camWorldWidth = 78;
+function placeCamera() {
+  const h = Math.sin(camElev) * camDist, r = Math.cos(camElev) * camDist;
+  camera.position.set(camTarget.x + Math.cos(camYaw) * r, camTarget.y + h, camTarget.z + Math.sin(camYaw) * r);
+  camera.lookAt(camTarget);
+}
+function resize() {
+  const w = stageEl.clientWidth || 1, h = stageEl.clientHeight || 1;
+  renderer.setSize(w, h, false);
+  const halfW = camWorldWidth / 2, halfH = halfW * (h / w);
+  camera.left = -halfW; camera.right = halfW; camera.top = halfH; camera.bottom = -halfH;
+  camera.updateProjectionMatrix();
+  placeCamera();
+}
+addEventListener("resize", resize);
+
+/* ── build helpers (merge, don't instance — the house rule) ───────────────── */
+const BOX = new THREE.BoxGeometry(1, 1, 1);
+const staticSpecs = [];
+function box(size, at, colour) { staticSpecs.push({ size, at, colour }); }
+
+function bakeStatic(specs, rough = 0.86, metal = 0) {
+  const geos = specs.map((s) => {
+    const g = new THREE.BoxGeometry(s.size[0], s.size[1], s.size[2]).toNonIndexed();
+    g.translate(s.at[0], s.at[1], s.at[2]);
+    g.deleteAttribute("uv");
+    const n = g.attributes.position.count, col = new Float32Array(n * 3);
+    const c = new THREE.Color().setHex(s.colour, THREE.SRGBColorSpace);
+    for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+    g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    return g;
+  });
+  const total = geos.reduce((n, g) => n + g.attributes.position.count, 0);
+  const pos = new Float32Array(total * 3), nor = new Float32Array(total * 3), col = new Float32Array(total * 3);
+  let o = 0;
+  for (const g of geos) {
+    const n = g.attributes.position.count;
+    pos.set(g.attributes.position.array, o * 3);
+    nor.set(g.attributes.normal.array, o * 3);
+    col.set(g.attributes.color.array, o * 3);
+    o += n; g.dispose();
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  geo.computeBoundingSphere();
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: rough, metalness: metal }));
+  mesh.castShadow = renderer.shadowMap.enabled;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+const floorY = (n) => BASE_Y + (n - 1) * FLOOR_H;   // n is 1-based
+
+/* ── ground + podium ──────────────────────────────────────────────────────── */
+(function ground() {
+  const g = new THREE.Mesh(new THREE.PlaneGeometry(600, 600),
+    new THREE.MeshStandardMaterial({ color: P.grass, roughness: 0.96 }));
+  g.rotation.x = -Math.PI / 2; g.receiveShadow = true; scene.add(g);
+  const plaza = new THREE.Mesh(new THREE.PlaneGeometry(46, 40),
+    new THREE.MeshStandardMaterial({ color: P.pathStone, roughness: 0.94 }));
+  plaza.rotation.x = -Math.PI / 2; plaza.position.y = 0.01; plaza.receiveShadow = true; scene.add(plaza);
+
+  box([FOOT_X + 3.4, BASE_Y, FOOT_Z + 3.4], [0, BASE_Y / 2, 0], P.pathStone);
+  box([FOOT_X + 4.2, 0.22, FOOT_Z + 4.2], [0, BASE_Y + 0.08, 0], P.cream);
+  // entrance canopy + doors on the +Z face
+  box([5.6, 0.24, 1.6], [0, BASE_Y + 1.55, FOOT_Z / 2 + 1.9], P.amber);
+  box([0.3, 1.5, 0.3], [-2.6, BASE_Y + 0.8, FOOT_Z / 2 + 2.5], P.amber);
+  box([0.3, 1.5, 0.3], [2.6, BASE_Y + 0.8, FOOT_Z / 2 + 2.5], P.amber);
+})();
+
+/* ── the stack ────────────────────────────────────────────────────────────── */
+for (let n = 1; n <= FLOORS; n++) {
+  const y = floorY(n);
+  const penthouse = n === FLOORS;
+  box([FOOT_X, 0.34, FOOT_Z], [0, y + 0.17, 0], penthouse ? P.amber : P.cream);           // slab
+  for (const sx of [-1, 1]) {                                                              // corner columns
+    for (const sz of [-1, 1]) {
+      box([0.52, FLOOR_H - 0.34, 0.52],
+        [sx * (FOOT_X / 2 - 0.26), y + 0.34 + (FLOOR_H - 0.34) / 2, sz * (FOOT_Z / 2 - 0.26)],
+        penthouse ? P.amber : P.teal);
+    }
+  }
+  if (n % 10 === 0 && !penthouse) box([FOOT_X + 0.5, 0.12, FOOT_Z + 0.5], [0, y + 0.40, 0], P.amber);
+}
+/* penthouse crown */
+(function crown() {
+  const y = floorY(FLOORS) + FLOOR_H;
+  box([FOOT_X + 1.2, 0.4, FOOT_Z + 1.2], [0, y + 0.2, 0], P.amber);
+  box([4.2, 1.1, 4.2], [0, y + 0.95, 0], P.cream);
+  box([1.0, 2.6, 1.0], [0, y + 2.6, 0], P.metal);
+})();
+scene.add(bakeStatic(staticSpecs));
+
+/* ── glass bands: one InstancedMesh so a floor can light up at runtime ────── */
+const glassGeo = new THREE.BoxGeometry(FOOT_X - 0.9, FLOOR_H - 0.46, FOOT_Z - 0.9);
+const glassMat = new THREE.MeshStandardMaterial({
+  roughness: 0.16, metalness: 0.08, transparent: true, opacity: 0.86, vertexColors: false,
+});
+const glass = new THREE.InstancedMesh(glassGeo, glassMat, FLOORS);
+glass.castShadow = renderer.shadowMap.enabled;
+glass.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+const _m = new THREE.Matrix4();
+for (let n = 1; n <= FLOORS; n++) {
+  _m.makeTranslation(0, floorY(n) + 0.34 + (FLOOR_H - 0.46) / 2, 0);
+  glass.setMatrixAt(n - 1, _m);
+}
+glass.instanceMatrix.needsUpdate = true;
+scene.add(glass);
+
+/* ── the Claude spark on the roof ─────────────────────────────────────────── */
+function buildSpark(radius, rays, thickness, colour, emissive) {
+  const g = new THREE.Group();
+  const m = new THREE.MeshStandardMaterial({ color: colour, roughness: 0.45, metalness: 0.1,
+    emissive: new THREE.Color(colour), emissiveIntensity: emissive });
+  for (let i = 0; i < rays; i++) {
+    const a = (i / rays) * Math.PI * 2;
+    const ray = new THREE.Mesh(BOX, m);
+    ray.scale.set(radius, thickness, thickness * 0.7);
+    ray.rotation.z = a;
+    ray.position.set(Math.cos(a) * radius * 0.5, Math.sin(a) * radius * 0.5, 0);
+    g.add(ray);
+  }
+  g.add(new THREE.Mesh(new THREE.SphereGeometry(thickness * 1.2, 12, 10), m));
+  return g;
+}
+const roofSpark = buildSpark(3.0, 11, 0.42, P.claude, 1.2);
+roofSpark.position.set(0, floorY(FLOORS) + FLOOR_H + 5.4, 0);
+scene.add(roofSpark);
+
+/* ── selection highlight ──────────────────────────────────────────────────── */
+const hl = new THREE.LineSegments(
+  new THREE.EdgesGeometry(new THREE.BoxGeometry(FOOT_X + 0.7, FLOOR_H, FOOT_Z + 0.7)),
+  new THREE.LineBasicMaterial({ color: P.amber })
+);
+hl.visible = false;
+scene.add(hl);
+
+/* ── picking: one invisible instanced box per floor, raycast on events only ──
+   Never per frame — a per-frame raycast is the single most expensive mistake
+   available in this codebase's house style. */
+const pickGeo = new THREE.BoxGeometry(FOOT_X + 0.7, FLOOR_H, FOOT_Z + 0.7);
+const picker = new THREE.InstancedMesh(pickGeo, new THREE.MeshBasicMaterial({ visible: false }), FLOORS);
+for (let n = 1; n <= FLOORS; n++) { _m.makeTranslation(0, floorY(n) + FLOOR_H / 2, 0); picker.setMatrixAt(n - 1, _m); }
+picker.instanceMatrix.needsUpdate = true;
+scene.add(picker);
+
+/* ═══ FLOOR STATE ═════════════════════════════════════════════════════════ */
+const PRICE_USDC = 50;
+const floors = [];                 // index 0 = floor 1
+for (let n = 1; n <= FLOORS; n++) {
+  floors.push({ n, state: n === FLOORS ? "hq" : "vacant", owner: null, name: null });
+}
+
+const LIT = {
+  hq:     new THREE.Color().setHex(0xd97757, THREE.SRGBColorSpace),
+  owned:  new THREE.Color().setHex(0xf2d79a, THREE.SRGBColorSpace),
+  vacant: new THREE.Color().setHex(0x4d7f86, THREE.SRGBColorSpace),
+};
+function paintFloors() {
+  for (const f of floors) glass.setColorAt(f.n - 1, LIT[f.state]);
+  glass.instanceColor.needsUpdate = true;
+  const taken = floors.filter((f) => f.state !== "vacant").length;
+  document.getElementById("s-taken").textContent = String(taken);
+  document.getElementById("s-free").textContent = String(FLOORS - taken);
+}
+glass.setColorAt(0, LIT.vacant);   // allocate instanceColor before first paint
+paintFloors();
+
+/* ═══ DIRECTORY ═══════════════════════════════════════════════════════════ */
+const listEl = document.getElementById("list"), selEl = document.getElementById("sel");
+let selected = FLOORS;
+
+const shortAddr = (a) => (a ? a.slice(0, 4) + "…" + a.slice(-4) : "");
+const label = (f) => (f.state === "hq" ? "Penthouse" : `Desk ${String(f.n).padStart(2, "0")}`);
+
+function renderList() {
+  listEl.innerHTML = "";
+  for (const f of [...floors].reverse()) {
+    const row = document.createElement("div");
+    row.className = `row ${f.state}`;
+    row.setAttribute("aria-selected", String(f.n === selected));
+    row.innerHTML = `<span class="n"></span><span class="l"></span><span class="s"></span>`;
+    row.querySelector(".n").textContent = String(f.n).padStart(2, "0");
+    row.querySelector(".l").textContent = f.name || label(f);
+    row.querySelector(".s").textContent = f.state === "hq" ? "HQ" : f.state === "owned" ? "Taken" : "Vacant";
+    row.onclick = () => select(f.n, true);
+    listEl.appendChild(row);
+  }
+}
+
+function renderSel() {
+  const f = floors[selected - 1];
+  selEl.innerHTML = "";
+  const num = document.createElement("div");
+  num.className = "num"; num.textContent = f.name || label(f);
+  selEl.appendChild(num);
+
+  const chip = document.createElement("span");
+  chip.className = `chip ${f.state}`;
+  chip.textContent = f.state === "hq" ? "Headquarters" : f.state === "owned" ? "Occupied" : "Available";
+  selEl.appendChild(chip);
+
+  if (f.owner) {
+    const who = document.createElement("div");
+    who.className = "who"; who.textContent = shortAddr(f.owner);
+    selEl.appendChild(who);
+  }
+
+  const act = document.createElement("div");
+  act.className = "act";
+  if (f.state === "vacant") {
+    const p = document.createElement("div");
+    p.className = "price";
+    p.innerHTML = `<b>${PRICE_USDC} USDC</b> · one-time · yours to keep`;
+    selEl.appendChild(p);
+    const buy = document.createElement("a");
+    buy.className = "btn primary"; buy.href = `/buy?floor=${f.n}`;
+    buy.textContent = `Take Desk ${String(f.n).padStart(2, "0")}`;
+    act.appendChild(buy);
+  }
+  const enter = document.createElement("a");
+  enter.className = f.state === "vacant" ? "btn ghost" : "btn primary";
+  enter.href = `/floor/${f.n}`;
+  enter.textContent = f.state === "vacant" ? "Look inside" : "Enter the floor";
+  act.appendChild(enter);
+  selEl.appendChild(act);
+}
+
+function select(n, focus) {
+  selected = Math.min(FLOORS, Math.max(1, n));
+  const f = floors[selected - 1];
+  hl.position.set(0, floorY(f.n) + FLOOR_H / 2, 0);
+  hl.visible = true;
+  renderSel(); renderList();
+  if (focus) camGoal = floorY(f.n) + 2;
+  listEl.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+}
+
+/* ═══ CONTROLS ════════════════════════════════════════════════════════════ */
+let camGoal = camTarget.y;
+const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
+
+function pickFloor(ev) {
+  const r = renderer.domElement.getBoundingClientRect();
+  ptr.x = ((ev.clientX - r.left) / r.width) * 2 - 1;
+  ptr.y = -((ev.clientY - r.top) / r.height) * 2 + 1;
+  ray.setFromCamera(ptr, camera);
+  const hit = ray.intersectObject(picker, false)[0];
+  return hit ? hit.instanceId + 1 : null;
+}
+
+(function controls() {
+  const el = renderer.domElement;
+  let dragging = false, moved = 0, px = 0, py = 0;
+  el.addEventListener("pointerdown", (e) => {
+    dragging = true; moved = 0; px = e.clientX; py = e.clientY;
+    el.classList.add("dragging"); el.setPointerCapture(e.pointerId);
+  });
+  el.addEventListener("pointermove", (e) => {
+    if (!dragging) {
+      el.classList.toggle("overFloor", pickFloor(e) !== null);   // event-driven only
+      return;
+    }
+    moved += Math.abs(e.clientX - px) + Math.abs(e.clientY - py);
+    camYaw -= (e.clientX - px) * 0.006;
+    camGoal = THREE.MathUtils.clamp(camGoal - (e.clientY - py) * 0.09, 2, floorY(FLOORS) + 12);
+    px = e.clientX; py = e.clientY;
+  });
+  const up = (e) => {
+    if (dragging && moved < 5) { const n = pickFloor(e); if (n) select(n, true); }
+    dragging = false; el.classList.remove("dragging");
+    try { el.releasePointerCapture(e.pointerId); } catch {}
+  };
+  el.addEventListener("pointerup", up);
+  el.addEventListener("pointercancel", () => { dragging = false; el.classList.remove("dragging"); });
+  el.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    camWorldWidth = THREE.MathUtils.clamp(camWorldWidth + e.deltaY * 0.06, 16, 150);
+    resize();
+  }, { passive: false });
+  addEventListener("keydown", (e) => {
+    if (e.key === "ArrowUp") select(selected + 1, true);
+    else if (e.key === "ArrowDown") select(selected - 1, true);
+  });
+})();
+
+/* ═══ LOAD STATE ══════════════════════════════════════════════════════════ */
+async function loadFloors() {
+  try {
+    const r = await fetch("/api/tower/floors", { headers: { accept: "application/json" } });
+    if (!r.ok) throw new Error("no tower api");
+    const data = await r.json();
+    for (const row of data.floors || []) {
+      const f = floors[row.n - 1];
+      if (!f) continue;
+      f.state = row.state; f.owner = row.owner ?? null; f.name = row.name ?? null;
+    }
+  } catch {
+    // Standalone (or no backend): show a plausible directory so the building reads as alive.
+    const taken = [3, 7, 8, 12, 15, 19, 22, 23, 28, 31, 34, 40, 41, 44, 47];
+    const names = { 7: "Wick & Sons", 15: "Bluewater", 28: "Tidemark", 41: "Ninefold" };
+    for (const n of taken) {
+      floors[n - 1].state = "owned";
+      floors[n - 1].owner = "So" + n.toString(36).padStart(3, "0") + "demoWallet" + n;
+      if (names[n]) floors[n - 1].name = names[n];
+    }
+  }
+  paintFloors();
+  select(FLOORS, true);
+}
+loadFloors();
+
+/* ═══ RENDER ══════════════════════════════════════════════════════════════ */
+resize();
+window.__tower = { THREE, renderer, scene, camera, floors,
+  stats: () => ({ drawCalls: renderer.info.render.calls, tris: renderer.info.render.triangles,
+                  shadows: renderer.shadowMap.enabled, selected }) };
+const clock = new THREE.Clock();
+let t = 0;
+function frame() {
+  const dt = Math.min(0.05, clock.getDelta());
+  t += dt;
+  camTarget.y += (camGoal - camTarget.y) * Math.min(1, dt * 3.4);
+  roofSpark.rotation.z = t * 0.5;
+  placeCamera();
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>

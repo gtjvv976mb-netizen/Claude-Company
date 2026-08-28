@@ -1,0 +1,276 @@
+<title>Claude Tower</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<style>
+:root{
+  --cream:#f0e4c7; --path-stone:#cfc7ad; --timber:#a96934; --timber-dark:#5f3e29;
+  --teal:#267f82; --solar-navy:#287e9d; --amber:#e0ad3d; --glass:#73c9d2;
+  --metal:#70828a; --terracotta:#bf623c; --coral:#df7655; --leaf:#66a348;
+  --charcoal:#30454a; --claude:#d97757;
+  --bg:#f7efdd; --bg-2:#efe3c8; --ink:#22343a; --ink-soft:#5b6f72; --ink-faint:#8a9a99;
+  --card:#fffaf0; --line:#e3d5b6; --on-dark:#f4ecd8;
+}
+:root:not([data-theme="light"]){ @media (prefers-color-scheme: dark){
+  --bg:#151f22; --bg-2:#1b2b2f; --ink:#eadfc6; --ink-soft:#a9b7b2; --ink-faint:#7b8a88;
+  --card:#22343a; --line:#33474c;
+}}
+:root[data-theme="dark"]{
+  --bg:#151f22; --bg-2:#1b2b2f; --ink:#eadfc6; --ink-soft:#a9b7b2; --ink-faint:#7b8a88;
+  --card:#22343a; --line:#33474c;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:Archivo,system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.6}
+a{color:inherit}
+.wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+
+/* ── nav ── */
+nav{position:sticky;top:0;z-index:20;background:var(--charcoal);color:var(--on-dark);
+  border-bottom:3px solid var(--amber)}
+nav .wrap{display:flex;align-items:center;gap:20px;padding-top:13px;padding-bottom:13px}
+.brand{font-family:"Instrument Serif",Georgia,serif;font-size:25px;line-height:1;text-decoration:none}
+.brand em{font-style:italic;color:var(--amber)}
+nav .links{margin-left:auto;display:flex;gap:20px;align-items:center;flex-wrap:wrap}
+nav a.l{font-size:12px;letter-spacing:.1em;text-transform:uppercase;font-weight:600;
+  color:rgba(244,236,216,.75);text-decoration:none}
+nav a.l:hover{color:var(--amber)}
+.cta{background:var(--amber);color:#2a2018;padding:8px 15px;border-radius:6px;
+  font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;text-decoration:none}
+.cta:hover{background:var(--claude);color:#2a1a14}
+a:focus-visible,button:focus-visible{outline:2px solid var(--amber);outline-offset:3px;border-radius:4px}
+
+/* ── hero ── */
+.hero{background:linear-gradient(178deg,var(--charcoal) 0%,#1b3138 60%,var(--charcoal) 100%);
+  color:var(--on-dark);padding:70px 0 0;overflow:hidden}
+.hero .wrap{display:grid;grid-template-columns:1.15fr .85fr;gap:40px;align-items:end}
+@media (max-width:900px){.hero .wrap{grid-template-columns:1fr;gap:24px}}
+.eyebrow{font-size:11.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--amber);font-weight:700}
+h1{font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:clamp(44px,6.4vw,78px);
+  line-height:1.02;margin:14px 0 18px;text-wrap:balance}
+h1 em{font-style:italic;color:var(--amber)}
+.lede{font-size:17.5px;color:rgba(244,236,216,.82);max-width:56ch;margin:0 0 26px}
+.herobtns{display:flex;gap:12px;flex-wrap:wrap;padding-bottom:64px}
+.btn{display:inline-block;padding:13px 22px;border-radius:8px;text-decoration:none;
+  font-size:13px;font-weight:700;letter-spacing:.07em;text-transform:uppercase}
+.btn.solid{background:var(--amber);color:#2a2018}
+.btn.solid:hover{background:var(--claude);color:#2a1a14}
+.btn.line{border:1px solid rgba(244,236,216,.34);color:var(--on-dark)}
+.btn.line:hover{border-color:var(--amber);color:var(--amber)}
+.towerart{align-self:end;display:block;width:100%;max-width:340px;margin:0 auto}
+
+/* ── sections ── */
+section{padding:76px 0}
+.alt{background:var(--bg-2)}
+h2{font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:clamp(30px,3.6vw,42px);
+  line-height:1.1;margin:0 0 12px;text-wrap:balance}
+.sub{color:var(--ink-soft);font-size:16px;max-width:64ch;margin:0 0 34px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
+@media (max-width:860px){.grid3,.grid2{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:22px}
+.card h3{margin:0 0 7px;font-size:16.5px}
+.card p{margin:0;color:var(--ink-soft);font-size:14.5px}
+.card .k{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--amber);font-weight:500;display:block;margin-bottom:9px}
+
+/* ── the pipeline table ── */
+.seats{width:100%;border-collapse:collapse;font-size:14.5px;background:var(--card);
+  border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.tablewrap{overflow-x:auto}
+.seats th,.seats td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--line)}
+.seats th{background:var(--charcoal);color:var(--on-dark);font-size:11px;letter-spacing:.12em;
+  text-transform:uppercase;font-weight:700}
+.seats tr:last-child td{border-bottom:0}
+.seats .n{font-family:"JetBrains Mono",monospace;color:var(--ink-faint);width:38px}
+.seats .s{font-weight:700;white-space:nowrap}
+.seats .kind{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+  padding:2px 7px;border-radius:4px;font-weight:700;white-space:nowrap}
+.kind.code{background:var(--metal);color:#fff}
+.kind.model{background:var(--teal);color:var(--cream)}
+.kind.claude{background:var(--claude);color:#2a1a14}
+.seats td.q{color:var(--ink-soft)}
+
+/* ── price ── */
+.price{display:grid;grid-template-columns:auto 1fr;gap:30px;align-items:center;
+  background:var(--card);border:1px solid var(--line);border-radius:14px;padding:30px}
+@media (max-width:700px){.price{grid-template-columns:1fr;gap:16px}}
+.price .big{font-family:"Instrument Serif",Georgia,serif;font-size:66px;line-height:.95}
+.price .big small{display:block;font-family:Archivo,sans-serif;font-size:12px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--ink-faint);font-weight:700;margin-top:8px}
+.steps{counter-reset:s;margin:0;padding:0;list-style:none;display:grid;gap:11px}
+.steps li{counter-increment:s;position:relative;padding-left:36px;font-size:14.5px;color:var(--ink-soft)}
+.steps li::before{content:counter(s);position:absolute;left:0;top:1px;width:24px;height:24px;
+  border-radius:50%;background:var(--teal);color:var(--cream);font-size:12px;font-weight:700;
+  display:grid;place-content:center;font-family:"JetBrains Mono",monospace}
+.steps b{color:var(--ink)}
+
+.plain{border-left:3px solid var(--terracotta);padding:4px 0 4px 18px;margin:26px 0 0;
+  color:var(--ink-soft);font-size:14.5px;max-width:70ch}
+.plain b{color:var(--ink)}
+
+footer{background:var(--charcoal);color:rgba(244,236,216,.7);padding:44px 0;font-size:13px}
+footer .wrap{display:flex;gap:24px;flex-wrap:wrap;align-items:center}
+footer a{color:var(--amber);text-decoration:none}
+footer .spacer{margin-left:auto}
+</style>
+
+<nav><div class="wrap">
+  <a class="brand" href="/">Claude <em>Tower</em></a>
+  <div class="links">
+    <a class="l" href="#desk">The desk</a>
+    <a class="l" href="#building">The building</a>
+    <a class="l" href="#floor">Take a floor</a>
+    <a class="l" href="/floor/50">Look inside</a>
+    <a class="cta" href="/tower">Enter the tower</a>
+  </div>
+</div></nav>
+
+<div class="hero"><div class="wrap">
+  <div>
+    <div class="eyebrow">Fifty floors · one research desk each</div>
+    <h1>A whole firm of agents, <em>on your floor</em>.</h1>
+    <p class="lede">Fourteen purpose-built agents work one Solana trade from end to end —
+      sourcing it, tearing it apart, sizing it, and arguing about it — while a CEO behind a
+      brass door decides whether it is worth your signature. Watch them do it, in a room.</p>
+    <div class="herobtns">
+      <a class="btn solid" href="/tower">Take a floor — 50 USDC</a>
+      <a class="btn line" href="/floor/50">Look inside the penthouse</a>
+    </div>
+  </div>
+  <svg class="towerart" viewBox="0 -46 240 446" role="img" aria-label="The tower, fifty floors, lit at the top">
+    <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#73c9d2"/><stop offset="1" stop-color="#2b5f68"/></linearGradient></defs>
+    <ellipse cx="120" cy="386" rx="104" ry="14" fill="#000" opacity=".22"/>
+    <rect x="46" y="352" width="148" height="32" fill="#cfc7ad"/>
+    <rect x="58" y="60" width="124" height="292" fill="url(#g)"/>
+    <g id="slabs" fill="#f0e4c7"></g>
+    <rect x="52" y="44" width="136" height="18" fill="#e0ad3d"/>
+    <rect x="88" y="18" width="64" height="28" fill="#f0e4c7"/>
+    <rect x="114" y="2" width="12" height="18" fill="#70828a"/>
+    <g id="spark" transform="translate(120,-14)"></g>
+  </svg>
+</div></div>
+
+<section id="desk"><div class="wrap">
+  <h2>One trade, fourteen specialists</h2>
+  <p class="sub">A trading desk is not one mind with one opinion. It is a room full of people
+    whose jobs disagree with each other on purpose. This one is built the same way: cheap
+    deterministic code narrows the field, and the expensive judgment only ever looks at
+    what survived.</p>
+
+  <div class="tablewrap"><table class="seats">
+    <thead><tr><th></th><th>Seat</th><th>Kind</th><th>The one question it answers</th></tr></thead>
+    <tbody>
+      <tr><td class="n">0</td><td class="s">Scout</td><td><span class="kind model">model</span></td><td class="q">What deserves attention <em>today</em>, and why now?</td></tr>
+      <tr><td class="n">1</td><td class="s">Screener</td><td><span class="kind code">code</span></td><td class="q">Does this clear the floor at all? <em>Kills most candidates, costs nothing.</em></td></tr>
+      <tr><td class="n">2</td><td class="s">Forensics</td><td><span class="kind model">model</span></td><td class="q">Can this token be used against a holder, by design?</td></tr>
+      <tr><td class="n">3</td><td class="s">Liquidity</td><td><span class="kind model">model</span></td><td class="q">Can I get out — at size, at a price I would accept?</td></tr>
+      <tr><td class="n">4</td><td class="s">Flow</td><td><span class="kind model">model</span></td><td class="q">Is the demand real, or is it manufactured?</td></tr>
+      <tr><td class="n">5</td><td class="s">Narrative</td><td><span class="kind model">model</span></td><td class="q">Is there a story, is it true, and am I early?</td></tr>
+      <tr><td class="n">6</td><td class="s">Technical</td><td><span class="kind model">model</span></td><td class="q">Is this a location worth entering?</td></tr>
+      <tr><td class="n">7</td><td class="s">Red Team</td><td><span class="kind model">model</span></td><td class="q"><b>Why does this trade lose money?</b></td></tr>
+      <tr><td class="n">8</td><td class="s">Risk</td><td><span class="kind model">model</span></td><td class="q">How much, and where is it mechanically wrong?</td></tr>
+      <tr><td class="n">9</td><td class="s">PM</td><td><span class="kind model">model</span></td><td class="q">Propose, watch, or pass — on what thesis?</td></tr>
+      <tr><td class="n">10</td><td class="s">Execution</td><td><span class="kind model">model</span></td><td class="q">The unsigned ticket: route, slicing, stop, targets.</td></tr>
+      <tr><td class="n">11</td><td class="s">Compliance</td><td><span class="kind code">code</span></td><td class="q">Does this break a house rule? <em>A veto, not advice.</em></td></tr>
+      <tr><td class="n">12</td><td class="s">CEO</td><td><span class="kind claude">Claude</span></td><td class="q">Do I trust this desk, on this trade, today?</td></tr>
+      <tr><td class="n">13</td><td class="s">Scribe</td><td><span class="kind code">code</span></td><td class="q">Write it down so the desk can be graded later.</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="grid3" style="margin-top:28px">
+    <div class="card"><span class="k">Independence</span>
+      <h3>The analysts don't read each other</h3>
+      <p>Five agents who share notes produce one opinion wearing five hats. These five see the
+        evidence and nothing else, so when they agree it means something.</p></div>
+    <div class="card"><span class="k">Adversarial</span>
+      <h3>Someone is paid to hate it</h3>
+      <p>The Red Team isn't asked for balance — it's asked to destroy the idea. The PM has a
+        required field for how the attack was answered, and "refuted" can never become a trade.</p></div>
+    <div class="card"><span class="k">Evidence</span>
+      <h3>No invented numbers</h3>
+      <p>Every figure comes from a bundle fetched by code, and every claim carries its source.
+        Where a datum is missing, the agent says so and drops its confidence.</p></div>
+  </div>
+</div></section>
+
+<section class="alt" id="building"><div class="wrap">
+  <h2>Fifty floors. One desk each.</h2>
+  <p class="sub">The building is the product. Every floor is a complete, private research
+    desk with its own fourteen agents, its own journal, and its own CEO behind its own door.
+    The penthouse is the headquarters and is not for sale.</p>
+  <div class="grid3">
+    <div class="card"><span class="k">Floors 1 – 49</span><h3>Tenancies</h3>
+      <p>Yours, one-time, 50 USDC. Name your desk, set its risk appetite, and watch it work.</p></div>
+    <div class="card"><span class="k">Floor 50</span><h3>The Penthouse</h3>
+      <p>Headquarters. The house desk, and the room the building is run from.</p></div>
+    <div class="card"><span class="k">Every floor</span><h3>The same fourteen</h3>
+      <p>No tiers, no upsells, no better agents on a higher floor. The view changes; the desk doesn't.</p></div>
+  </div>
+  <p style="margin-top:26px"><a class="btn solid" href="/tower">Walk the directory</a></p>
+</div></section>
+
+<section id="floor"><div class="wrap">
+  <h2>Taking a floor</h2>
+  <p class="sub">One payment, from your wallet, to the building's treasury. Nothing sits in
+    the middle and nothing is held on your behalf.</p>
+  <div class="price">
+    <div class="big">50<small>USDC · once</small></div>
+    <ol class="steps">
+      <li>Pick a vacant floor in <b>the directory</b>.</li>
+      <li><b>Your wallet</b> signs a single USDC transfer to the building's treasury address.</li>
+      <li>The building watches the chain, <b>read-only</b>, and finds your transaction.</li>
+      <li>The floor is bound to the wallet that signed. It's yours; move in.</li>
+    </ol>
+  </div>
+  <p class="plain"><b>What you are buying.</b> A floor is cosmetic tenancy in a research tool.
+    It is not an investment product, not a share of anything, and carries no promise of profit.
+    <b>What this software will never do.</b> Hold your keys, sign for you, or move your money —
+    there is no custody anywhere in it. Every order it produces is unsigned, and stops at you.
+    Nothing here is financial advice.</p>
+</div></section>
+
+<footer><div class="wrap">
+  <span>Claude Tower — a research desk, not a broker.</span>
+  <span class="spacer"></span>
+  <a href="/tower">The tower</a>
+  <a href="/floor/50">The penthouse</a>
+</div></footer>
+
+<script>
+// Draw the tower's fifty floor slabs and its rooftop spark, rather than hand-authoring
+// a hundred SVG rects nobody would want to read.
+(() => {
+  const slabs = document.getElementById("slabs");
+  if (!slabs) return;
+  const ns = "http://www.w3.org/2000/svg";
+  for (let i = 0; i < 50; i++) {
+    const y = 60 + i * 5.84;
+    const r = document.createElementNS(ns, "rect");
+    r.setAttribute("x", "58"); r.setAttribute("y", y.toFixed(2));
+    r.setAttribute("width", "124"); r.setAttribute("height", "2.1");
+    r.setAttribute("fill", i % 10 === 9 ? "#e0ad3d" : "#f0e4c7");
+    r.setAttribute("opacity", i % 10 === 9 ? "1" : ".82");
+    slabs.appendChild(r);
+  }
+  const spark = document.getElementById("spark");
+  for (let i = 0; i < 11; i++) {
+    const a = (i / 11) * 360;
+    const r = document.createElementNS(ns, "rect");
+    r.setAttribute("x", "-1.9"); r.setAttribute("y", "-15");
+    r.setAttribute("width", "3.8"); r.setAttribute("height", "30");
+    r.setAttribute("rx", "1.9"); r.setAttribute("fill", "#d97757");
+    r.setAttribute("transform", `rotate(${a})`);
+    spark.appendChild(r);
+  }
+  const anim = document.createElementNS(ns, "animateTransform");
+  anim.setAttribute("attributeName", "transform"); anim.setAttribute("type", "rotate");
+  anim.setAttribute("from", "0"); anim.setAttribute("to", "360");
+  anim.setAttribute("dur", "24s"); anim.setAttribute("repeatCount", "indefinite");
+  anim.setAttribute("additive", "sum");
+  if (!matchMedia("(prefers-reduced-motion: reduce)").matches) spark.appendChild(anim);
+})();
+</script>
