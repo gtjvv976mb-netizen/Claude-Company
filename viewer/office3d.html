@@ -413,20 +413,20 @@ scene.add(room);
 const DAIS_Y = 0.35;                              // the executive suite is raised
 
 const STAFF = [
-  { id:"CEO",        name:"CLAUDE",        role:"Signs, or doesn't", desk:[0,-9.6],    stand:[0,-11.0],    y:DAIS_Y, claude:true },
-  { id:"Scout",      name:"BLOODHOUND",    role:"Finds them",        desk:[-15.4,-6.5],stand:[-13.8,-6.5], apron:0x8d6cae },
-  { id:"Screener",   name:"BOUNCER",       role:"Kills at the door", desk:[-15.4,-1.0],stand:[-13.8,-1.0], apron:0x5c7d8a },
-  { id:"Compliance", name:"WARDEN",        role:"The rule",          desk:[-15.4,4.5], stand:[-13.8,4.5],  apron:0x8d9298 },
-  { id:"Forensics",  name:"CORONER",       role:"Cause of death",    desk:[-9.5,-5.6], stand:[-9.5,-4.1],  apron:0xbf4a3c },
-  { id:"Liquidity",  name:"HOUDINI",       role:"Can you escape?",   desk:[-3.2,-5.6], stand:[-3.2,-4.1],  apron:0x2f9fb0 },
-  { id:"Flow",       name:"UNDERTOW",      role:"The real current",  desk:[3.2,-5.6],  stand:[3.2,-4.1],   apron:0xe0b040 },
-  { id:"Technical",  name:"CARTOGRAPHER",  role:"Maps the ground",   desk:[-6.6,-0.6], stand:[-6.6,0.9],   apron:0x4e6ba8 },
-  { id:"Narrative",  name:"VERITY",        role:"Is it true?",       desk:[6.6,-0.6],  stand:[6.6,0.9],    apron:0xd7758f },
-  { id:"PM",         name:"ARBITER",       role:"Settles it",        desk:[15.4,-7.0], stand:[13.8,-7.0],  apron:0x287e9d },
-  { id:"Red Team",   name:"PROSECUTOR",    role:"Builds the case against", desk:[15.4,-1.0], stand:[13.8,-1.0], apron:0x8c2f27 },
-  { id:"Risk",       name:"GOVERNOR",      role:"Limits the engine", desk:[15.4,5.5],  stand:[13.8,5.5],   apron:0x70828a },
-  { id:"Execution",  name:"QUARTERMASTER", role:"Issues the ticket", desk:[2.5,8.2],   stand:[2.5,6.7],    apron:0x5f9445 },
-  { id:"Scribe",     name:"ARCHIVIST",     role:"Writes it down",    desk:[-5.5,8.2],  stand:[-5.5,6.7],   apron:0xc8863c },
+  { id:"CEO",        name:"CONTROL",        role:"Authorises the op", desk:[0,-9.6],    stand:[0,-11.0],    y:DAIS_Y, claude:true },
+  { id:"Scout",      name:"DRAGNET",    role:"Sweeps the field",        desk:[-15.4,-6.5],stand:[-13.8,-6.5], apron:0x8d6cae },
+  { id:"Screener",   name:"CHECKPOINT",       role:"Nobody passes unchecked", desk:[-15.4,-1.0],stand:[-13.8,-1.0], apron:0x5c7d8a },
+  { id:"Compliance", name:"OVERSIGHT",        role:"Cannot be argued with",          desk:[-15.4,4.5], stand:[-13.8,4.5],  apron:0x8d9298 },
+  { id:"Forensics",  name:"SCALPEL",       role:"Opens it up",    desk:[-9.5,-5.6], stand:[-9.5,-4.1],  apron:0xbf4a3c },
+  { id:"Liquidity",  name:"EXFIL",       role:"Gets you out",   desk:[-3.2,-5.6], stand:[-3.2,-4.1],  apron:0x2f9fb0 },
+  { id:"Flow",       name:"WIRETAP",      role:"Listens to the real traffic",  desk:[3.2,-5.6],  stand:[3.2,-4.1],   apron:0xe0b040 },
+  { id:"Technical",  name:"COMPASS",  role:"Reads the ground",   desk:[-6.6,-0.6], stand:[-6.6,0.9],   apron:0x4e6ba8 },
+  { id:"Narrative",  name:"POLYGRAPH",        role:"Detects the lie",       desk:[6.6,-0.6],  stand:[6.6,0.9],    apron:0xd7758f },
+  { id:"PM",         name:"HANDLER",       role:"Runs the agents",        desk:[15.4,-7.0], stand:[13.8,-7.0],  apron:0x287e9d },
+  { id:"Red Team",   name:"SABOTEUR",    role:"Tries to blow it up", desk:[15.4,-1.0], stand:[13.8,-1.0], apron:0x8c2f27 },
+  { id:"Risk",       name:"TOURNIQUET",      role:"Stops the bleeding", desk:[15.4,5.5],  stand:[13.8,5.5],   apron:0x70828a },
+  { id:"Execution",  name:"COURIER", role:"Carries the package", desk:[2.5,8.2],   stand:[2.5,6.7],    apron:0x5f9445 },
+  { id:"Scribe",     name:"BLACKBOX",     role:"Survives the crash",    desk:[-5.5,8.2],  stand:[-5.5,6.7],   apron:0xc8863c },
 ];
 
 /** seat id -> crew name, for anything arriving from the server keyed by id. */
