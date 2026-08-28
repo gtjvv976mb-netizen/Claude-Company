@@ -98,6 +98,7 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
 
   // 4. Only now does anything cost money.
   const picks = [];
+  let workedUp = 0;
   let stopped = null;
   for (const c of scored.slice(0, workups)) {
     const usedSoFar = spend.usd - startSpend;
@@ -118,6 +119,7 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
       continue;
     }
     if (!rec || rec.outcome === "no_data") continue;
+    workedUp++;                       // paid for, whatever the verdict turned out to be
     if (rec.finalDecision === "APPROVED") {
       picks.push({ rec, category: c.category, launchpad: c.launchpad,
         conviction: rec.pm?.conviction ?? rec.conviction ?? null });
@@ -152,7 +154,9 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
   const cost = spend.usd - startSpend;
   emit("cycle:end", { cycle, count: opened.length, spendUsd: Number(cost.toFixed(4)), stopped });
   return { cycle, considered: universe.length, ranked: scored.length,
-    workedUp: picks.length, opened: opened.length, costUsd: Number(cost.toFixed(4)), stopped };
+    workedUp, approved: picks.length, opened: opened.length,
+    costUsd: Number(cost.toFixed(4)), costPerWorkup: workedUp ? Number((cost / workedUp).toFixed(2)) : null,
+    stopped };
 }
 
 /**
