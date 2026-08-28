@@ -1,6 +1,9 @@
 import db from "./lib/store.js";
 import { emit } from "./lib/bus.js";
 import { CATEGORY_RISK } from "./market.js";
+
+/** The pads a floor can choose between. `other` covers established coins with no pad. */
+export const LAUNCHPADS = ["pump.fun", "letsbonk.fun", "bags.fm", "moonshot", "boop.fun", "meteora-dbc", "trix", "other"];
 import { liveCalls, getCall } from "./calls.js";
 
 /**
@@ -34,6 +37,7 @@ CREATE TABLE IF NOT EXISTS copy_settings (
   bankroll_usd REAL NOT NULL DEFAULT 1000,
   auto        INTEGER NOT NULL DEFAULT 0,     -- deliver instantly with a ready ticket
   categories  TEXT,                            -- JSON override of the appetite default
+  launchpads  TEXT,                            -- JSON allow-list of pads; null = every pad
   updated_at  INTEGER
 );
 
@@ -61,7 +65,10 @@ export function settingsFor(floorNo) {
   }
   const preset = APPETITES[s.appetite] ?? APPETITES.balanced;
   return { ...s, auto: !!s.auto, preset,
-    categories: s.categories ? JSON.parse(s.categories) : preset.categories };
+    categories: s.categories ? JSON.parse(s.categories) : preset.categories,
+    // null means every pad — a floor that has expressed no preference should not
+    // silently miss calls when a new launchpad is added.
+    launchpads: s.launchpads ? JSON.parse(s.launchpads) : LAUNCHPADS };
 }
 
 export function saveSettings(floorNo, patch) {
@@ -76,8 +83,11 @@ export function saveSettings(floorNo, patch) {
   const cats = Array.isArray(patch.categories)
     ? JSON.stringify(patch.categories.filter((c) => c in CATEGORY_RISK))
     : null;
-  db.prepare("UPDATE copy_settings SET appetite=?, bankroll_usd=?, auto=?, categories=?, updated_at=? WHERE floor_no=?")
-    .run(appetite, bankroll, auto, cats, Date.now(), floorNo);
+  const pads = Array.isArray(patch.launchpads)
+    ? JSON.stringify(patch.launchpads.filter((l) => LAUNCHPADS.includes(l)))
+    : null;
+  db.prepare("UPDATE copy_settings SET appetite=?, bankroll_usd=?, auto=?, categories=?, launchpads=?, updated_at=? WHERE floor_no=?")
+    .run(appetite, bankroll, auto, cats, pads, Date.now(), floorNo);
   return settingsFor(floorNo);
 }
 
@@ -92,6 +102,12 @@ const openCount = (floorNo) => db.prepare(`
 export function decide(floorNo, call) {
   const s = settingsFor(floorNo);
   const risk = CATEGORY_RISK[call.category] ?? CATEGORY_RISK.unclear;
+
+  // Platform first: a floor that only trades pump.fun should say so, rather than
+  // reporting a category miss on a coin it was never going to look at.
+  const pad = call.launchpad || "other";
+  if (!s.launchpads.includes(pad))
+    return { verdict: "skipped", reason: `this floor does not trade ${pad}` };
 
   if (!s.categories.includes(call.category))
     return { verdict: "skipped", reason: `${call.category} is outside this floor's categories` };

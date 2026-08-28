@@ -132,6 +132,12 @@ body{
 .call .nums b{color:var(--ink)}
 .call .why{margin-top:6px;font-size:11.5px;color:var(--ink-faint);font-style:italic}
 .call .act{margin-top:9px;display:flex;gap:7px}
+.padgrid{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.pad{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:5px 9px;border-radius:6px;
+  border:1px solid var(--card-line);color:var(--ink-faint);cursor:pointer;user-select:none}
+.pad.on{background:var(--teal);color:var(--cream);border-color:var(--teal)}
+.pad input{margin:0;accent-color:var(--amber)}
+select.dp-in{cursor:pointer}
 .runprogress{padding:11px 14px;border-bottom:1px solid var(--panel-line);background:var(--card)}
 .rp-head{font-size:11.5px;font-weight:600;color:var(--ink);margin-bottom:7px}
 .rp-bar{height:4px;border-radius:3px;background:var(--panel-line);overflow:hidden}
@@ -1633,12 +1639,7 @@ async function loadCalls() {
 function renderCalls({ feed = [], settings }) {
   callsPanel.innerHTML = "";
 
-  const head = document.createElement("div");
-  head.className = "dp-note";
-  head.textContent = settings
-    ? `Copying the house team on ${settings.appetite} settings, $${Number(settings.bankroll_usd).toLocaleString()} bankroll.`
-    : "Copying the house team.";
-  callsPanel.appendChild(head);
+  if (settings) callsPanel.appendChild(buildControls(settings));
 
   if (!feed.length) {
     const p = document.createElement("p");
@@ -1704,6 +1705,64 @@ function renderCalls({ feed = [], settings }) {
   note.className = "dp-note";
   note.textContent = "Every ticket is unsigned. The desk never holds your keys and never places a trade — you sign, in your own wallet, or you don't.";
   callsPanel.appendChild(note);
+}
+
+/* ── the tenant's own settings: appetite, bankroll, and which platforms ──── */
+const ALL_PADS = ["pump.fun", "letsbonk.fun", "bags.fm", "moonshot", "boop.fun", "meteora-dbc", "trix", "other"];
+
+function buildControls(settings) {
+  const box = document.createElement("div");
+  box.className = "call";
+  const mk = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x) e.textContent = x; return e; };
+
+  box.appendChild(mk("div", "dp-h", "How this floor copies"));
+
+  const row = mk("div", "dp-row");
+  const sel = document.createElement("select");
+  sel.className = "dp-in";
+  sel.setAttribute("aria-label", "Risk appetite");
+  for (const a of ["conservative", "balanced", "aggressive"]) {
+    const o = document.createElement("option");
+    o.value = a; o.textContent = a[0].toUpperCase() + a.slice(1);
+    if (settings.appetite === a) o.selected = true;
+    sel.appendChild(o);
+  }
+  const bank = document.createElement("input");
+  bank.className = "dp-in"; bank.type = "number"; bank.min = "0"; bank.step = "100";
+  bank.value = settings.bankroll_usd;
+  bank.setAttribute("aria-label", "Bankroll in dollars");
+  row.append(sel, bank);
+  box.appendChild(row);
+  box.appendChild(mk("div", "dp-note", "Appetite sets the conviction bar, position limit and size. Bankroll is a number you declare — the desk never holds or sees your funds."));
+
+  box.appendChild(mk("div", "dp-h", "Platforms this floor trades"));
+  const pads = mk("div", "padgrid");
+  const chosen = new Set(settings.launchpads || ALL_PADS);
+  for (const p of ALL_PADS) {
+    const lab = document.createElement("label");
+    lab.className = "pad" + (chosen.has(p) ? " on" : "");
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = chosen.has(p); cb.value = p;
+    cb.addEventListener("change", () => lab.classList.toggle("on", cb.checked));
+    lab.append(cb, document.createTextNode(p === "other" ? "established" : p));
+    pads.appendChild(lab);
+  }
+  box.appendChild(pads);
+
+  const save = mk("button", "dp-btn", "Save settings");
+  save.type = "button";
+  const msg = mk("div", "dp-note");
+  save.addEventListener("click", async () => {
+    save.disabled = true; save.textContent = "Saving…";
+    const launchpads = [...pads.querySelectorAll("input:checked")].map((i) => i.value);
+    const { status, body } = await call_api(`/api/floor/${FLOOR_N}/copy`, { method: "POST",
+      body: JSON.stringify({ appetite: sel.value, bankrollUsd: Number(bank.value), launchpads }) });
+    msg.textContent = status === 200 ? "Saved. Future calls use these settings." : (body.error || "could not save");
+    save.disabled = false; save.textContent = "Save settings";
+    if (status === 200) setTimeout(loadCalls, 700);
+  });
+  box.append(save, msg);
+  return box;
 }
 
 if (FLOOR_N != null) loadCalls();
