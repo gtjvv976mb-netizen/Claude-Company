@@ -137,15 +137,31 @@ export async function ask({
  */
 export async function askWithWeb({ seat, model, effort, schema, prompt, system, maxTokens = 16000 }) {
   emit("seat:searching", { seat, model });
-  const research = await client.messages.create({
-    model,
-    max_tokens: maxTokens,
-    system: SHARED_RULES + (system ? `\n\n${system}` : ""),
-    tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 6 }],
-    output_config: { effort },
-    messages: [{ role: "user", content: prompt }],
-  });
-  meter(model, research.usage);
+
+  // Server-tool errors do NOT throw: they arrive as a result block whose content is an
+  // error object instead of a list. Unchecked, a rate-limited search reads to the agent
+  // as "no coverage exists" — which is exactly the absence-of-evidence mistake the
+  // charter forbids. Retry, then say plainly that the tool failed.
+  let research = null, searchError = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    research = await client.messages.create({
+      model,
+      max_tokens: maxTokens,
+      system: SHARED_RULES + (system ? `\n\n${system}` : ""),
+      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 4 }],
+      output_config: { effort },
+      messages: [{ role: "user", content: prompt }],
+    });
+    meter(model, research.usage);
+
+    const errs = research.content
+      .filter((b) => b.type === "web_search_tool_result" && !Array.isArray(b.content))
+      .map((b) => b.content?.error_code || "unknown");
+    if (!errs.length) { searchError = null; break; }
+    searchError = errs[0];
+    emit("seat:retry", { seat, attempt, error: `web_search: ${searchError}` });
+    if (attempt < 3) await new Promise((r) => setTimeout(r, 4000 * attempt));
+  }
 
   const notes = research.content
     .filter((b) => b.type === "text")
@@ -168,6 +184,10 @@ export async function askWithWeb({ seat, model, effort, schema, prompt, system, 
     maxTokens,
     prompt:
       `Convert your own research notes into the required contract. Use ONLY what the notes support.\n\n` +
+      (searchError
+        ? `=== TOOL FAILURE ===\nThe web search tool failed with "${searchError}" on every attempt. You have read NOTHING external. ` +
+          `Report this as missing data and carry it at zero weight in both directions — you have established neither the presence nor the absence of coverage.\n\n`
+        : "") +
       `=== YOUR RESEARCH NOTES ===\n${notes}\n\n` +
       `=== SOURCES YOU ACTUALLY READ ===\n${cited.join("\n") || "(none returned)"}\n\n` +
       `=== ORIGINAL BRIEF ===\n${prompt}`,

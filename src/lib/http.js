@@ -49,9 +49,21 @@ const ALLOWED = new Set([
   "getTokenAccountsByOwner", "getTokenAccountBalance",
 ]);
 
-export async function readRpc(endpoint, method, params, opts) {
+export async function readRpc(endpoint, method, params, opts = {}) {
   if (!ALLOWED.has(method)) {
     throw new Error(`readRpc refused non-read method: ${method}`);
   }
-  return rpc(endpoint, method, params, opts);
+  // The public RPC rate-limits the expensive reads, and a 429 on holders is not a
+  // cosmetic loss: holder concentration is the single most decision-relevant datum the
+  // forensics seat has. Back off and try again before giving up on it.
+  const attempts = opts.attempts ?? 3;
+  let last;
+  for (let i = 1; i <= attempts; i++) {
+    last = await rpc(endpoint, method, params, opts);
+    if (last.ok) return last;
+    const rateLimited = /429|Too many requests|rate/i.test(String(last.error || ""));
+    if (!rateLimited || i === attempts) break;
+    await new Promise((r) => setTimeout(r, 700 * i * i));
+  }
+  return last;
 }

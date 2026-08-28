@@ -115,6 +115,14 @@ body{
 .runrow .sym{font-weight:600;flex:none}
 .runrow .out{margin-left:auto;font-size:10px;letter-spacing:.07em;text-transform:uppercase;font-weight:700}
 .locked{padding:18px;text-align:center;color:var(--ink-faint);font-size:13px;line-height:1.6}
+.runprogress{padding:11px 14px;border-bottom:1px solid var(--panel-line);background:var(--card)}
+.rp-head{font-size:11.5px;font-weight:600;color:var(--ink);margin-bottom:7px}
+.rp-bar{height:4px;border-radius:3px;background:var(--panel-line);overflow:hidden}
+.rp-bar i{display:block;height:100%;background:var(--teal);transition:width .4s ease}
+.rp-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+.rp-chip{font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;font-weight:600;
+  padding:2px 6px;border-radius:4px;background:transparent;color:var(--ink-faint);border:1px solid var(--panel-line)}
+.rp-chip.done{background:var(--good,#4f8f52);color:#fff;border-color:transparent}
 .memo{background:var(--card); border:1px solid var(--card-line); border-radius:8px; padding:12px}
 .memo header{display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin-bottom:6px}
 .memo .sym{font-family:"Instrument Serif",Georgia,serif; font-size:20px; color:var(--ink)}
@@ -1240,7 +1248,7 @@ const HANDLERS = {
   },
   "seat:done": (e) => { if (e.usd != null) setStat("s-spend", "$" + Number(e.usd).toFixed(2)); },
 };
-function handle(ev) { HANDLERS[ev.type]?.(ev); }
+function handle(ev) { HANDLERS[ev.type]?.(ev); if (window.__runProgress) window.__runProgress(ev); }
 
 /* ── idle life: people are not statues between events ─────────────────────── */
 const CHATTER = ["Coffee?", "Seen the volume on that?", "Mine's a pass.", "Printer's jammed again.",
@@ -1454,6 +1462,7 @@ function renderRoom() {
     const { status, body } = await api(`/api/floor/${FLOOR}/run`, { method: "POST", body: JSON.stringify({ mint }) });
     if (status === 200) {
       msg.textContent = body.free ? "Started — using an included run." : `Started — charged ${ROOM.runPriceTokens.toLocaleString()} $CLAUDECO.`;
+      startProgress();
       showPane("tape");
       input.value = "";
     } else {
@@ -1497,6 +1506,58 @@ function renderRoom() {
     panel.appendChild(row);
   }
 }
+
+/* ── live progress: a five-minute wait needs to show its working ─────────── */
+const SEATS = ["Screener","Forensics","Liquidity","Flow","Technical","Narrative","Red Team","Risk","PM","Execution","Compliance","CEO"];
+let progressEl = null, progressSeen = new Set(), progressT0 = 0;
+
+function startProgress() {
+  progressSeen = new Set();
+  progressT0 = Date.now();
+  if (!progressEl) {
+    progressEl = document.createElement("div");
+    progressEl.className = "runprogress";
+    document.querySelector(".railhead").after(progressEl);
+  }
+  drawProgress();
+  clearInterval(startProgress._t);
+  startProgress._t = setInterval(drawProgress, 1000);
+}
+
+function drawProgress() {
+  if (!progressEl) return;
+  const secs = Math.round((Date.now() - progressT0) / 1000);
+  const done = progressSeen.size;
+  progressEl.innerHTML = "";
+  const head = document.createElement("div");
+  head.className = "rp-head";
+  head.textContent = done >= SEATS.length - 1
+    ? `Done in ${secs}s`
+    : `Your team is working — ${done}/${SEATS.length} seats, ${secs}s`;
+  const bar = document.createElement("div");
+  bar.className = "rp-bar";
+  const fill = document.createElement("i");
+  fill.style.width = Math.min(100, (done / SEATS.length) * 100) + "%";
+  bar.appendChild(fill);
+  const chips = document.createElement("div");
+  chips.className = "rp-chips";
+  for (const s of SEATS) {
+    const c = document.createElement("span");
+    c.className = "rp-chip" + (progressSeen.has(s) ? " done" : "");
+    c.textContent = s;
+    chips.appendChild(c);
+  }
+  progressEl.append(head, bar, chips);
+  if (done >= SEATS.length - 1) { clearInterval(startProgress._t); setTimeout(() => { progressEl?.remove(); progressEl = null; }, 6000); }
+}
+
+// The room's own event stream drives it, so it reflects real work, never a timer.
+window.__runProgress = (ev) => {
+  if (!progressEl) return;
+  if (ev.type === "seat:verdict" && ev.seat) progressSeen.add(ev.seat);
+  if (ev.type === "token:end" || ev.type === "run:done") progressSeen = new Set(SEATS);
+  drawProgress();
+};
 
 if (FLOOR != null) loadRoom();
 window.addEventListener("focus", () => { if (panel.classList.contains("on")) loadRoom(); });

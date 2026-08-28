@@ -59,6 +59,15 @@ async function main() {
       console.log(`  RPC          : ${cfg.rpc}`);
       const h = await sol.health();
       console.log(`  RPC reachable: ${h.ok ? C.g + "yes (slot " + h.slot + ")" + C.x : C.r + h.error + C.x}`);
+      // Holder concentration is the datum the red team called dominant. The public RPC
+      // blocks the call outright, so flag it here rather than letting every workup lose
+      // it silently mid-run.
+      const holderProbe = await import("./lib/http.js").then(({ readRpc }) =>
+        readRpc(cfg.rpc, "getTokenLargestAccounts",
+          ["DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"], { attempts: 1 }));
+      console.log(`  Holder data  : ${holderProbe.ok
+        ? C.g + "available" + C.x
+        : C.r + `UNAVAILABLE (${holderProbe.error}) — set SOLANA_RPC to a paid endpoint or every workup loses holder concentration` + C.x}`);
       console.log(`  Book equity  : $${cfg.equityUsd}  |  max risk/idea ${cfg.maxRiskPct}%`);
       console.log(`  Screen floors: liq $${cfg.screen.minLiquidityUsd}, age ${cfg.screen.minPairAgeHours}h, vol $${cfg.screen.minVolume24hUsd}`);
       console.log(`  Journal      : ${JSON.stringify(store.stats())}`);
@@ -82,6 +91,10 @@ async function main() {
       const r = await workup(new Date().toISOString().replace(/[:.]/g, "-"), args[0], "operator-specified");
       console.log(`\n${C.b}Outcome:${C.x} ${r.finalDecision || r.outcome}`);
       if (r.reportFile) console.log(`Report: ${r.reportFile}`);
+      const { spend } = await import("./lib/llm.js");
+      console.log(`${C.b}Cost:${C.x} $${spend.usd.toFixed(4)}  ` +
+        `(${spend.calls} calls, ${spend.inTok.toLocaleString()} in / ${spend.outTok.toLocaleString()} out` +
+        `${spend.cachedTok ? `, ${spend.cachedTok.toLocaleString()} cached` : ""})`);
       if (!args.includes("--office")) process.exit(0);
       break;
     }
