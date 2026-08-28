@@ -1840,7 +1840,7 @@ function renderCalls({ feed = [], settings }) {
     const why = document.createElement("div");
     why.className = "why";
     why.textContent = c.verdict === "offered"
-      ? `Your floor: take $${c.size_usd} — ${c.reason}`
+      ? `Your floor: take ${c.size_sol} SOL — ${c.reason}`
       : `Your floor passed — ${c.reason}`;
     el.appendChild(why);
 
@@ -1912,9 +1912,9 @@ function buildBudget() {
   box.appendChild(copy);
 
   const warn = mk("p", "bud-warn");
-  warn.textContent = "This budget pays your agents to work — research runs and your lease. " +
-    "It is not trading capital. Money you trade with stays in your own wallet: the desk sizes " +
-    "your calls against the bankroll you declare, and never holds, moves or signs for your funds.";
+  warn.textContent = "$CLAUDECO is the access token: it pays your lease and your rent, and nothing else. " +
+    "You trade in SOL, from your own wallet. The desk sizes your calls against the bankroll you " +
+    "declare and never holds, moves or signs for your funds.";
   box.appendChild(warn);
   return box;
 }
@@ -1948,12 +1948,12 @@ function buildControls(settings) {
     sel.appendChild(o);
   }
   const bank = document.createElement("input");
-  bank.className = "dp-in"; bank.type = "number"; bank.min = "0"; bank.step = "100";
-  bank.value = settings.bankroll_usd;
-  bank.setAttribute("aria-label", "Bankroll in dollars");
+  bank.className = "dp-in"; bank.type = "number"; bank.min = "0"; bank.step = "0.5";
+  bank.value = settings.bankroll_sol;
+  bank.setAttribute("aria-label", "Trading bankroll in SOL");
   row.append(sel, bank);
   box.appendChild(row);
-  box.appendChild(mk("div", "dp-note", "Appetite sets the conviction bar, position limit and size. Bankroll is your own trading capital, declared here only so calls can be sized — it stays in your wallet and the desk never holds or signs for it."));
+  box.appendChild(mk("div", "dp-note", "Appetite sets the conviction bar, position limit and size. Bankroll is your own SOL, declared here only so calls can be sized. It stays in your wallet — the desk never holds or signs for it."));
 
   box.appendChild(mk("div", "dp-h", "Platforms this floor trades"));
   const pads = mk("div", "padgrid");
@@ -1976,7 +1976,7 @@ function buildControls(settings) {
     save.disabled = true; save.textContent = "Saving…";
     const launchpads = [...pads.querySelectorAll("input:checked")].map((i) => i.value);
     const { status, body } = await call_api(`/api/floor/${FLOOR_N}/copy`, { method: "POST",
-      body: JSON.stringify({ appetite: sel.value, bankrollUsd: Number(bank.value), launchpads }) });
+      body: JSON.stringify({ appetite: sel.value, bankrollSol: Number(bank.value), launchpads }) });
     msg.textContent = status === 200 ? "Saved. Future calls use these settings." : (body.error || "could not save");
     save.disabled = false; save.textContent = "Save settings";
     if (status === 200) setTimeout(loadCalls, 700);

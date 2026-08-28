@@ -23,6 +23,10 @@ export const DECIMALS = Number(process.env.CLAUDECO_DECIMALS || 6);
 export const PRICE_TOKENS = Number(process.env.FLOOR_PRICE_CLAUDECO || 1_000_000);
 export const PRICE_BASE_UNITS = BigInt(Math.round(PRICE_TOKENS)) * 10n ** BigInt(DECIMALS);
 export const TREASURY = process.env.TREASURY_OWNER || "";
+/** Rent, in whole tokens, charged per period. CLAUDECO buys access, not exposure. */
+export const RENT_TOKENS = Number(process.env.FLOOR_RENT_CLAUDECO || 250_000);
+export const RENT_BASE_UNITS = BigInt(Math.round(RENT_TOKENS)) * 10n ** BigInt(DECIMALS);
+export const RENT_PERIOD_DAYS = Number(process.env.FLOOR_RENT_DAYS || 30);
 
 db.exec(`
 -- One credit row per (transaction, destination token account). Keyed that way so a single
@@ -50,6 +54,18 @@ CREATE TABLE IF NOT EXISTS leases (
 );
 -- ONE FLOOR PER WALLET, enforced by the database. Application-level checks lose races.
 CREATE UNIQUE INDEX IF NOT EXISTS ux_lease_one_per_wallet ON leases(wallet);
+
+CREATE TABLE IF NOT EXISTS rent (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  floor_no   INTEGER NOT NULL,
+  wallet     TEXT NOT NULL,
+  base_units TEXT NOT NULL,
+  period_end INTEGER NOT NULL,
+  paid       INTEGER NOT NULL DEFAULT 0,
+  charged_at INTEGER NOT NULL,
+  UNIQUE (floor_no, period_end)
+);
+CREATE INDEX IF NOT EXISTS idx_rent_floor ON rent(floor_no, id DESC);
 
 CREATE TABLE IF NOT EXISTS spends (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -136,10 +152,62 @@ export function allocate({ wallet, floorNo, name = null }) {
   }
 }
 
+/** When this floor's rent is next due. A fresh lease is paid up for one period. */
+export function rentDueAt(floorNo) {
+  const last = db.prepare("SELECT period_end FROM rent WHERE floor_no=? ORDER BY period_end DESC LIMIT 1").get(floorNo);
+  if (last) return last.period_end;
+  const lease = leaseFor(floorNo);
+  return lease ? lease.created_at + RENT_PERIOD_DAYS * 86400000 : null;
+}
+
+export function rentStatus(floorNo) {
+  const due = rentDueAt(floorNo);
+  const unpaid = db.prepare("SELECT COUNT(*) n FROM rent WHERE floor_no=? AND paid=0").get(floorNo).n;
+  return { dueAt: due, overdue: due != null && Date.now() > due, unpaidPeriods: unpaid,
+    rentTokens: RENT_TOKENS, periodDays: RENT_PERIOD_DAYS };
+}
+
+/**
+ * Charge rent on every floor whose period has elapsed. Charged from the same credit
+ * balance the lease was paid from. A floor that cannot pay goes into arrears rather
+ * than being evicted — and arrears never stops an exit call reaching the tenant.
+ */
+export function chargeDueRent() {
+  const leases = db.prepare("SELECT * FROM leases").all();
+  let charged = 0, unpaid = 0;
+  for (const l of leases) {
+    const due = rentDueAt(l.floor_no);
+    if (due == null || Date.now() < due) continue;
+    const periodEnd = due + RENT_PERIOD_DAYS * 86400000;
+    const canPay = balanceOf(l.wallet) >= RENT_BASE_UNITS;
+    try {
+      db.exec("BEGIN IMMEDIATE");
+      if (canPay) {
+        db.prepare("INSERT INTO spends (wallet, base_units, created_at) VALUES (?,?,?)")
+          .run(l.wallet, RENT_BASE_UNITS.toString(), Date.now());
+      }
+      db.prepare(`INSERT INTO rent (floor_no,wallet,base_units,period_end,paid,charged_at)
+                  VALUES (?,?,?,?,?,?)`)
+        .run(l.floor_no, l.wallet, RENT_BASE_UNITS.toString(), periodEnd, canPay ? 1 : 0, Date.now());
+      db.exec("COMMIT");
+      canPay ? charged++ : unpaid++;
+    } catch (e) {
+      try { db.exec("ROLLBACK"); } catch {}
+      if (!/UNIQUE/i.test(String(e.message))) throw e;
+    }
+  }
+  return { charged, unpaid };
+}
+
+/** In arrears: gates NEW calls, never an exit. */
+export const inArrears = (floorNo) =>
+  db.prepare("SELECT COUNT(*) n FROM rent WHERE floor_no=? AND paid=0").get(floorNo).n > 0;
+
 export function config() {
   return {
     mint: MINT, decimals: DECIMALS,
     priceTokens: PRICE_TOKENS, priceBaseUnits: PRICE_BASE_UNITS.toString(),
+    rentTokens: RENT_TOKENS, rentPeriodDays: RENT_PERIOD_DAYS,
     treasury: TREASURY || null,
     oneFloorPerWallet: true,
     ready: Boolean(TREASURY),

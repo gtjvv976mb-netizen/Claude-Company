@@ -5,6 +5,7 @@ import { CATEGORY_RISK } from "./market.js";
 /** The pads a floor can choose between. `other` covers established coins with no pad. */
 export const LAUNCHPADS = ["pump.fun", "letsbonk.fun", "bags.fm", "moonshot", "boop.fun", "meteora-dbc", "trix", "other"];
 import { liveCalls, getCall } from "./calls.js";
+import { inArrears } from "./leasing.js";
 
 /**
  * COPY TRADING — how one house call becomes fifty different decisions.
@@ -34,7 +35,7 @@ db.exec(`
 CREATE TABLE IF NOT EXISTS copy_settings (
   floor_no    INTEGER PRIMARY KEY REFERENCES floors(n),
   appetite    TEXT NOT NULL DEFAULT 'balanced',
-  bankroll_usd REAL NOT NULL DEFAULT 1000,
+  bankroll_sol REAL NOT NULL DEFAULT 5,        -- SOL, held in the tenant own wallet
   auto        INTEGER NOT NULL DEFAULT 0,     -- deliver instantly with a ready ticket
   categories  TEXT,                            -- JSON override of the appetite default
   launchpads  TEXT,                            -- JSON allow-list of pads; null = every pad
@@ -48,7 +49,7 @@ CREATE TABLE IF NOT EXISTS deliveries (
   floor_no    INTEGER NOT NULL,
   verdict     TEXT NOT NULL,        -- offered | skipped
   reason      TEXT,
-  size_usd    REAL,
+  size_sol    REAL,
   taken       INTEGER NOT NULL DEFAULT 0,
   taken_at    INTEGER,
   delivered_at INTEGER NOT NULL,
@@ -61,11 +62,11 @@ CREATE INDEX IF NOT EXISTS idx_deliveries_floor ON deliveries(floor_no, id DESC)
  * A floor has two numbers, and conflating them would be the most dangerous mistake in
  * this product:
  *
- *   BUDGET   — $CLAUDECO topped up in-game and held as credit. It pays the agents to
- *              work: the lease, and each research run. The desk controls this.
- *   BANKROLL — the trading capital, which stays in the tenant's own wallet. The desk
- *              never holds it, never sees it, and never signs for it. It exists here
- *              only as a number the tenant declares so their calls can be sized.
+ *   BUDGET   — $CLAUDECO. The access token, and nothing else: it pays the lease and
+ *              the rent. It is never traded and buys no exposure.
+ *   BANKROLL — SOL. The trading capital, which stays in the tenant own wallet. The
+ *              desk never holds it, never sees it, and never signs for it. It exists
+ *              here only as a declared number so calls can be sized.
  *
  * The desk can spend the first and only ever sizes against the second.
  */
@@ -86,7 +87,7 @@ export function settingsFor(floorNo) {
 export function saveSettings(floorNo, patch) {
   const cur = settingsFor(floorNo);
   const appetite = APPETITES[patch.appetite] ? patch.appetite : cur.appetite;
-  const bankroll = Math.max(0, Math.min(1_000_000, Number(patch.bankrollUsd ?? cur.bankroll_usd)));
+  const bankroll = Math.max(0, Math.min(100_000, Number(patch.bankrollSol ?? cur.bankroll_sol)));
   const auto = patch.auto == null ? (cur.auto ? 1 : 0) : (patch.auto ? 1 : 0);
   // The column is an EXPLICIT override and nothing else. The first version wrote the
   // previous appetite's list back whenever the appetite changed, so switching to
@@ -98,7 +99,7 @@ export function saveSettings(floorNo, patch) {
   const pads = Array.isArray(patch.launchpads)
     ? JSON.stringify(patch.launchpads.filter((l) => LAUNCHPADS.includes(l)))
     : null;
-  db.prepare("UPDATE copy_settings SET appetite=?, bankroll_usd=?, auto=?, categories=?, launchpads=?, updated_at=? WHERE floor_no=?")
+  db.prepare("UPDATE copy_settings SET appetite=?, bankroll_sol=?, auto=?, categories=?, launchpads=?, updated_at=? WHERE floor_no=?")
     .run(appetite, bankroll, auto, cats, pads, Date.now(), floorNo);
   return settingsFor(floorNo);
 }
@@ -113,6 +114,12 @@ const openCount = (floorNo) => db.prepare(`
  */
 export function decide(floorNo, call) {
   const s = settingsFor(floorNo);
+
+  // Rent unpaid: the floor stops receiving NEW calls. It never stops receiving exits —
+  // holding someone in a position over a billing dispute would be indefensible, and
+  // exits are published to every floor regardless of what it owes.
+  if (inArrears(floorNo))
+    return { verdict: "skipped", reason: "rent is overdue — top up $CLAUDECO to resume new calls" };
   const risk = CATEGORY_RISK[call.category] ?? CATEGORY_RISK.unclear;
 
   // Platform first: a floor that only trades pump.fun should say so, rather than
@@ -133,10 +140,10 @@ export function decide(floorNo, call) {
 
   // Size from the floor's own bankroll, scaled by category and by conviction.
   const convScale = call.conviction != null ? Math.min(1, Math.max(0.4, call.conviction / 100)) : 0.6;
-  const sizeUsd = Number((s.bankroll_usd * (s.preset.riskPctPerTrade / 100) * risk.sizeMultiplier * convScale).toFixed(2));
-  if (sizeUsd < 1) return { verdict: "skipped", reason: "the sized position rounds to nothing on this bankroll" };
+  const sizeSol = Number((s.bankroll_sol * (s.preset.riskPctPerTrade / 100) * risk.sizeMultiplier * convScale).toFixed(4));
+  if (sizeSol < 0.001) return { verdict: "skipped", reason: "the sized position rounds to nothing on this bankroll" };
 
-  return { verdict: "offered", sizeUsd,
+  return { verdict: "offered", sizeSol,
     reason: `${s.appetite} · ${risk.sizeMultiplier}x for ${call.category} · conviction ${Math.round(call.conviction ?? 0)}` };
 }
 
@@ -148,9 +155,9 @@ export function broadcast(callId, leasedFloors) {
   for (const floorNo of leasedFloors) {
     const d = decide(floorNo, call);
     try {
-      db.prepare(`INSERT INTO deliveries (call_id,floor_no,verdict,reason,size_usd,delivered_at)
+      db.prepare(`INSERT INTO deliveries (call_id,floor_no,verdict,reason,size_sol,delivered_at)
                   VALUES (?,?,?,?,?,?)`)
-        .run(callId, floorNo, d.verdict, d.reason, d.sizeUsd ?? null, Date.now());
+        .run(callId, floorNo, d.verdict, d.reason, d.sizeSol ?? null, Date.now());
       d.verdict === "offered" ? offered++ : skipped++;
     } catch (e) { if (!/UNIQUE/i.test(String(e.message))) throw e; }
   }

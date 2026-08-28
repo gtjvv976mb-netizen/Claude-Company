@@ -21,6 +21,7 @@ import "./calls.js";
  */
 
 export const FEE_PCT = Number(process.env.PERF_FEE_PCT || 10);
+export const MINT = process.env.CLAUDECO_MINT || "HRkkxgaFDDmZ3qZX8xP5SiMRBNvFNVUUv4FJUjPCpump";
 const SOL = "So11111111111111111111111111111111111111112";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
@@ -54,7 +55,10 @@ CREATE TABLE IF NOT EXISTS results (
   sold_usd     REAL NOT NULL,
   pnl_usd      REAL NOT NULL,
   fee_pct      REAL NOT NULL,
+  fee_usd      REAL NOT NULL DEFAULT 0,
   fee_claudeco TEXT,                  -- base units owed, only ever on a gain
+  fee_paid     INTEGER NOT NULL DEFAULT 0,
+  token_usd    REAL,                  -- the CLAUDECO price the fee was converted at
   settled_at   INTEGER NOT NULL,
   UNIQUE (floor_no, call_id)
 );
@@ -119,6 +123,13 @@ function readFill(tx, wallet, mint, solPriceUsd) {
   };
 }
 
+/** What one CLAUDECO is worth right now — the rate a fee is converted at. */
+export async function tokenPriceUsd() {
+  const { price } = await import("./data/jupiter.js");
+  const p = await price([MINT]);
+  return p?.[MINT]?.usdPrice ?? null;
+}
+
 async function solPrice() {
   const { price } = await import("./data/jupiter.js");
   const p = await price([SOL]);
@@ -166,7 +177,7 @@ export async function scanFills({ floorNo, callId, wallet, mint, limit = 40 }) {
  * Settle a call for a floor. A result is only written once the position is fully closed:
  * an unrealised gain is not a result, and must never be billed as one.
  */
-export function settle({ floorNo, callId, wallet }) {
+export async function settle({ floorNo, callId, wallet }) {
   const fills = db.prepare("SELECT * FROM fills WHERE floor_no=? AND call_id=? ORDER BY id").all(floorNo, callId);
   if (!fills.length) return { ok: false, error: "no fills" };
 
@@ -186,28 +197,95 @@ export function settle({ floorNo, callId, wallet }) {
   // A fee is charged on gains only. A losing call costs the tenant nothing.
   const feeUsd = pnl > 0 ? (pnl * FEE_PCT) / 100 : 0;
 
-  try {
-    db.prepare(`INSERT INTO results (floor_no,call_id,wallet,bought_usd,sold_usd,pnl_usd,fee_pct,fee_claudeco,settled_at)
-                VALUES (?,?,?,?,?,?,?,?,?)`)
-      .run(floorNo, callId, wallet, boughtUsd, soldUsd, pnl, FEE_PCT, null, Date.now());
-  } catch (e) { if (!/UNIQUE/i.test(String(e.message))) throw e; }
+  // Convert the fee to CLAUDECO at the live rate and settle it against the same credit
+  // balance the tenant already tops up. Priced at settlement, and the rate is recorded,
+  // so a later price move cannot retroactively change what was charged.
+  let feeUnits = 0n, tokenUsd = null, paid = 0;
+  if (feeUsd > 0) {
+    tokenUsd = await tokenPriceUsd();
+    if (tokenUsd && tokenUsd > 0) {
+      feeUnits = BigInt(Math.round((feeUsd / tokenUsd) * 10 ** DECIMALS));
+    }
+  }
 
-  emit("result", { floorNo, callId, pnlUsd: pnl, feeUsd: Number(feeUsd.toFixed(4)) });
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    const existing = db.prepare("SELECT 1 FROM results WHERE floor_no=? AND call_id=?").get(floorNo, callId);
+    if (existing) { db.exec("ROLLBACK"); return { ok: false, error: "already settled" }; }
+
+    if (feeUnits > 0n) {
+      const { balanceOf } = await import("./leasing.js");
+      if (balanceOf(wallet) >= feeUnits) {
+        db.prepare("INSERT INTO spends (wallet, base_units, created_at) VALUES (?,?,?)")
+          .run(wallet, feeUnits.toString(), Date.now());
+        paid = 1;
+      }
+      // If the balance will not cover it the fee stands as owed. It is never written as
+      // a negative balance, and it never blocks an exit call — see feesOwed().
+    }
+
+    db.prepare(`INSERT INTO results (floor_no,call_id,wallet,bought_usd,sold_usd,pnl_usd,fee_pct,fee_usd,fee_claudeco,fee_paid,token_usd,settled_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(floorNo, callId, wallet, boughtUsd, soldUsd, pnl, FEE_PCT,
+           Number(feeUsd.toFixed(4)), feeUnits.toString(), paid, tokenUsd, Date.now());
+    db.exec("COMMIT");
+  } catch (e) {
+    try { db.exec("ROLLBACK"); } catch {}
+    if (!/UNIQUE/i.test(String(e.message))) throw e;
+    return { ok: false, error: "already settled" };
+  }
+
+  emit("result", { floorNo, callId, pnlUsd: pnl, feeUsd: Number(feeUsd.toFixed(4)),
+    feeClaudeco: feeUnits.toString(), paid: Boolean(paid) });
   return { ok: true, boughtUsd, soldUsd, pnlUsd: pnl, feeUsd: Number(feeUsd.toFixed(4)),
+           feeClaudeco: feeUnits.toString(), paid: Boolean(paid), tokenUsd,
            transfersIgnored: transfers.length };
+}
+
+/**
+ * Fees settled but not covered by the balance at the time.
+ *
+ * An unpaid fee may gate NEW research. It must never gate an exit call: holding
+ * someone in a position over a billing dispute would be indefensible, and the desk
+ * publishes exits to everyone regardless of what they owe.
+ */
+export function feesOwed(wallet) {
+  const rows = db.prepare("SELECT fee_claudeco, fee_usd FROM results WHERE wallet=? AND fee_paid=0 AND fee_usd>0").all(wallet);
+  return {
+    count: rows.length,
+    baseUnits: rows.reduce((a, r) => a + BigInt(r.fee_claudeco || "0"), 0n).toString(),
+    usd: Number(rows.reduce((a, r) => a + r.fee_usd, 0).toFixed(2)),
+  };
+}
+
+/** Try again on fees that could not be covered when they settled. */
+export async function collectOwed(wallet) {
+  const { balanceOf } = await import("./leasing.js");
+  const rows = db.prepare("SELECT id, fee_claudeco FROM results WHERE wallet=? AND fee_paid=0 AND fee_usd>0 ORDER BY id").all(wallet);
+  let collected = 0;
+  for (const r of rows) {
+    const units = BigInt(r.fee_claudeco || "0");
+    if (units <= 0n || balanceOf(wallet) < units) continue;
+    db.prepare("INSERT INTO spends (wallet, base_units, created_at) VALUES (?,?,?)").run(wallet, units.toString(), Date.now());
+    db.prepare("UPDATE results SET fee_paid=1 WHERE id=?").run(r.id);
+    collected++;
+  }
+  return { collected, stillOwed: feesOwed(wallet) };
 }
 
 export function recordFor(floorNo) {
   const rows = db.prepare("SELECT * FROM results WHERE floor_no=? ORDER BY id DESC").all(floorNo);
   const wins = rows.filter((r) => r.pnl_usd > 0).length;
   const net = rows.reduce((a, r) => a + r.pnl_usd, 0);
-  const fees = rows.reduce((a, r) => a + (r.pnl_usd > 0 ? (r.pnl_usd * r.fee_pct) / 100 : 0), 0);
+  const fees = rows.reduce((a, r) => a + (r.fee_usd ?? 0), 0);
+  const unpaid = rows.filter((r) => r.fee_usd > 0 && !r.fee_paid);
   return {
     settled: rows.length,
     wins, losses: rows.length - wins,
     winRate: rows.length ? Math.round((wins / rows.length) * 100) : null,
     netPnlUsd: Number(net.toFixed(2)),
-    feesOwedUsd: Number(fees.toFixed(2)),
+    feesChargedUsd: Number(fees.toFixed(2)),
+    feesUnpaidUsd: Number(unpaid.reduce((a, r) => a + r.fee_usd, 0).toFixed(2)),
     feePct: FEE_PCT,
     results: rows.slice(0, 20),
   };

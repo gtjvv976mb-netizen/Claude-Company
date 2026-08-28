@@ -2,6 +2,7 @@ import { runCycle, workup } from "./desk.js";
 import { startOffice } from "./office.js";
 import { startScanner } from "./scanner.js";
 import { runPenthouseCycle, monitorCalls } from "./penthouse.js";
+import { chargeDueRent } from "./leasing.js";
 import { bus } from "./lib/bus.js";
 import { spend } from "./lib/llm.js";
 import * as store from "./lib/store.js";
@@ -54,6 +55,16 @@ function startPenthouse() {
       if (r.closed) console.log(`[penthouse] closed ${r.closed} of ${r.checked} open calls`);
     } catch (e) { console.log(`[penthouse] monitor failed: ${e.message}`); }
   };
+  // Rent is checked hourly. Charging is idempotent per period, so a missed hour or a
+  // restart cannot double-charge or skip anyone.
+  const rent = () => {
+    try { const r = chargeDueRent();
+      if (r.charged || r.unpaid) console.log(`[rent] charged ${r.charged}, in arrears ${r.unpaid}`);
+    } catch (e) { console.log(`[rent] ${e.message}`); }
+  };
+  setInterval(rent, 3600000);
+  setTimeout(rent, 30000);
+
   setTimeout(research, 15000);                      // let the server settle first
   setInterval(research, cycleMins * 60000);
   setInterval(watch, monitorMins * 60000);

@@ -155,7 +155,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           for (const d of taken) {
             const r = await perf.scanFills({ floorNo, callId: d.call_id, wallet: me, mint: d.mint });
             if (r.ok) scanned += r.fills ?? 0;
-            const s2 = perf.settle({ floorNo, callId: d.call_id, wallet: me });
+            const s2 = await perf.settle({ floorNo, callId: d.call_id, wallet: me });
             if (s2.ok) settled++;
           }
           return json(200, { ok: true, fillsFound: scanned, settled, record: perf.recordFor(floorNo) });
