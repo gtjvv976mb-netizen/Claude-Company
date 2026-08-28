@@ -1,0 +1,120 @@
+import db, { ensureColumn } from "./lib/store.js";
+import { emit } from "./lib/bus.js";
+import "./calls.js";
+
+/**
+ * ALERTS — the desk can be right and the tenant still lose money because nobody told them.
+ *
+ * An exit that fires at 3am is worthless if it assumes someone is watching a browser tab.
+ * So an exit is recorded as a durable, unread alert the moment it happens: it survives a
+ * closed tab, a reload, and a week away, and it is only cleared when a human acknowledges it.
+ *
+ * Exit alerts are delivered to a floor REGARDLESS of arrears or unpaid fees. Gating an
+ * exit on a billing dispute would trap someone in a position, which is indefensible.
+ */
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS alerts (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  floor_no   INTEGER NOT NULL,
+  call_id    INTEGER REFERENCES calls(id),
+  kind       TEXT NOT NULL,          -- exit | entry
+  urgency    TEXT NOT NULL DEFAULT 'normal',
+  title      TEXT NOT NULL,
+  body       TEXT,
+  mint       TEXT,
+  created_at INTEGER NOT NULL,
+  read_at    INTEGER,
+  UNIQUE (floor_no, call_id, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_alerts_floor ON alerts(floor_no, id DESC);
+`);
+ensureColumn("copy_settings", "webhook_url", "TEXT");
+
+/**
+ * Where a tenant may be pinged. Restricted on purpose: an arbitrary user-supplied URL that
+ * the server fetches is a server-side request forgery hole, so only the messaging hosts
+ * people actually use are accepted.
+ */
+const WEBHOOK_HOSTS = ["discord.com", "discordapp.com", "api.telegram.org", "hooks.slack.com"];
+
+export function validWebhook(url) {
+  if (!url) return { ok: true, url: null };            // clearing it is valid
+  let u;
+  try { u = new URL(url); } catch { return { ok: false, error: "not a URL" }; }
+  if (u.protocol !== "https:") return { ok: false, error: "must be https" };
+  if (!WEBHOOK_HOSTS.some((h) => u.hostname === h || u.hostname.endsWith("." + h))) {
+    return { ok: false, error: `host must be one of: ${WEBHOOK_HOSTS.join(", ")}` };
+  }
+  return { ok: true, url: u.toString() };
+}
+
+export function raise({ floorNo, callId, kind, urgency = "normal", title, body, mint }) {
+  try {
+    db.prepare(`INSERT INTO alerts (floor_no,call_id,kind,urgency,title,body,mint,created_at)
+                VALUES (?,?,?,?,?,?,?,?)`)
+      .run(floorNo, callId ?? null, kind, urgency, title, body ?? null, mint ?? null, Date.now());
+    emit("alert", { floorNo, callId, kind, urgency, title });
+    return true;
+  } catch (e) {
+    if (/UNIQUE/i.test(String(e.message))) return false;   // already alerted; never spam
+    throw e;
+  }
+}
+
+export const unreadFor = (floorNo) =>
+  db.prepare("SELECT * FROM alerts WHERE floor_no=? AND read_at IS NULL ORDER BY id DESC LIMIT 20").all(floorNo);
+
+export const recentFor = (floorNo, n = 20) =>
+  db.prepare("SELECT * FROM alerts WHERE floor_no=? ORDER BY id DESC LIMIT ?").all(floorNo, n);
+
+export function acknowledge(floorNo, ids) {
+  const now = Date.now();
+  const stmt = db.prepare("UPDATE alerts SET read_at=? WHERE floor_no=? AND id=? AND read_at IS NULL");
+  let n = 0;
+  for (const id of ids || []) n += stmt.run(now, floorNo, Number(id)).changes;
+  return n;
+}
+
+/** Best effort push. A webhook that fails must never hold up an exit reaching the room. */
+async function push(url, title, body) {
+  const v = validWebhook(url);
+  if (!v.ok || !v.url) return false;
+  const text = `${title}\n${body ?? ""}`.trim();
+  const payload = v.url.includes("api.telegram.org")
+    ? { text }                                  // telegram sendMessage needs chat_id in the URL
+    : { content: text };                        // discord / slack
+  try {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 6000);
+    await fetch(v.url, { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload), signal: ctl.signal });
+    clearTimeout(t);
+    return true;
+  } catch { return false; }
+}
+
+/**
+ * Fan an exit out to every floor that was offered the call. Deliberately not filtered by
+ * arrears, unpaid fees, or whether the tenant said they took it — someone who quietly
+ * bought without pressing the button still needs to hear that it is time to leave.
+ */
+export async function announceExit(call, exit) {
+  const rows = db.prepare(`SELECT d.floor_no, c.webhook_url
+                           FROM deliveries d LEFT JOIN copy_settings c ON c.floor_no = d.floor_no
+                           WHERE d.call_id=? AND d.verdict='offered'`).all(call.id);
+  const sym = call.symbol || call.mint.slice(0, 6);
+  const title = exit.urgency === "unconditional"
+    ? `EXIT NOW — ${sym}`
+    : `Exit called — ${sym}`;
+  const body = `${exit.detail}\nThis is a research call. Sell in your own wallet; the desk cannot and does not.`;
+
+  let sent = 0;
+  for (const r of rows) {
+    const fresh = raise({ floorNo: r.floor_no, callId: call.id, kind: "exit",
+      urgency: exit.urgency === "unconditional" ? "urgent" : "normal", title, body, mint: call.mint });
+    if (fresh && r.webhook_url) await push(r.webhook_url, title, body);
+    if (fresh) sent++;
+  }
+  return { floors: rows.length, alerted: sent };
+}

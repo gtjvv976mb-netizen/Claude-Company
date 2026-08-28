@@ -3,6 +3,7 @@ import { gather, screen } from "./data/evidence.js";
 import { workup } from "./desk.js";
 import { openCall, liveCalls, liveCallFor, evaluateExit, closeCall, noteEvent } from "./calls.js";
 import { broadcast } from "./copy.js";
+import { announceExit } from "./alerts.js";
 import { listFloors } from "./tower.js";
 import { emit, runFor } from "./lib/bus.js";
 import { spend, OutOfCredit, spendSince } from "./lib/llm.js";
@@ -178,6 +179,9 @@ export async function monitorCalls() {
       closeCall(call.id, exit.code, now.mark);
       emit("call:exit", { callId: call.id, symbol: call.symbol, code: exit.code,
         urgency: exit.urgency, detail: exit.detail, mark: now.mark });
+      // Durable, per-floor, and sent regardless of arrears — an exit must reach the
+      // tenant whether or not their tab is open and whether or not they owe rent.
+      await announceExit(call, exit);
       closed++;
     } else {
       noteEvent(call.id, "ok", null, now.mark);

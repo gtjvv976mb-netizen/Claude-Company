@@ -12,6 +12,7 @@ import * as rooms from "./rooms.js";
 import * as calls from "./calls.js";
 import * as copy from "./copy.js";
 import * as perf from "./perf.js";
+import * as alerts from "./alerts.js";
 
 /** Serves the trading floor and streams the desk's real events to it. */
 export function startOffice(port = Number(process.env.PORT) || 4949) {
@@ -142,6 +143,19 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
         // The house record, computed from chain data rather than self-reported.
         if (url.pathname === "/api/record") return json(200, perf.houseRecord());
 
+        const alertMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/alerts(\/ack)?$/);
+        if (alertMatch) {
+          const floorNo = Number(alertMatch[1]);
+          if (!alertMatch[2]) {
+            return json(200, { unread: alerts.unreadFor(floorNo), recent: alerts.recentFor(floorNo) });
+          }
+          if (!me) return json(401, { error: "sign in with your wallet first" });
+          const lease = leasing.leaseFor(floorNo);
+          if (!lease || lease.wallet !== me) return json(403, { error: "this is not your floor" });
+          const body = await readBody();
+          return json(200, { acknowledged: alerts.acknowledge(floorNo, body?.ids) });
+        }
+
         const perfMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/(record|sync)$/);
         if (perfMatch) {
           const floorNo = Number(perfMatch[1]);
@@ -175,7 +189,14 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           const lease = leasing.leaseFor(floorNo);
           if (!lease || lease.wallet !== me) return json(403, { error: "this is not your floor" });
           const body = await readBody();
-          if (what === "copy") return json(200, copy.saveSettings(floorNo, body || {}));
+          if (what === "copy") {
+            if (body && "webhookUrl" in body) {
+              const v = alerts.validWebhook(body.webhookUrl || null);
+              if (!v.ok) return json(400, { error: `webhook: ${v.error}` });
+              body.webhookUrl = v.url;
+            }
+            return json(200, copy.saveSettings(floorNo, body || {}));
+          }
           if (what === "take") {
             const ok = copy.markTaken(floorNo, Number(body?.callId), body?.taken !== false);
             return json(ok ? 200 : 404, { ok });

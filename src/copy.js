@@ -101,11 +101,12 @@ export function saveSettings(floorNo, patch) {
   const cats = Array.isArray(patch.categories)
     ? JSON.stringify(patch.categories.filter((c) => c in CATEGORY_RISK))
     : null;
+  const hook = "webhookUrl" in patch ? (patch.webhookUrl || null) : cur.webhook_url ?? null;
   const pads = Array.isArray(patch.launchpads)
     ? JSON.stringify(patch.launchpads.filter((l) => LAUNCHPADS.includes(l)))
     : null;
-  db.prepare("UPDATE copy_settings SET appetite=?, bankroll_sol=?, auto=?, categories=?, launchpads=?, updated_at=? WHERE floor_no=?")
-    .run(appetite, bankroll, auto, cats, pads, Date.now(), floorNo);
+  db.prepare("UPDATE copy_settings SET appetite=?, bankroll_sol=?, auto=?, categories=?, launchpads=?, webhook_url=?, updated_at=? WHERE floor_no=?")
+    .run(appetite, bankroll, auto, cats, pads, hook, Date.now(), floorNo);
   return settingsFor(floorNo);
 }
 
