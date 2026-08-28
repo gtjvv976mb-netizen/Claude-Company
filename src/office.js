@@ -15,6 +15,14 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${port}`);
 
+    // The site and the API are on different origins by design (static host + Render), so
+    // every response needs these — not just the /api/ ones. /events did not have them,
+    // which silently dropped every floor back to the demo feed.
+    res.setHeader("access-control-allow-origin", "*");
+    res.setHeader("access-control-allow-headers", "content-type,authorization");
+    res.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
+    if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
+
     if (url.pathname === "/events") {
       res.writeHead(200, {
         "content-type": "text/event-stream",

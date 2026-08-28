@@ -1,4 +1,6 @@
 <title>Claude Co Trading Floor</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1382,9 +1384,23 @@ let ROOM = null;
 
 async function loadRoom() {
   if (FLOOR == null) { panel.innerHTML = `<p class="locked">No floor in this address.</p>`; return; }
-  const { body } = await api(`/api/floor/${FLOOR}`);
-  ROOM = body;
-  renderRoom();
+  if (!ROOM) panel.innerHTML = `<p class="locked">Looking up floor ${FLOOR}…</p>`;
+  try {
+    const { status, body } = await api(`/api/floor/${FLOOR}`);
+    if (status !== 200) throw new Error(body?.error || `the desk answered ${status}`);
+    ROOM = body;
+    renderRoom();
+  } catch (e) {
+    // Never leave the panel blank: a silent empty pane reads as a broken page.
+    panel.innerHTML = "";
+    const p1 = document.createElement("p");
+    p1.className = "locked";
+    p1.textContent = `Could not reach the desk. ${String(e.message || e)}`;
+    const retry = document.createElement("button");
+    retry.className = "dp-btn"; retry.textContent = "Try again";
+    retry.onclick = () => loadRoom();
+    panel.append(p1, retry);
+  }
 }
 
 function renderRoom() {

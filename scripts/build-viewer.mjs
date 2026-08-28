@@ -79,9 +79,9 @@ for (const { src: name, out } of PAGES) {
   // the dev server's routes become relative links
   html = html.replace(/<link rel="icon"[^>]*>/, '<link rel="icon" href="assets/favicon.png" type="image/png">');
   html = html.replace(/href="\/tower"/g, 'href="tower.html"');
-  html = html.replace(/href="\/floor\/\d+"/g, 'href="floor.html"');
+  html = html.replace(/href="\/floor\/(\d+)"/g, (_, n) => `href="floor.html?floor=${n}"`);
   html = html.replace(/href="\/"(?=[ >])/g, 'href="index.html"');
-  html = html.replace(/\/floor\/\$\{f\.n\}/g, "floor.html");        // tower.html directory links
+  html = html.replace(/\/floor\/\$\{f\.n\}/g, "floor.html?floor=${f.n}");   // keep the floor number
   html = html.replace(/\/buy\?floor=\$\{f\.n\}/g, "buy.html?floor=${f.n}");
   // link previews need an absolute image URL; relative is a harmless fallback
   if (SITE_URL) html = html.replace(/content="assets\//g, `content="${SITE_URL}/assets/`);
@@ -102,9 +102,9 @@ for (const { src: name, out } of PAGES) {
   if (TOWER) html = html.replace(/href="\/tower"/g, () => `href="${TOWER}" target="_blank" rel="noopener"`);
   if (FLOOR) html = html.replace(/href="\/floor\/50"/g, () => `href="${FLOOR}" target="_blank" rel="noopener"`);
 
-  const out = path.join(OUT, name);
-  fs.writeFileSync(out, html);
-  built.push({ name, bytes: html.length, inlined: !html.includes("/vendor/three/") });
+  const outPath = path.join(OUT, out);
+  fs.writeFileSync(outPath, html);
+  built.push({ name: out, bytes: html.length, inlined: !html.includes("/vendor/three/") });
 }
 
 console.log(`three namespace entries: ${exportCount}`);
