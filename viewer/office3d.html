@@ -418,6 +418,11 @@ const SPOTS = {
   shredder: [-15.0, 1.7],
   archive:  [-11.0, 8.8],
   meeting:  [0, 3.4],
+  // the snack room: a counter to graze at and three stools to sit and argue at
+  snackBar: [10.8, 10.2],
+  snackA:   [8.6, 8.3],
+  snackB:   [10.4, 8.3],
+  snackC:   [9.5, 9.6],
 };
 
 /* ═══ FURNITURE ═══════════════════════════════════════════════════════════ */
@@ -433,7 +438,7 @@ function buildDesk(at, yaw, y = 0, accent = P.teal) {
     cyl(g, 0.045, 0.72, [dx, 0.37, dz], STEEL, 8);
   box(g, [0.06, 0.30, 0.62], [-0.22, 0.93, 0], DARK);              // monitor stand + panel
   box(g, [0.05, 0.46, 0.80], [-0.30, 1.16, 0], DARK);
-  box(g, [0.02, 0.38, 0.72], [-0.335, 1.16, 0], P.glassAqua, 0.35);
+  box(g, [0.02, 0.38, 0.72], [-0.272, 1.16, 0], P.glassAqua, 0.35);   // screen faces the user, not away
   box(g, [0.30, 0.02, 0.52], [0.16, 0.79, 0], DARK);               // keyboard
   box(g, [0.24, 0.05, 0.32], [0.10, 0.81, 0.72], P.cream, 0.9);    // paper tray
   cyl(g, 0.055, 0.11, [0.16, 0.84, -0.62], P.terracotta, 8);       // mug
@@ -503,7 +508,58 @@ function buildPlant(at) {
   rug.rotation.x = -Math.PI / 2; rug.position.set(SPOTS.meeting[0], 0.022, SPOTS.meeting[1]);
   rug.receiveShadow = true; room.add(rug);
 
-  for (const at of [[-16, 11.4], [16, 11.4], [-16, -11.4], [16, -11.4], [9.2, 9.6]]) buildPlant(at);
+  for (const at of [[-16, 11.4], [16, 11.4], [-16, -11.4], [16, -11.4]]) buildPlant(at);
+})();
+
+/* ═══ THE SNACK ROOM ══════════════════════════════════════════════════════
+   A trading floor without somewhere to stand around complaining is a diagram, not
+   an office. This is where idle agents go to eat and argue. */
+(function buildSnackRoom() {
+  const g = new THREE.Group(); room.add(g);
+  const X = 9.8, Z = 9.6;
+
+  // tiled floor patch marks the room off without a wall boxing the camera out
+  const tile = new THREE.Mesh(new THREE.PlaneGeometry(8.6, 6.6),
+    new THREE.MeshStandardMaterial({ color: 0xd7cfb4, roughness: 0.9 }));
+  tile.rotation.x = -Math.PI / 2; tile.position.set(X, 0.02, Z);
+  tile.receiveShadow = true; g.add(tile);
+
+  // half-height divider, so it reads as a room but never blocks the isometric view
+  box(g, [8.8, 0.5, 0.28], [X, 0.25, Z - 3.3], P.wall, 0.88);
+  box(g, [0.28, 0.5, 6.8], [X - 4.3, 0.25, Z], P.wall, 0.88);
+
+  // counter along the back with a splashback
+  box(g, [7.4, 0.9, 0.7], [X, 0.45, Z + 2.9], P.timberDark);
+  box(g, [7.4, 0.08, 0.8], [X, 0.94, Z + 2.9], P.pathStone);
+  box(g, [7.4, 1.0, 0.1], [X, 1.4, Z + 3.28], 0xbfd3d6, 0.7);
+
+  // coffee machine, mugs, a fruit bowl, a stack of cups
+  box(g, [0.5, 0.55, 0.42], [X - 2.6, 1.26, Z + 2.9], DARK);
+  box(g, [0.34, 0.12, 0.3], [X - 2.6, 0.99, Z + 2.75], P.metal);
+  for (let i = 0; i < 4; i++) cyl(g, 0.055, 0.11, [X - 1.9 + i * 0.2, 1.03, Z + 2.8], P.cream, 8);
+  cyl(g, 0.26, 0.12, [X + 0.5, 1.04, Z + 2.9], P.cream, 12);
+  for (const [dx, dz, c] of [[0.42, 2.86, 0xd9534f], [0.62, 2.94, 0xe0ad3d], [0.5, 3.02, 0x7ab85a]])
+    cyl(g, 0.09, 0.16, [X + dx, 1.14, Z + dz], c, 8);
+  box(g, [0.34, 0.5, 0.34], [X + 1.6, 1.24, Z + 2.9], P.cream, 0.9);      // snack boxes
+  box(g, [0.3, 0.4, 0.3], [X + 2.1, 1.19, Z + 2.9], P.terracotta, 0.9);
+
+  // fridge
+  box(g, [0.9, 1.9, 0.8], [X + 3.2, 0.95, Z + 2.85], 0xe4e9ea, 0.5);
+  box(g, [0.06, 0.5, 0.06], [X + 2.72, 1.35, Z + 2.45], P.metal, 0.4, 0.4);
+
+  // a round table and three stools
+  cyl(g, 0.09, 0.72, [X - 0.3, 0.36, Z - 1.3], STEEL, 10);
+  cyl(g, 0.95, 0.09, [X - 0.3, 0.76, Z - 1.3], TIMBER, 20);
+  for (const [sx, sz] of [[-1.2, -0.05], [0.6, -0.05], [-0.3, 1.35]]) {
+    cyl(g, 0.06, 0.44, [X - 0.3 + sx, 0.22, Z - 1.3 + sz], STEEL, 8);
+    cyl(g, 0.26, 0.08, [X - 0.3 + sx, 0.48, Z - 1.3 + sz], P.terracotta, 12);
+  }
+  // things left on the table
+  cyl(g, 0.055, 0.11, [X - 0.7, 0.86, Z - 1.5], P.cream, 8);
+  cyl(g, 0.055, 0.11, [X + 0.1, 0.86, Z - 1.1], P.glassAqua, 8);
+  box(g, [0.22, 0.03, 0.16], [X - 0.25, 0.82, Z - 1.6], P.amber, 0.9);
+
+  buildPlant([X + 3.6, Z - 2.4]);
 })();
 
 /* ═══ THE EXECUTIVE SUITE ═════════════════════════════════════════════════
@@ -678,8 +734,8 @@ function buildAvatar(spec, index) {
 
   const claude = !!spec.claude;
   const pal = claude
-    ? { skin: P.cream, hair: P.claude, eye: P.claude, shirt: P.claude,
-        trousers: 0xb85f42, apron: P.cream, boots: 0x8f4832 }
+    ? { skin: P.claude, head: 0xf5efe4, hair: P.claude, eye: P.claude, shirt: P.claude,
+        trousers: 0xb85f42, apron: P.claude, boots: 0x7d3f2c }
     : { skin: SKINS[index % SKINS.length], hair: HAIRS[(index * 3 + 1) % HAIRS.length],
         eye: 0x2a2320, shirt: SHIRTS[index % SHIRTS.length],
         trousers: TROUSERS[(index * 2) % TROUSERS.length],
@@ -688,9 +744,12 @@ function buildAvatar(spec, index) {
   // The CEO has no hair and no eyes — the spark stands in for a face.
   const parts = claude ? BODY.filter((b) => b[3] !== "hair" && b[3] !== "eye") : BODY;
 
-  const specs = parts.map(([joint, size, centre, key]) => ({
-    size, at: centre, colour: pal[key], bone: JOINT_ORDER.indexOf(joint),
-  }));
+  const specs = parts.map(([joint, size, centre, key]) => {
+    // The head cube shares the `skin` key with the forearms; the CEO needs them apart.
+    const isHeadCube = joint === "Head" && key === "skin" && size[0] === 0.30;
+    return { size, at: centre, colour: (isHeadCube && pal.head) ? pal.head : pal[key],
+             bone: JOINT_ORDER.indexOf(joint) };
+  });
   const mesh = new THREE.SkinnedMesh(buildBodyGeometry(specs), bodyMat);
   mesh.castShadow = renderer.shadowMap.enabled;
   mesh.receiveShadow = true;
@@ -701,13 +760,29 @@ function buildAvatar(spec, index) {
   root.updateMatrixWorld(true);
   mesh.bind(new THREE.Skeleton(JOINT_ORDER.map((n) => joints[n])), new THREE.Matrix4());
 
-  let spark = null;
+  let spark = null, built_halo = null;
   if (claude) {
-    // Claude's mark, hovering just off the brow. The CEO has no face; it has this.
-    spark = buildSpark(0.30, 11, 0.055, P.claude, 1.15);
-    spark.position.set(0.26, 0.42, 0);
+    // Claude's mark, worn where a face would be. The rig faces +X, and the spark is
+    // built in the XY plane, so it must be turned a quarter turn about Y or it presents
+    // edge-on and reads as a spike rather than a mark.
+    spark = buildSpark(0.17, 11, 0.030, P.claude, 1.25);
+    spark.rotation.y = -Math.PI / 2;
+    spark.position.set(0.158, 0.16, 0);
     joints.Head.add(spark);
+    // a second, larger mark floating above — the one you can see across the room
+    const halo = buildSpark(0.26, 11, 0.042, P.claude, 1.0);
+    halo.rotation.y = -Math.PI / 2;
+    halo.position.set(0.02, 0.52, 0);
+    joints.Head.add(halo);
+    built_halo = halo;
   }
+
+  // a snack, held in the other hand
+  const snack = new THREE.Mesh(BOX, mat(P.amber, 0.85));
+  snack.scale.set(0.1, 0.1, 0.13);
+  snack.position.set(0.12, 0.98, -0.26);
+  snack.visible = false;
+  root.add(snack);
 
   // the sheet of paper they carry
   const doc = new THREE.Mesh(BOX, mat(P.cream, 0.9));
@@ -716,7 +791,7 @@ function buildAvatar(spec, index) {
   doc.visible = false;
   root.add(doc);
 
-  return { root, joints, doc, spark };
+  return { root, joints, doc, snack, spark, halo: built_halo };
 }
 
 /* ── canvas labels (the M&M sign-sprite idiom) ───────────────────────────── */
@@ -776,7 +851,9 @@ class Worker {
     this.typing = false;
 
     const built = buildAvatar(spec, index);
-    this.g = built.root; this.joints = built.joints; this.doc = built.doc; this.spark = built.spark;
+    this.g = built.root; this.joints = built.joints; this.doc = built.doc;
+    this.spark = built.spark; this.halo = built.halo; this.snackMesh = built.snack;
+    this.eating = false;
     this.g.position.set(this.x, this.baseY, this.z);
     this.faceTowards(this.deskAt.x, this.deskAt.z);
     scene.add(this.g);
@@ -830,6 +907,11 @@ class Worker {
 
   busy(on) { this.typing = !!on; }
 
+  eat(on) { this.eating = !!on; this.snackMesh.visible = !!on; }
+
+  /** Turn on the spot to face someone — how a conversation reads at a glance. */
+  faceWorker(other) { if (other) this.faceTowards(other.x, other.z); }
+
   run(fn) { this.chain = this.chain.then(fn).catch(() => {}); return this.chain; }
 
   update(dt, t) {
@@ -862,8 +944,13 @@ class Worker {
       J.UpperLegL.rotation.z = sw;   J.UpperLegR.rotation.z = -sw;
       J.LowerLegL.rotation.z = -Math.max(0, Math.sin(w + 0.6)) * 0.5;
       J.LowerLegR.rotation.z = -Math.max(0, Math.sin(w + 0.6 + Math.PI)) * 0.5;
+      // Arms swing opposite their own leg, and the forearms trail slightly — a straight
+      // arm reads as a mannequin, a bent one as someone carrying something.
       J.UpperArmL.rotation.z = -sw * 0.62;  J.UpperArmR.rotation.z = sw * 0.62;
+      J.LowerArmL.rotation.z = -0.16 - Math.max(0, -sw) * 0.28;
+      J.LowerArmR.rotation.z = -0.16 - Math.max(0, sw) * 0.28;
       J.Chest.rotation.y = Math.sin(w) * 0.06;
+      J.Spine.rotation.z = 0.03;                       // a touch of forward lean
       this.g.position.y = this.baseY + Math.abs(Math.sin(w)) * 0.035;
     } else {
       // seated pose: thighs forward, shins back down, hips dropped onto the chair
@@ -871,16 +958,27 @@ class Worker {
       J.LowerLegL.rotation.z = -1.45 * s; J.LowerLegR.rotation.z = -1.45 * s;
       const breathe = Math.sin(t * 1.6 + this.phase) * 0.02;
       J.Chest.rotation.y = breathe;
+      J.Spine.rotation.z = 0;
       const type = this.typing ? Math.sin(t * 15 + this.phase) * 0.16 : 0;
       J.UpperArmL.rotation.z = 0.42 * s + type;
       J.UpperArmR.rotation.z = 0.42 * s - type;
       J.LowerArmL.rotation.z = -0.75 * s;
       J.LowerArmR.rotation.z = -0.75 * s;
+      if (this.eating) {
+        // right arm lifts to the mouth on a slow cycle, and the head dips to meet it
+        const bite = (Math.sin(t * 2.2 + this.phase) + 1) / 2;
+        J.UpperArmR.rotation.z = -0.35 - bite * 0.55;
+        J.LowerArmR.rotation.z = -1.15 - bite * 0.5;
+        J.Head.rotation.z = bite * 0.12;
+      } else {
+        J.Head.rotation.z = 0;
+      }
       this.g.position.y = this.baseY - 0.30 * s;
     }
-    if (this.spark) {
-      this.spark.rotation.z = t * 0.55;
-      this.spark.position.y = 0.30 + Math.sin(t * 1.3) * 0.03;
+    if (this.halo) {
+      // Only the floating mark turns. Spinning the one on the face reads as a fault.
+      this.halo.rotation.x = t * 0.5;
+      this.halo.position.y = 0.52 + Math.sin(t * 1.3) * 0.025;
     }
   }
 }
@@ -889,7 +987,7 @@ class Worker {
 const deskYaw = (spec) => Math.atan2(-(spec.desk[1] - spec.stand[1]), spec.desk[0] - spec.stand[0]);
 for (const spec of STAFF) {
   const yaw = deskYaw(spec);
-  buildDesk(spec.desk, yaw + Math.PI / 2, spec.y ?? 0, spec.claude ? P.claude : P.teal);
+  buildDesk(spec.desk, yaw + Math.PI, spec.y ?? 0, spec.claude ? P.claude : P.teal);
   buildChair(spec.stand, yaw, spec.y ?? 0);
 }
 
@@ -953,6 +1051,13 @@ function bakeStatic(root) {
 const bakedBuckets = bakeStatic(room);
 
 /* ── the staff ────────────────────────────────────────────────────────────── */
+{
+  // signage lives here because makeSprite depends on labelCache, declared above
+  const snackSign = makeSprite("Snack Room", 0.72, { bg: "#5f3e29", accent: "#e0ad3d" });
+  snackSign.position.set(SPOTS.snackBar[0] - 1.0, 2.15, SPOTS.snackBar[1] - 3.7);
+  scene.add(snackSign);
+}
+
 STAFF.forEach((spec, i) => {
   workers[spec.id] = new Worker(spec, i);
   const plate = makeSprite(spec.id, 0.58, spec.claude ? { bg: "#8a3f22", accent: "#f0c9a0" } : undefined);
@@ -1284,12 +1389,64 @@ function handle(ev) { HANDLERS[ev.type]?.(ev); if (window.__runProgress) window.
 /* ── idle life: people are not statues between events ─────────────────────── */
 const CHATTER = ["Coffee?", "Seen the volume on that?", "Mine's a pass.", "Printer's jammed again.",
   "Anything good today?", "I'd want a tighter stop.", "Liquidity's thin out there.", "Long week."];
+const SNACK_TALK = [
+  ["Red Team killed another one.", "It was right to."],
+  ["Anything survive the screen?", "Three out of forty."],
+  ["That chart looked fine to me.", "It always does at the top."],
+  ["Coffee's gone again.", "That was PM."],
+  ["Holders came back 429 all morning.", "So we're guessing again."],
+  ["I had it at seventy.", "I had it at twelve."],
+  ["Did we ever close that call?", "Stop hit at four."],
+];
+
+const inSnackRoom = new Set();
+
+/** Send two agents for a snack and let them actually talk to each other. */
+function snackBreak() {
+  const free = STAFF.filter((s) => !s.claude).map((s) => workers[s.id])
+    .filter((p) => p && !p.typing && !p.doc.visible && !p.path && !inSnackRoom.has(p.id));
+  if (free.length < 2) return;
+  const a = free[Math.floor(Math.random() * free.length)];
+  const b = free.filter((p) => p !== a)[Math.floor(Math.random() * (free.length - 1))];
+  if (!b) return;
+  inSnackRoom.add(a.id); inSnackRoom.add(b.id);
+
+  const seats = [SPOTS.snackA, SPOTS.snackB, SPOTS.snackC];
+  const [sa, sb] = [seats[0], seats[1]];
+  const script = SNACK_TALK[Math.floor(Math.random() * SNACK_TALK.length)];
+
+  a.run(async () => {
+    await a.moveTo(SPOTS.snackBar[0], SPOTS.snackBar[1] - 1.1);
+    puff(a, "☕"); await pause(700);
+    await a.moveTo(sa[0], sa[1]);
+    a.faceWorker(b); a.eat(true); a.wantSeated = true;
+    a.say(script[0], 4200);
+    await pause(4200);
+    a.eat(false);
+    await a.goHome();
+    inSnackRoom.delete(a.id);
+  });
+  b.run(async () => {
+    await pause(900);
+    await b.moveTo(sb[0], sb[1]);
+    b.faceWorker(a); b.wantSeated = true;
+    await pause(2200);
+    b.say(script[1], 3600);
+    b.eat(true);
+    await pause(3600);
+    b.eat(false);
+    await b.goHome();
+    inSnackRoom.delete(b.id);
+  });
+}
+
 setInterval(() => {
+  if (Math.random() < 0.5) { snackBreak(); return; }
   const roam = STAFF.filter((s) => !s.claude);      // the CEO stays in the office
   const spec = roam[Math.floor(Math.random() * roam.length)];
   const p = workers[spec.id];
-  if (!p || p.typing || p.doc.visible || p.path) return;
-  if (Math.random() < 0.45) p.run(async () => { await errand(p, SPOTS.cooler, "≈", ""); });
+  if (!p || p.typing || p.doc.visible || p.path || inSnackRoom.has(p.id)) return;
+  if (Math.random() < 0.4) p.run(async () => { await errand(p, SPOTS.cooler, "≈", ""); });
   else p.run(async () => p.say(CHATTER[Math.floor(Math.random() * CHATTER.length)], 2400));
 }, 5400);
 

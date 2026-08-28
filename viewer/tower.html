@@ -229,13 +229,42 @@ const floorY = (n) => BASE_Y + (n - 1) * FLOOR_H;   // n is 1-based
 
 /* ── ground + podium ──────────────────────────────────────────────────────── */
 (function ground() {
-  const g = new THREE.Mesh(new THREE.PlaneGeometry(600, 600),
+  const g = new THREE.Mesh(new THREE.PlaneGeometry(900, 900),
     new THREE.MeshStandardMaterial({ color: P.grass, roughness: 0.96 }));
   g.rotation.x = -Math.PI / 2; g.receiveShadow = true; scene.add(g);
-  const plaza = new THREE.Mesh(new THREE.PlaneGeometry(46, 40),
+  const plaza = new THREE.Mesh(new THREE.CircleGeometry(30, 48),
     new THREE.MeshStandardMaterial({ color: P.pathStone, roughness: 0.94 }));
   plaza.rotation.x = -Math.PI / 2; plaza.position.y = 0.01; plaza.receiveShadow = true; scene.add(plaza);
+  const inner = new THREE.Mesh(new THREE.CircleGeometry(21, 48),
+    new THREE.MeshStandardMaterial({ color: 0xd8d0b6, roughness: 0.93 }));
+  inner.rotation.x = -Math.PI / 2; inner.position.y = 0.02; inner.receiveShadow = true; scene.add(inner);
 
+  // A tower with nothing around it reads as a model on a table. A low skyline gives it
+  // scale, and being deterministic keeps it identical on every load.
+  let seed = 20260829;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const neighbourColours = [0xcfc7ad, 0xbfae8e, 0xd6cbb0, 0xa9a289, 0xc3b79a];
+  for (let i = 0; i < 46; i++) {
+    const a = rnd() * Math.PI * 2;
+    const r = 44 + rnd() * 150;
+    const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    const w = 6 + rnd() * 13, d = 6 + rnd() * 13;
+    const h = 4 + rnd() * (r < 90 ? 26 : 14);
+    box([w, h, d], [x, h / 2, z], neighbourColours[(i * 7) % neighbourColours.length]);
+    box([w + 0.6, 0.5, d + 0.6], [x, h + 0.25, z], P.cream);
+    // a few lit windows so the skyline is not dead
+    if (rnd() > 0.45) box([w * 0.62, h * 0.5, 0.2], [x, h * 0.55, z + d / 2], 0x6f8f95);
+  }
+  // trees ringing the plaza
+  for (let i = 0; i < 20; i++) {
+    const a = (i / 20) * Math.PI * 2 + 0.15;
+    const x = Math.cos(a) * 25.5, z = Math.sin(a) * 25.5;
+    box([0.5, 2.0, 0.5], [x, 1.0, z], P.timberDark);
+    box([2.4, 2.4, 2.4], [x, 3.1, z], P.leaf);
+    box([1.7, 1.7, 1.7], [x, 4.5, z], 0x7ab85a);
+  }
+
+  // podium and entrance
   box([FOOT_X + 3.4, BASE_Y, FOOT_Z + 3.4], [0, BASE_Y / 2, 0], P.pathStone);
   box([FOOT_X + 4.2, 0.22, FOOT_Z + 4.2], [0, BASE_Y + 0.08, 0], P.cream);
   // entrance canopy + doors on the +Z face
@@ -245,25 +274,39 @@ const floorY = (n) => BASE_Y + (n - 1) * FLOOR_H;   // n is 1-based
 })();
 
 /* ── the stack ────────────────────────────────────────────────────────────── */
+// Setbacks: the tower narrows as it rises, which is what stops fifty identical slabs
+// reading as a barcode.
+const setback = (n) => n > 40 ? 0.80 : n > 28 ? 0.88 : n > 15 ? 0.95 : 1.0;
 for (let n = 1; n <= FLOORS; n++) {
   const y = floorY(n);
   const penthouse = n === FLOORS;
-  box([FOOT_X, 0.34, FOOT_Z], [0, y + 0.17, 0], penthouse ? P.amber : P.cream);           // slab
-  for (const sx of [-1, 1]) {                                                              // corner columns
+  const k = setback(n);
+  const fx = FOOT_X * k, fz = FOOT_Z * k;
+  box([fx, 0.34, fz], [0, y + 0.17, 0], penthouse ? P.amber : P.cream);           // slab
+  for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
       box([0.52, FLOOR_H - 0.34, 0.52],
-        [sx * (FOOT_X / 2 - 0.26), y + 0.34 + (FLOOR_H - 0.34) / 2, sz * (FOOT_Z / 2 - 0.26)],
+        [sx * (fx / 2 - 0.26), y + 0.34 + (FLOOR_H - 0.34) / 2, sz * (fz / 2 - 0.26)],
         penthouse ? P.amber : P.teal);
     }
   }
-  if (n % 10 === 0 && !penthouse) box([FOOT_X + 0.5, 0.12, FOOT_Z + 0.5], [0, y + 0.40, 0], P.amber);
+  // a brass band every ten floors, so height is countable at a glance
+  if (n % 10 === 0 && !penthouse) {
+    box([fx + 0.5, 0.14, fz + 0.5], [0, y + 0.40, 0], P.amber);
+    box([fx + 0.5, 0.06, fz + 0.5], [0, y + 0.95, 0], P.amber);
+  }
 }
 /* penthouse crown */
 (function crown() {
   const y = floorY(FLOORS) + FLOOR_H;
-  box([FOOT_X + 1.2, 0.4, FOOT_Z + 1.2], [0, y + 0.2, 0], P.amber);
-  box([4.2, 1.1, 4.2], [0, y + 0.95, 0], P.cream);
-  box([1.0, 2.6, 1.0], [0, y + 2.6, 0], P.metal);
+  const fx = FOOT_X * 0.80, fz = FOOT_Z * 0.80;
+  box([fx + 1.4, 0.45, fz + 1.4], [0, y + 0.22, 0], P.amber);
+  box([fx + 0.2, 0.9, fz + 0.2], [0, y + 0.9, 0], P.cream);
+  box([5.2, 0.35, 5.2], [0, y + 1.5, 0], P.amber);
+  box([3.4, 1.6, 3.4], [0, y + 2.45, 0], P.cream);
+  box([2.0, 0.3, 2.0], [0, y + 3.35, 0], P.amber);
+  box([0.9, 3.2, 0.9], [0, y + 5.0, 0], P.metal);
+  box([0.36, 1.6, 0.36], [0, y + 7.4, 0], P.amber);
 })();
 scene.add(bakeStatic(staticSpecs));
 
