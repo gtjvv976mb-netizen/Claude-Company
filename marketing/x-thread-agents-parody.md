@@ -1,108 +1,115 @@
-1/
-Claude Company is a Solana research desk staffed by fourteen parody spies.
+1/ 📟 One pool quoted RAY at $4,064.74.
+
+The real price was $0.81.
+
+The desk now takes a median across the deepest pools. 🩹
+
+It is staffed by fourteen parody spies. 🕵️
 
 Every joke name is the job description.
 
-MINI-MEH's entire function is making your size smaller.
+2/ 💧 Another one.
 
-AGENT P never speaks. He only writes it down.
+$1.8m of daily volume. Looked like depth.
 
-Fifty floors. You can lease one. 🏢
+The pool held $64k.
 
-2/
-Floor 50 is the house desk. The other 49 are for lease.
+57,479 trades. $31.36 average.
 
-Your floor copies the house desk's calls, filtered by your own risk appetite, your categories, and the launchpads you will actually touch.
+Turnover, not depth. 🎣
 
-You trade SOL from your own wallet. $CLAUDECO pays the rent.
+3/ 🕺 AUSTIN POWERZ — Scout.
 
-3/
-AUSTIN POWERZ — Scout.
+14 search angles.
+~357 unique tokens a sweep.
 
-Sweeps the field. 14 search angles, ~357 unique tokens a sweep, across pump.fun, letsbonk.fun, bags.fm, moonshot, boop and Meteora.
+pump.fun. letsbonk.fun. bags.fm. moonshot. boop. Meteora.
 
-He judges nothing. Judgement is the next seat.
+He sweeps the field. That is the whole job. 🔍
 
-4/
-MAXWELL SMORT — Screener.
+4/ 👞 MAXWELL SMORT — Screener.
 
-Pure code. No model, no AI cost, no opinions.
+Pure code. Zero AI cost.
 
-Hard floors only: liquidity, age, wash ratio, and a real buy-then-sell exit probe. ~79% die here.
+Liquidity. Age. Wash ratio.
+And a real buy-then-sell exit probe.
 
-A full workup runs $1.29–$1.44, a cycle about $4. His job is that most never earn one.
+~79% die right here. 🪦
 
-5/
-Five analysts work the survivors, blind to each other. No shared context, no shared conclusion. They disagree violently, by design.
+No model ever reads them. ⛔
 
-STERLING ARCHOR, Forensics: can this be used against a holder?
+5/ Then five analysts. Blind to each other. They disagree violently. That is the design. 🙈
 
-JASON BURN, Technical: is this a location worth entering?
+🥃 STERLING ARCHOR — Forensics: can this be used against a holder?
 
-6/
-BLACK WIDOWER, Narrative: is there a story, is it true, and am I early?
+🧗 ETHAN HUNTED — Liquidity: can I actually get out, at size?
 
-ETHAN HUNTED, Liquidity: can I actually get out, at size?
+6/ 🥽 SAM FISHY — Flow: real demand, or manufactured?
 
-SAM FISHY, Flow: is the demand real, or manufactured?
+🗺️ JASON BURN — Technical: a location worth entering?
 
-Contradiction between the five is not a problem to resolve. It is the data.
+🕷️ BLACK WIDOWER — Narrative: is the story true, and am I early?
 
-7/
-The best catch so far.
+None of them sees another's answer.
 
-$1.8m of daily volume. It looked like depth.
+7/ 🎯 AGENT 48 — Red Team.
 
-The pool actually held $64k.
+One question, asked in bad faith: why does this trade LOSE money? 💣
 
-Behind the same headline: 57,479 trades, averaging $31.36.
+Red Team record: 9 refuted, 0 survived.
 
-Turnover, not depth.
+His record. Nobody else's.
 
-8/
-Prices lie in the other direction too.
+8/ 🤏 MINI-MEH — Risk.
 
-One pool quoted RAY at $4,064.74. The real price was $0.81.
+How much. 📉
 
-The desk now takes a median across the deepest pools.
+And where is it wrong.
 
-You don't get to be right about a token while you're wrong about its price.
+He names the size, then he names the level that proves the thesis broken.
 
-9/
-One seat is paid to destroy the desk's work.
+9/ 🍸 JAMES BOUND — PM.
+Propose, watch or pass, on a stated thesis.
+He may not propose until he states how the Red Team was answered. 🚧
 
-AGENT 48 — Red Team.
+✏️ JOHN QUICK — Execution.
+Route. Stop. Targets.
+Unsigned.
 
-Its only question, asked in bad faith: why does this trade LOSE money?
+10/ ⚖️ JUDGE DREAD — Compliance.
 
-Record so far: 9 refuted, 0 survived.
+Code, not a model. A veto, not advice.
 
-10/
-MINI-MEH — Risk.
+Read-only by construction. 🔒 No keys. No signing. No custody. A hard RPC method allowlist.
 
-How much, and where is it wrong?
+The output is always an unsigned ticket.
 
-His job is not to like the trade. It is to make the size smaller and name the level that proves the thesis broken.
+11/ 🦫 AGENT P — Scribe.
+Never speaks. Writes it down, so the desk can be graded. 📓
 
-11/
-JAMES BOUND — PM. Propose, watch, or pass, and on what thesis.
+🎩 BIG M — CEO.
+The only seat that turns research into a call.
 
-He may not propose until he has stated how the Red Team was answered.
+12/ 💵 The bill for all of it:
 
-JOHN QUICK — Execution. Route, stop, targets. Unsigned.
+$1.29–$1.44 per workup.
+Roughly $4 per cycle.
 
-12/
-JUDGE DREAD — Compliance. Code, not a model. A veto, not advice. House rules do not negotiate.
+Fourteen spies. Four dollars. 🧾
 
-The first house rule is the building itself: read-only by construction. No keys, no signing, no custody. Chain access is a hard method allowlist.
+13/ 🏢 Fifty floors.
 
-13/
-AGENT P — Scribe. Never speaks. Writes it down, so the desk can be graded.
+Floor 50 is the house desk. The other 49 lease.
 
-BIG M — CEO. The only seat that turns research into a call.
+A floor copies the house desk's calls — filtered by that tenant's own risk appetite, categories and chosen launchpads.
 
-BIG M runs JAMES BOUND, as they should.
+Tenants trade SOL from their own wallet. 🔑
 
-Floor 50. The other 49 are downstairs.
+14/ 💼 $CLAUDECO only leases a floor.
+
+And pays its rent.
+
+Fourteen parody spies.
+One unsigned ticket. 📄
 
 claudedotcompany.com
