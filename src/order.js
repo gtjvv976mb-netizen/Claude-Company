@@ -11,10 +11,24 @@ const JUP = "https://lite-api.jup.ag";
  *
  * Requires DESK_WALLET_PUBKEY: a PUBLIC key only. This desk has no code path that reads,
  * stores, requests or accepts a private key or seed phrase, and none should ever be added.
- * The returned transaction is unsigned; signing and submitting happen in the CEO's own
- * wallet, by the CEO.
+ *
+ * ─── READ THIS BEFORE ENABLING IT ───────────────────────────────────────────────
+ * "The server never holds a key" is true here and is NOT the property that matters.
+ * The privilege that matters is choosing WHAT THE KEY SIGNS. A prepared transaction
+ * hands that privilege to this process in full: if the desk, its host, its RPC or the
+ * quote endpoint were compromised, it could compose a transaction that drains the
+ * wallet, and you would approve it during a routine action without reading it.
+ *
+ * So this path is OFF unless DESK_PREPARE_TX=1 is set deliberately, and the order slip
+ * always prints the decoded terms next to it. The GMGN deep link is the safe default:
+ * there you build the trade in an interface you trust, and nothing this desk composed
+ * is ever put in front of your signature.
+ * ────────────────────────────────────────────────────────────────────────────────
  */
 export async function buildUnsignedSwap({ mint, usd, slippageBps = 150 }) {
+  if (process.env.DESK_PREPARE_TX !== "1") {
+    return { ok: false, error: "disabled — set DESK_PREPARE_TX=1 only if you will read every transaction before signing" };
+  }
   const pubkey = process.env.DESK_WALLET_PUBKEY;
   if (!pubkey) return { ok: false, error: "DESK_WALLET_PUBKEY not set (public key only)" };
 
@@ -60,7 +74,7 @@ export async function writeOrderSlip(cycle, { ev, ceo, pm, risk, ticket }) {
   const size = ceo.order_size_usd ?? risk?.position_size_usd ?? 0;
 
   let tx = { ok: false, error: "not requested" };
-  if (ceo.ruling === "APPROVE" && size > 0 && process.env.DESK_WALLET_PUBKEY) {
+  if (ceo.ruling === "APPROVE" && size > 0 && process.env.DESK_WALLET_PUBKEY && process.env.DESK_PREPARE_TX === "1") {
     emit("order:building", { mint: ev.mint, symbol: ev.symbol });
     tx = await buildUnsignedSwap({ mint: ev.mint, usd: size, slippageBps: ticket?.max_slippage_bps ?? 150 });
   }
@@ -106,7 +120,12 @@ export async function writeOrderSlip(cycle, { ev, ceo, pm, risk, ticket }) {
     L.push(`| Expected out | ${tx.expectedOut} (raw units) |`);
     L.push(`| Price impact | ${tx.priceImpactPct?.toFixed(3) ?? "—"}% |`);
     L.push(`| Valid to block | ${tx.lastValidBlockHeight} |`);
-    L.push(`\n<details><summary>Base64 transaction — paste into your own signer</summary>\n\n\`\`\`\n${tx.unsignedTransactionBase64}\n\`\`\`\n</details>`);
+    L.push(`\n> **Do not sign this without reading it.** This desk composed it. Holding no key is`);
+    L.push(`> not the same as being safe: whoever chooses what your key signs holds the real`);
+    L.push(`> privilege, and for this blob that is this process. Check in your wallet that it`);
+    L.push(`> spends **${size} USDC** and nothing else, that the destination mint is \`${ev.mint}\`,`);
+    L.push(`> and that no other token account is touched. If anything differs, do not approve it.`);
+    L.push(`\n<details><summary>Base64 transaction — verify, then sign in your own wallet</summary>\n\n\`\`\`\n${tx.unsignedTransactionBase64}\n\`\`\`\n</details>`);
   } else if (ceo.ruling === "APPROVE") {
     L.push(`\n_No transaction was prepared: ${tx.error}._`);
   }
