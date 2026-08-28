@@ -9,6 +9,8 @@ import * as tower from "./tower.js";
 import * as auth from "./auth.js";
 import * as leasing from "./leasing.js";
 import * as rooms from "./rooms.js";
+import * as calls from "./calls.js";
+import * as copy from "./copy.js";
 
 /** Serves the trading floor and streams the desk's real events to it. */
 export function startOffice(port = Number(process.env.PORT) || 4949) {
@@ -115,6 +117,32 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             lease, credits: leasing.creditsFor(me),
           });
         }
+        // ── the house call sheet ──
+        if (url.pathname === "/api/calls") {
+          return json(200, { live: calls.liveCalls(), recent: calls.recentCalls(20), stats: calls.stats() });
+        }
+        if (url.pathname === "/api/calls/stats") return json(200, calls.stats());
+
+        // ── a floor's copy settings and its personal feed ──
+        const copyMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/(copy|feed|take)$/);
+        if (copyMatch) {
+          const floorNo = Number(copyMatch[1]);
+          const what = copyMatch[2];
+          if (what === "feed" && req.method === "GET") {
+            return json(200, { feed: copy.feedFor(floorNo), settings: copy.settingsFor(floorNo),
+                               appetites: copy.APPETITES });
+          }
+          if (!me) return json(401, { error: "sign in with your wallet first" });
+          const lease = leasing.leaseFor(floorNo);
+          if (!lease || lease.wallet !== me) return json(403, { error: "this is not your floor" });
+          const body = await readBody();
+          if (what === "copy") return json(200, copy.saveSettings(floorNo, body || {}));
+          if (what === "take") {
+            const ok = copy.markTaken(floorNo, Number(body?.callId), body?.taken !== false);
+            return json(ok ? 200 : 404, { ok });
+          }
+        }
+
         const roomMatch = url.pathname.match(/^\/api\/floor\/(\d+)(\/settings|\/run)?$/);
         if (roomMatch) {
           const floorNo = Number(roomMatch[1]);

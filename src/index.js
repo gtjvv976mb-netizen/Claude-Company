@@ -1,6 +1,7 @@
 import { runCycle, workup } from "./desk.js";
 import { startOffice } from "./office.js";
 import { startScanner } from "./scanner.js";
+import { runPenthouseCycle, monitorCalls } from "./penthouse.js";
 import { bus } from "./lib/bus.js";
 import { spend } from "./lib/llm.js";
 import * as store from "./lib/store.js";
@@ -30,6 +31,33 @@ function narrate() {
     }[e.type];
     if (line) console.log(`${C.dim}${t}${C.x} ${line()}`);
   });
+}
+
+/**
+ * The penthouse works on a schedule. Research is expensive, so it runs a few times a day;
+ * monitoring open calls is free of model calls, so it runs often — an exit trigger that
+ * fires six hours late is not an exit trigger.
+ */
+function startPenthouse() {
+  const cycleMins = Number(process.env.PENTHOUSE_CYCLE_MINS || 360);   // 4x a day
+  const monitorMins = Number(process.env.PENTHOUSE_MONITOR_MINS || 10);
+  if (process.env.PENTHOUSE_ENABLED === "0") { console.log("[penthouse] disabled"); return; }
+  if (!process.env.ANTHROPIC_API_KEY) { console.log("[penthouse] no API key — the house team cannot work"); return; }
+
+  const research = async () => {
+    try { const r = await runPenthouseCycle();
+      console.log(`[penthouse] cycle: ${r.considered} seen, ${r.workedUp} worked up, ${r.opened} calls, $${r.costUsd}`);
+    } catch (e) { console.log(`[penthouse] cycle failed: ${e.message}`); }
+  };
+  const watch = async () => {
+    try { const r = await monitorCalls();
+      if (r.closed) console.log(`[penthouse] closed ${r.closed} of ${r.checked} open calls`);
+    } catch (e) { console.log(`[penthouse] monitor failed: ${e.message}`); }
+  };
+  setTimeout(research, 15000);                      // let the server settle first
+  setInterval(research, cycleMins * 60000);
+  setInterval(watch, monitorMins * 60000);
+  console.log(`[penthouse] research every ${cycleMins}m, monitoring every ${monitorMins}m`);
 }
 
 async function main() {
@@ -76,6 +104,7 @@ async function main() {
     case "office": {
       const { url } = startOffice(Number(args[0]) || Number(process.env.PORT) || 4949);
       startScanner();          // watches the treasury for $CLAUDECO; no-ops until TREASURY_OWNER is set
+      startPenthouse();        // the house team's schedule
       console.log(`${C.b}Trading floor live at ${url}${C.x}  (Ctrl-C to close)`);
       narrate();
       break;
