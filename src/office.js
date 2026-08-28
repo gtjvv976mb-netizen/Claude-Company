@@ -36,8 +36,11 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
       // ?floor=N gives a tenant only their own desk's work; no argument is the house view.
       const wantFloor = url.searchParams.has("floor") ? Number(url.searchParams.get("floor")) : null;
       res.write(`event: hello\ndata: ${JSON.stringify({ backlog: backlog(wantFloor), floor: wantFloor })}\n\n`);
+      // A room shows two things at once: the HOUSE desk working (floor null, the same
+      // for every visitor) and that floor's own activity. Filtering strictly to the floor
+      // hid the house team entirely, so every room looked idle while the desk was busy.
       const onEvent = (ev) => {
-        if (wantFloor != null && ev.floor !== wantFloor) return;
+        if (wantFloor != null && ev.floor != null && ev.floor !== wantFloor) return;
         res.write(`data: ${JSON.stringify(ev)}\n\n`);
       };
       bus.on("event", onEvent);

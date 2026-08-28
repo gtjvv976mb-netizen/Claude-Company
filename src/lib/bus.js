@@ -27,6 +27,8 @@ export function emit(type, payload = {}) {
 }
 
 export function backlog(floor = null) {
-  // A floor sees only its own work; the house view (floor null) sees everything.
-  return floor == null ? RING.slice() : RING.filter((e) => e.floor === floor);
+  // A room replays the house desk's recent work plus its own — which is what makes the
+  // building feel alive to someone who just walked in, rather than empty until the next
+  // event happens to fire.
+  return floor == null ? RING.slice() : RING.filter((e) => e.floor == null || e.floor === floor);
 }
