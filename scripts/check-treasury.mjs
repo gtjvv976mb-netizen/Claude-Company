@@ -7,7 +7,7 @@
  * and never signs anything. It wants a PUBLIC address and nothing else — never paste a
  * private key or seed phrase into this or any other part of this project.
  */
-import { cfg } from "../src/config.js";
+import { cfg, maskRpc } from "../src/config.js";
 import { readRpc } from "../src/lib/http.js";
 import { isAddress } from "../src/lib/base58.js";
 
@@ -44,7 +44,7 @@ const acct = await readRpc(cfg.rpc, "getTokenAccountsByOwner",
 
 if (!acct.ok) {
   bad(`Could not reach the chain: ${acct.error}`);
-  info(`RPC in use: ${cfg.rpc}`);
+  info(`RPC in use: ${maskRpc()}`);
   info("The public RPC is heavily rate-limited; set SOLANA_RPC to a Helius/Triton/QuickNode URL.");
   process.exit(1);
 }

@@ -80,6 +80,10 @@ export const cfg = {
   },
 };
 
+/** The RPC URL embeds an API key. Never print it raw — mask it wherever it is shown. */
+export const maskRpc = (u = cfg.rpc) =>
+  String(u).replace(/([?&]api-key=)[^&]+/i, "$1***").replace(/\/\/([^@/]+:)[^@]+@/, "//$1***@");
+
 // Well-known mints used as quote assets / routing anchors.
 export const MINTS = {
   SOL: "So11111111111111111111111111111111111111112",

@@ -5,7 +5,7 @@ import { bus } from "./lib/bus.js";
 import { spend } from "./lib/llm.js";
 import * as store from "./lib/store.js";
 import * as sol from "./data/solana.js";
-import { cfg } from "./config.js";
+import { cfg, maskRpc } from "./config.js";
 
 const [, , cmd, ...args] = process.argv;
 
@@ -56,7 +56,7 @@ async function main() {
         }
       }
       console.log(`  Treasury     : ${process.env.TREASURY_OWNER ? C.g + "set — leasing open" + C.x : C.y + "not set — leasing closed" + C.x}`);
-      console.log(`  RPC          : ${cfg.rpc}`);
+      console.log(`  RPC          : ${maskRpc()}`);
       const h = await sol.health();
       console.log(`  RPC reachable: ${h.ok ? C.g + "yes (slot " + h.slot + ")" + C.x : C.r + h.error + C.x}`);
       // Holder concentration is the datum the red team called dominant. The public RPC
