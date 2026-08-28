@@ -29,8 +29,8 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Build static site
-        # SITE_URL makes the og:image link absolute, which link-preview crawlers require.
-        run: SITE_URL="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}" node scripts/build-viewer.mjs
+        # SITE_URL (the custom domain) makes og:image absolute for link-preview crawlers.
+        run: node scripts/build-viewer.mjs
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

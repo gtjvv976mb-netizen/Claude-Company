@@ -129,9 +129,20 @@ h2{font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:clamp(
   box-shadow:0 18px 40px rgba(24,38,42,.28)}
 .ticker{font-family:"JetBrains Mono",monospace;font-size:13px;letter-spacing:.14em;
   color:var(--amber);font-weight:500;text-transform:uppercase}
-.ca{background:var(--card);border:1px dashed var(--line);border-radius:9px;padding:13px 16px;
-  font-family:"JetBrains Mono",monospace;font-size:12.5px;color:var(--ink-faint);margin-top:18px}
-.ca b{color:var(--ink);font-weight:500}
+.ca{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--card);
+  border:1px dashed var(--line);border-radius:9px;padding:11px 13px;margin-top:20px}
+.ca .calabel{font-family:"JetBrains Mono",monospace;font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--amber);font-weight:500;flex:none}
+.ca code{font-family:"JetBrains Mono",monospace;font-size:12.5px;color:var(--ink);
+  word-break:break-all;flex:1;min-width:180px}
+.cacopy{font:inherit;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  border:1px solid var(--line);background:transparent;color:var(--ink-soft);border-radius:6px;
+  padding:6px 12px;cursor:pointer;flex:none}
+.cacopy:hover{background:var(--teal);color:var(--cream);border-color:var(--teal)}
+.cacopy.done{background:var(--good);color:#fff;border-color:var(--good)}
+.cacopy:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.tokenlinks{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+.verified{margin:16px 0 0;font-size:12.5px;color:var(--ink-faint);line-height:1.55}
 
 footer{background:var(--charcoal);color:rgba(244,236,216,.7);padding:44px 0;font-size:13px}
 footer .wrap{display:flex;gap:24px;flex-wrap:wrap;align-items:center}
@@ -160,7 +171,7 @@ footer .spacer{margin-left:auto}
       worth your money. A CEO signs off on the good ones. You keep your wallet.</p>
     <div class="herobtns">
       <a class="btn solid" href="/tower">Lease a floor — 50 USDC</a>
-      <a class="btn line" href="/floor/50">Look inside the penthouse</a>
+      <a class="btn line" href="#token">Get $CLAUDECO</a>
     </div>
   </div>
   <svg class="towerart" viewBox="0 -46 240 446" role="img" aria-label="The tower, fifty floors, lit at the top">
@@ -269,8 +280,17 @@ footer .spacer{margin-left:auto}
       <p style="margin:0;color:var(--ink-soft);font-size:14.5px">Lease a floor in Claude
         Tower and get your own AI trading team. Fourteen agents research every Solana trade
         end to end, and a CEO refuses the bad ones. You stay in control.</p>
-      <div class="ca"><b>Contract address:</b> not minted yet. When it is, the address will be
-        published here and nowhere else — treat any address you see anywhere else as fake.</div>
+      <div class="ca" id="ca">
+        <span class="calabel">Contract</span>
+        <code id="caval">HRkkxgaFDDmZ3qZX8xP5SiMRBNvFNVUUv4FJUjPCpump</code>
+        <button class="cacopy" id="cacopy" type="button" aria-label="Copy contract address">Copy</button>
+      </div>
+      <div class="tokenlinks">
+        <a class="btn solid" href="https://pump.fun/coin/HRkkxgaFDDmZ3qZX8xP5SiMRBNvFNVUUv4FJUjPCpump" target="_blank" rel="noopener">Buy on pump.fun</a>
+        <a class="btn line" href="https://dexscreener.com/solana/HRkkxgaFDDmZ3qZX8xP5SiMRBNvFNVUUv4FJUjPCpump" target="_blank" rel="noopener">Chart</a>
+        <a class="btn line" href="https://solscan.io/token/HRkkxgaFDDmZ3qZX8xP5SiMRBNvFNVUUv4FJUjPCpump" target="_blank" rel="noopener">Solscan</a>
+      </div>
+      <p class="verified">Mint &amp; freeze authority revoked · no transfer hooks or fees · verify it yourself on Solscan. This is the only official address — treat any other as fake.</p>
     </div>
   </div>
 </div></section>
@@ -285,6 +305,29 @@ footer .spacer{margin-left:auto}
   An independent project. Not affiliated with, endorsed by, or connected to Anthropic.
 </div></footer>
 
+<script>
+// Copy the contract address. Clipboard API needs a secure context; fall back to select.
+(() => {
+  const btn = document.getElementById("cacopy");
+  const val = document.getElementById("caval");
+  if (!btn || !val) return;
+  btn.addEventListener("click", async () => {
+    const text = val.textContent.trim();
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const r = document.createRange();
+      r.selectNodeContents(val);
+      const sel = getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }
+    btn.textContent = "Copied";
+    btn.classList.add("done");
+    setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("done"); }, 1600);
+  });
+})();
+</script>
 <script>
 // Draw the tower's fifty floor slabs and its rooftop spark, rather than hand-authoring
 // a hundred SVG rects nobody would want to read.

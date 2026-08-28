@@ -25,15 +25,14 @@ const ASSETS = [
   "claudeco-512.png", "claudeco-256.png", "claudeco-64.png",
   "banner-1500x500.png", "banner-1200x630.png",
 ];
-const SITE_URL = (process.env.SITE_URL || "").replace(/\/$/, "");
+const SITE_URL = (process.env.SITE_URL || "https://claudedotcompany.com").replace(/\/$/, "");
 
 const { source: THREE_SRC, exportCount } = inlineThree();
 const THREE_REV = JSON.parse(
   fs.readFileSync(path.join(ROOT, "node_modules", "three", "package.json"), "utf8")
 ).version;
 
-// index.html keeps its own small script; the 3D pages have exactly one module each.
-const expectedClosers = (name) => (name === "index.html" ? 1 : 1);
+
 
 fs.mkdirSync(OUT, { recursive: true });
 fs.mkdirSync(path.join(OUT, "assets"), { recursive: true });
@@ -42,12 +41,17 @@ for (const a of ASSETS) {
 }
 fs.copyFileSync(path.join(ROOT, "token", "claudeco-64.png"), path.join(OUT, "assets", "favicon.png"));
 
+// GitHub Pages reads dist/CNAME to bind the custom domain.
+const cnameSrc = path.join(VIEWER, "CNAME");
+if (fs.existsSync(cnameSrc)) fs.copyFileSync(cnameSrc, path.join(OUT, "CNAME"));
+
 const built = [];
 
 for (const { src: name, out } of PAGES) {
   const src = path.join(VIEWER, name);
   if (!fs.existsSync(src)) continue;
   let html = fs.readFileSync(src, "utf8");
+  const srcClosers = (html.match(/<\/script/gi) || []).length;
 
   if (IMPORT_LINE.test(html)) {
     // A replacer FUNCTION, not a string: three's source contains `$'`-style sequences,
@@ -57,11 +61,12 @@ for (const { src: name, out } of PAGES) {
     html = html.replace(IMPORT_LINE, () => block);
   }
 
-  // Any `</script` inside the module would close the element early. There is none in
-  // three today, but assert rather than hope — a silent break here is unparseable HTML.
+  // Any `</script` inside the inlined module would close the element early. Assert the
+  // output has no more terminators than the source did — the `$'`-in-replacement bug
+  // spliced the whole document back in and doubled them, and this catches that class.
   const closers = (html.match(/<\/script/gi) || []).length;
-  if (closers !== expectedClosers(name)) {
-    throw new Error(`${name}: expected ${expectedClosers(name)} </script> but found ${closers} — inlining corrupted the page`);
+  if (closers !== srcClosers) {
+    throw new Error(`${name}: source had ${srcClosers} </script> but output has ${closers} — inlining corrupted the page`);
   }
   // the dev server's routes become relative links
   html = html.replace(/<link rel="icon"[^>]*>/, '<link rel="icon" href="assets/favicon.png" type="image/png">');
