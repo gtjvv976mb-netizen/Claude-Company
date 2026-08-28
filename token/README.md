@@ -10,6 +10,21 @@
 ticker is a handle people type and bots match — every space-symbol token on Solana today
 sits at zero liquidity.
 
+## The art
+
+| File | Use |
+|---|---|
+| `claudeco-512.png` | **The token image.** Upload this one; point `metadata.json` `image` at its live URL |
+| `claudeco-256/128/64/32.png` | Pre-scaled copies; `claudeco-sizes.png` shows the 32px wallet-list check |
+| `banner-1500x500.png` | X / Twitter profile header |
+| `banner-1200x630.png` | OG / link-preview card |
+
+The mark is the CEO's head from floor 50 — the one figure in the building with Claude's
+spark where a face would be. It is designed inside a circle-safe square (wallets mask
+token images to a circle) and the spark's ray widths are set by the geometry that keeps
+eleven spokes distinct at 32px. Regenerate everything with `python3 token/make-image.py`
+(fonts in `token/fonts/`, OFL-licensed).
+
 ## Before minting
 
 **Mint it plain.** Claude Tower's own Forensics seat checks for exactly these and treats
