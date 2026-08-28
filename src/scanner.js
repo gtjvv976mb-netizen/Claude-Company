@@ -79,8 +79,12 @@ export async function scanOnce({ limit = 40 } = {}) {
   const tokenAccount = await treasuryTokenAccount();
   const until = getState("last_signature") || undefined;
 
+  // getSignaturesForAddress takes TWO params — address and one config object. Passing
+  // commitment as a third argument returns "Invalid params: Expected end of params",
+  // which failed silently on every poll: the scanner never saw a payment, so a tenant
+  // could send 1,000,000 CLAUDECO and never be credited.
   const sigs = await readRpc(cfg.rpc, "getSignaturesForAddress",
-    [tokenAccount, { limit, ...(until ? { until } : {}) }, { commitment: "finalized" }]);
+    [tokenAccount, { limit, commitment: "finalized", ...(until ? { until } : {}) }]);
   if (!sigs.ok) return { ok: false, error: sigs.error };
 
   const list = (sigs.data || []).filter((s) => !s.err).reverse();   // oldest first
