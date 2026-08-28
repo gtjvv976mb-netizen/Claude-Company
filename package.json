@@ -12,7 +12,8 @@
     "one": "node src/index.js one",
     "watch": "node src/index.js watch",
     "ledger": "node src/index.js ledger",
-    "doctor": "node src/index.js doctor"
+    "doctor": "node src/index.js doctor",
+    "treasury:check": "node scripts/check-treasury.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.70.0",

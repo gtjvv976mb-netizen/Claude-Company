@@ -45,6 +45,8 @@ const ALLOWED = new Set([
   "getAccountInfo", "getMultipleAccounts", "getTokenLargestAccounts",
   "getTokenSupply", "getSignaturesForAddress", "getBalance", "getSlot",
   "getTransaction", "getProgramAccounts",
+  // the treasury scanner's reads
+  "getTokenAccountsByOwner", "getTokenAccountBalance",
 ]);
 
 export async function readRpc(endpoint, method, params, opts) {
