@@ -2,6 +2,20 @@ import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { emit } from "./bus.js";
 import { CHARTER } from "../config.js";
+import db from "./store.js";
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS llm_spend (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  seat     TEXT, model TEXT, effort TEXT,
+  in_tok   INTEGER, out_tok INTEGER, cached_tok INTEGER,
+  usd      REAL, ts INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_spend_ts ON llm_spend(ts);
+`);
+
+/** Billing failures are terminal for a cycle: retrying just burns time. */
+export class OutOfCredit extends Error {}
 
 const client = new Anthropic();
 
@@ -16,7 +30,7 @@ const PRICE = {
 
 export const spend = { usd: 0, calls: 0, inTok: 0, outTok: 0, cachedTok: 0 };
 
-function meter(model, usage) {
+function meter(model, usage, seat, effort) {
   const p = PRICE[model] || PRICE["claude-opus-5"];
   const i = usage?.input_tokens ?? 0;
   const o = usage?.output_tokens ?? 0;
@@ -26,6 +40,18 @@ function meter(model, usage) {
   spend.inTok += i;
   spend.outTok += o;
   spend.cachedTok += cached;
+  const usd = (i / 1e6) * p.in + (o / 1e6) * p.out;
+  try {
+    db.prepare("INSERT INTO llm_spend (seat,model,effort,in_tok,out_tok,cached_tok,usd,ts) VALUES (?,?,?,?,?,?,?,?)")
+      .run(seat ?? null, model, effort ?? null, i, o, cached, usd, Date.now());
+  } catch {}   // metering must never break a run
+}
+
+/** What the desk has actually spent, from the database rather than a live process. */
+export function spendSince(sinceMs) {
+  const row = db.prepare("SELECT COUNT(*) calls, COALESCE(SUM(usd),0) usd, COALESCE(SUM(in_tok),0) inTok, COALESCE(SUM(out_tok),0) outTok FROM llm_spend WHERE ts >= ?")
+    .get(sinceMs ?? 0);
+  return { ...row, usd: Number(row.usd.toFixed(4)) };
 }
 
 const SHARED_RULES = `
@@ -88,7 +114,7 @@ export async function ask({
       });
       const res = await stream.finalMessage();
 
-      meter(model, res.usage);
+      meter(model, res.usage, seat, effort);
 
       if (res.stop_reason === "max_tokens") {
         throw new Error(`${seat}: ran out of tokens before answering (effort ${effort}, cap ${maxTokens})`);
@@ -120,6 +146,10 @@ export async function ask({
     } catch (err) {
       lastErr = err;
       if (err instanceof Refusal) throw err;
+      if (/credit balance is too low/i.test(String(err?.message))) {
+        emit("desk:out_of_credit", { seat });
+        throw new OutOfCredit("the Anthropic balance is empty — the desk cannot think");
+      }
       const retryable =
         err?.status === 429 || err?.status >= 500 || err?.name === "APIConnectionError";
       emit("seat:retry", { seat, attempt: a, error: String(err?.message || err) });
@@ -152,7 +182,7 @@ export async function askWithWeb({ seat, model, effort, schema, prompt, system, 
       output_config: { effort },
       messages: [{ role: "user", content: prompt }],
     });
-    meter(model, research.usage);
+    meter(model, research.usage, seat, effort);
 
     const errs = research.content
       .filter((b) => b.type === "web_search_tool_result" && !Array.isArray(b.content))

@@ -98,6 +98,9 @@ async function main() {
         : C.r + `UNAVAILABLE (${holderProbe.error}) — set SOLANA_RPC to a paid endpoint or every workup loses holder concentration` + C.x}`);
       console.log(`  Book equity  : $${cfg.equityUsd}  |  max risk/idea ${cfg.maxRiskPct}%`);
       console.log(`  Screen floors: liq $${cfg.screen.minLiquidityUsd}, age ${cfg.screen.minPairAgeHours}h, vol $${cfg.screen.minVolume24hUsd}`);
+      const { spendSince } = await import("./lib/llm.js");
+      const day = spendSince(Date.now() - 86400000), all = spendSince(0);
+      console.log(`  Spend 24h    : $${day.usd} over ${day.calls} calls   |  all time: $${all.usd} over ${all.calls}`);
       console.log(`  Journal      : ${JSON.stringify(store.stats())}`);
       break;
     }

@@ -5,7 +5,7 @@ import { openCall, liveCalls, liveCallFor, evaluateExit, closeCall, noteEvent } 
 import { broadcast } from "./copy.js";
 import { listFloors } from "./tower.js";
 import { emit, runFor } from "./lib/bus.js";
-import { spend } from "./lib/llm.js";
+import { spend, OutOfCredit, spendSince } from "./lib/llm.js";
 import * as jup from "./data/jupiter.js";
 
 /**
@@ -19,6 +19,8 @@ import * as jup from "./data/jupiter.js";
  */
 
 export const WORKUPS_PER_CYCLE = Number(process.env.PENTHOUSE_WORKUPS || 3);
+/** Hard ceiling per cycle. Without it one bad night empties the account. */
+export const CYCLE_BUDGET_USD = Number(process.env.PENTHOUSE_CYCLE_BUDGET_USD || 8);
 export const TOP_N = Number(process.env.PENTHOUSE_TOP_N || 5);
 
 /**
@@ -95,9 +97,25 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
 
   // 4. Only now does anything cost money.
   const picks = [];
+  let stopped = null;
   for (const c of scored.slice(0, workups)) {
+    const usedSoFar = spend.usd - startSpend;
+    if (usedSoFar >= CYCLE_BUDGET_USD) {
+      stopped = `budget: $${usedSoFar.toFixed(2)} of $${CYCLE_BUDGET_USD}`;
+      emit("cycle:budget", { usedUsd: Number(usedSoFar.toFixed(4)), capUsd: CYCLE_BUDGET_USD });
+      break;
+    }
     const hook = `house scan · ${c.category}${c.launchpad ? ` · ${c.launchpad}` : ""}`;
-    const rec = await runFor(null, () => workup(cycle, c.mint, hook));
+    let rec;
+    try {
+      rec = await runFor(null, () => workup(cycle, c.mint, hook));
+    } catch (e) {
+      // Out of credit is terminal: the remaining candidates cannot be worked up either,
+      // and the cycle should end with what it has rather than crash the process.
+      if (e instanceof OutOfCredit) { stopped = "out of credit"; emit("cycle:halted", { reason: "out_of_credit" }); break; }
+      emit("cycle:error", { mint: c.mint, error: String(e.message) });
+      continue;
+    }
     if (!rec || rec.outcome === "no_data") continue;
     if (rec.finalDecision === "APPROVED") {
       picks.push({ rec, category: c.category, launchpad: c.launchpad,
@@ -131,9 +149,9 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
   }
 
   const cost = spend.usd - startSpend;
-  emit("cycle:end", { cycle, count: opened.length, spendUsd: Number(cost.toFixed(4)) });
+  emit("cycle:end", { cycle, count: opened.length, spendUsd: Number(cost.toFixed(4)), stopped });
   return { cycle, considered: universe.length, ranked: scored.length,
-    workedUp: Math.min(workups, scored.length), opened: opened.length, costUsd: Number(cost.toFixed(4)) };
+    workedUp: picks.length, opened: opened.length, costUsd: Number(cost.toFixed(4)), stopped };
 }
 
 /**
