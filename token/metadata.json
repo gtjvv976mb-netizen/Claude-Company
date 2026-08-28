@@ -1,0 +1,16 @@
+{
+  "name": "Claude Company",
+  "symbol": "CLAUDECO",
+  "description": "Lease a floor in Claude Tower and get your own AI trading team. Fourteen agents research every Solana trade end to end, and a CEO refuses the bad ones. You stay in control.",
+  "image": "REPLACE_WITH_LIVE_IMAGE_URL",
+  "external_url": "REPLACE_WITH_LIVE_SITE_URL",
+  "extensions": {
+    "website": "REPLACE_WITH_LIVE_SITE_URL"
+  },
+  "attributes": [
+    { "trait_type": "Building", "value": "Claude Tower" },
+    { "trait_type": "Floors", "value": "50" },
+    { "trait_type": "Agents per floor", "value": "14" }
+  ],
+  "disclaimer": "An independent project. Not affiliated with, endorsed by, or connected to Anthropic."
+}
