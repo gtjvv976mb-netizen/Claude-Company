@@ -36,7 +36,26 @@ async function main() {
   switch (cmd) {
     case "doctor": {
       console.log(`${C.b}Claude Company doctor${C.x}`);
-      console.log(`  API key      : ${process.env.ANTHROPIC_API_KEY ? C.g + "set" + C.x : C.r + "MISSING" + C.x}`);
+      // "set" is not the same as "usable" — a copied placeholder looks set and 401s.
+      const key = process.env.ANTHROPIC_API_KEY || "";
+      const keyState = !key ? C.r + "MISSING" + C.x
+        : key.length < 40 || key.includes("...") ? C.r + "PLACEHOLDER — replace it with the real key" + C.x
+        : !key.startsWith("sk-ant-") ? C.y + "unexpected format (should start sk-ant-)" + C.x
+        : C.g + `set (${key.length} chars)` + C.x;
+      console.log(`  API key      : ${keyState}`);
+      if (key.length >= 40 && key.startsWith("sk-ant-")) {
+        try {
+          const Anthropic = (await import("@anthropic-ai/sdk")).default;
+          const r = await new Anthropic().messages.create({
+            model: "claude-opus-5", max_tokens: 8,
+            messages: [{ role: "user", content: "say: ok" }],
+          });
+          console.log(`  API call     : ${C.g}works${C.x} (${r.model})`);
+        } catch (e) {
+          console.log(`  API call     : ${C.r}${e.status || ""} ${String(e.message).slice(0, 80)}${C.x}`);
+        }
+      }
+      console.log(`  Treasury     : ${process.env.TREASURY_OWNER ? C.g + "set — leasing open" + C.x : C.y + "not set — leasing closed" + C.x}`);
       console.log(`  RPC          : ${cfg.rpc}`);
       const h = await sol.health();
       console.log(`  RPC reachable: ${h.ok ? C.g + "yes (slot " + h.slot + ")" + C.x : C.r + h.error + C.x}`);
