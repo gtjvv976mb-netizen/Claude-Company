@@ -218,7 +218,7 @@ select.dp-in{cursor:pointer}
       <h2>The Floor</h2>
       <div class="tabs" role="tablist">
         <button class="tab" id="tab-tape" role="tab" aria-selected="true">Tape</button>
-        <button class="tab" id="tab-inbox" role="tab" aria-selected="false">Inbox</button>
+        <button class="tab" id="tab-inbox" role="tab" aria-selected="false">CONTROL</button>
         <button class="tab" id="tab-desk" role="tab" aria-selected="false">My Desk</button>
         <button class="tab" id="tab-calls" role="tab" aria-selected="false">Calls</button>
       </div>
@@ -1188,7 +1188,7 @@ function memo({ symbol, decision, thesis, conviction, size, stop, gmgn }) {
   inboxEl.prepend(m);
   if (decision === "APPROVED" || decision === "PROPOSE") approvedCount++;
 }
-inboxEl.innerHTML = `<p class="empty">Nothing on the CEO's desk yet.<br>Approved orders land here.</p>`;
+inboxEl.innerHTML = `<p class="empty">Nothing on CONTROL's desk yet.<br>Authorised orders land here.</p>`;
 
 document.getElementById("tab-tape").onclick = () => switchTab(true);
 document.getElementById("tab-inbox").onclick = () => switchTab(false);
@@ -1339,7 +1339,7 @@ const HANDLERS = {
           // else crosses into that office.
           await p.moveTo(SPOTS.ceoDoor[0], SPOTS.ceoDoor[1]);
           puff(p, "✉");
-          p.say("For the CEO.");
+          p.say("For CONTROL.");
           p.carry(false);
           const ceo = who("CEO");
           ceo?.run(async () => { ceo.carry(true, "green"); ceo.say("Something's come under the door."); });
@@ -1416,13 +1416,13 @@ function handle(ev) { HANDLERS[ev.type]?.(ev); if (window.__runProgress) window.
 const CHATTER = ["Coffee?", "Seen the volume on that?", "Mine's a pass.", "Printer's jammed again.",
   "Anything good today?", "I'd want a tighter stop.", "Liquidity's thin out there.", "Long week."];
 const SNACK_TALK = [
-  ["Red Team killed another one.", "It was right to."],
+  ["SABOTEUR killed another one.", "It was right to."],
   ["Anything survive the screen?", "Three out of forty."],
   ["That chart looked fine to me.", "It always does at the top."],
-  ["Coffee's gone again.", "That was PM."],
-  ["Holders came back 429 all morning.", "So we're guessing again."],
+  ["Coffee's gone again.", "That was HANDLER."],
+  ["Holders came back 429 all morning.", "So POLYGRAPH is guessing again."],
   ["I had it at seventy.", "I had it at twelve."],
-  ["Did we ever close that call?", "Stop hit at four."],
+  ["Did EXFIL ever clear that one?", "Stop hit at four."],
 ];
 
 const inSnackRoom = new Set();
