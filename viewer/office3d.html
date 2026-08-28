@@ -181,9 +181,10 @@ select.dp-in{cursor:pointer}
   <div class="firm">Claude <em>&amp;</em> Co.</div>
   <div class="tag">Solana Research Desk</div>
   <div class="spacer"></div>
-  <div class="stat">Under review <b id="s-token">—</b></div>
-  <div class="stat">Approved <b id="s-props">0</b></div>
-  <div class="stat">Spend <b id="s-spend">$0.00</b></div>
+  <div class="stat">Live calls <b id="s-live-calls">—</b></div>
+  <div class="stat">Your floor <b id="s-mine">—</b></div>
+  <div class="stat">Balance <b id="s-bal">—</b></div>
+  <div class="stat" id="s-rentwrap" hidden>Rent <b id="s-rent">—</b></div>
   <div class="live" id="s-live"><span class="dot"></span><span id="s-livetext">Connecting</span></div>
 </div>
 
@@ -1116,7 +1117,7 @@ document.getElementById("loading").classList.add("gone");
 /* ═══ THE TAPE, THE INBOX, THE LEGEND ═════════════════════════════════════ */
 const tapeEl = document.getElementById("tape"), inboxEl = document.getElementById("inbox");
 let approvedCount = 0, lastOrder = null, current = { symbol: "—" };
-const setStat = (id, v) => { document.getElementById(id).textContent = v; };
+const setStat = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
 const short = (m) => (m ? m.slice(0, 4) + "…" + m.slice(-4) : "");
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -1160,7 +1161,7 @@ function memo({ symbol, decision, thesis, conviction, size, stop, gmgn }) {
   }
   inboxEl.querySelector(".empty")?.remove();
   inboxEl.prepend(m);
-  if (decision === "APPROVED" || decision === "PROPOSE") setStat("s-props", String(++approvedCount));
+  if (decision === "APPROVED" || decision === "PROPOSE") approvedCount++;
 }
 inboxEl.innerHTML = `<p class="empty">Nothing on the CEO's desk yet.<br>Approved orders land here.</p>`;
 
@@ -1367,7 +1368,7 @@ const HANDLERS = {
     const good = e.outcome === "APPROVED" || e.outcome === "PROPOSE";
     tape("Floor", `${e.symbol || short(e.mint)} → ${e.outcome}${e.detail ? " (" + e.detail + ")" : ""}`,
       good ? "good" : e.outcome === "WATCH" || e.outcome === "HELD" ? "warn" : "bad");
-    setStat("s-token", "—");
+
     const sc = who("Scribe");
     sc.run(async () => { sc.carry(true, good ? "green" : ""); await errand(sc, SPOTS.archive, "▤", `${e.symbol || "?"}: ${e.outcome}`); sc.carry(false); });
     memo({
@@ -1380,9 +1381,9 @@ const HANDLERS = {
   },
   "cycle:end": (e) => {
     tape("Floor", `Cycle closed — ${e.count ?? 0} names, $${e.spendUsd ?? 0} spent`, "hi");
-    if (e.spendUsd != null) setStat("s-spend", "$" + Number(e.spendUsd).toFixed(2));
+
   },
-  "seat:done": (e) => { if (e.usd != null) setStat("s-spend", "$" + Number(e.usd).toFixed(2)); },
+
 };
 function handle(ev) { HANDLERS[ev.type]?.(ev); if (window.__runProgress) window.__runProgress(ev); }
 
@@ -1790,6 +1791,7 @@ async function loadCalls() {
   try {
     const { body } = await call_api(`/api/floor/${FLOOR_N}/feed`);
     renderCalls(body);
+    paintHud({ feed: body.feed, settings: body.settings, budget: BUDGET, rent: body.rent });
   } catch (e) {
     callsPanel.innerHTML = "";
     const p = document.createElement("p");
@@ -1923,6 +1925,7 @@ async function refreshBudget() {
   try {
     const { body } = await call_api("/api/budget");
     BUDGET = body;
+    paintHud({ budget: BUDGET });
     if (callsPanel.classList.contains("on")) loadCalls();
   } catch {}
 }
@@ -1983,6 +1986,27 @@ function buildControls(settings) {
   });
   box.append(save, msg);
   return box;
+}
+
+/* ── the top bar, kept current from the same data the panels use ─────────── */
+function paintHud({ feed, settings, budget, rent } = {}) {
+  const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  if (feed) {
+    set("s-live-calls", String(feed.filter((c) => c.status === "live").length));
+    const mine = feed.filter((c) => c.verdict === "offered" && c.status === "live");
+    set("s-mine", mine.length ? `${mine.length} to place` : "nothing to place");
+  }
+  if (budget) {
+    const bal = Number(BigInt(budget.balanceBaseUnits) / 10n ** BigInt(Math.max(0, budget.decimals - 3))) / 1000;
+    set("s-bal", bal.toLocaleString(undefined, { maximumFractionDigits: 0 }) + " CLAUDECO");
+  }
+  const wrap = document.getElementById("s-rentwrap");
+  if (wrap && rent && rent.dueAt) {
+    wrap.hidden = false;
+    const days = Math.ceil((rent.dueAt - Date.now()) / 86400000);
+    set("s-rent", rent.overdue ? "overdue" : `${days}d`);
+    wrap.style.color = rent.overdue ? "var(--bad,#d9806e)" : "";
+  }
 }
 
 if (FLOOR_N != null) { refreshBudget(); loadCalls(); }

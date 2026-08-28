@@ -81,4 +81,20 @@ export function stats() {
   return { proposals: p, byDecision, kills, tokensSeen: looked };
 }
 
+/**
+ * CREATE TABLE IF NOT EXISTS is not a migration. On a database that already has the
+ * table, a changed schema is silently ignored and the new column simply is not there —
+ * which reads at runtime as `undefined`, not as an error. Production databases are
+ * always the old shape, so every added column needs this.
+ */
+export function ensureColumn(table, column, decl, backfillFrom = null) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!cols.length || cols.includes(column)) return false;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
+  if (backfillFrom && cols.includes(backfillFrom)) {
+    db.exec(`UPDATE ${table} SET ${column} = ${backfillFrom} WHERE ${column} IS NULL`);
+  }
+  return true;
+}
+
 export default db;

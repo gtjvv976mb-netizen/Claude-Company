@@ -1,4 +1,4 @@
-import db from "./lib/store.js";
+import db, { ensureColumn } from "./lib/store.js";
 import { emit } from "./lib/bus.js";
 import { CATEGORY_RISK } from "./market.js";
 
@@ -54,6 +54,8 @@ CREATE TABLE IF NOT EXISTS call_events (
 );
 CREATE INDEX IF NOT EXISTS idx_call_events ON call_events(call_id, id DESC);
 `);
+
+ensureColumn("calls", "launchpad", "TEXT");
 
 export function openCall(c) {
   try {

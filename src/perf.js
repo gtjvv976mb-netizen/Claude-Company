@@ -1,4 +1,4 @@
-import db from "./lib/store.js";
+import db, { ensureColumn } from "./lib/store.js";
 import { readRpc } from "./lib/http.js";
 import { cfg } from "./config.js";
 import { isAddress } from "./lib/base58.js";
@@ -63,6 +63,10 @@ CREATE TABLE IF NOT EXISTS results (
   UNIQUE (floor_no, call_id)
 );
 `);
+
+ensureColumn("results", "fee_usd", "REAL NOT NULL DEFAULT 0");
+ensureColumn("results", "fee_paid", "INTEGER NOT NULL DEFAULT 0");
+ensureColumn("results", "token_usd", "REAL");
 
 /** The wallet's token account for a mint, if it has ever held one. */
 async function tokenAccountOf(wallet, mint) {

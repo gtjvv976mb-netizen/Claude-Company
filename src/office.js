@@ -168,7 +168,8 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           const what = copyMatch[2];
           if (what === "feed" && req.method === "GET") {
             return json(200, { feed: copy.feedFor(floorNo), settings: copy.settingsFor(floorNo),
-                               appetites: copy.APPETITES });
+                               appetites: copy.APPETITES, rent: leasing.rentStatus(floorNo),
+                               record: perf.recordFor(floorNo) });
           }
           if (!me) return json(401, { error: "sign in with your wallet first" });
           const lease = leasing.leaseFor(floorNo);

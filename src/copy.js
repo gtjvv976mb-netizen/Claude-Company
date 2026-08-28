@@ -1,4 +1,4 @@
-import db from "./lib/store.js";
+import db, { ensureColumn } from "./lib/store.js";
 import { emit } from "./lib/bus.js";
 import { CATEGORY_RISK } from "./market.js";
 
@@ -70,6 +70,11 @@ CREATE INDEX IF NOT EXISTS idx_deliveries_floor ON deliveries(floor_no, id DESC)
  *
  * The desk can spend the first and only ever sizes against the second.
  */
+// Migrations for databases that predate these columns — production is always one of them.
+ensureColumn("copy_settings", "bankroll_sol", "REAL NOT NULL DEFAULT 5");
+ensureColumn("copy_settings", "launchpads", "TEXT");
+ensureColumn("deliveries", "size_sol", "REAL", "size_usd");
+
 export function settingsFor(floorNo) {
   let s = db.prepare("SELECT * FROM copy_settings WHERE floor_no=?").get(floorNo);
   if (!s) {
