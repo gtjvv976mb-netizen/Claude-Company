@@ -218,7 +218,7 @@ select.dp-in{cursor:pointer}
       <h2>The Floor</h2>
       <div class="tabs" role="tablist">
         <button class="tab" id="tab-tape" role="tab" aria-selected="true">Tape</button>
-        <button class="tab" id="tab-inbox" role="tab" aria-selected="false">CONTROL</button>
+        <button class="tab" id="tab-inbox" role="tab" aria-selected="false">BIG M</button>
         <button class="tab" id="tab-desk" role="tab" aria-selected="false">My Desk</button>
         <button class="tab" id="tab-calls" role="tab" aria-selected="false">Calls</button>
       </div>
@@ -413,20 +413,20 @@ scene.add(room);
 const DAIS_Y = 0.35;                              // the executive suite is raised
 
 const STAFF = [
-  { id:"CEO",        name:"CONTROL",        role:"Authorises the op", desk:[0,-9.6],    stand:[0,-11.0],    y:DAIS_Y, claude:true },
-  { id:"Scout",      name:"DRAGNET",    role:"Sweeps the field",        desk:[-15.4,-6.5],stand:[-13.8,-6.5], apron:0x8d6cae },
-  { id:"Screener",   name:"CHECKPOINT",       role:"Nobody passes unchecked", desk:[-15.4,-1.0],stand:[-13.8,-1.0], apron:0x5c7d8a },
-  { id:"Compliance", name:"OVERSIGHT",        role:"Cannot be argued with",          desk:[-15.4,4.5], stand:[-13.8,4.5],  apron:0x8d9298 },
-  { id:"Forensics",  name:"SCALPEL",       role:"Opens it up",    desk:[-9.5,-5.6], stand:[-9.5,-4.1],  apron:0xbf4a3c },
-  { id:"Liquidity",  name:"EXFIL",       role:"Gets you out",   desk:[-3.2,-5.6], stand:[-3.2,-4.1],  apron:0x2f9fb0 },
-  { id:"Flow",       name:"WIRETAP",      role:"Listens to the real traffic",  desk:[3.2,-5.6],  stand:[3.2,-4.1],   apron:0xe0b040 },
-  { id:"Technical",  name:"COMPASS",  role:"Reads the ground",   desk:[-6.6,-0.6], stand:[-6.6,0.9],   apron:0x4e6ba8 },
-  { id:"Narrative",  name:"POLYGRAPH",        role:"Detects the lie",       desk:[6.6,-0.6],  stand:[6.6,0.9],    apron:0xd7758f },
-  { id:"PM",         name:"HANDLER",       role:"Runs the agents",        desk:[15.4,-7.0], stand:[13.8,-7.0],  apron:0x287e9d },
-  { id:"Red Team",   name:"SABOTEUR",    role:"Tries to blow it up", desk:[15.4,-1.0], stand:[13.8,-1.0], apron:0x8c2f27 },
-  { id:"Risk",       name:"TOURNIQUET",      role:"Stops the bleeding", desk:[15.4,5.5],  stand:[13.8,5.5],   apron:0x70828a },
-  { id:"Execution",  name:"COURIER", role:"Carries the package", desk:[2.5,8.2],   stand:[2.5,6.7],    apron:0x5f9445 },
-  { id:"Scribe",     name:"BLACKBOX",     role:"Survives the crash",    desk:[-5.5,8.2],  stand:[-5.5,6.7],   apron:0xc8863c },
+  { id:"CEO",        name:"BIG M",        role:"Signs off on the op", desk:[0,-9.6],    stand:[0,-11.0],    y:DAIS_Y, claude:true },
+  { id:"Scout",      name:"WALLDO",    role:"Finds them wherever they hide",        desk:[-15.4,-6.5],stand:[-13.8,-6.5], apron:0x8d6cae },
+  { id:"Screener",   name:"DR. NOPE",       role:"Says no. A lot.", desk:[-15.4,-1.0],stand:[-13.8,-1.0], apron:0x5c7d8a },
+  { id:"Compliance", name:"JUDGE DREAD",        role:"I am the law",          desk:[-15.4,4.5], stand:[-13.8,4.5],  apron:0x8d9298 },
+  { id:"Forensics",  name:"SHERLOCK HOMES",       role:"Deduces what it really is",    desk:[-9.5,-5.6], stand:[-9.5,-4.1],  apron:0xbf4a3c },
+  { id:"Liquidity",  name:"HOUDEENY",       role:"Checks you can get out",   desk:[-3.2,-5.6], stand:[-3.2,-4.1],  apron:0x2f9fb0 },
+  { id:"Flow",       name:"GADGIT",      role:"Bugs the order flow",  desk:[3.2,-5.6],  stand:[3.2,-4.1],   apron:0xe0b040 },
+  { id:"Technical",  name:"CUE",  role:"Reads the chart",   desk:[-6.6,-0.6], stand:[-6.6,0.9],   apron:0x4e6ba8 },
+  { id:"Narrative",  name:"MATA HARDLY",        role:"The story hardly holds",       desk:[6.6,-0.6],  stand:[6.6,0.9],    apron:0xd7758f },
+  { id:"PM",         name:"CHARLIE ANGLES",       role:"Runs the team, calls the angle",        desk:[15.4,-7.0], stand:[13.8,-7.0],  apron:0x287e9d },
+  { id:"Red Team",   name:"BLOWFELD",    role:"Tries to blow it up", desk:[15.4,-1.0], stand:[13.8,-1.0], apron:0x8c2f27 },
+  { id:"Risk",       name:"MINI-MEH",      role:"Makes your size smaller", desk:[15.4,5.5],  stand:[13.8,5.5],   apron:0x70828a },
+  { id:"Execution",  name:"JOHN QUICK", role:"Executes. Fast.", desk:[2.5,8.2],   stand:[2.5,6.7],    apron:0x5f9445 },
+  { id:"Scribe",     name:"MANYPENNY",     role:"Keeps the file on everything",    desk:[-5.5,8.2],  stand:[-5.5,6.7],   apron:0xc8863c },
 ];
 
 /** seat id -> crew name, for anything arriving from the server keyed by id. */
@@ -450,7 +450,7 @@ const SPOTS = {
 /* ═══ FURNITURE ═══════════════════════════════════════════════════════════ */
 const TIMBER = 0x8a6540, STEEL = 0x76858a, DARK = 0x3c4a4d;
 
-function buildDesk(at, yaw, y = 0, accent = P.teal) {
+function buildDesk(at, yaw, y = 0, accent = P.teal, kitId = null) {
   const g = new THREE.Group();
   g.position.set(at[0], y, at[1]);
   g.rotation.y = yaw;
@@ -464,6 +464,10 @@ function buildDesk(at, yaw, y = 0, accent = P.teal) {
   box(g, [0.30, 0.02, 0.52], [0.16, 0.79, 0], DARK);               // keyboard
   box(g, [0.24, 0.05, 0.32], [0.10, 0.81, 0.72], P.cream, 0.9);    // paper tray
   cyl(g, 0.055, 0.11, [0.16, 0.84, -0.62], P.terracotta, 8);       // mug
+
+  const kit = kitId && DESK_KIT[kitId];
+  if (kit) kit((size, at2, colour, rough = 0.82) => box(g, size, at2, colour, rough));
+
   room.add(g);
   return g;
 }
@@ -743,6 +747,104 @@ function buildSpark(radius, rays, thickness, colour, emissive = 0.55) {
   return g;
 }
 
+/**
+ * One prop per operative, hung off the rig's bones so it follows the animation.
+ * Kept to two or three boxes each: at fourteen figures the silhouette has to read from
+ * across the room, and detail that only resolves up close costs draw calls for nothing.
+ */
+const ACCESSORY = {
+  // Each figure has to be identifiable at a glance from across an isometric room, so the
+  // rule is the same one caricaturists use: take the two or three things a person is
+  // known for and drop everything else. Boxes are parented to bones, not skinned, so they
+  // ride the existing walk cycle for free.
+
+  // WALLDO — bobble hat, round glasses, stripes. The seat that finds things is the one
+  // you can always find.
+  Scout: (j, add) => { add(j.Head, [0.35, 0.12, 0.35], [0, 1.80, 0], 0xf4f4f4);
+                       add(j.Head, [0.35, 0.06, 0.35], [0, 1.87, 0], 0xb0503f);
+                       add(j.Head, [0.13, 0.13, 0.13], [0, 1.94, 0], 0xf4f4f4);
+                       add(j.Head, [0.02, 0.07, 0.09], [0.16, 1.65, 0.08], 0x1d1916);
+                       add(j.Head, [0.02, 0.07, 0.09], [0.16, 1.65, -0.08], 0x1d1916);
+                       add(j.Chest, [0.29, 0.05, 0.49], [-0.01, 1.34, 0], 0xb0503f);
+                       add(j.Chest, [0.29, 0.05, 0.49], [-0.01, 1.20, 0], 0xb0503f); },
+
+  // DR. NOPE — lab coat and the black gloves. Says no in a laboratory.
+  Screener: (j, add) => { add(j.Chest, [0.30, 0.38, 0.50], [-0.01, 1.22, 0], 0xf0e4c7);
+                          add(j.LowerArmL, [0.13, 0.13, 0.13], [0.04, 0.86, 0.26], 0x1d1916);
+                          add(j.LowerArmR, [0.13, 0.13, 0.13], [0.04, 0.86, -0.26], 0x1d1916); },
+
+  // SHERLOCK HOMES — deerstalker, both brims, and a lens in the right hand.
+  Forensics: (j, add) => { add(j.Head, [0.34, 0.12, 0.34], [0, 1.81, 0], 0x8a6540);
+                           add(j.Head, [0.15, 0.04, 0.36], [0.21, 1.78, 0], 0x6f4f30);
+                           add(j.Head, [0.15, 0.04, 0.36], [-0.21, 1.78, 0], 0x6f4f30);
+                           add(j.Head, [0.24, 0.13, 0.05], [0, 1.74, 0.19], 0x6f4f30);
+                           add(j.Head, [0.24, 0.13, 0.05], [0, 1.74, -0.19], 0x6f4f30);
+                           add(j.LowerArmR, [0.02, 0.15, 0.15], [0.06, 0.86, -0.28], 0x8fd8dd);
+                           add(j.LowerArmR, [0.03, 0.03, 0.12], [0.06, 0.76, -0.28], 0x8a6540); },
+
+  // HOUDEENY — wrapped in chain with the padlock on the front. The exit seat, in irons.
+  Liquidity: (j, add) => { add(j.Chest, [0.31, 0.05, 0.51], [-0.01, 1.35, 0], 0x9aa7ab);
+                           add(j.Chest, [0.31, 0.05, 0.51], [-0.01, 1.19, 0], 0x9aa7ab);
+                           add(j.Chest, [0.10, 0.13, 0.10], [0.16, 1.27, 0], 0xe0ad3d); },
+
+  // GADGIT — trench coat, fedora, and the thing that comes out of the hat.
+  Flow: (j, add) => { add(j.Chest, [0.31, 0.44, 0.51], [-0.01, 1.17, 0], 0x9a7a4a);
+                      add(j.Head, [0.33, 0.10, 0.33], [0, 1.81, 0], 0x8a6540);
+                      add(j.Head, [0.44, 0.03, 0.44], [0, 1.76, 0], 0x8a6540);
+                      add(j.Head, [0.04, 0.10, 0.04], [0, 1.90, 0], 0x2f3a3f);
+                      add(j.Head, [0.03, 0.02, 0.42], [0, 1.96, 0], 0xbfd3d6); },
+
+  // CUE — the quartermaster: lab coat and the heavy spectacles.
+  Technical: (j, add) => { add(j.Chest, [0.30, 0.38, 0.50], [-0.01, 1.22, 0], 0xf0e4c7);
+                           add(j.Head, [0.02, 0.10, 0.12], [0.16, 1.65, 0.09], 0x1d1916);
+                           add(j.Head, [0.02, 0.10, 0.12], [0.16, 1.65, -0.09], 0x1d1916);
+                           add(j.Head, [0.02, 0.02, 0.08], [0.16, 1.65, 0], 0x1d1916); },
+
+  // MATA HARDLY — headdress, jewel and veil. The seat that tests a story, dressed as one.
+  Narrative: (j, add) => { add(j.Head, [0.33, 0.09, 0.33], [0, 1.80, 0], 0xe0ad3d);
+                           add(j.Head, [0.09, 0.10, 0.09], [0.13, 1.87, 0], 0xd7a3c8);
+                           add(j.Head, [0.04, 0.17, 0.30], [0.17, 1.56, 0], 0xd7a3c8);
+                           add(j.Chest, [0.09, 0.05, 0.28], [0.14, 1.35, 0], 0xe0ad3d); },
+
+  // BLOWFELD — bald, scarred, Nehru collar, and the cat. Always the cat.
+  "Red Team": (j, add) => { add(j.Head, [0.33, 0.11, 0.33], [0, 1.79, 0], 0xd8b08c);
+                            add(j.Head, [0.02, 0.15, 0.03], [0.16, 1.66, 0.07], 0xb0503f);
+                            add(j.Chest, [0.31, 0.38, 0.51], [-0.01, 1.21, 0], 0x2f3a3f);
+                            add(j.LowerArmL, [0.16, 0.13, 0.26], [0.07, 0.93, 0.25], 0xf4f4f4);
+                            add(j.LowerArmL, [0.12, 0.12, 0.12], [0.13, 1.01, 0.35], 0xf4f4f4); },
+
+  // MINI-MEH — grey jumpsuit and a bald head. The size gag is in AVATAR_SCALE below,
+  // which is also, exactly, this seat's job.
+  Risk: (j, add) => { add(j.Head, [0.33, 0.11, 0.33], [0, 1.79, 0], 0xd8b08c);
+                      add(j.Chest, [0.31, 0.42, 0.51], [-0.01, 1.19, 0], 0x8a9296); },
+
+  // CHARLIE ANGLES — the hair and the aviators, both oversized, as they were.
+  PM: (j, add) => { add(j.Head, [0.44, 0.32, 0.46], [-0.05, 1.68, 0], 0x6f4f30);
+                    add(j.Head, [0.05, 0.09, 0.34], [0.17, 1.66, 0], 0x1d1916); },
+
+  // JOHN QUICK — black suit, white collar, and the beard.
+  Execution: (j, add) => { add(j.Chest, [0.31, 0.42, 0.51], [-0.01, 1.19, 0], 0x1d1916);
+                           add(j.Chest, [0.05, 0.24, 0.10], [0.16, 1.28, 0], 0xf4f4f4);
+                           add(j.Head, [0.06, 0.11, 0.26], [0.15, 1.55, 0], 0x2a231e);
+                           add(j.Head, [0.31, 0.15, 0.33], [-0.03, 1.76, 0], 0x2a231e); },
+
+  // JUDGE DREAD — the helmet never comes off, the visor is gold, the shoulder is armoured.
+  Compliance: (j, add) => { add(j.Head, [0.36, 0.30, 0.36], [0, 1.72, 0], 0x2f4048);
+                            add(j.Head, [0.05, 0.09, 0.34], [0.18, 1.66, 0], 0xe0ad3d);
+                            add(j.Head, [0.13, 0.10, 0.13], [-0.03, 1.91, 0], 0xe0ad3d);
+                            add(j.UpperArmL, [0.23, 0.15, 0.23], [0, 1.35, 0.26], 0xe0ad3d);
+                            add(j.Chest, [0.06, 0.14, 0.14], [0.16, 1.32, 0.11], 0xe0ad3d); },
+
+  // MANYPENNY — the updo and the pearls. Keeps the file on everyone in the building.
+  Scribe: (j, add) => { add(j.Head, [0.33, 0.13, 0.33], [0, 1.79, 0], 0x6f4f30);
+                        add(j.Head, [0.16, 0.16, 0.16], [-0.11, 1.90, 0], 0x6f4f30);
+                        add(j.Chest, [0.06, 0.05, 0.29], [0.15, 1.35, 0], 0xf0e4c7); },
+};
+
+// Scaling the root shrinks the figure without touching the rig, the walk cycle or the
+// desk it sits at. Only one seat wants it, and for that seat it is the whole point.
+const AVATAR_SCALE = { Risk: 0.66 };
+
 function buildAvatar(spec, index) {
   const root = new THREE.Group();
   const joints = {};
@@ -782,6 +884,22 @@ function buildAvatar(spec, index) {
   root.updateMatrixWorld(true);
   mesh.bind(new THREE.Skeleton(JOINT_ORDER.map((n) => joints[n])), new THREE.Matrix4());
 
+  // Props are separate meshes parented to bones, so they follow the skinned animation
+  // without needing to be skinned themselves.
+  const kit = ACCESSORY[spec.id];
+  if (kit) {
+    const add = (bone, size, centre, colour) => {
+      if (!bone) return;
+      const rest = JOINT_REST[Object.keys(JOINT_REST).find((n) => joints[n] === bone)] || [0, 0, 0];
+      const m = new THREE.Mesh(BOX, mat(colour, 0.8));
+      m.scale.set(size[0], size[1], size[2]);
+      m.position.set(centre[0] - rest[0], centre[1] - rest[1], centre[2] - rest[2]);
+      m.castShadow = renderer.shadowMap.enabled;
+      bone.add(m);
+    };
+    kit(joints, add);
+  }
+
   let spark = null, built_halo = null;
   if (claude) {
     // Claude's mark, worn where a face would be. The rig faces +X, and the spark is
@@ -812,6 +930,9 @@ function buildAvatar(spec, index) {
   doc.position.set(0.16, 0.96, 0);
   doc.visible = false;
   root.add(doc);
+
+  const sc = AVATAR_SCALE[spec.id];
+  if (sc) root.scale.setScalar(sc);
 
   return { root, joints, doc, snack, spark, halo: built_halo };
 }
@@ -883,7 +1004,7 @@ class Worker {
     this.nameSprite = makeSprite(spec.name || spec.id, spec.claude ? 1.15 : 0.92,
       spec.claude ? { bg: "#8a3f22", accent: "#f0c9a0" } : undefined);
     this.nameSprite.position.set(0, 2.28, 0);
-    this.nameSprite.visible = false;
+    this.nameSprite.visible = true;
     this.g.add(this.nameSprite);
 
     this.bubble = null;
@@ -952,7 +1073,7 @@ class Worker {
       }
       this.g.position.x = this.x; this.g.position.z = this.z;
     }
-    this.nameSprite.visible = moving || !!this.bubble;
+    this.nameSprite.visible = true;
 
     // seated blend
     const target = this.wantSeated && !moving ? 1 : 0;
@@ -1005,11 +1126,124 @@ class Worker {
   }
 }
 
+/**
+ * Each workstation is kitted for its operative. All of it is static, so it bakes into
+ * the merged geometry and costs nothing per frame — the desks can be as detailed as
+ * they need to be to tell you who sits there from across the room.
+ *
+ * `b` places a box in the desk's own local frame: +X is the seated side, +Z is to the
+ * operative's right, so a kit written once lands correctly whichever way the desk faces.
+ */
+const DESK_KIT = {
+  // Props are baked into the merged desk geometry, so a workstation costs nothing per
+  // frame. Local frame: +X is the seated side, +Z is the operative's right.
+
+  // WALLDO — a crowded spot-the-thing board, a striped ball, the cane.
+  Scout: (b) => { b([0.05, 0.64, 0.92], [-0.44, 1.28, 0], 0xf0e4c7);
+                  for (let i = 0; i < 12; i++) b([0.02, 0.06, 0.06], [-0.41, 1.03 + (i % 4) * 0.15, -0.36 + (i % 6) * 0.15], [0xb0503f, 0x2a4a6a, 0xe0ad3d, 0x4f8f52][i % 4]);
+                  b([0.18, 0.18, 0.18], [0.14, 0.89, 0.60], 0xb0503f);
+                  b([0.05, 0.46, 0.05], [-0.1, 1.03, 0.68], 0xf4f4f4);
+                  b([0.06, 0.10, 0.14], [-0.1, 1.28, 0.63], 0xb0503f); },
+
+  // DR. NOPE — the stamp, the pad, and a reject tray that is doing most of the work.
+  Screener: (b) => { b([0.16, 0.13, 0.16], [0.20, 0.86, -0.48], 0x1d1916);
+                     b([0.09, 0.09, 0.09], [0.20, 0.96, -0.48], 0xb0503f);
+                     b([0.22, 0.03, 0.26], [0.20, 0.81, -0.72], 0xb0503f);
+                     b([0.34, 0.16, 0.42], [-0.16, 0.87, 0.52], 0x3a4a50);
+                     for (let i = 0; i < 5; i++) b([0.24, 0.02, 0.30], [-0.16, 0.96 + i * 0.04, 0.52 + (i % 2) * 0.04], 0xf0e4c7); },
+
+  // SHERLOCK HOMES — lens on a stand, the pinboard with string, the pipe.
+  Forensics: (b) => { b([0.05, 0.60, 0.90], [-0.44, 1.26, 0], 0x5f3e29);
+                      for (let i = 0; i < 6; i++) b([0.02, 0.12, 0.09], [-0.41, 1.08 + (i % 3) * 0.18, -0.32 + (i % 3) * 0.30], 0xf0e4c7);
+                      for (let i = 0; i < 5; i++) b([0.02, 0.02, 0.24], [-0.40, 1.14 + i * 0.09, -0.18 + (i % 2) * 0.24], 0xb0503f);
+                      b([0.04, 0.30, 0.04], [0.14, 0.94, 0.58], 0x8a6540);
+                      b([0.02, 0.22, 0.22], [0.14, 1.16, 0.58], 0x8fd8dd);
+                      b([0.14, 0.04, 0.04], [0.20, 0.82, -0.60], 0x5f3e29);
+                      b([0.06, 0.09, 0.06], [0.26, 0.86, -0.60], 0x5f3e29); },
+
+  // HOUDEENY — a chained trunk, the key nobody can reach, and a lit exit sign.
+  Liquidity: (b) => { b([0.34, 0.24, 0.44], [0.12, 0.90, 0.58], 0x5f3e29);
+                      b([0.36, 0.04, 0.10], [0.12, 0.94, 0.58], 0x9aa7ab);
+                      b([0.10, 0.11, 0.10], [0.30, 0.90, 0.58], 0xe0ad3d);
+                      b([0.03, 0.10, 0.03], [0.18, 0.81, 0.10], 0xe0ad3d);
+                      b([0.50, 0.16, 0.06], [-0.20, 1.62, 0], 0x4f8f52);
+                      b([0.34, 0.08, 0.03], [-0.24, 1.62, 0], 0xf4f4f4); },
+
+  // GADGIT — a rack of devices, the dish, and a telephone from the right decade.
+  Flow: (b) => { b([0.30, 0.34, 0.10], [-0.24, 0.95, -0.56], 0x2f3a3f);
+                 for (let i = 0; i < 6; i++) b([0.06, 0.06, 0.06], [-0.10, 0.86 + (i % 3) * 0.12, -0.56 + (i % 2) * 0.10], [0xdf7655, 0x8fd8dd, 0xd7f04a][i % 3]);
+                 b([0.02, 0.26, 0.26], [0.16, 1.14, 0.60], 0xbfd3d6);
+                 b([0.04, 0.22, 0.04], [0.16, 0.92, 0.60], 0x2f3a3f);
+                 b([0.20, 0.10, 0.28], [0.18, 0.85, 0.16], 0x1d1916);
+                 b([0.22, 0.05, 0.08], [0.18, 0.92, 0.16], 0x1d1916); },
+
+  // CUE — a bench of half-finished things, none of which is explained twice.
+  Technical: (b) => { b([0.40, 0.04, 0.60], [-0.14, 0.81, 0.44], 0x8a6540);
+                      b([0.12, 0.20, 0.12], [-0.14, 0.92, 0.24], 0x9aa7ab);
+                      b([0.08, 0.14, 0.08], [-0.14, 0.89, 0.48], 0xdf7655);
+                      b([0.10, 0.10, 0.22], [-0.14, 0.87, 0.68], 0x2a4a6a);
+                      for (let i = 0; i < 4; i++) b([0.03, 0.16, 0.03], [0.22, 0.90, -0.44 - i * 0.07], 0xbfd3d6);
+                      b([0.20, 0.03, 0.34], [0.22, 0.81, -0.58], 0x2f3a3f); },
+
+  // MATA HARDLY — a chart recorder with a live pen, and a deck of two answers.
+  Narrative: (b) => { b([0.26, 0.14, 0.44], [-0.12, 0.86, 0.50], 0x2f4048);
+                      b([0.20, 0.02, 0.36], [-0.12, 0.94, 0.50], 0xf0e4c7);
+                      b([0.02, 0.02, 0.24], [-0.06, 0.96, 0.50], 0xb0503f);
+                      b([0.03, 0.14, 0.03], [-0.02, 0.99, 0.44], 0x1d1916);
+                      b([0.16, 0.03, 0.11], [0.20, 0.81, -0.50], 0xf0e4c7);
+                      b([0.16, 0.03, 0.11], [0.20, 0.85, -0.62], 0xd7a3c8);
+                      b([0.14, 0.14, 0.14], [0.16, 0.89, 0.66], 0x8fd8dd); },
+
+  // BLOWFELD — the lair console, the button, and where the cat sleeps.
+  "Red Team": (b) => { b([0.34, 0.22, 0.62], [-0.14, 0.90, -0.32], 0x1d1916);
+                       for (let i = 0; i < 8; i++) b([0.05, 0.05, 0.05], [-0.06, 0.94 + (i % 2) * 0.09, -0.56 + (i % 4) * 0.16], [0xdf7655, 0xd7f04a][i % 2]);
+                       b([0.20, 0.10, 0.20], [0.20, 0.84, 0.52], 0x2f3a3f);
+                       b([0.16, 0.09, 0.16], [0.20, 0.92, 0.52], 0xb0503f);
+                       b([0.30, 0.07, 0.38], [-0.16, 0.82, 0.56], 0x8a6540);
+                       b([0.24, 0.04, 0.32], [-0.16, 0.87, 0.56], 0xd7a3c8); },
+
+  // MINI-MEH — the same workstation, one sixth the size, on top of the real one.
+  Risk: (b) => { b([0.16, 0.03, 0.30], [0.06, 0.82, 0.52], 0x8a6540);
+                 b([0.03, 0.07, 0.03], [0.06, 0.78, 0.40], 0x5f3e29);
+                 b([0.03, 0.07, 0.03], [0.06, 0.78, 0.64], 0x5f3e29);
+                 b([0.02, 0.10, 0.14], [-0.01, 0.89, 0.52], 0x2f4048);
+                 b([0.08, 0.09, 0.08], [0.16, 0.86, 0.52], 0x3a4a50);
+                 b([0.08, 0.02, 0.08], [0.16, 0.91, 0.52], 0x8a9296); },
+
+  // CHARLIE ANGLES — three dossiers and the speaker the brief comes out of.
+  PM: (b) => { b([0.22, 0.20, 0.16], [0.16, 0.90, 0.60], 0x5f3e29);
+               for (let i = 0; i < 4; i++) b([0.16, 0.02, 0.12], [0.16, 0.86 + i * 0.03, 0.60], 0x2f3a3f);
+               for (let i = 0; i < 3; i++) b([0.20, 0.04, 0.26], [-0.14, 0.82 + i * 0.05, -0.36 - i * 0.14], [0xb0503f, 0xe0ad3d, 0x2a4a6a][i]); },
+
+  // JOHN QUICK — a stack of tickets, one gold coin, and the pencil.
+  Execution: (b) => { for (let i = 0; i < 7; i++) b([0.20, 0.02, 0.28], [0.16, 0.81 + i * 0.022, 0.52], 0xf0e4c7);
+                      b([0.10, 0.02, 0.10], [-0.14, 0.81, 0.60], 0xe0ad3d);
+                      b([0.09, 0.13, 0.09], [0.20, 0.87, -0.52], 0x2f3a3f);
+                      b([0.03, 0.22, 0.03], [0.20, 0.96, -0.52], 0xe0ad3d);
+                      b([0.03, 0.04, 0.03], [0.20, 1.08, -0.52], 0x1d1916); },
+
+  // JUDGE DREAD — a gavel, its block, and the statute it is read from.
+  Compliance: (b) => { b([0.09, 0.09, 0.24], [0.18, 0.88, -0.46], 0x5f3e29);
+                       b([0.05, 0.18, 0.05], [0.18, 0.82, -0.58], 0x5f3e29);
+                       b([0.22, 0.04, 0.26], [0.18, 0.81, -0.16], 0x8a6540);
+                       b([0.24, 0.12, 0.32], [-0.14, 0.86, 0.52], 0x2f4048);
+                       b([0.22, 0.03, 0.30], [-0.14, 0.93, 0.52], 0xf0e4c7);
+                       b([0.10, 0.02, 0.10], [-0.14, 0.95, 0.52], 0xe0ad3d); },
+
+  // MANYPENNY — the typewriter and the cabinet the whole desk answers to.
+  Scribe: (b) => { b([0.26, 0.10, 0.34], [0.10, 0.85, 0.50], 0x2f3a3f);
+                   for (let i = 0; i < 4; i++) b([0.03, 0.03, 0.28], [0.18 - i * 0.06, 0.91, 0.50], 0xf0e4c7);
+                   b([0.20, 0.16, 0.30], [-0.02, 0.96, 0.50], 0x1d1916);
+                   b([0.34, 0.62, 0.40], [-0.46, 0.31, 0.62], 0x3a4a50);
+                   for (let i = 0; i < 3; i++) b([0.02, 0.16, 0.30], [-0.29, 0.12 + i * 0.20, 0.62], 0x8a9296);
+                   b([0.18, 0.03, 0.24], [0.16, 0.81, -0.52], 0xf0e4c7); },
+};
+
 /* ── desks and chairs ─────────────────────────────────────────────────────── */
 const deskYaw = (spec) => Math.atan2(-(spec.desk[1] - spec.stand[1]), spec.desk[0] - spec.stand[0]);
 for (const spec of STAFF) {
   const yaw = deskYaw(spec);
-  buildDesk(spec.desk, yaw + Math.PI, spec.y ?? 0, spec.claude ? P.claude : P.teal);
+  buildDesk(spec.desk, yaw + Math.PI, spec.y ?? 0, spec.claude ? P.claude : P.teal, spec.id);
   buildChair(spec.stand, yaw, spec.y ?? 0);
 }
 
@@ -1082,9 +1316,7 @@ const bakedBuckets = bakeStatic(room);
 
 STAFF.forEach((spec, i) => {
   workers[spec.id] = new Worker(spec, i);
-  const plate = makeSprite(spec.name || spec.id, 0.58, spec.claude ? { bg: "#8a3f22", accent: "#f0c9a0" } : undefined);
-  plate.position.set(spec.desk[0], (spec.y ?? 0) + 1.18, spec.desk[1]);
-  scene.add(plate);
+
 });
 
 /* ── camera controls ──────────────────────────────────────────────────────── */
@@ -1188,7 +1420,7 @@ function memo({ symbol, decision, thesis, conviction, size, stop, gmgn }) {
   inboxEl.prepend(m);
   if (decision === "APPROVED" || decision === "PROPOSE") approvedCount++;
 }
-inboxEl.innerHTML = `<p class="empty">Nothing on CONTROL's desk yet.<br>Authorised orders land here.</p>`;
+inboxEl.innerHTML = `<p class="empty">Nothing on BIG M's desk yet.<br>Authorised orders land here.</p>`;
 
 document.getElementById("tab-tape").onclick = () => switchTab(true);
 document.getElementById("tab-inbox").onclick = () => switchTab(false);
@@ -1339,7 +1571,7 @@ const HANDLERS = {
           // else crosses into that office.
           await p.moveTo(SPOTS.ceoDoor[0], SPOTS.ceoDoor[1]);
           puff(p, "✉");
-          p.say("For CONTROL.");
+          p.say("For BIG M.");
           p.carry(false);
           const ceo = who("CEO");
           ceo?.run(async () => { ceo.carry(true, "green"); ceo.say("Something's come under the door."); });
@@ -1413,16 +1645,35 @@ const HANDLERS = {
 function handle(ev) { HANDLERS[ev.type]?.(ev); if (window.__runProgress) window.__runProgress(ev); }
 
 /* ── idle life: people are not statues between events ─────────────────────── */
+// An idle agent should look like the person whose name is over their head, not like a
+// generic worker who happens to be labelled. Each seat gets its own errand — a place it
+// would plausibly go and a line it would plausibly say — plus quips said in place.
+const ROUTINE = {
+  Scout:       { spot: "archive",  glyph: "?", lines: ["Found one.", "It was behind the other forty.", "There he is."] },
+  Screener:    { spot: "shredder", glyph: "\u2715", lines: ["No.", "No. Next.", "Thirty-seven of forty. No."] },
+  Forensics:   { spot: "archive",  glyph: "\u2315", lines: ["Elementary. The mint authority is live.", "You see, but you do not read the contract.", "Every transfer leaves a trace."] },
+  Liquidity:   { spot: "ceoDoor",  glyph: "\u2192", lines: ["I can get out of this.", "Nobody gets out at that size.", "Watch the door, not the entry."] },
+  Flow:        { spot: "cooler",   glyph: "\u266b", lines: ["Go-go-gadget order book.", "Wowsers. Eleven wallets, one owner.", "I'm picking something up."] },
+  Technical:   { spot: "printer",  glyph: "\u2692", lines: ["Now pay attention.", "Do bring the chart back in one piece.", "This range is standard issue."] },
+  Narrative:   { spot: "meeting",  glyph: "\u2248", lines: ["The story hardly holds.", "Charming. And untrue.", "Everyone lies. Charts included."] },
+  "Red Team":  { spot: "shredder", glyph: "\u2620", lines: ["I've been expecting this one to fail.", "No, Mr. Token, I expect you to die.", "Every thesis has a trapdoor."] },
+  Risk:        { spot: "ceoDoor",  glyph: "\u25be", lines: ["Half that.", "Half that, then half it again.", "Meh. Smaller."] },
+  PM:          { spot: "meeting",  glyph: "\u2709", lines: ["Good morning, team.", "Three angles. Take the second.", "That's the brief."] },
+  Execution:   { spot: "printer",  glyph: "\u2713", lines: ["Ticket's ready.", "Yeah. I'm thinking I'm filled.", "Routed. Sliced. Done."] },
+  Compliance:  { spot: "shredder", glyph: "\u2696", lines: ["I am the law.", "House rule nine. Denied.", "That is not a judgement call."] },
+  Scribe:      { spot: "archive",  glyph: "\u270e", lines: ["Filed.", "It's all on the record.", "I write everything down. Everything."] },
+};
 const CHATTER = ["Coffee?", "Seen the volume on that?", "Mine's a pass.", "Printer's jammed again.",
   "Anything good today?", "I'd want a tighter stop.", "Liquidity's thin out there.", "Long week."];
 const SNACK_TALK = [
-  ["SABOTEUR killed another one.", "It was right to."],
-  ["Anything survive the screen?", "Three out of forty."],
-  ["That chart looked fine to me.", "It always does at the top."],
-  ["Coffee's gone again.", "That was HANDLER."],
-  ["Holders came back 429 all morning.", "So POLYGRAPH is guessing again."],
-  ["I had it at seventy.", "I had it at twelve."],
-  ["Did EXFIL ever clear that one?", "Stop hit at four."],
+  ["BLOWFELD killed another one.", "He does bring the cat to the meeting."],
+  ["Anything survive DR. NOPE?", "Three out of forty."],
+  ["That chart looked fine to me.", "MATA HARDLY says it always does."],
+  ["Coffee's gone again.", "JOHN QUICK. He's fast."],
+  ["I sized it at ten.", "MINI-MEH will halve that."],
+  ["Did HOUDEENY ever clear that one?", "Stop hit at four."],
+  ["Where'd WALLDO go?", "That's the whole problem with WALLDO."],
+  ["JUDGE DREAD vetoed it.", "You can't argue with the law."],
 ];
 
 const inSnackRoom = new Set();
@@ -1472,8 +1723,11 @@ setInterval(() => {
   const spec = roam[Math.floor(Math.random() * roam.length)];
   const p = workers[spec.id];
   if (!p || p.typing || p.doc.visible || p.path || inSnackRoom.has(p.id)) return;
-  if (Math.random() < 0.4) p.run(async () => { await errand(p, SPOTS.cooler, "≈", ""); });
-  else p.run(async () => p.say(CHATTER[Math.floor(Math.random() * CHATTER.length)], 2400));
+  const r = ROUTINE[spec.id];
+  const line = r ? r.lines[Math.floor(Math.random() * r.lines.length)]
+                 : CHATTER[Math.floor(Math.random() * CHATTER.length)];
+  if (r && Math.random() < 0.45) p.run(async () => { await errand(p, SPOTS[r.spot], r.glyph, line); });
+  else p.run(async () => p.say(line, 2600));
 }, 5400);
 
 /* ═══ THE FEED ════════════════════════════════════════════════════════════
