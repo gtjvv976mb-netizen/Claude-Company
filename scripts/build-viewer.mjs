@@ -26,6 +26,9 @@ const ASSETS = [
   "banner-1500x500.png", "banner-1200x630.png",
 ];
 const SITE_URL = (process.env.SITE_URL || "https://claudedotcompany.com").replace(/\/$/, "");
+// Where the API lives. Empty means "same origin", which is right for local dev and wrong
+// for a static host — Pages cannot run the scanner or the database.
+const API_BASE = (process.env.API_BASE || "").replace(/\/$/, "");
 
 const { source: THREE_SRC, exportCount } = inlineThree();
 const THREE_REV = JSON.parse(
@@ -68,6 +71,11 @@ for (const { src: name, out } of PAGES) {
   if (closers !== srcClosers) {
     throw new Error(`${name}: source had ${srcClosers} </script> but output has ${closers} — inlining corrupted the page`);
   }
+  if (API_BASE) {
+    html = html.replace(/<style>/, () =>
+      `<script>window.__API_BASE__=${JSON.stringify(API_BASE)};</script>\n<style>`);
+  }
+
   // the dev server's routes become relative links
   html = html.replace(/<link rel="icon"[^>]*>/, '<link rel="icon" href="assets/favicon.png" type="image/png">');
   html = html.replace(/href="\/tower"/g, 'href="tower.html"');

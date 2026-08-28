@@ -11,7 +11,7 @@ import * as leasing from "./leasing.js";
 import * as rooms from "./rooms.js";
 
 /** Serves the trading floor and streams the desk's real events to it. */
-export function startOffice(port = 4949) {
+export function startOffice(port = Number(process.env.PORT) || 4949) {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${port}`);
 

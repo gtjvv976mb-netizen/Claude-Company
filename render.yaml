@@ -1,0 +1,39 @@
+# Render Blueprint. In Render: New → Blueprint → connect this repo → Apply.
+#
+# The API needs a persistent disk because ownership lives in SQLite: floors, leases and
+# credits. On an ephemeral filesystem a redeploy would erase who owns what, for money
+# that is irreversibly on chain. That is why this is not on the free tier.
+services:
+  - type: web
+    name: claude-company-api
+    runtime: node
+    plan: starter               # required for a persistent disk
+    region: oregon
+    branch: main
+    buildCommand: npm ci
+    startCommand: node src/index.js office
+    healthCheckPath: /api/lease/config
+    disk:
+      name: claude-company-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: CLAUDE_CO_DB
+        value: /var/data/claude-co.db      # on the disk, not the ephemeral filesystem
+      - key: CLAUDECO_MINT
+        value: HRkkxgaFDDmZ3qZX8xP5SiMRBNvFNVUUv4FJUjPCpump
+      - key: CLAUDECO_DECIMALS
+        value: "6"
+      - key: FLOOR_PRICE_CLAUDECO
+        value: "1000000"
+      - key: RUN_PRICE_CLAUDECO
+        value: "250000"
+      - key: FREE_RUNS_WITH_LEASE
+        value: "5"
+      # Set these in the dashboard, not here — they are secrets or account-specific.
+      - key: TREASURY_OWNER
+        sync: false             # your PUBLIC address; leasing stays closed until set
+      - key: ANTHROPIC_API_KEY
+        sync: false             # required for the agents to actually run
+      - key: SOLANA_RPC
+        sync: false             # a Helius/Triton URL; the public RPC is rate-limited

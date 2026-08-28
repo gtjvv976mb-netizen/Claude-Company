@@ -30,7 +30,9 @@ jobs:
       - run: npm ci
       - name: Build static site
         # SITE_URL (the custom domain) makes og:image absolute for link-preview crawlers.
-        run: node scripts/build-viewer.mjs
+        # API_BASE points the static site at the Render service; Pages cannot run the
+        # scanner or the database itself.
+        run: API_BASE="${{ vars.API_BASE }}" node scripts/build-viewer.mjs
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

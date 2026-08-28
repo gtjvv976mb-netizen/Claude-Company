@@ -1,5 +1,6 @@
 import { runCycle, workup } from "./desk.js";
 import { startOffice } from "./office.js";
+import { startScanner } from "./scanner.js";
 import { bus } from "./lib/bus.js";
 import { spend } from "./lib/llm.js";
 import * as store from "./lib/store.js";
@@ -45,7 +46,8 @@ async function main() {
       break;
     }
     case "office": {
-      const { url } = startOffice(Number(args[0]) || 4949);
+      const { url } = startOffice(Number(args[0]) || Number(process.env.PORT) || 4949);
+      startScanner();          // watches the treasury for $CLAUDECO; no-ops until TREASURY_OWNER is set
       console.log(`${C.b}Trading floor live at ${url}${C.x}  (Ctrl-C to close)`);
       narrate();
       break;
