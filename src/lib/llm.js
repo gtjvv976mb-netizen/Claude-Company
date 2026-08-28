@@ -59,14 +59,20 @@ export async function ask({
   schema,
   prompt,
   system,
-  maxTokens = 8000,
+  maxTokens,
   attempts = 3,
 }) {
+  // Thinking counts against max_tokens, so the deeper the effort the more headroom the
+  // visible answer needs. 8000 flat starved the xhigh seats of any room to reply.
+  maxTokens ??= effort === "max" ? 32000 : effort === "xhigh" ? 24000 : 16000;
   let lastErr;
   for (let a = 1; a <= attempts; a++) {
     try {
       emit("seat:thinking", { seat, model, effort, attempt: a });
-      const res = await client.beta.messages.parse({
+      // Streaming, not parse(): the SDK refuses a non-streaming call at these token
+      // budgets because it could exceed the HTTP timeout. finalMessage() gives the same
+      // assembled response, and the schema check below is the authority on shape anyway.
+      const stream = client.beta.messages.stream({
         model,
         max_tokens: maxTokens,
         system: [
@@ -80,14 +86,34 @@ export async function ask({
         betas: ["server-side-fallback-2026-07-01"],
         fallbacks: "default",
       });
+      const res = await stream.finalMessage();
 
       meter(model, res.usage);
 
+      if (res.stop_reason === "max_tokens") {
+        throw new Error(`${seat}: ran out of tokens before answering (effort ${effort}, cap ${maxTokens})`);
+      }
       if (res.stop_reason === "refusal") {
         throw new Refusal(`${seat}: refused (${res.stop_details?.category ?? "unknown"})`);
       }
-      const parsed = res.parsed_output ?? res.parsed;
-      if (!parsed) throw new Error(`${seat}: response did not parse into contract`);
+      // The SDK's auto-parse leaves parsed_output null on this version even when the
+      // model returned perfectly valid JSON, so fall back to validating the text block
+      // against the same schema. Zod is the authority either way — a seat that cannot
+      // answer in contract is dropped, never guessed at.
+      let parsed = res.parsed_output ?? res.parsed ?? null;
+      if (!parsed) {
+        const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+        if (!text) throw new Error(`${seat}: empty response`);
+        const json = text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
+        let raw;
+        try { raw = JSON.parse(json); }
+        catch { throw new Error(`${seat}: response was not JSON`); }
+        const check = schema.safeParse(raw);
+        if (!check.success) {
+          throw new Error(`${seat}: response did not match contract — ${check.error.issues.slice(0, 2).map((i) => i.path.join(".") + " " + i.message).join("; ")}`);
+        }
+        parsed = check.data;
+      }
 
       emit("seat:done", { seat, usd: spend.usd });
       return parsed;
@@ -109,7 +135,7 @@ export async function ask({
  * Two-step for the narrative seat: server-side web search cannot be combined with a
  * structured output format, so we search in one call and shape the result in a second.
  */
-export async function askWithWeb({ seat, model, effort, schema, prompt, system, maxTokens = 8000 }) {
+export async function askWithWeb({ seat, model, effort, schema, prompt, system, maxTokens = 16000 }) {
   emit("seat:searching", { seat, model });
   const research = await client.messages.create({
     model,
