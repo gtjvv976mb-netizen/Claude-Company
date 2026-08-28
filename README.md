@@ -44,6 +44,24 @@ field. "Refuted" can never become a proposal.
 The **CEO** is the only seat shown the desk's own historical record, because its question
 isn't "is this a good trade" — the PM already answered that — but "do I trust my desk today".
 
+## What a tenant actually rents
+
+A floor is a rented desk, not a window onto someone else's. Each floor has its own
+settings, its own journal, and its own research runs, which its tenant triggers and pays
+for. The building is the interface; the desk is the product.
+
+Runs are **metered, not continuous**, and the reason is arithmetic rather than caution.
+Every seat is Opus, two at `xhigh` effort. A full fourteen-seat workup on one token costs
+roughly $0.90–1.50 in API spend, so a desk running hourly is ~$75–110/day. Forty-nine of
+those running independently would be ~$4,000/day against a one-time lease. A one-time
+payment cannot fund unlimited compute, and pretending otherwise would break either the
+promise or the owner.
+
+So: a lease includes `FREE_RUNS_WITH_LEASE` runs, and further runs cost
+`RUN_PRICE_CLAUDECO` from the same $CLAUDECO credit balance the lease was paid from. The
+tenant points their team at a token; fourteen agents work it end to end; the tenant gets a
+brief and an unsigned ticket they sign themselves, or don't.
+
 ## The building
 
 | Page | Route | What it is |

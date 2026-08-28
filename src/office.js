@@ -8,6 +8,7 @@ import * as store from "./lib/store.js";
 import * as tower from "./tower.js";
 import * as auth from "./auth.js";
 import * as leasing from "./leasing.js";
+import * as rooms from "./rooms.js";
 
 /** Serves the trading floor and streams the desk's real events to it. */
 export function startOffice(port = 4949) {
@@ -20,8 +21,13 @@ export function startOffice(port = 4949) {
         "cache-control": "no-cache",
         connection: "keep-alive",
       });
-      res.write(`event: hello\ndata: ${JSON.stringify({ backlog: backlog() })}\n\n`);
-      const onEvent = (ev) => res.write(`data: ${JSON.stringify(ev)}\n\n`);
+      // ?floor=N gives a tenant only their own desk's work; no argument is the house view.
+      const wantFloor = url.searchParams.has("floor") ? Number(url.searchParams.get("floor")) : null;
+      res.write(`event: hello\ndata: ${JSON.stringify({ backlog: backlog(wantFloor), floor: wantFloor })}\n\n`);
+      const onEvent = (ev) => {
+        if (wantFloor != null && ev.floor !== wantFloor) return;
+        res.write(`data: ${JSON.stringify(ev)}\n\n`);
+      };
       bus.on("event", onEvent);
       const ping = setInterval(() => res.write(": ping\n\n"), 15000);
       req.on("close", () => { bus.off("event", onEvent); clearInterval(ping); });
@@ -101,6 +107,24 @@ export function startOffice(port = 4949) {
             lease, credits: leasing.creditsFor(me),
           });
         }
+        const roomMatch = url.pathname.match(/^\/api\/floor\/(\d+)(\/settings|\/run)?$/);
+        if (roomMatch) {
+          const floorNo = Number(roomMatch[1]);
+          const action = roomMatch[2];
+          if (!action) return json(200, rooms.roomState(floorNo, me));
+
+          if (!me) return json(401, { error: "sign in with your wallet first" });
+          const lease = leasing.leaseFor(floorNo);
+          if (!lease || lease.wallet !== me) return json(403, { error: "this is not your floor" });
+
+          const body = await readBody();
+          if (action === "/settings") return json(200, rooms.saveSettings(floorNo, body || {}));
+          if (action === "/run") {
+            const r = await rooms.requestRun({ floorNo, wallet: me, mint: body?.mint });
+            return json(r.ok ? 200 : 409, r);
+          }
+        }
+
         if (url.pathname === "/api/lease/allocate" && req.method === "POST") {
           if (!me) return json(401, { error: "sign in with your wallet first" });
           const body = await readBody();
