@@ -65,6 +65,26 @@ Two house rules that matter, both load-bearing:
 - **Merge, don't instance.** Every static prop is baked into one geometry per finish and
   every avatar is a single skinned mesh. That took the floor from 1,045 draw calls to 99.
 
+## Deploying the website
+
+The site is fully static — every page runs with no backend (the tower and the floors fall
+back to a scripted demo shift when there is no desk process to talk to). It deploys to
+GitHub Pages automatically:
+
+1. Create the empty GitHub repo and `git push -u origin main`.
+2. In the repo: **Settings → Pages → Source: GitHub Actions** (one time).
+3. Every push to `main` then builds `dist/` and publishes it. The workflow sets `SITE_URL`
+   so link-preview images resolve absolutely.
+
+Local equivalents:
+
+```bash
+node scripts/build-viewer.mjs                 # plain static build into dist/
+INLINE_ASSETS=1 node scripts/build-viewer.mjs # artifact build: images inlined as data URIs
+```
+
+A custom domain later is Settings → Pages → Custom domain, plus a CNAME at your DNS.
+
 ## Running it
 
 ```bash

@@ -37,6 +37,18 @@ export function startOffice(port = 4949) {
       return;
     }
 
+    // Token art, served for local dev; the static build copies these into dist/assets.
+    if (url.pathname.startsWith("/assets/")) {
+      const name = path.basename(url.pathname);
+      const af = path.join(ROOT, "token", name);
+      if (/^[\w-]+\.png$/.test(name) && fs.existsSync(af)) {
+        res.writeHead(200, { "content-type": "image/png" });
+        res.end(fs.readFileSync(af));
+        return;
+      }
+      res.writeHead(404); res.end("no such asset"); return;
+    }
+
     if (url.pathname === "/api/tower/floors") {
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       res.end(JSON.stringify(tower.summary()));

@@ -1,4 +1,13 @@
 <title>Claude Company</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Lease a floor in Claude Tower and get your own AI trading team. Fourteen agents research every Solana trade end to end, and a CEO refuses the bad ones.">
+<meta property="og:title" content="Claude Company">
+<meta property="og:description" content="Lease a floor. Get a trading team. Fifty floors, fourteen AI agents each.">
+<meta property="og:image" content="assets/banner-1200x630.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="assets/banner-1200x630.png">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -31,7 +40,9 @@ a{color:inherit}
 nav{position:sticky;top:0;z-index:20;background:var(--charcoal);color:var(--on-dark);
   border-bottom:3px solid var(--amber)}
 nav .wrap{display:flex;align-items:center;gap:20px;padding-top:13px;padding-bottom:13px}
-.brand{font-family:"Instrument Serif",Georgia,serif;font-size:25px;line-height:1;text-decoration:none}
+.brand{font-family:"Instrument Serif",Georgia,serif;font-size:25px;line-height:1;text-decoration:none;
+  display:inline-flex;align-items:center;gap:10px}
+.brand .mark{border-radius:8px;display:block}
 .brand em{font-style:italic;color:var(--amber)}
 nav .links{margin-left:auto;display:flex;gap:20px;align-items:center;flex-wrap:wrap}
 nav a.l{font-size:12px;letter-spacing:.1em;text-transform:uppercase;font-weight:600;
@@ -111,6 +122,17 @@ h2{font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:clamp(
   color:var(--ink-soft);font-size:14.5px;max-width:70ch}
 .plain b{color:var(--ink)}
 
+/* ── token ── */
+.tokengrid{display:grid;grid-template-columns:300px 1fr;gap:38px;align-items:center}
+@media (max-width:760px){.tokengrid{grid-template-columns:1fr}}
+.coin{width:100%;max-width:300px;border-radius:26px;border:1px solid var(--line);display:block;
+  box-shadow:0 18px 40px rgba(24,38,42,.28)}
+.ticker{font-family:"JetBrains Mono",monospace;font-size:13px;letter-spacing:.14em;
+  color:var(--amber);font-weight:500;text-transform:uppercase}
+.ca{background:var(--card);border:1px dashed var(--line);border-radius:9px;padding:13px 16px;
+  font-family:"JetBrains Mono",monospace;font-size:12.5px;color:var(--ink-faint);margin-top:18px}
+.ca b{color:var(--ink);font-weight:500}
+
 footer{background:var(--charcoal);color:rgba(244,236,216,.7);padding:44px 0;font-size:13px}
 footer .wrap{display:flex;gap:24px;flex-wrap:wrap;align-items:center}
 footer a{color:var(--amber);text-decoration:none}
@@ -118,11 +140,12 @@ footer .spacer{margin-left:auto}
 </style>
 
 <nav><div class="wrap">
-  <a class="brand" href="/">Claude <em>Company</em></a>
+  <a class="brand" href="/"><img class="mark" src="assets/claudeco-64.png" alt="" width="30" height="30">Claude <em>Company</em></a>
   <div class="links">
     <a class="l" href="#desk">The desk</a>
     <a class="l" href="#building">The building</a>
     <a class="l" href="#floor">Lease a floor</a>
+    <a class="l" href="#token">$CLAUDECO</a>
     <a class="l" href="/floor/50">Look inside</a>
     <a class="cta" href="/tower">Enter the tower</a>
   </div>
@@ -231,6 +254,25 @@ footer .spacer{margin-left:auto}
     <b>What this software will never do.</b> Hold your keys, sign for you, or move your money —
     there is no custody anywhere in it. Every order it produces is unsigned, and stops at you.
     Nothing here is financial advice.</p>
+</div></section>
+
+<section class="alt" id="token"><div class="wrap">
+  <div class="tokengrid">
+    <img class="coin" src="assets/claudeco-512.png" width="300" height="300"
+      alt="The Claude Company token mark: a blocky cream cube head with an eleven-ray coral spark for a face">
+    <div>
+      <div class="ticker">The house token</div>
+      <h2>$CLAUDECO</h2>
+      <p class="sub" style="margin-bottom:14px">The mark is the CEO of floor 50 — the only
+        head in the building that wears the spark instead of a face. Every other figure on
+        every floor has eyes. The boss is Claude.</p>
+      <p style="margin:0;color:var(--ink-soft);font-size:14.5px">Lease a floor in Claude
+        Tower and get your own AI trading team. Fourteen agents research every Solana trade
+        end to end, and a CEO refuses the bad ones. You stay in control.</p>
+      <div class="ca"><b>Contract address:</b> not minted yet. When it is, the address will be
+        published here and nowhere else — treat any address you see anywhere else as fake.</div>
+    </div>
+  </div>
 </div></section>
 
 <footer><div class="wrap">
