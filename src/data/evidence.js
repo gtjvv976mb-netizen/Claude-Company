@@ -14,8 +14,13 @@ export async function gather(mint, hook = "") {
   const px = await ds.pairsFor(mint);
   if (!px.ok) return { ok: false, mint, error: `dexscreener: ${px.error}` };
 
-  const best = ds.shapePair(px.pairs[0]);
-  const totalLiquidityUsd = px.pairs.reduce((a, p) => a + (p.liquidity?.usd || 0), 0);
+  // Never price off pairs[0]. See dexscreener.consensus() — the deepest REPORTED pool
+  // can be a broken one, and RAY was killed on a price 5,000x its real market.
+  const cons = ds.consensus(px.pairs);
+  if (!cons.ok) return { ok: false, mint, error: `pricing: ${cons.error}` };
+  const best = ds.shapePair(cons.deepest);
+  if (best) best.priceUsd = cons.priceUsd;              // the consensus mark, not one pool's quote
+  const totalLiquidityUsd = cons.liquidityUsd;
 
   const mintAcct = await sol.mintInfo(mint);
   const holders = mintAcct.ok && mintAcct.supply
@@ -84,8 +89,10 @@ export function screen(ev) {
     "too_new", `ageHours=${p.ageHours} < floor ${s.minPairAgeHours}`);
   check((p.volume?.h24 ?? 0) < s.minVolume24hUsd,
     "no_volume", `volume.h24=${p.volume?.h24} < floor ${s.minVolume24hUsd}`);
-  check(d.txns24h < s.minTxns24,
-    "no_participants", `txns24h=${d.txns24h} < floor ${s.minTxns24}`);
+  // Was `s.minTxns24`, which is undefined — so `n < undefined` was always false and this
+  // screen never fired once. The config key is minTxns24h.
+  check(d.txns24h < s.minTxns24h,
+    "no_participants", `txns24h=${d.txns24h} < floor ${s.minTxns24h}`);
   check(d.volToLiqRatio != null && d.volToLiqRatio > s.maxVolToLiqRatio,
     "wash_suspect", `volume/liquidity=${d.volToLiqRatio} > ceiling ${s.maxVolToLiqRatio}`);
   check(d.fdvToLiqRatio != null && d.fdvToLiqRatio > s.maxFdvToLiqRatio,
