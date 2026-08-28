@@ -57,6 +57,18 @@ CREATE TABLE IF NOT EXISTS deliveries (
 CREATE INDEX IF NOT EXISTS idx_deliveries_floor ON deliveries(floor_no, id DESC);
 `);
 
+/**
+ * A floor has two numbers, and conflating them would be the most dangerous mistake in
+ * this product:
+ *
+ *   BUDGET   — $CLAUDECO topped up in-game and held as credit. It pays the agents to
+ *              work: the lease, and each research run. The desk controls this.
+ *   BANKROLL — the trading capital, which stays in the tenant's own wallet. The desk
+ *              never holds it, never sees it, and never signs for it. It exists here
+ *              only as a number the tenant declares so their calls can be sized.
+ *
+ * The desk can spend the first and only ever sizes against the second.
+ */
 export function settingsFor(floorNo) {
   let s = db.prepare("SELECT * FROM copy_settings WHERE floor_no=?").get(floorNo);
   if (!s) {

@@ -132,6 +132,12 @@ body{
 .call .nums b{color:var(--ink)}
 .call .why{margin-top:6px;font-size:11.5px;color:var(--ink-faint);font-style:italic}
 .call .act{margin-top:9px;display:flex;gap:7px}
+.bud-bal{font-family:"Instrument Serif",Georgia,serif;font-size:28px;margin:4px 0 2px}
+.bud-bal b{font-family:"JetBrains Mono",monospace;font-size:24px}
+.bud-addr{font-family:"JetBrains Mono",monospace;font-size:10.5px;word-break:break-all;
+  background:var(--panel);border:1px dashed var(--card-line);border-radius:6px;padding:8px;margin:7px 0}
+.bud-warn{margin:10px 0 0;font-size:11.5px;line-height:1.5;color:var(--ink-soft);
+  border-left:3px solid var(--terracotta);padding-left:10px}
 .padgrid{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
 .pad{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:5px 9px;border-radius:6px;
   border:1px solid var(--card-line);color:var(--ink-faint);cursor:pointer;user-select:none}
@@ -1639,6 +1645,7 @@ async function loadCalls() {
 function renderCalls({ feed = [], settings }) {
   callsPanel.innerHTML = "";
 
+  callsPanel.appendChild(buildBudget());
   if (settings) callsPanel.appendChild(buildControls(settings));
 
   if (!feed.length) {
@@ -1707,6 +1714,62 @@ function renderCalls({ feed = [], settings }) {
   callsPanel.appendChild(note);
 }
 
+/* ── the top-up panel ──────────────────────────────────────────────────────
+   Two numbers, kept visibly apart because conflating them would be the most
+   dangerous confusion in the product: the BUDGET is $CLAUDECO the tenant tops up
+   in-game, which pays their agents to work. The BANKROLL is trading capital that
+   never leaves their wallet — the desk sizes against it and cannot touch it. */
+let BUDGET = null;
+
+function buildBudget() {
+  const box = document.createElement("div");
+  box.className = "call";
+  const mk = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x) e.textContent = x; return e; };
+  box.appendChild(mk("div", "dp-h", "Your agents' budget"));
+
+  if (!BUDGET) { box.appendChild(mk("div", "dp-note", "Loading…")); refreshBudget(); return box; }
+
+  const bal = Number(BigInt(BUDGET.balanceBaseUnits) / 10n ** BigInt(Math.max(0, BUDGET.decimals - 3))) / 1000;
+  const big = mk("div", "bud-bal");
+  big.innerHTML = `<b></b> $CLAUDECO`;
+  big.querySelector("b").textContent = bal.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  box.appendChild(big);
+
+  const runs = BUDGET.runPriceTokens > 0 ? Math.floor(bal / BUDGET.runPriceTokens) : 0;
+  box.appendChild(mk("div", "dp-note",
+    `That is ${runs} research run${runs === 1 ? "" : "s"} at ${BUDGET.runPriceTokens.toLocaleString()} each. ` +
+    `A floor costs ${BUDGET.floorPriceTokens.toLocaleString()} and includes ${BUDGET.freeRunsWithLease} runs.`));
+
+  box.appendChild(mk("div", "dp-h", "Top up"));
+  box.appendChild(mk("div", "dp-note", "Send $CLAUDECO from your own wallet to the building's treasury. It is credited automatically, usually within a minute."));
+  const addr = mk("div", "bud-addr");
+  addr.textContent = BUDGET.treasury || "treasury not configured";
+  box.appendChild(addr);
+  const copy = mk("button", "dp-btn ghost", "Copy address");
+  copy.type = "button";
+  copy.onclick = async () => {
+    try { await navigator.clipboard.writeText(BUDGET.treasury); copy.textContent = "Copied"; }
+    catch { copy.textContent = "Select it above"; }
+    setTimeout(() => (copy.textContent = "Copy address"), 1600);
+  };
+  box.appendChild(copy);
+
+  const warn = mk("p", "bud-warn");
+  warn.textContent = "This budget pays your agents to work — research runs and your lease. " +
+    "It is not trading capital. Money you trade with stays in your own wallet: the desk sizes " +
+    "your calls against the bankroll you declare, and never holds, moves or signs for your funds.";
+  box.appendChild(warn);
+  return box;
+}
+
+async function refreshBudget() {
+  try {
+    const { body } = await call_api("/api/budget");
+    BUDGET = body;
+    if (callsPanel.classList.contains("on")) loadCalls();
+  } catch {}
+}
+
 /* ── the tenant's own settings: appetite, bankroll, and which platforms ──── */
 const ALL_PADS = ["pump.fun", "letsbonk.fun", "bags.fm", "moonshot", "boop.fun", "meteora-dbc", "trix", "other"];
 
@@ -1733,7 +1796,7 @@ function buildControls(settings) {
   bank.setAttribute("aria-label", "Bankroll in dollars");
   row.append(sel, bank);
   box.appendChild(row);
-  box.appendChild(mk("div", "dp-note", "Appetite sets the conviction bar, position limit and size. Bankroll is a number you declare — the desk never holds or sees your funds."));
+  box.appendChild(mk("div", "dp-note", "Appetite sets the conviction bar, position limit and size. Bankroll is your own trading capital, declared here only so calls can be sized — it stays in your wallet and the desk never holds or signs for it."));
 
   box.appendChild(mk("div", "dp-h", "Platforms this floor trades"));
   const pads = mk("div", "padgrid");
@@ -1765,6 +1828,6 @@ function buildControls(settings) {
   return box;
 }
 
-if (FLOOR_N != null) loadCalls();
+if (FLOOR_N != null) { refreshBudget(); loadCalls(); }
 setInterval(() => { if (callsPanel.classList.contains("on")) loadCalls(); }, 30000);
 </script>

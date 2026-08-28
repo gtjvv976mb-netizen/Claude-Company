@@ -106,6 +106,21 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           if (bearer) auth.signOut(bearer);
           return json(200, { ok: true });
         }
+        // Everything a floor needs to show its budget: what is credited, what it costs
+        // to work, and where to send more.
+        if (url.pathname === "/api/budget") {
+          const cfgL = leasing.config();
+          return json(200, {
+            treasury: cfgL.treasury, mint: cfgL.mint, decimals: cfgL.decimals,
+            floorPriceTokens: cfgL.priceTokens,
+            runPriceTokens: rooms.RUN_PRICE_TOKENS,
+            freeRunsWithLease: rooms.FREE_RUNS_WITH_LEASE,
+            balanceBaseUnits: me ? leasing.balanceOf(me).toString() : "0",
+            credits: me ? leasing.creditsFor(me) : [],
+            wallet: me ?? null,
+          });
+        }
+
         if (url.pathname === "/api/me") {
           if (!me) return json(401, { error: "not signed in" });
           const lease = leasing.leaseOf(me);
