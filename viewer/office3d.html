@@ -413,21 +413,25 @@ scene.add(room);
 const DAIS_Y = 0.35;                              // the executive suite is raised
 
 const STAFF = [
-  { id:"CEO",        role:"Signs, or doesn't", desk:[0,-9.6],    stand:[0,-11.0],    y:DAIS_Y, claude:true },
-  { id:"Scout",      role:"Sourcing",          desk:[-15.4,-6.5],stand:[-13.8,-6.5], apron:0x8d6cae },
-  { id:"Screener",   role:"Hard filters",      desk:[-15.4,-1.0],stand:[-13.8,-1.0], apron:0x5c7d8a },
-  { id:"Compliance", role:"Veto",              desk:[-15.4,4.5], stand:[-13.8,4.5],  apron:0x8d9298 },
-  { id:"Forensics",  role:"Token safety",      desk:[-9.5,-5.6], stand:[-9.5,-4.1],  apron:0xbf4a3c },
-  { id:"Liquidity",  role:"Can we exit?",      desk:[-3.2,-5.6], stand:[-3.2,-4.1],  apron:0x2f9fb0 },
-  { id:"Flow",       role:"Real demand?",      desk:[3.2,-5.6],  stand:[3.2,-4.1],   apron:0xe0b040 },
-  { id:"Technical",  role:"Entry location",    desk:[-6.6,-0.6], stand:[-6.6,0.9],   apron:0x4e6ba8 },
-  { id:"Narrative",  role:"Is it true?",       desk:[6.6,-0.6],  stand:[6.6,0.9],    apron:0xd7758f },
-  { id:"PM",         role:"Decides",           desk:[15.4,-7.0], stand:[13.8,-7.0],  apron:0x287e9d },
-  { id:"Red Team",   role:"Break it",          desk:[15.4,-1.0], stand:[13.8,-1.0],  apron:0x8c2f27 },
-  { id:"Risk",       role:"How much",          desk:[15.4,5.5],  stand:[13.8,5.5],   apron:0x70828a },
-  { id:"Execution",  role:"The ticket",        desk:[2.5,8.2],   stand:[2.5,6.7],    apron:0x5f9445 },
-  { id:"Scribe",     role:"The journal",       desk:[-5.5,8.2],  stand:[-5.5,6.7],   apron:0xc8863c },
+  { id:"CEO",        name:"CLAUDE",        role:"Signs, or doesn't", desk:[0,-9.6],    stand:[0,-11.0],    y:DAIS_Y, claude:true },
+  { id:"Scout",      name:"BLOODHOUND",    role:"Finds them",        desk:[-15.4,-6.5],stand:[-13.8,-6.5], apron:0x8d6cae },
+  { id:"Screener",   name:"BOUNCER",       role:"Kills at the door", desk:[-15.4,-1.0],stand:[-13.8,-1.0], apron:0x5c7d8a },
+  { id:"Compliance", name:"WARDEN",        role:"The rule",          desk:[-15.4,4.5], stand:[-13.8,4.5],  apron:0x8d9298 },
+  { id:"Forensics",  name:"CORONER",       role:"Cause of death",    desk:[-9.5,-5.6], stand:[-9.5,-4.1],  apron:0xbf4a3c },
+  { id:"Liquidity",  name:"HOUDINI",       role:"Can you escape?",   desk:[-3.2,-5.6], stand:[-3.2,-4.1],  apron:0x2f9fb0 },
+  { id:"Flow",       name:"UNDERTOW",      role:"The real current",  desk:[3.2,-5.6],  stand:[3.2,-4.1],   apron:0xe0b040 },
+  { id:"Technical",  name:"CARTOGRAPHER",  role:"Maps the ground",   desk:[-6.6,-0.6], stand:[-6.6,0.9],   apron:0x4e6ba8 },
+  { id:"Narrative",  name:"VERITY",        role:"Is it true?",       desk:[6.6,-0.6],  stand:[6.6,0.9],    apron:0xd7758f },
+  { id:"PM",         name:"ARBITER",       role:"Settles it",        desk:[15.4,-7.0], stand:[13.8,-7.0],  apron:0x287e9d },
+  { id:"Red Team",   name:"PROSECUTOR",    role:"Builds the case against", desk:[15.4,-1.0], stand:[13.8,-1.0], apron:0x8c2f27 },
+  { id:"Risk",       name:"GOVERNOR",      role:"Limits the engine", desk:[15.4,5.5],  stand:[13.8,5.5],   apron:0x70828a },
+  { id:"Execution",  name:"QUARTERMASTER", role:"Issues the ticket", desk:[2.5,8.2],   stand:[2.5,6.7],    apron:0x5f9445 },
+  { id:"Scribe",     name:"ARCHIVIST",     role:"Writes it down",    desk:[-5.5,8.2],  stand:[-5.5,6.7],   apron:0xc8863c },
 ];
+
+/** seat id -> crew name, for anything arriving from the server keyed by id. */
+const CREW = Object.fromEntries(STAFF.map((s) => [s.id, s.name]));
+const crewName = (id) => CREW[id] || id;
 
 const SPOTS = {
   ceoDoor:  [0, -6.6],        // the threshold. Staff stop here; only the CEO goes in.
@@ -876,7 +880,7 @@ class Worker {
     this.faceTowards(this.deskAt.x, this.deskAt.z);
     scene.add(this.g);
 
-    this.nameSprite = makeSprite(spec.id, spec.claude ? 1.15 : 0.92,
+    this.nameSprite = makeSprite(spec.name || spec.id, spec.claude ? 1.15 : 0.92,
       spec.claude ? { bg: "#8a3f22", accent: "#f0c9a0" } : undefined);
     this.nameSprite.position.set(0, 2.28, 0);
     this.nameSprite.visible = false;
@@ -1078,7 +1082,7 @@ const bakedBuckets = bakeStatic(room);
 
 STAFF.forEach((spec, i) => {
   workers[spec.id] = new Worker(spec, i);
-  const plate = makeSprite(spec.id, 0.58, spec.claude ? { bg: "#8a3f22", accent: "#f0c9a0" } : undefined);
+  const plate = makeSprite(spec.name || spec.id, 0.58, spec.claude ? { bg: "#8a3f22", accent: "#f0c9a0" } : undefined);
   plate.position.set(spec.desk[0], (spec.y ?? 0) + 1.18, spec.desk[1]);
   scene.add(plate);
 });
@@ -1146,7 +1150,7 @@ function tape(seat, msg, cls = "") {
   const row = document.createElement("div");
   row.className = "row " + cls;
   row.innerHTML = `<span class="t">${new Date().toLocaleTimeString([], { hour12: false })}</span><span class="who"></span><span class="msg"></span>`;
-  row.querySelector(".who").textContent = seat;
+  row.querySelector(".who").textContent = crewName(seat);
   row.querySelector(".msg").textContent = msg;
   tapeEl.appendChild(row);
   while (tapeEl.children.length > 240) tapeEl.firstChild.remove();
@@ -1199,7 +1203,7 @@ for (const s of STAFF) {
   const sp = document.createElement("span");
   const hex = "#" + (s.claude ? P.claude : s.apron).toString(16).padStart(6, "0");
   sp.innerHTML = `<i style="background:${hex}"></i>`;
-  sp.appendChild(document.createTextNode(s.id));
+  sp.appendChild(document.createTextNode(s.name || s.id));
   legendEl.appendChild(sp);
 }
 

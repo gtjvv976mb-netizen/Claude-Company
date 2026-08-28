@@ -97,6 +97,8 @@ h2{font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:clamp(
 .seats tr:last-child td{border-bottom:0}
 .seats .n{font-family:"JetBrains Mono",monospace;color:var(--ink-faint);width:38px}
 .seats .s{font-weight:700;white-space:nowrap}
+.seats .seatrole{display:block;font-family:"JetBrains Mono",monospace;font-size:10px;
+  font-weight:400;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);margin-top:2px}
 .seats .kind{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
   padding:2px 7px;border-radius:4px;font-weight:700;white-space:nowrap}
 .kind.code{background:var(--metal);color:#fff}
@@ -197,22 +199,22 @@ footer .spacer{margin-left:auto}
     what survived.</p>
 
   <div class="tablewrap"><table class="seats">
-    <thead><tr><th></th><th>Seat</th><th>Kind</th><th>The one question it answers</th></tr></thead>
+    <thead><tr><th></th><th>The crew</th><th>Kind</th><th>The one question it answers</th></tr></thead>
     <tbody>
-      <tr><td class="n">0</td><td class="s">Scout</td><td><span class="kind model">model</span></td><td class="q">What deserves attention <em>today</em>, and why now?</td></tr>
-      <tr><td class="n">1</td><td class="s">Screener</td><td><span class="kind code">code</span></td><td class="q">Does this clear the floor at all? <em>Kills most candidates, costs nothing.</em></td></tr>
-      <tr><td class="n">2</td><td class="s">Forensics</td><td><span class="kind model">model</span></td><td class="q">Can this token be used against a holder, by design?</td></tr>
-      <tr><td class="n">3</td><td class="s">Liquidity</td><td><span class="kind model">model</span></td><td class="q">Can I get out — at size, at a price I would accept?</td></tr>
-      <tr><td class="n">4</td><td class="s">Flow</td><td><span class="kind model">model</span></td><td class="q">Is the demand real, or is it manufactured?</td></tr>
-      <tr><td class="n">5</td><td class="s">Narrative</td><td><span class="kind model">model</span></td><td class="q">Is there a story, is it true, and am I early?</td></tr>
-      <tr><td class="n">6</td><td class="s">Technical</td><td><span class="kind model">model</span></td><td class="q">Is this a location worth entering?</td></tr>
-      <tr><td class="n">7</td><td class="s">Red Team</td><td><span class="kind model">model</span></td><td class="q"><b>Why does this trade lose money?</b></td></tr>
-      <tr><td class="n">8</td><td class="s">Risk</td><td><span class="kind model">model</span></td><td class="q">How much, and where is it mechanically wrong?</td></tr>
-      <tr><td class="n">9</td><td class="s">PM</td><td><span class="kind model">model</span></td><td class="q">Propose, watch, or pass — on what thesis?</td></tr>
-      <tr><td class="n">10</td><td class="s">Execution</td><td><span class="kind model">model</span></td><td class="q">The unsigned ticket: route, slicing, stop, targets.</td></tr>
-      <tr><td class="n">11</td><td class="s">Compliance</td><td><span class="kind code">code</span></td><td class="q">Does this break a house rule? <em>A veto, not advice.</em></td></tr>
-      <tr><td class="n">12</td><td class="s">CEO</td><td><span class="kind claude">Claude</span></td><td class="q">Do I trust this desk, on this trade, today?</td></tr>
-      <tr><td class="n">13</td><td class="s">Scribe</td><td><span class="kind code">code</span></td><td class="q">Write it down so the desk can be graded later.</td></tr>
+      <tr><td class="n">0</td><td class="s">BLOODHOUND<span class="seatrole">Scout</span></td><td><span class="kind model">model</span></td><td class="q">What deserves attention <em>today</em>, and why now?</td></tr>
+      <tr><td class="n">1</td><td class="s">BOUNCER<span class="seatrole">Screener</span></td><td><span class="kind code">code</span></td><td class="q">Does this clear the floor at all? <em>Kills most candidates, costs nothing.</em></td></tr>
+      <tr><td class="n">2</td><td class="s">CORONER<span class="seatrole">Forensics</span></td><td><span class="kind model">model</span></td><td class="q">Can this token be used against a holder, by design?</td></tr>
+      <tr><td class="n">3</td><td class="s">HOUDINI<span class="seatrole">Liquidity</span></td><td><span class="kind model">model</span></td><td class="q">Can I get out — at size, at a price I would accept?</td></tr>
+      <tr><td class="n">4</td><td class="s">UNDERTOW<span class="seatrole">Flow</span></td><td><span class="kind model">model</span></td><td class="q">Is the demand real, or is it manufactured?</td></tr>
+      <tr><td class="n">5</td><td class="s">VERITY<span class="seatrole">Narrative</span></td><td><span class="kind model">model</span></td><td class="q">Is there a story, is it true, and am I early?</td></tr>
+      <tr><td class="n">6</td><td class="s">CARTOGRAPHER<span class="seatrole">Technical</span></td><td><span class="kind model">model</span></td><td class="q">Is this a location worth entering?</td></tr>
+      <tr><td class="n">7</td><td class="s">PROSECUTOR<span class="seatrole">Red Team</span></td><td><span class="kind model">model</span></td><td class="q"><b>Why does this trade lose money?</b></td></tr>
+      <tr><td class="n">8</td><td class="s">GOVERNOR<span class="seatrole">Risk</span></td><td><span class="kind model">model</span></td><td class="q">How much, and where is it mechanically wrong?</td></tr>
+      <tr><td class="n">9</td><td class="s">ARBITER<span class="seatrole">PM</span></td><td><span class="kind model">model</span></td><td class="q">Propose, watch, or pass — on what thesis?</td></tr>
+      <tr><td class="n">10</td><td class="s">QUARTERMASTER<span class="seatrole">Execution</span></td><td><span class="kind model">model</span></td><td class="q">The unsigned ticket: route, slicing, stop, targets.</td></tr>
+      <tr><td class="n">11</td><td class="s">WARDEN<span class="seatrole">Compliance</span></td><td><span class="kind code">code</span></td><td class="q">Does this break a house rule? <em>A veto, not advice.</em></td></tr>
+      <tr><td class="n">12</td><td class="s">CLAUDE<span class="seatrole">CEO</span></td><td><span class="kind claude">Claude</span></td><td class="q">Do I trust this desk, on this trade, today?</td></tr>
+      <tr><td class="n">13</td><td class="s">ARCHIVIST<span class="seatrole">Scribe</span></td><td><span class="kind code">code</span></td><td class="q">Write it down so the desk can be graded later.</td></tr>
     </tbody>
   </table></div>
 
