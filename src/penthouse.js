@@ -8,6 +8,7 @@ import { listFloors } from "./tower.js";
 import { emit, runFor } from "./lib/bus.js";
 import { spend, OutOfCredit, spendSince } from "./lib/llm.js";
 import * as jup from "./data/jupiter.js";
+import { callouts, whaleScore } from "./whales.js";
 
 /**
  * THE PENTHOUSE CYCLE — the house team's working day.
@@ -130,6 +131,24 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
     scored.push({ ...c, category: cat.category, categoryWhy: cat.why, score: r.score, rankWhy: r.why });
   }
   scored.sort((a, b) => b.score - a.score);
+
+  // Whale flow is checked only on the coins already in contention. It costs ~25 RPC
+  // reads per coin, so running it over all 345 would be wasteful; running it over the
+  // top handful is what changes a decision.
+  for (const c of scored.slice(0, Math.max(8, workups * 3))) {
+    try {
+      const w = await callouts(c.mint, { scan: 24 });
+      if (!w.ok) continue;
+      const ws = whaleScore(w);
+      c.whales = w;
+      c.score += ws.score;
+      c.rankWhy = [...c.rankWhy, ...ws.why];
+      if (ws.why.length) emit("whales", { mint: c.mint, symbol: c.pair?.baseSymbol,
+        netUsd: w.netUsd, buyers: w.uniqueBuyers, sellers: w.uniqueSellers, delta: ws.score });
+    } catch {}
+  }
+  scored.sort((a, b) => b.score - a.score);
+
   const shortlist = selectShortlist(scored, workups);
   emit("scout:shortlist", { count: shortlist.length, considered: universe.length,
     mix: shortlist.map((c) => c.category) });

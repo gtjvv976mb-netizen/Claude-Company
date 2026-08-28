@@ -13,6 +13,7 @@ import * as calls from "./calls.js";
 import * as copy from "./copy.js";
 import * as perf from "./perf.js";
 import * as alerts from "./alerts.js";
+import { callouts } from "./whales.js";
 
 /** Serves the trading floor and streams the desk's real events to it. */
 export function startOffice(port = Number(process.env.PORT) || 4949) {
@@ -145,6 +146,10 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
 
         // The house record, computed from chain data rather than self-reported.
         if (url.pathname === "/api/record") return json(200, perf.houseRecord());
+
+        // Whale callouts for one mint, read live off the pool.
+        const whaleMatch = url.pathname.match(/^\/api\/whales\/([1-9A-HJ-NP-Za-km-z]{32,44})$/);
+        if (whaleMatch) return json(200, await callouts(whaleMatch[1], { scan: 24 }));
 
         const alertMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/alerts(\/ack)?$/);
         if (alertMatch) {
