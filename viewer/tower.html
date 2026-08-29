@@ -753,26 +753,93 @@ function renderWallet() {
   }
 }
 
+/* ── which wallet? ──────────────────────────────────────────────────────────
+   Every modern Solana wallet — Phantom, Solflare, Backpack, Glow, Coinbase —
+   announces itself to the page via the Wallet Standard, so the chooser lists
+   what is actually installed instead of hardcoding one brand. Legacy injected
+   providers are swept up as a fallback for anything that predates the
+   standard. The auth flow itself is unchanged: connect, sign the nonce
+   message, verify — whoever does the signing. */
+const FOUND_WALLETS = new Map();
+(function discoverWallets() {
+  const api = { register: (...ws) => { for (const w of ws) {
+    const chains = w.chains ?? [];
+    const canSign = !!w.features?.["solana:signMessage"] && !!w.features?.["standard:connect"];
+    if (canSign && chains.some((c) => String(c).startsWith("solana:")))
+      FOUND_WALLETS.set(w.name, { kind: "standard", w });
+  } } };
+  window.addEventListener("wallet-standard:register-wallet", (e) => { try { e.detail(api); } catch {} });
+  try { window.dispatchEvent(new CustomEvent("wallet-standard:app-ready", { detail: api })); } catch {}
+  // legacy fallbacks for injectors that never adopted the standard
+  setTimeout(() => {
+    if (window.solana?.isPhantom && ![...FOUND_WALLETS.keys()].some((n) => /phantom/i.test(n)))
+      FOUND_WALLETS.set("Phantom", { kind: "legacy", w: window.solana });
+    if (window.solflare?.isSolflare && ![...FOUND_WALLETS.keys()].some((n) => /solflare/i.test(n)))
+      FOUND_WALLETS.set("Solflare", { kind: "legacy", w: window.solflare });
+  }, 300);
+})();
+
+function chooseWallet() {
+  return new Promise((resolve) => {
+    const list = [...FOUND_WALLETS.entries()];
+    if (!list.length) { window.open("https://phantom.app/download", "_blank", "noopener"); return resolve(null); }
+    if (list.length === 1) return resolve(list[0][1]);
+    const overlay = document.createElement("div");
+    overlay.style.cssText = "position:fixed;inset:0;z-index:80;background:rgba(10,14,16,.6);display:grid;place-items:center";
+    const box = document.createElement("div");
+    box.style.cssText = "background:var(--panel,#1b2b2f);color:inherit;border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:18px 20px;min-width:260px;display:flex;flex-direction:column;gap:8px";
+    box.innerHTML = "<div style='font-size:12px;letter-spacing:.14em;text-transform:uppercase;opacity:.7'>Sign in with</div>";
+    for (const [name, entry] of list) {
+      const btn = document.createElement("button");
+      btn.style.cssText = "display:flex;align-items:center;gap:10px;font:inherit;padding:10px 12px;border-radius:7px;border:1px solid rgba(255,255,255,.14);background:transparent;color:inherit;cursor:pointer;text-align:left";
+      const ico = entry.kind === "standard" && entry.w.icon ? `<img src="${entry.w.icon}" width="22" height="22" style="border-radius:5px" alt="">` : "👛";
+      btn.innerHTML = `${ico}<span>${name}</span>`;
+      btn.onclick = () => { document.body.removeChild(overlay); resolve(entry); };
+      box.appendChild(btn);
+    }
+    const cancel = document.createElement("button");
+    cancel.textContent = "Cancel";
+    cancel.style.cssText = "font:inherit;font-size:11px;opacity:.6;background:none;border:none;color:inherit;cursor:pointer;margin-top:2px";
+    cancel.onclick = () => { document.body.removeChild(overlay); resolve(null); };
+    box.appendChild(cancel);
+    overlay.appendChild(box);
+    overlay.onclick = (e) => { if (e.target === overlay) { document.body.removeChild(overlay); resolve(null); } };
+    document.body.appendChild(overlay);
+  });
+}
+
+async function walletConnect(entry) {
+  if (entry.kind === "legacy") {
+    const { publicKey } = await entry.w.connect();
+    return { wallet: publicKey.toString(),
+      sign: async (bytes) => { const s = await entry.w.signMessage(bytes, "utf8"); return s.signature ?? s; } };
+  }
+  const res = await entry.w.features["standard:connect"].connect();
+  const account = res.accounts.find((a) => (a.chains ?? []).some((c) => String(c).startsWith("solana:"))) ?? res.accounts[0];
+  if (!account) throw new Error("the wallet returned no account");
+  return { wallet: account.address,
+    sign: async (bytes) => {
+      const [out] = await entry.w.features["solana:signMessage"].signMessage({ account, message: bytes });
+      return out.signature;
+    } };
+}
+
 async function connect() {
   if (ME) {                                   // already signed in → sign out
     await api("/api/auth/signout", { method: "POST", body: "{}" });
     setToken(null); ME = null; renderWallet(); renderSel(); return;
   }
-  const provider = window.solana;
-  if (!provider?.isPhantom) {
-    window.open("https://phantom.app/download", "_blank", "noopener");
-    return;
-  }
+  const entry = await chooseWallet();
+  if (!entry) return;
   try {
-    const { publicKey } = await provider.connect();
-    const wallet = publicKey.toString();
+    const { wallet, sign } = await walletConnect(entry);
     const { body: n } = await api("/api/auth/nonce", { method: "POST", body: JSON.stringify({ wallet }) });
     if (!n?.message) throw new Error(n?.error || "could not start sign-in");
 
     const encoded = new TextEncoder().encode(n.message);
-    const signed = await provider.signMessage(encoded, "utf8");
-    // Phantom returns bytes; the server wants base58
-    const sigB58 = b58(signed.signature ?? signed);
+    const signed = await sign(encoded);
+    // wallets return bytes; the server wants base58
+    const sigB58 = b58(signed);
 
     const { status, body } = await api("/api/auth/verify", {
       method: "POST", body: JSON.stringify({ wallet, nonce: n.nonce, signature: sigB58 }),
