@@ -40,12 +40,16 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
       // EventSource cannot send headers, so the tenant's token rides the query
       // string (same-origin HTTPS). A visitor to a leased floor is told plainly
       // and the stream ends — the client runs its demo shift instead.
-      if (wantFloor != null && wantFloor !== 50) {
+      {
         const sid = url.searchParams.get("sid");
         const who = sid ? auth.walletFor(sid) : null;
-        const l = leasing.leaseFor(wantFloor);
-        if (!l || !who || l.wallet !== who) {
-          res.write(`event: hello\ndata: ${JSON.stringify({ private: true, vacant: !l, floor: wantFloor })}\n\n`);
+        const isHq = (w) => !!w && (w === leasing.TREASURY || tower.getFloor(50)?.owner === w);
+        let allowed;
+        if (wantFloor == null || wantFloor === 50) allowed = isHq(who);
+        else { const l = leasing.leaseFor(wantFloor); allowed = !!l && !!who && l.wallet === who; }
+        if (!allowed) {
+          const l = wantFloor != null && wantFloor !== 50 ? leasing.leaseFor(wantFloor) : true;
+          res.write(`event: hello\ndata: ${JSON.stringify({ private: true, hq: wantFloor == null || wantFloor === 50, vacant: !l, floor: wantFloor })}\n\n`);
           res.end();
           return;
         }
@@ -105,14 +109,18 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
        * Enforced here, because a client that merely chooses not to look is not
        * privacy. */
       const HQ_FLOOR = 50;
+      // The HQ's owner is the treasury's owner (floors.owner as a future override).
+      const hqOwner = (w) => !!w && (w === leasing.TREASURY || tower.getFloor(HQ_FLOOR)?.owner === w);
+      // Live data is for people with standing: the HQ's owner anywhere, a tenant
+      // on their own floor. Everyone else — every floor, the HQ included — gets
+      // the demo shift. The 3D office is the showroom; the data is the product.
       const floorPrivate = (floorNo) => {
-        if (floorNo === HQ_FLOOR) return false;   // the showroom
+        if (!me) return true;
+        if (floorNo === HQ_FLOOR) return !hqOwner(me);
         const l = leasing.leaseFor(floorNo);
-        // Vacant floors show the demo too: a visitor is a visitor, and the only
-        // live desks are the house's and the one you pay rent on.
-        if (!l) return true;
-        return !me || l.wallet !== me;
+        return !l || l.wallet !== me;
       };
+      const insider = () => !!me && (hqOwner(me) || !!leasing.leaseOf(me));
 
       const readBody = () => new Promise((resolve) => {
         let raw = ""; let over = false;
@@ -171,6 +179,14 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           });
         }
         // ── the house call sheet ──
+        if (url.pathname === "/api/calls" && !insider())
+          return json(403, { private: true, error: "live calls are for tenants and the house" });
+        if (url.pathname === "/api/calls/stats" && !insider())
+          return json(403, { private: true });
+        if (url.pathname === "/api/whales/feed" && !insider())
+          return json(403, { private: true, error: "the whale feed is for tenants and the house" });
+        if (url.pathname === "/api/chronicle" && !insider())
+          return json(403, { private: true });
         if (url.pathname === "/api/calls") {
           return json(200, { live: calls.liveCalls(), recent: calls.recentCalls(20), stats: calls.stats() });
         }

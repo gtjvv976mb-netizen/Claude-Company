@@ -2880,7 +2880,9 @@ async function loadChronicle(before) {
     const fp = location.pathname.match(/\/floor\/(\d+)/);
     if (fp) q.set("floor", fp[1]);
     if (before) q.set("before", String(before));
-    const r = await fetch(`${base}/api/chronicle?${q}`);
+    const tk = (() => { try { return localStorage.getItem("cc_token"); } catch { return null; } })();
+    const r = await fetch(`${base}/api/chronicle?${q}`,
+      tk ? { headers: { authorization: "Bearer " + tk } } : undefined);
     const { events = [] } = await r.json();
     if (!events.length || events[0].id == null) { chronDone = !!before; return 0; }
     oldestChron = events[0].id;
@@ -3352,7 +3354,9 @@ if (location.search.includes("demo")) {
       if (stage && !document.getElementById("privnote")) {
         const n = document.createElement("div");
         n.id = "privnote";
-        n.innerHTML = hello.vacant
+        n.innerHTML = hello.hq
+          ? `🕵️ Demo shift — Section 14's live desk runs in private. <a href="tower.html">Lease a floor</a> to copy its real calls.`
+          : hello.vacant
           ? `🏢 Demo shift — this floor isn't leased yet. <a href="tower.html">Lease it</a> and this desk goes live for you.`
           : `🔒 Demo shift — this floor's live desk is private to its tenant. <a href="tower.html">Lease your own floor</a> to run one for real.`;
         stage.appendChild(n);
@@ -4191,7 +4195,8 @@ window.load_whales = async () => {
   h.textContent = "Pump.fun callouts: distinct wallets taking size, net of the pool's own mirrored side. The desk watches; whether it matters is Section 14's call.";
   el.appendChild(h);
   try {
-    const { body } = await call_api("/api/whales/feed?pad=pump.fun");
+    const { status, body } = await call_api("/api/whales/feed?pad=pump.fun");
+    if (status === 403) return empty(el, "The whale feed is insider data — lease a floor to see who is taking size.");
     const rows = body.callouts || [];
     localStorage.setItem("cc-whales-seen", String(rows[0]?.ts || 0));
     document.getElementById("whale-dot")?.classList.remove("on");
