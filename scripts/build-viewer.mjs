@@ -72,6 +72,12 @@ for (const { src: name, out } of PAGES) {
   if (closers !== srcClosers) {
     throw new Error(`${name}: source had ${srcClosers} </script> but output has ${closers} — inlining corrupted the page`);
   }
+  // A visible build stamp, so "am I seeing the new version?" is answerable by
+  // anyone in two seconds: view-source or the console, no guessing about caches.
+  const stamp = new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  html = html.replace(/<style>/, () =>
+    `<meta name="cc-build" content="${stamp}">\n<script>console.log("Claude Company build ${stamp}")</script>\n<style>`);
+
   if (API_BASE) {
     html = html.replace(/<style>/, () =>
       `<script>window.__API_BASE__=${JSON.stringify(API_BASE)};</script>\n<style>`);
