@@ -20,24 +20,31 @@
   --panel:#f6edd8; --panel-line:#ddceac; --card:#fffaf0; --card-line:#e6d8ba;
   --good:#4f8f52; --warn:#c08a2e; --bad:#b0503f;
   --on-dark:#f4ecd8;
+  /* the shell: masthead bar, dock, ground. Day = the broadsheet; night = the charcoal. */
+  --bar:#efe6cf; --bar-ink:#22343a; --bar-soft:rgba(34,52,58,.66);
+  --dock-bg:rgba(246,237,216,.9); --shadow:rgba(66,50,22,.2); --hint-bg:rgba(246,237,216,.92);
 }
 :root:not([data-theme="light"]){
   @media (prefers-color-scheme: dark){
     --ink:#eadfc6; --ink-soft:#a9b7b2; --ink-faint:#7b8a88;
     --panel:#1b2b2f; --panel-line:#2d4247; --card:#22343a; --card-line:#354c51;
     --good:#7bbd80; --warn:#e0ad3d; --bad:#d9806e;
+    --bar:#30454a; --bar-ink:#f4ecd8; --bar-soft:rgba(244,236,216,.66);
+  --dock-bg:rgba(27,43,47,.86); --shadow:rgba(0,0,0,.32); --hint-bg:rgba(27,43,47,.92);
   }
 }
 :root[data-theme="dark"]{
   --ink:#eadfc6; --ink-soft:#a9b7b2; --ink-faint:#7b8a88;
   --panel:#1b2b2f; --panel-line:#2d4247; --card:#22343a; --card-line:#354c51;
   --good:#7bbd80; --warn:#e0ad3d; --bad:#d9806e;
+  --bar:#30454a; --bar-ink:#f4ecd8; --bar-soft:rgba(244,236,216,.66);
+  --dock-bg:rgba(27,43,47,.86); --shadow:rgba(0,0,0,.32); --hint-bg:rgba(27,43,47,.92);
 }
 
 *{box-sizing:border-box}
 html,body{height:100%}
 body{
-  margin:0; background:var(--charcoal); color:var(--ink);
+  margin:0; background:var(--bar); color:var(--ink);
   font-family:Archivo,system-ui,-apple-system,"Segoe UI",sans-serif;
   font-size:14px; font-weight:450; -webkit-font-smoothing:antialiased;
   -webkit-font-smoothing:antialiased; overflow:hidden;
@@ -46,10 +53,14 @@ body{
 .topbar{
   position:relative; z-index:5;
   display:flex; align-items:baseline; gap:16px; flex-wrap:nowrap;
-  padding:12px 20px; background:var(--charcoal); color:var(--on-dark);
+  padding:12px 20px; background:var(--bar); color:var(--bar-ink);
   border-bottom:3px solid var(--amber);
 }
 .topbar .spacer{flex:1 1 auto; min-width:0}
+.shift{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.08em;
+  padding:5px 10px;border-radius:3px;border:1px solid var(--panel-line);background:var(--card);
+  color:var(--ink-soft);cursor:pointer;white-space:nowrap}
+.shift:hover{color:var(--ink);border-color:var(--ink-faint)}
 /* The stats keep one line and scroll sideways rather than pushing the bar taller —
    the dock is positioned from the top of the stage, so a bar that grows downward
    lands on top of it. */
@@ -68,11 +79,11 @@ body{
 }
 @media (max-width:560px){ .topstats{gap:12px} }
 .firm{font-family:"Instrument Serif",Georgia,serif; font-size:29px; line-height:1; letter-spacing:.005em}
-.firm em{font-style:italic; color:var(--amber)}
-.tag{font-size:11.5px; text-transform:uppercase; letter-spacing:.16em; color:rgba(244,236,216,.66); font-weight:600}
+.firm em{font-style:italic; color:var(--warn)}
+.tag{font-size:11.5px; text-transform:uppercase; letter-spacing:.16em; color:var(--bar-soft); font-weight:600}
 .topbar .spacer{margin-left:auto}
-.stat{display:flex; gap:6px; align-items:baseline; font-size:12.5px; color:rgba(244,236,216,.78)}
-.stat b{font-family:"JetBrains Mono",ui-monospace,monospace; font-size:14px; color:var(--amber); font-variant-numeric:tabular-nums}
+.stat{display:flex; gap:6px; align-items:baseline; font-size:12.5px; color:var(--bar-soft)}
+.stat b{font-family:"JetBrains Mono",ui-monospace,monospace; font-size:14px; color:var(--warn); font-variant-numeric:tabular-nums}
 .live{display:inline-flex; align-items:center; gap:7px; font-size:11px; letter-spacing:.12em; text-transform:uppercase; font-weight:600}
 .live .dot{width:8px;height:8px;border-radius:50%;background:var(--leaf); animation:pulse 2.4s infinite}
 .live.sim .dot{background:var(--amber); animation:none}
@@ -95,12 +106,12 @@ body{
 .hint{
   position:absolute; left:14px; bottom:12px; z-index:3;
   font-size:11px; letter-spacing:.1em; text-transform:uppercase;
-  color:rgba(244,236,216,.7); background:rgba(48,69,74,.66);
+  color:var(--bar-soft); background:var(--hint-bg);
   padding:5px 10px; border-radius:5px; backdrop-filter:blur(3px);
 }
 .loading{
   position:absolute; inset:0; z-index:4; display:grid; place-content:center; gap:10px;
-  background:var(--charcoal); color:var(--on-dark); text-align:center;
+  background:var(--bar); color:var(--bar-ink); text-align:center;
 }
 .loading.gone{display:none}
 .loading .t{font-family:"Instrument Serif",Georgia,serif; font-size:27px}
@@ -112,15 +123,15 @@ body{
 .dock{
   position:absolute; right:14px; top:14px; z-index:6; display:flex; gap:5px;
   padding:5px; border-radius:9px;
-  background:rgba(27,43,47,.86); border:1px solid var(--panel-line);
-  backdrop-filter:blur(7px); box-shadow:0 6px 18px rgba(0,0,0,.28);
+  background:var(--dock-bg); border:1px solid var(--panel-line);
+  backdrop-filter:blur(7px); box-shadow:0 6px 18px var(--shadow);
 }
 .dtab{
   font:inherit; font-size:11.5px; font-weight:600; letter-spacing:.07em; text-transform:uppercase;
   padding:7px 11px; border-radius:6px; cursor:pointer; white-space:nowrap;
   background:transparent; border:1px solid transparent; color:var(--ink-soft);
 }
-.dtab:hover{color:var(--ink); background:rgba(255,255,255,.05)}
+.dtab:hover{color:var(--ink); background:var(--panel-line)}
 .dtab[aria-selected="true"]{
   background:var(--amber); border-color:var(--amber); color:#2a2018;
 }
@@ -251,28 +262,28 @@ body{
 }
 @media (max-width:1000px){ .dossier{left:16px; right:16px; width:auto} }
 .pulse{position:absolute;right:12px;bottom:56px;z-index:5;display:flex;align-items:center;gap:10px;
-  max-width:min(620px,90vw);padding:7px 12px;border-radius:4px;background:rgba(14,26,28,.92);
-  border:1px solid rgba(240,233,210,.16);font-family:"JetBrains Mono",ui-monospace,monospace;
-  font-size:10.5px;color:#cfc6ae;backdrop-filter:blur(3px)}
+  max-width:min(620px,90vw);padding:7px 12px;border-radius:4px;background:var(--panel);
+  border:1px solid var(--panel-line);font-family:"JetBrains Mono",ui-monospace,monospace;
+  font-size:10.5px;color:var(--ink-soft);backdrop-filter:blur(3px)}
 .pulse .pill{font-weight:700;letter-spacing:.08em;padding:2px 8px;border-radius:3px;flex:none}
 .pulse .pill.run{background:#2f5c37;color:#cfe8cf}
 .pulse .pill.paused{background:#7a5a24;color:#ffe9bd}
 .pulse .preason{opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pulse .pnums{flex:none;white-space:nowrap}
-.pulse .pnums b{color:#f4c478;font-weight:600}
+.pulse .pnums b{color:var(--warn);font-weight:600}
 @media(max-width:760px){.pulse{display:none}}
-.watchrow,.killrow{display:flex;flex-direction:column;gap:5px;padding:10px 12px;border:1px solid var(--line,#2c4a4c);
-  border-radius:4px;background:rgba(240,233,210,.03);font-size:12.5px}
+.watchrow,.killrow{display:flex;flex-direction:column;gap:5px;padding:10px 12px;border:1px solid var(--card-line);
+  border-radius:4px;background:var(--card);font-size:12.5px}
 .watchrow .wr-top,.killrow .kr-top{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
 .watchrow .wr-sym,.killrow .kr-sym{font-weight:700;letter-spacing:.03em}
 .watchrow .wr-rule{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10.5px;opacity:.85}
-.wr-bar{height:5px;border-radius:3px;background:rgba(240,233,210,.12);overflow:hidden}
+.wr-bar{height:5px;border-radius:3px;background:var(--panel-line);overflow:hidden}
 .wr-bar i{display:block;height:100%;background:#d97757;border-radius:3px}
-.wr-held{font-size:10px;letter-spacing:.1em;color:#f4c478}
+.wr-held{font-size:10px;letter-spacing:.1em;color:var(--warn)}
 .killrow .kr-since.good{color:var(--good,#4f8f52)} .killrow .kr-since.bad{color:var(--bad,#b0503f)}
 .planbar{position:relative;height:7px;border-radius:4px;margin:7px 0 3px;
-  background:linear-gradient(90deg,#b0503f 0 18%,rgba(240,233,210,.14) 18% 82%,#4f8f52 82% 100%)}
-.planbar .cur{position:absolute;top:-3px;width:3px;height:13px;background:#f4c478;border-radius:2px}
+  background:linear-gradient(90deg,var(--bad) 0 18%,var(--panel-line) 18% 82%,var(--good) 82% 100%)}
+.planbar .cur{position:absolute;top:-3px;width:3px;height:13px;background:var(--warn);border-radius:2px}
 .planbar-l{display:flex;justify-content:space-between;font-family:"JetBrains Mono",ui-monospace,monospace;
   font-size:9.5px;opacity:.75}
 .alertbar{position:absolute;left:0;right:0;top:0;z-index:6;display:none;flex-direction:column;gap:1px}
@@ -378,8 +389,19 @@ select.dp-in{cursor:pointer}
 .note{padding:0 13px 13px; font-size:11.5px; color:var(--ink-faint); border-top:1px solid var(--panel-line); line-height:1.5}
 </style>
 
+<script>
+/* The two shifts. NIGHT SHIFT is the floor as it has always looked; DAY SHIFT
+   is the broadsheet-cream chrome that was authored into the tokens from day
+   one and never given a switch. Applied before first paint; the choice is the
+   viewer's own and persists on this device. Default: night, for everyone. */
+(function () {
+  let t = null;
+  try { t = localStorage.getItem("cc_theme"); } catch {}
+  document.documentElement.dataset.theme = t === "light" ? "light" : "dark";
+})();
+</script>
 <div class="topbar">
-  <div class="firm">Claude <em>&amp;</em> Co.</div>
+  <div class="firm">Claude <em>Company</em></div>
   <div class="tag" id="s-floortag">The Aye-Team · The House Desk</div>
   <div class="spacer"></div>
   <div class="topstats">
@@ -388,6 +410,7 @@ select.dp-in{cursor:pointer}
     <div class="stat">Wallet <b id="s-wal">—</b></div>
     <div class="stat">Credit <b id="s-bal">—</b></div>
     <div class="stat" id="s-rentwrap" hidden>Rent <b id="s-rent">—</b></div>
+    <button class="shift" id="shiftbtn" type="button" title="Switch the floor's lighting">&#x263E; Night shift</button>
     <div class="live" id="s-live"><span class="dot"></span><span id="s-livetext">Connecting</span></div>
   </div>
 </div>
@@ -558,6 +581,25 @@ function resetView() {
 window.__pan = panCamera;
 window.__follow = (seat) => followFigure(seat) ? "following " + seat : "no such seat";
 window.__resetView = resetView;
+
+/* ── the shift switch: Night Shift ⇄ Day Shift ─────────────────────────── */
+(function shiftSwitch() {
+  const btn = document.getElementById("shiftbtn");
+  if (!btn) return;
+  const label = () => {
+    const day = document.documentElement.dataset.theme === "light";
+    btn.textContent = day ? "\u2600 Day shift" : "\u263e Night shift";
+    btn.title = day ? "The floor in daylight. Click for the night shift."
+                    : "The floor after hours. Click for the day shift.";
+  };
+  btn.addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("cc_theme", next); } catch {}
+    label();
+  });
+  label();
+})();
 /* Inspect one figure up close. The scroll wheel is deliberately clamped for players,
    which makes it useless for checking whether a character actually reads — so this
    drives the camera directly. __figure("Scribe") frames AGENT P; the second argument
@@ -3114,7 +3156,8 @@ async function loadChronicle(before) {
   try {
     const base = window.__API_BASE__ || "";
     const q = new URLSearchParams({ limit: "250", exclude: "world:" });
-    const fp = location.pathname.match(/\/floor\/(\d+)/);
+    const fp = location.pathname.match(/\/floor\/(\d+)/) ||
+               location.search.match(/[?&]floor=(\d+)/);
     if (fp) q.set("floor", fp[1]);
     if (before) q.set("before", String(before));
     const tk = (() => { try { return localStorage.getItem("cc_token"); } catch { return null; } })();
@@ -3129,6 +3172,18 @@ async function loadChronicle(before) {
     for (const e of events) {
       const f = fmtTape(e);
       if (f) frag.appendChild(tapeRow(f[0], f[1], f[2], e.ts));
+    }
+    // The boss's desk keeps its paperwork: on first load, rebuild BIG M's memo
+    // pile from the same chronicle slice, oldest first so the newest sits on top.
+    if (!before && !window.__inboxFilled) {
+      window.__inboxFilled = true;
+      for (const e of events.filter((x) => x.type === "token:end")) {
+        try {
+          memo({ symbol: e.symbol || (e.mint ? e.mint.slice(0, 6) : "?"), decision: e.outcome,
+            thesis: e.thesis || e.detail || "Filed to the journal.",
+            conviction: e.conviction ?? null, size: e.size ?? null, stop: e.stop ?? null, gmgn: null });
+        } catch {}
+      }
     }
     if (chronDone) {
       const start = tapeRow("Floor", "— the start of the record —", "hi", events[0]?.ts);
@@ -4182,18 +4237,35 @@ async function loadCalls() {
 function renderCalls({ feed = [], settings, record }) {
   callsPanel.innerHTML = "";
 
-  callsPanel.appendChild(buildBudget());
-  if (settings) callsPanel.appendChild(buildControls(settings));
+  // What the tenant NEEDS leads: the book, the tripwires, the live sheet.
+  // The machinery (budget, copy settings, executor) folds into one drawer.
   callsPanel.appendChild(buildRecord(record, feed));
 
-  loadWatchboard();      // armed tripwires render above the live sheet
-  loadKilled();          // and the vetoes render beneath it, with receipts
+  // Ordered containers, so the async lanes always land where they belong:
+  // book → watch board → live sheet → killed → the settings drawer.
+  const watchWrap = document.createElement("div");
+  const feedWrap = document.createElement("div");
+  const killWrap = document.createElement("div");
+  feedWrap.style.cssText = watchWrap.style.cssText = killWrap.style.cssText = "display:flex;flex-direction:column;gap:11px";
+  callsPanel.append(watchWrap, feedWrap, killWrap);
+  loadWatchboard(watchWrap);
+  loadKilled(killWrap);
+
+  const drawer = document.createElement("details");
+  drawer.className = "dp-drawer";
+  const sum = document.createElement("summary");
+  sum.textContent = "Desk settings \u00b7 budget \u00b7 executor";
+  sum.style.cssText = "cursor:pointer;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;padding:8px 2px;opacity:.8";
+  drawer.appendChild(sum);
+  drawer.appendChild(buildBudget());
+  if (settings) drawer.appendChild(buildControls(settings));
+  callsPanel.appendChild(drawer);
 
   if (!feed.length) {
     const p = document.createElement("p");
     p.className = "locked";
     p.textContent = "The house team has not published a call yet. The watch board above shows what it is stalking; every armed rule is re-checked every five minutes.";
-    callsPanel.appendChild(p);
+    feedWrap.appendChild(p);
     return;
   }
 
@@ -4310,13 +4382,13 @@ function renderCalls({ feed = [], settings, record }) {
       act.appendChild(sell);
       el.appendChild(act);
     }
-    callsPanel.appendChild(el);
+    feedWrap.appendChild(el);
   }
 
   const note = document.createElement("p");
   note.className = "dp-note";
   note.textContent = "Buy opens a swap you sign in your own wallet — the desk never holds keys, never signs, and never sees the transaction. The size is a suggestion from your floor's risk settings; your wallet shows the real numbers before anything happens.";
-  callsPanel.appendChild(note);
+  feedWrap.appendChild(note);
 }
 
 /* ── the floor's own book: settled results + the sync that writes them ─────
@@ -4614,13 +4686,13 @@ function renderAlerts(unread) {
 }
 
 /* ── the watch board: why nothing is happening, made legible ────────────── */
-async function loadWatchboard() {
+async function loadWatchboard(host) {
   try {
     const { status, body } = await call_api("/api/watchboard");
     if (status !== 200 || !body.watches?.length) return;
     const head = document.createElement("div");
     head.className = "dp-h"; head.textContent = "The watch board — armed tripwires, checked every 5 minutes";
-    callsPanel.appendChild(head);
+    host.appendChild(head);
     for (const w of body.watches.filter((x) => x.status === "watching").slice(0, 8)) {
       const row = document.createElement("div");
       row.className = "watchrow";
@@ -4646,19 +4718,19 @@ async function loadWatchboard() {
           row.appendChild(bar);
         }
       }
-      callsPanel.appendChild(row);
+      host.appendChild(row);
     }
   } catch {}
 }
 
 /* ── the killed lane: judgment, receipted. Dodged bullets in green. ──────── */
-async function loadKilled() {
+async function loadKilled(host) {
   try {
     const { status, body } = await call_api("/api/killed");
     if (status !== 200 || !body.kills?.length) return;
     const head = document.createElement("div");
     head.className = "dp-h"; head.textContent = "Killed — the trades that did not happen";
-    callsPanel.appendChild(head);
+    host.appendChild(head);
     for (const k of body.kills.slice(0, 8)) {
       const row = document.createElement("div"); row.className = "killrow";
       const top = document.createElement("div"); top.className = "kr-top";
@@ -4674,7 +4746,7 @@ async function loadKilled() {
       const why = document.createElement("div"); why.className = "wr-rule";
       why.textContent = (k.reason || "").slice(0, 160);
       row.append(top, why);
-      callsPanel.appendChild(row);
+      host.appendChild(row);
     }
   } catch {}
 }
