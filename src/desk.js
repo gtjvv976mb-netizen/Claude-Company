@@ -132,6 +132,16 @@ export async function workup(cycle, mint, hook = "") {
   store.recordVerdict(cycle, mint, ev.symbol, "pm", { verdict: pm.decision, score: pm.conviction, ...pm });
   emit("seat:verdict", { seat: "PM", mint, symbol: ev.symbol, detail: pm.decision, score: pm.conviction });
 
+  // A WATCH becomes a standing order, not a note to self: the rules go on the
+  // watchlist and a free checker promotes the token back through this whole
+  // pipeline the moment they hold. Before this, WATCH terminated nowhere.
+  if (pm.decision === "WATCH" && pm.watch_rules) {
+    import("./watchlist.js").then((w) => w.addWatch({
+      mint, symbol: ev.symbol, rules: pm.watch_rules,
+      note: (pm.watch_triggers || []).join("; "),
+    })).catch(() => {});
+  }
+
   // --- Stage 10: the unsigned ticket, only if proposing. ---
   let ticket = null;
   if (pm.decision === "PROPOSE" && risk.position_size_usd > 0 && redteam.verdict !== "refuted") {

@@ -63,6 +63,12 @@ export const PMOut = z.object({
   how_red_team_was_answered: z.string().describe("Required. If you cannot answer the red team, the decision is not PROPOSE."),
   key_disagreement: z.string().describe("Where the analysts conflicted and how you resolved it."),
   watch_triggers: z.array(z.string()).describe("For WATCH: what would promote this to PROPOSE."),
+  watch_rules: z.object({
+    price_above_usd: z.number().nullable().describe("Promote when price holds above this. Null if not a condition."),
+    buys_h1_at_least: z.number().nullable().describe("Promote when hourly buys reach this. Null if not a condition."),
+    liq_at_least_usd: z.number().nullable().describe("Promote when liquidity reaches this. Null if not a condition."),
+    hours: z.number().min(1).max(72).describe("How long the watch stands before it expires."),
+  }).nullable().describe("For WATCH only, otherwise null. MACHINE-CHECKABLE promotion rules — the desk re-runs this token automatically when every non-null rule holds. A WATCH without rules is a PASS that lies about itself."),
 });
 
 export const TicketOut = z.object({

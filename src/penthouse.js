@@ -296,6 +296,77 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
  * sweep, keep only coins under 48h old, rank them, and only when the best one
  * shows real ignition does it earn a full workup — one per scan, the budget
  * brake underneath as always. Early is a schedule, not a speed. */
+/**
+ * The one road from an APPROVED workup to a live, broadcast call. Both hunting
+ * lanes (fresh ignition, watch promotion) publish through here so the gates —
+ * pre-stated invalidation, no spike-shaped entries — can never drift apart.
+ */
+function publishApproved(rec, { category = null, launchpad: pad = null } = {}) {
+  if (rec?.finalDecision !== "APPROVED") return { outcome: rec?.outcome ?? rec?.finalDecision };
+  const ev = rec.ev ?? {};
+  if (!rec.pm?.invalidation) {
+    emit("call:withheld", { mint: rec.mint, reason: "no pre-stated invalidation" });
+    return { outcome: "withheld" };
+  }
+  if ((ev.pair?.priceChange?.m5 ?? 0) > 20) {
+    emit("call:withheld", { mint: rec.mint, reason: "spike-shaped entry" });
+    return { outcome: "withheld" };
+  }
+  const call = openCall({
+    mint: rec.mint, symbol: rec.symbol ?? ev.symbol, category, launchpad: pad,
+    conviction: rec.pm?.conviction ?? null,
+    entryRef: ev.pair?.priceUsd ?? null,
+    stop: rec.ticket?.stop_price ?? null,
+    target: rec.ticket?.take_profit?.[0]?.price ?? null,
+    thesis: rec.pm?.thesis ?? null,
+    invalidation: rec.pm?.invalidation ?? null,
+    flags: ev.mintAccount?.error ? null : (ev.mintAccount?.flags ?? []).map((f) => f.flag ?? f),
+    liqUsd: ev.pairs?.totalLiquidityUsd ?? ev.pair?.liquidityUsd ?? null,
+    rtLossPct: ev.exitProbe?.roundTripLossPct ?? null,
+    reportFile: rec.reportFile ?? null,
+  });
+  if (call) {
+    const floors = listFloors().filter((f) => f.state === "owned").map((f) => f.n);
+    if (floors.length) broadcast(call.id, floors);
+    return { outcome: "published", callId: call.id };
+  }
+  return { outcome: "open_failed" };
+}
+
+/**
+ * THE PROMOTION PASS — the criteria, acted on. Free until a watch's rules hold;
+ * then ONE promoted token per pass goes back through the entire paid gauntlet
+ * with the watch context in its hook. Promotion buys a re-examination, never a
+ * shortcut: the analysts, red team, risk, PM, compliance and CEO all sit again.
+ */
+let promoteBusy = false;
+export async function promoteWatches() {
+  if (promoteBusy) return { skipped: "busy" };
+  promoteBusy = true;
+  try {
+    const { checkWatchlist } = await import("./watchlist.js");
+    const { checked, promoted } = await checkWatchlist();
+    if (!promoted.length) return { checked, promoted: 0 };
+    const w = promoted.find((x) => !liveCallFor(x.mint));
+    if (!w) return { checked, promoted: promoted.length, outcome: "already live" };
+
+    const hook = `watch promoted \u00b7 ${w.symbol ?? w.mint.slice(0, 6)} \u00b7 rules held: ` +
+      Object.entries(w.rules).filter(([, v]) => v != null).map(([k, v]) => `${k}=${v}`).join(", ");
+    const rec = await runFor(null, () => workup(new Date().toISOString().replace(/[:.]/g, "-"), w.mint, hook));
+
+    let category = null, pad = null;
+    try {
+      const c = { mint: w.mint, pair: rec?.ev?.pair };
+      category = classify(c).category; pad = launchpad(c);
+    } catch {}
+    const pub = publishApproved(rec, { category, launchpad: pad });
+    return { checked, promoted: promoted.length, workedUp: 1, outcome: pub.outcome };
+  } catch (e) {
+    if (e instanceof OutOfCredit) return { halted: e.message };
+    return { error: String(e.message || e) };
+  } finally { promoteBusy = false; }
+}
+
 let freshBusy = false;
 export async function freshScan({ minScore = 45 } = {}) {
   if (freshBusy) return { skipped: "busy" };
@@ -328,29 +399,8 @@ export async function freshScan({ minScore = 45 } = {}) {
 
     const hook = `fresh scan \u00b7 ignition \u00b7 ${top.category}${top.launchpad ? ` \u00b7 ${top.launchpad}` : ""}`;
     const rec = await runFor(null, () => workup(new Date().toISOString().replace(/[:.]/g, "-"), top.mint, hook));
-    if (rec?.finalDecision === "APPROVED") {
-      const ev = rec.ev ?? {};
-      if (!rec.pm?.invalidation) { emit("call:withheld", { mint: rec.mint, reason: "no pre-stated invalidation" }); return { young: young.length, workedUp: 1, outcome: "withheld" }; }
-      if ((ev.pair?.priceChange?.m5 ?? 0) > 20) { emit("call:withheld", { mint: rec.mint, reason: "spike-shaped entry" }); return { young: young.length, workedUp: 1, outcome: "withheld" }; }
-      const call = openCall({
-        mint: rec.mint, symbol: rec.symbol ?? ev.symbol, category: top.category, launchpad: top.launchpad,
-        conviction: rec.pm?.conviction ?? null,
-        entryRef: ev.pair?.priceUsd ?? null,
-        stop: rec.ticket?.stop_price ?? null,
-        target: rec.ticket?.take_profit?.[0]?.price ?? null,
-        thesis: rec.pm?.thesis ?? null,
-        invalidation: rec.pm?.invalidation ?? null,
-        flags: ev.mintAccount?.error ? null : (ev.mintAccount?.flags ?? []).map((f) => f.flag ?? f),
-        liqUsd: ev.pairs?.totalLiquidityUsd ?? ev.pair?.liquidityUsd ?? null,
-        rtLossPct: ev.exitProbe?.roundTripLossPct ?? null,
-        reportFile: rec.reportFile ?? null,
-      });
-      if (call) {
-        const floors = listFloors().filter((f) => f.state === "owned").map((f) => f.n);
-        if (floors.length) broadcast(call.id, floors);
-      }
-    }
-    return { young: young.length, workedUp: 1, outcome: rec?.outcome ?? rec?.finalDecision };
+    const pub = publishApproved(rec, { category: top.category, launchpad: top.launchpad });
+    return { young: young.length, workedUp: 1, outcome: pub.outcome ?? rec?.outcome ?? rec?.finalDecision };
   } catch (e) {
     if (e instanceof OutOfCredit) return { halted: e.message };
     return { error: String(e.message || e) };
