@@ -14,6 +14,7 @@ import * as copy from "./copy.js";
 import * as perf from "./perf.js";
 import * as alerts from "./alerts.js";
 import * as identity from "./identity.js";
+import * as passes from "./passes.js";
 import { callouts } from "./whales.js";
 
 /** Serves the trading floor and streams the desk's real events to it. */
@@ -45,8 +46,11 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
         const who = sid ? auth.walletFor(sid) : null;
         const isHq = (w) => !!w && (w === leasing.TREASURY || tower.getFloor(50)?.owner === w);
         let allowed;
-        if (wantFloor == null || wantFloor === 50) allowed = isHq(who);
-        else { const l = leasing.leaseFor(wantFloor); allowed = !!l && !!who && l.wallet === who; }
+        if (wantFloor == null || wantFloor === 50) allowed = isHq(who) || (!!who && !!leasing.leaseOf(who));
+        else {
+          const l = leasing.leaseFor(wantFloor);
+          allowed = !!l && !!who && (l.wallet === who || !!passes.passFor(wantFloor, who));
+        }
         if (!allowed) {
           const l = wantFloor != null && wantFloor !== 50 ? leasing.leaseFor(wantFloor) : true;
           res.write(`event: hello\ndata: ${JSON.stringify({ private: true, hq: wantFloor == null || wantFloor === 50, vacant: !l, floor: wantFloor })}\n\n`);
@@ -114,11 +118,15 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
       // Live data is for people with standing: the HQ's owner anywhere, a tenant
       // on their own floor. Everyone else — every floor, the HQ included — gets
       // the demo shift. The 3D office is the showroom; the data is the product.
+      // Live standing, floor by floor: the HQ opens to its owner and to every
+      // tenant (they are copying its calls); a leased floor opens to its tenant
+      // and to anyone holding a paid guest pass; everything else is the demo.
       const floorPrivate = (floorNo) => {
         if (!me) return true;
-        if (floorNo === HQ_FLOOR) return !hqOwner(me);
+        if (floorNo === HQ_FLOOR) return !(hqOwner(me) || leasing.leaseOf(me));
         const l = leasing.leaseFor(floorNo);
-        return !l || l.wallet !== me;
+        if (!l) return true;
+        return l.wallet !== me && !passes.passFor(floorNo, me);
       };
       const insider = () => !!me && (hqOwner(me) || !!leasing.leaseOf(me));
 
@@ -221,6 +229,48 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
         if (ledgerMatch) {
           const floorNo = ledgerMatch[2] != null ? Number(ledgerMatch[2]) : null;
           return json(200, identity.ledger({ floorNo }));
+        }
+
+        // ── a guest pass: pay the tenant, see the floor ──
+        const passMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/pass$/);
+        if (passMatch) {
+          const floorNo = Number(passMatch[1]);
+          if (req.method === "GET") {
+            const lease = leasing.leaseFor(floorNo);
+            return json(200, {
+              priceTokens: passes.PASS_TOKENS, days: passes.PASS_DAYS,
+              payTo: lease?.wallet ?? null,
+              yourPass: me ? passes.passFor(floorNo, me) : null,
+            });
+          }
+          if (!me) return json(401, { error: "sign in with your wallet first" });
+          if (!leasing.leaseOf(me) && !hqOwner(me))
+            return json(403, { error: "guest passes are for tenants — lease a floor first" });
+          const body = await readBody();
+          const r = await passes.grantPass({ floorNo, viewer: me, signature: body?.signature });
+          return json(r.ok ? 200 : 400, r);
+        }
+
+        /* ── the building's public books: proof the company works, for everyone ──
+           Aggregates only — realised results, the house record, occupancy. The
+           live edge stays subscription; the scoreboard is the shop window. */
+        if (url.pathname === "/api/stats/overview") {
+          const led = identity.ledger({ limit: 1 });
+          const floors = identity.leaderboard(60);
+          const occupancy = tower.summary();
+          return json(200, {
+            building: {
+              floorsTotal: 50,
+              floorsLeased: occupancy.floors.filter((f) => f.state === "owned").length,
+              settledTrades: led.totals.floors.settled,
+              realisedPnlUsd: led.totals.floors.pnl_usd,
+              houseCalls: led.totals.house.calls,
+              houseLive: led.totals.house.live ?? 0,
+              houseClosedUp: led.totals.house.closed_up ?? 0,
+              houseClosedDown: led.totals.house.closed_down ?? 0,
+            },
+            floors,
+          });
         }
 
         // ── what a tenant gets to name: the floor, the MD, the costume ──

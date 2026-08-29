@@ -333,6 +333,18 @@ select.dp-in{cursor:pointer}
 .datarow .up{color:var(--good)} .datarow .down{color:var(--bad)}
 .datarow .faint{color:var(--ink-faint); font-size:10.5px}
 .data-h{font-size:10px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-faint); margin:4px 0 0}
+.togglerow{display:flex; gap:6px; flex-wrap:wrap}
+.chip{
+  font:inherit; font-size:10.5px; font-weight:600; letter-spacing:.08em; text-transform:uppercase;
+  padding:6px 11px; border-radius:999px; cursor:pointer;
+  background:transparent; border:1px solid var(--card-line); color:var(--ink-soft);
+}
+.chip[aria-pressed="true"]{background:var(--amber); border-color:var(--amber); color:#2a2018}
+.passbox{margin-top:10px; display:flex; flex-direction:column; gap:7px; text-align:left; font-size:12px}
+.passbox input{
+  font:inherit; font-size:11px; padding:7px 9px; border-radius:4px;
+  border:1px solid var(--card-line); background:var(--card); color:var(--ink);
+}
 .crewpanel{flex:1; min-height:0; overflow-y:auto; display:none; flex-direction:column}
 .crewpanel.on{display:flex}
 .legend{padding:11px 13px; display:flex; flex-wrap:wrap; gap:6px 10px}
@@ -380,6 +392,7 @@ select.dp-in{cursor:pointer}
     <button class="dtab" id="tab-desk" role="tab" aria-selected="false">Desk</button>
     <button class="dtab" id="tab-crew" role="tab" aria-selected="false">Crew</button>
     <button class="dtab" id="tab-whales" role="tab" aria-selected="false">Whales<span class="dot" id="whale-dot"></span></button>
+    <button class="dtab" id="tab-stats" role="tab" aria-selected="false">Stats</button>
     <button class="dtab" id="tab-ranks" role="tab" aria-selected="false">Ranks</button>
     <button class="dtab" id="tab-ledger" role="tab" aria-selected="false">Ledger</button>
   </div>
@@ -394,6 +407,7 @@ select.dp-in{cursor:pointer}
     <div class="deskpanel" id="deskpanel"></div>
     <div class="callspanel" id="callspanel"></div>
     <div class="datapanel" id="whalespanel"></div>
+    <div class="datapanel" id="statspanel"></div>
     <div class="datapanel" id="rankspanel"></div>
     <div class="datapanel" id="ledgerpanel"></div>
     <div class="crewpanel" id="crewpanel">
@@ -3355,11 +3369,40 @@ if (location.search.includes("demo")) {
         const n = document.createElement("div");
         n.id = "privnote";
         n.innerHTML = hello.hq
-          ? `🕵️ Demo shift — Section 14's live desk runs in private. <a href="tower.html">Lease a floor</a> to copy its real calls.`
+          ? `🕵️ Demo shift — Section 14's live desk runs in private. <a href="tower.html">Lease a floor</a> to copy its real calls and watch the house live.`
           : hello.vacant
           ? `🏢 Demo shift — this floor isn't leased yet. <a href="tower.html">Lease it</a> and this desk goes live for you.`
           : `🔒 Demo shift — this floor's live desk is private to its tenant. <a href="tower.html">Lease your own floor</a> to run one for real.`;
         stage.appendChild(n);
+        // A tenant elsewhere in the building can buy their way in: pay the floor's
+        // owner directly, paste the transaction, and the stream opens.
+        if (!hello.hq && !hello.vacant && localStorage.getItem("cc_token")) {
+          fetch((window.__API_BASE__ || "") + `/api/floor/${hello.floor}/pass`, {
+            headers: { authorization: "Bearer " + localStorage.getItem("cc_token") },
+          }).then((r) => r.json()).then((info) => {
+            if (!info.payTo) return;
+            const box = document.createElement("div");
+            box.className = "passbox";
+            box.innerHTML = `<span>Or buy a <b>${info.priceTokens.toLocaleString()} $CLAUDECO</b> guest pass (${info.days} days), paid straight to this floor's owner:</span>
+              <input readonly value="${info.payTo}" aria-label="Owner wallet address">
+              <input id="pass-sig" placeholder="Paste your payment's transaction signature" aria-label="Transaction signature">
+              <button class="dp-btn" id="pass-go" type="button">Redeem pass</button>
+              <span id="pass-msg"></span>`;
+            n.appendChild(box);
+            box.querySelector("#pass-go").onclick = async () => {
+              const msg = box.querySelector("#pass-msg");
+              msg.textContent = "Checking the chain…";
+              const r = await fetch((window.__API_BASE__ || "") + `/api/floor/${hello.floor}/pass`, {
+                method: "POST",
+                headers: { "content-type": "application/json", authorization: "Bearer " + localStorage.getItem("cc_token") },
+                body: JSON.stringify({ signature: box.querySelector("#pass-sig").value.trim() }),
+              });
+              const bodyR = await r.json();
+              if (r.ok) { msg.textContent = "Pass granted — opening the floor…"; setTimeout(() => location.reload(), 900); }
+              else msg.textContent = bodyR.error || "could not verify";
+            };
+          }).catch(() => {});
+        }
       }
       return;
     }
@@ -3469,9 +3512,9 @@ const tapeEl2 = document.getElementById("tape");
 const RAIL = document.getElementById("rail");
 const RAIL_TITLE = document.getElementById("rail-title");
 const PANE_TITLE = { tape: "The Tape", inbox: "Big M", desk: "My Desk", calls: "Live Calls", crew: "Section 14",
-  whales: "Whale Callouts", ranks: "The Leaderboard", ledger: "The Record Book" };
+  whales: "Whale Callouts", stats: "The Building's Books", ranks: "The Leaderboard", ledger: "The Record Book" };
 const PANE_TABS = { tape: "tab-tape", inbox: "tab-inbox", desk: "tab-desk", calls: "tab-calls", crew: "tab-crew",
-  whales: "tab-whales", ranks: "tab-ranks", ledger: "tab-ledger" };
+  whales: "tab-whales", stats: "tab-stats", ranks: "tab-ranks", ledger: "tab-ledger" };
 let openPane = null;
 
 function showPane(which) {
@@ -3482,7 +3525,7 @@ function showPane(which) {
   panel.classList.toggle("on", which === "desk");
   document.getElementById("callspanel").classList.toggle("on", which === "calls");
   document.getElementById("crewpanel").classList.toggle("on", which === "crew");
-  for (const pane of ["whales", "ranks", "ledger"])
+  for (const pane of ["whales", "stats", "ranks", "ledger"])
     document.getElementById(pane + "panel").classList.toggle("on", which === pane);
 
   for (const [pane, id] of Object.entries(PANE_TABS))
@@ -3508,7 +3551,7 @@ function togglePane(which, onOpen) {
 
 document.getElementById("rail-close").addEventListener("click", closeRail);
 document.getElementById("tab-crew").addEventListener("click", () => togglePane("crew"));
-for (const pane of ["whales", "ranks", "ledger"])
+for (const pane of ["whales", "stats", "ranks", "ledger"])
   document.getElementById("tab-" + pane).addEventListener("click", () =>
     togglePane(pane, () => window["load_" + pane]?.()));
 // Three separate module scripts share this page, and module scope does not carry
@@ -4180,7 +4223,7 @@ const drow = (parts) => {
   const r = document.createElement("div"); r.className = "datarow";
   for (const [cls, text] of parts) {
     const e = document.createElement(cls === "b" || cls.startsWith("b ") ? "b" : "span");
-    if (cls !== "b" && cls !== "span") e.className = cls.replace(/^b /, "");
+    if (cls !== "b" && cls !== "span") e.className = cls.replace(/^b /, "").replace(/^span /, "");
     e.textContent = text;
     r.appendChild(e);
   }
@@ -4208,6 +4251,57 @@ window.load_whales = async () => {
         ["b " + ((w.net_usd ?? 0) >= 0 ? "up" : "down"), money(w.net_usd)],
         ["faint", ago(w.ts)],
       ]));
+    }
+  } catch { empty(el, "Could not reach the desk."); }
+};
+
+let statsView = "building";
+window.load_stats = async () => {
+  const el = document.getElementById("statspanel");
+  el.innerHTML = "";
+  const chips = document.createElement("div"); chips.className = "togglerow";
+  for (const [id, label] of [["building", "The building"], ["floors", "Profit per floor"], ["house", "House record"]]) {
+    const c = document.createElement("button");
+    c.className = "chip"; c.type = "button"; c.textContent = label;
+    c.setAttribute("aria-pressed", String(statsView === id));
+    c.onclick = () => { statsView = id; window.load_stats(); };
+    chips.appendChild(c);
+  }
+  el.appendChild(chips);
+  const note = document.createElement("p"); note.className = "dp-note";
+  note.textContent = "The building's books are public — settled results and the house's record, so anyone can judge whether the company works. The live edge is what a lease buys.";
+  el.appendChild(note);
+  try {
+    const { body } = await call_api("/api/stats/overview");
+    const B = body.building || {};
+    if (statsView === "building") {
+      for (const [k, v, cls] of [
+        ["Floors leased", `${B.floorsLeased} of ${B.floorsTotal}`, ""],
+        ["House calls published", String(B.houseCalls ?? 0), ""],
+        ["Calls live right now", String(B.houseLive ?? 0), ""],
+        ["Closed above entry", String(B.houseClosedUp ?? 0), "up"],
+        ["Closed below entry", String(B.houseClosedDown ?? 0), "down"],
+        ["Settled tenant trades", String(B.settledTrades ?? 0), ""],
+        ["Realised P&L, all floors", money(B.realisedPnlUsd ?? 0), (B.realisedPnlUsd ?? 0) >= 0 ? "up" : "down"],
+      ]) el.appendChild(drow([["span grow", k], ["b " + cls, v]]));
+    } else if (statsView === "floors") {
+      const rows = body.floors || [];
+      if (!rows.length) empty(el, "No floor has settled a trade yet. The first one starts this board.");
+      for (const f of rows) el.appendChild(drow([
+        ["b grow", (f.floor_name || ordC(f.floor_no))],
+        ["span", `${f.settled} settled`],
+        ["b " + (f.pnl_usd >= 0 ? "up" : "down"), money(f.pnl_usd)],
+      ]));
+    } else {
+      for (const [k, v, cls] of [
+        ["Calls published", String(B.houseCalls ?? 0), ""],
+        ["Live", String(B.houseLive ?? 0), ""],
+        ["Closed above entry", String(B.houseClosedUp ?? 0), "up"],
+        ["Closed below entry", String(B.houseClosedDown ?? 0), "down"],
+      ]) el.appendChild(drow([["span grow", k], ["b " + cls, v]]));
+      const p2 = document.createElement("p"); p2.className = "dp-note";
+      p2.textContent = "Above or below entry is arithmetic on recorded closes, not advice — the record book has every call behind these numbers.";
+      el.appendChild(p2);
     }
   } catch { empty(el, "Could not reach the desk."); }
 };
