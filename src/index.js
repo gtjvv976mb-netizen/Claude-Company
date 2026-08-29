@@ -2,6 +2,7 @@ import { runCycle, workup } from "./desk.js";
 import { startOffice } from "./office.js";
 import { startScanner } from "./scanner.js";
 import { runPenthouseCycle, monitorCalls } from "./penthouse.js";
+import { autoSyncAll } from "./perf.js";
 import { chargeDueRent } from "./leasing.js";
 import { bus } from "./lib/bus.js";
 import { spend } from "./lib/llm.js";
@@ -39,6 +40,29 @@ function narrate() {
  * monitoring open calls is free of model calls, so it runs often — an exit trigger that
  * fires six hours late is not an exit trigger.
  */
+/** The books run whether or not the brain does. Rent and fill-syncing are pure
+ * accounting — no model calls — and used to sit behind the penthouse guard, which
+ * meant a server without an API key also silently stopped charging rent. */
+function startBooks() {
+  const rent = () => {
+    try { const r = chargeDueRent();
+      if (r.charged || r.unpaid) console.log(`[rent] charged ${r.charged}, in arrears ${r.unpaid}`);
+    } catch (e) { console.log(`[rent] ${e.message}`); }
+  };
+  setInterval(rent, 3600000);
+  setTimeout(rent, 30000);
+
+  const sync = async () => {
+    try { const r = await autoSyncAll();
+      if (r.fills || r.settled) console.log(`[books] synced ${r.floors} floors: ${r.fills} fills, ${r.settled} settled`);
+    } catch (e) { console.log(`[books] ${e.message}`); }
+  };
+  const syncMins = Number(process.env.BOOKS_SYNC_MINS || 10);
+  setInterval(sync, syncMins * 60000);
+  setTimeout(sync, 45000);
+  console.log(`[books] rent hourly, fill sync every ${syncMins}m`);
+}
+
 function startPenthouse() {
   const cycleMins = Number(process.env.PENTHOUSE_CYCLE_MINS || 360);   // 4x a day
   const monitorMins = Number(process.env.PENTHOUSE_MONITOR_MINS || 10);
@@ -55,16 +79,6 @@ function startPenthouse() {
       if (r.closed) console.log(`[penthouse] closed ${r.closed} of ${r.checked} open calls`);
     } catch (e) { console.log(`[penthouse] monitor failed: ${e.message}`); }
   };
-  // Rent is checked hourly. Charging is idempotent per period, so a missed hour or a
-  // restart cannot double-charge or skip anyone.
-  const rent = () => {
-    try { const r = chargeDueRent();
-      if (r.charged || r.unpaid) console.log(`[rent] charged ${r.charged}, in arrears ${r.unpaid}`);
-    } catch (e) { console.log(`[rent] ${e.message}`); }
-  };
-  setInterval(rent, 3600000);
-  setTimeout(rent, 30000);
-
   setTimeout(research, 15000);                      // let the server settle first
   setInterval(research, cycleMins * 60000);
   setInterval(watch, monitorMins * 60000);
@@ -118,6 +132,7 @@ async function main() {
     case "office": {
       const { url } = startOffice(Number(args[0]) || Number(process.env.PORT) || 4949);
       startScanner();          // watches the treasury for $CLAUDECO; no-ops until TREASURY_OWNER is set
+      startBooks();            // rent + fill sync, always
       startPenthouse();        // the house team's schedule
       console.log(`${C.b}Trading floor live at ${url}${C.x}  (Ctrl-C to close)`);
       narrate();

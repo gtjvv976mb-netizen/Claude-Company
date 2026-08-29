@@ -2,7 +2,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { ROOT } from "./config.js";
-import { bus, backlog } from "./lib/bus.js";
+import { bus, backlog, emit, runFor } from "./lib/bus.js";
 import { spend } from "./lib/llm.js";
 import * as store from "./lib/store.js";
 import * as tower from "./tower.js";
@@ -171,6 +171,9 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           if (!lease || lease.wallet !== me) return json(403, { error: "this is not your floor" });
           const body = await readBody();
           const r = identity.setIdentity(floorNo, body || {});
+          // Everyone watching this floor sees the new nameplate now, not on reload.
+          if (r.ok) runFor(floorNo, () => emit("identity:changed",
+            { floorNo, identity: r.identity, floorLabel: identity.ordinal(floorNo) }));
           return json(r.ok ? 200 : 400, r);
         }
 

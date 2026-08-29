@@ -305,3 +305,42 @@ export function houseRecord() {
     netPnlUsd: Number(rows.reduce((a, r) => a + r.pnl_usd, 0).toFixed(2)),
   };
 }
+
+
+/* ── the server keeps its own books ─────────────────────────────────────────
+ * Fills used to enter the ledger only when a floor's owner pressed Sync, so the
+ * leaderboard was as fresh as each tenant's last visit. The server now walks
+ * taken calls itself, round-robin so a big building spreads its RPC spend across
+ * ticks instead of bursting. Wallets are read, never touched — same scan the
+ * button runs, nobody's finger required. */
+let syncCursor = 0;
+export async function autoSyncAll({ maxFloors = 6, maxCallsPerFloor = 8 } = {}) {
+  const floors = db.prepare(`
+    SELECT DISTINCT d.floor_no, f.owner FROM deliveries d
+    JOIN floors f ON f.n = d.floor_no AND f.state = 'owned' AND f.owner IS NOT NULL
+    WHERE d.taken = 1
+    ORDER BY d.floor_no`).all();
+  if (!floors.length) return { floors: 0, fills: 0, settled: 0 };
+
+  const picked = [];
+  for (let i = 0; i < Math.min(maxFloors, floors.length); i++)
+    picked.push(floors[(syncCursor + i) % floors.length]);
+  syncCursor = (syncCursor + picked.length) % Math.max(1, floors.length);
+
+  let fills = 0, settled = 0;
+  for (const fl of picked) {
+    const rows = db.prepare(`
+      SELECT d.call_id, c.mint FROM deliveries d JOIN calls c ON c.id = d.call_id
+      WHERE d.floor_no = ? AND d.taken = 1
+      ORDER BY d.taken_at DESC LIMIT ?`).all(fl.floor_no, maxCallsPerFloor);
+    for (const r of rows) {
+      try {
+        const sc = await scanFills({ floorNo: fl.floor_no, callId: r.call_id, wallet: fl.owner, mint: r.mint });
+        if (sc.ok) fills += sc.fills ?? 0;
+        const st = await settle({ floorNo: fl.floor_no, callId: r.call_id, wallet: fl.owner });
+        if (st.ok) settled++;            // settle refuses open positions on its own
+      } catch {}                          // one floor's RPC trouble must not stall the rest
+    }
+  }
+  return { floors: picked.length, fills, settled };
+}

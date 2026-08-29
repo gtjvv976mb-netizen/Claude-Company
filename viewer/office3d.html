@@ -2911,6 +2911,13 @@ const HANDLERS = {
     current.symbol = e.symbol; setStat("s-token", e.symbol);
     tape("Evidence", `${e.symbol} @ $${e.price} · liquidity $${Math.round(e.liq || 0).toLocaleString()}`);
   },
+  "identity:changed": (e) => {
+    // A tenant renamed the floor or redressed the MD; every open viewer follows suit.
+    window.applyIdentity?.(e.identity);
+    const tag = document.getElementById("s-floortag");
+    if (tag && e.floorLabel && e.identity && !e.identity.isHQ)
+      tag.textContent = `${e.floorLabel} \u00b7 ${e.identity.floorName || "Unnamed floor"}`;
+  },
   "seat:thinking": (e) => { const p = who(e.seat); if (p) p.run(async () => { await p.goHome(); p.busy(true); p.say("…", 2000); }); },
   "seat:searching": (e) => {
     tape(e.seat, "searching the web");
