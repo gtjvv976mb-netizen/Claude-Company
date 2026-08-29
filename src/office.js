@@ -3,7 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { ROOT } from "./config.js";
 import { bus, backlog, emit, runFor, chronicleRead } from "./lib/bus.js";
-import { spend } from "./lib/llm.js";
+import { spend, spendSince } from "./lib/llm.js";
+import { cfg } from "./config.js";
 import * as store from "./lib/store.js";
 import db from "./lib/store.js";
 import * as tower from "./tower.js";
@@ -307,6 +308,143 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           if (r.ok) runFor(floorNo, () => emit("identity:changed",
             { floorNo, identity: r.identity, floorLabel: identity.ordinal(floorNo) }));
           return json(r.ok ? 200 : 400, r);
+        }
+
+        /* ── the heartbeat: is the desk alive, and if paused, why ────────── */
+        if (url.pathname === "/api/heartbeat") {
+          const q = (sql, ...a) => { try { return db.prepare(sql).get(...a); } catch { return null; } };
+          const dayAgo = Date.now() - 86400e3;
+          const sp = spendSince(dayAgo);
+          const cap = cfg.dailyBudgetUsd;
+          let state = "RUNNING", reason = null;
+          if (process.env.PENTHOUSE_ENABLED === "0") { state = "PAUSED"; reason = "research disabled by the operator"; }
+          else if (!process.env.ANTHROPIC_API_KEY) { state = "PAUSED"; reason = "no API key — the house team cannot work"; }
+          else if (cap > 0 && sp.usd >= cap) { state = "PAUSED"; reason = `daily budget reached ($${sp.usd.toFixed(2)} of $${cap}) — monitoring and watch checks continue free`; }
+          const lastEv = q("SELECT MAX(ts) t FROM chronicle")?.t ?? null;
+          const cnt = (sql) => q(sql)?.n ?? 0;
+          const live = calls.liveCalls();
+          const marked = live.map((c) => {
+            const m = q("SELECT mark FROM call_events WHERE call_id=? AND mark IS NOT NULL ORDER BY id DESC LIMIT 1", c.id)?.mark ?? null;
+            return { id: c.id, symbol: c.symbol, entry: c.entry_ref, mark: m,
+              pct: m != null && c.entry_ref ? Number((((m - c.entry_ref) / c.entry_ref) * 100).toFixed(1)) : null };
+          });
+          const settled = q("SELECT COUNT(*) n, COALESCE(SUM(pnl_usd),0) pnl, SUM(pnl_usd>0) w FROM results");
+          return json(200, {
+            state, reason, lastEventTs: lastEv, grokEnabled: !!process.env.XAI_API_KEY,
+            today: {
+              workups: cnt(`SELECT COUNT(DISTINCT cycle||'-'||mint) n FROM verdicts WHERE ts > ${dayAgo}`),
+              kills: cnt(`SELECT COUNT(*) n FROM verdicts WHERE killed=1 AND ts > ${dayAgo}`),
+              watches: cnt(`SELECT COUNT(*) n FROM watchlist WHERE created_at > ${dayAgo}`),
+              xReads: cnt(`SELECT COUNT(*) n FROM llm_spend WHERE seat='XRead' AND ts > ${dayAgo}`),
+              spendUsd: Number(sp.usd.toFixed(2)), capUsd: cap,
+            },
+            pnl: {
+              realizedUsd: Number((settled?.pnl ?? 0).toFixed(2)),
+              settled: settled?.n ?? 0, wins: settled?.w ?? 0, losses: (settled?.n ?? 0) - (settled?.w ?? 0),
+              researchSpendAllTimeUsd: Number((spendSince(0).usd).toFixed(2)),
+              openCalls: marked,
+            },
+          });
+        }
+
+        /* ── the killed lane: the trades that did NOT happen, with receipts ── */
+        if (url.pathname === "/api/killed" && !insider())
+          return json(403, { error: "the kill record is for tenants — lease a floor" });
+        if (url.pathname === "/api/killed") {
+          const kills = db.prepare(`SELECT mint, symbol, seat, reason, MAX(ts) ts FROM verdicts
+            WHERE killed=1 GROUP BY mint ORDER BY ts DESC LIMIT 14`).all();
+          const out = kills.map((k) => {
+            const at = db.prepare("SELECT price FROM snapshots WHERE mint=? AND ts<=? ORDER BY ts DESC LIMIT 1").get(k.mint, k.ts)?.price ?? null;
+            const now = db.prepare("SELECT price FROM snapshots WHERE mint=? ORDER BY ts DESC LIMIT 1").get(k.mint)?.price ?? null;
+            return { ...k, sinceKillPct: at && now ? Number((((now - at) / at) * 100).toFixed(1)) : null };
+          });
+          return json(200, { kills: out });
+        }
+
+        /* ── the dossier: one call's whole story, kept forever ───────────── */
+        const dossierMatch = url.pathname.match(/^\/api\/call\/(\d+)\/dossier$/);
+        if (dossierMatch && !insider())
+          return json(403, { error: "call dossiers are for tenants — lease a floor" });
+        if (dossierMatch) {
+          const call = calls.getCall(Number(dossierMatch[1]));
+          if (!call) return json(404, { error: "no such call" });
+          const win = 50 * 60e3;
+          const verdicts = db.prepare(`SELECT seat,verdict,score,confidence,killed,reason,json,ts FROM verdicts
+            WHERE mint=? AND ts BETWEEN ? AND ? ORDER BY ts`).all(call.mint, call.opened_at - win, call.opened_at + 5 * 60e3);
+          const events = db.prepare("SELECT kind,detail,mark,ts FROM call_events WHERE call_id=? ORDER BY id").all(call.id);
+          const fills = db.prepare("SELECT floor_no,side,token_units,quote_usd,signature,block_time FROM fills WHERE call_id=? ORDER BY id").all(call.id);
+          const results = db.prepare("SELECT floor_no,pnl_usd,fee_usd,settled_at FROM results WHERE call_id=?").all(call.id);
+          const lesson = db.prepare("SELECT grade,lesson,ts FROM lessons WHERE call_id=? ORDER BY id DESC LIMIT 1").get(call.id) ?? null;
+          // The research bill for THIS call, from the verdict window.
+          let costUsd = null;
+          if (verdicts.length) {
+            const t0 = verdicts[0].ts - 120e3, t1 = verdicts[verdicts.length - 1].ts + 120e3;
+            costUsd = db.prepare("SELECT COALESCE(SUM(usd),0) u FROM llm_spend WHERE ts BETWEEN ? AND ?").get(t0, t1)?.u ?? null;
+            if (costUsd != null) costUsd = Number(costUsd.toFixed(3));
+          }
+          let report = null;
+          if (call.report_file) {
+            try {
+              const f = path.join(ROOT, call.report_file);
+              if (f.startsWith(ROOT) && fs.existsSync(f)) report = fs.readFileSync(f, "utf8").slice(0, 60_000);
+            } catch {}
+          }
+          const seats = verdicts.map((v) => {
+            let extract = null;
+            try { const j = JSON.parse(v.json || "{}"); extract = j.headline ?? j.thesis ?? j.size_rationale ?? null; } catch {}
+            return { seat: v.seat, verdict: v.verdict, score: v.score, confidence: v.confidence,
+              killed: !!v.killed, reason: v.reason, extract, ts: v.ts };
+          });
+          return json(200, { call, seats, events, fills, results, lesson, costUsd, report });
+        }
+
+        /* ── the glass desk: every decision, seat by seat ──────────────────
+           The verdicts table already holds the whole story of every coin the
+           desk examined — every seat's score, confidence, kill and reasoning.
+           This surfaces it: the trail a tenant reads to answer "why did my
+           team decide that". Insider-gated like calls: transparency is the
+           tenant's product; the public gets the odometer and the books. */
+        if (url.pathname === "/api/activity" && !insider())
+          return json(403, { error: "the decision trail is for tenants — lease a floor" });
+        if (url.pathname === "/api/activity") {
+          const floorQ = url.searchParams.get("floor");
+          const like = floorQ ? `floor${Number(floorQ)}-%` : null;
+          const rows = like
+            ? db.prepare("SELECT cycle,mint,symbol,seat,verdict,score,confidence,killed,reason,json,ts FROM verdicts WHERE cycle LIKE ? ORDER BY id DESC LIMIT 400").all(like)
+            : db.prepare("SELECT cycle,mint,symbol,seat,verdict,score,confidence,killed,reason,json,ts FROM verdicts ORDER BY id DESC LIMIT 400").all();
+          const byKey = new Map();
+          for (const r of rows) {
+            const k = r.cycle + "|" + r.mint;
+            if (!byKey.has(k)) byKey.set(k, { cycle: r.cycle, mint: r.mint, symbol: r.symbol, ts: r.ts, seats: [] });
+            const g = byKey.get(k);
+            g.ts = Math.min(g.ts, r.ts);
+            let extract = null;
+            try {
+              const j = JSON.parse(r.json || "{}");
+              extract = j.headline ?? j.thesis ?? j.size_rationale ?? j.ruling ?? null;
+              if (r.seat === "pm" && j.how_red_team_was_answered)
+                extract = (extract ? extract + " " : "") + "· RT answered: " + j.how_red_team_was_answered;
+            } catch {}
+            g.seats.push({ seat: r.seat, verdict: r.verdict, score: r.score,
+              confidence: r.confidence, killed: !!r.killed, reason: r.reason, extract, ts: r.ts });
+          }
+          const workups = [...byKey.values()].slice(0, 24)
+            .map((w) => ({ ...w, seats: w.seats.sort((a, b) => a.ts - b.ts) }));
+          return json(200, { workups });
+        }
+
+        // The watch board: every armed tripwire and its LIVE distance to firing.
+        if (url.pathname === "/api/watchboard" && !insider())
+          return json(403, { error: "the watch board is for tenants — lease a floor" });
+        if (url.pathname === "/api/watchboard") {
+          const ws = db.prepare("SELECT id,mint,symbol,rules,note,created_at,expires_at,status,held_count,last_checked FROM watchlist ORDER BY id DESC LIMIT 30").all();
+          const out = ws.map((w) => {
+            const rules = JSON.parse(w.rules || "{}");
+            const snap = db.prepare("SELECT price, liq, buys, sells, ts FROM snapshots WHERE mint=? ORDER BY ts DESC LIMIT 1").get(w.mint);
+            return { ...w, rules, now: snap ? { priceUsd: snap.price, liqUsd: snap.liq,
+              buysH24: snap.buys, asOf: snap.ts } : null };
+          });
+          return json(200, { watches: out });
         }
 
         // Whale callouts for one mint, read live off the pool.
