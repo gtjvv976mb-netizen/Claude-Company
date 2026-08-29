@@ -1,7 +1,7 @@
 import { runCycle, workup } from "./desk.js";
 import { startOffice } from "./office.js";
 import { startScanner } from "./scanner.js";
-import { runPenthouseCycle, monitorCalls } from "./penthouse.js";
+import { runPenthouseCycle, monitorCalls, freshScan } from "./penthouse.js";
 import { autoSyncAll } from "./perf.js";
 import { startWorld } from "./world.js";
 import { chroniclePrune } from "./lib/bus.js";
@@ -85,7 +85,17 @@ function startPenthouse() {
   setTimeout(research, 15000);                      // let the server settle first
   setInterval(research, cycleMins * 60000);
   setInterval(watch, monitorMins * 60000);
-  console.log(`[penthouse] research every ${cycleMins}m, monitoring every ${monitorMins}m`);
+
+  // The sniper lane: cheap, frequent, and only ever pays for ignition.
+  const freshMins = Number(process.env.PENTHOUSE_FRESH_MINS || 20);
+  const fresh = async () => {
+    try { const r = await freshScan();
+      if (r.workedUp) console.log(`[fresh] worked up the top ignition: ${r.outcome}`);
+    } catch (e) { console.log(`[fresh] ${e.message}`); }
+  };
+  setTimeout(fresh, 90000);
+  setInterval(fresh, freshMins * 60000);
+  console.log(`[penthouse] research every ${cycleMins}m, monitoring every ${monitorMins}m, fresh scan every ${freshMins}m`);
 }
 
 async function main() {

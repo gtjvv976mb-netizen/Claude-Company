@@ -75,7 +75,25 @@ export function rank(c) {
 
   // Age: old enough to have a tape, young enough to still move.
   if (age > 24 && age < 24 * 21) { s += 12; why.push("has a tape but is still young"); }
-  if (age < 12) { s -= 15; why.push("too new to read"); }
+
+  /* THE SNIPER PATH. The profitable memecoin bots of this cycle are not fast —
+   * they are EARLY: first hours of a coin whose attention is real. "Too new to
+   * read" was costing us every one of those, so youth stops being a penalty when
+   * the coin shows genuine ignition: buyers accelerating hour over hour, socials
+   * that exist, and a price that is moving without having already blown off.
+   * Youth without ignition keeps the old penalty — new and dead is just new. */
+  const buysH1 = c.pair?.txns?.h1?.buys ?? 0;
+  const buysH6 = c.pair?.txns?.h6?.buys ?? 0;
+  const buyAccel = buysH6 > 0 ? buysH1 / (buysH6 / 6) : 0;
+  const hasSocials = (c.pair?.socials?.length ?? 0) > 0;
+  if (age >= 1.5 && age < 48) {
+    if (buyAccel >= 2 && buysH1 >= 30 && hasSocials && h1 > 0 && h1 <= 25) {
+      s += 30; why.push(`ignition: ${buysH1} buys this hour, ${buyAccel.toFixed(1)}x the 6h pace, socials live`);
+      if (buyAccel >= 4 && h6 > 15) { s += 10; why.push("attention compounding, not spiking"); }
+    } else {
+      s -= 15; why.push("young without ignition");
+    }
+  } else if (age < 1.5) { s -= 20; why.push("too new even for the sniper path"); }
   // The ranker could reward youth and nothing else, so a coin that had actually survived
   // scored worse than one that had not been tested. Durability is evidence too.
   if (age > 24 * 90 && liq > 750_000) { s += 14; why.push("survived long enough to have a base rate"); }
@@ -229,6 +247,61 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
  * Watch the open calls. Deliberately cheap: prices and chain flags only, no model calls,
  * so it can run often without the monitoring costing more than the research.
  */
+/* THE FRESH LANE. A six-hour cycle is never early. This runs cheap and often:
+ * sweep, keep only coins under 48h old, rank them, and only when the best one
+ * shows real ignition does it earn a full workup — one per scan, the budget
+ * brake underneath as always. Early is a schedule, not a speed. */
+let freshBusy = false;
+export async function freshScan({ minScore = 45 } = {}) {
+  if (freshBusy) return { skipped: "busy" };
+  freshBusy = true;
+  try {
+    const universe = await sweep();
+    const young = [];
+    for (const c of universe) {
+      if (liveCallFor(c.mint)) continue;
+      const age = c.pair?.ageHours ?? 0;
+      if (age <= 0 || age >= 48) continue;
+      const cat = classify(c);
+      const r = rank(c);
+      if (r.score <= 0) continue;
+      young.push({ ...c, category: cat.category, score: r.score, rankWhy: r.why });
+    }
+    young.sort((a, b) => b.score - a.score);
+    const top = young[0];
+    emit("fresh:scan", { considered: universe.length, young: young.length,
+      top: top ? { symbol: top.pair?.baseSymbol, score: top.score } : null });
+    if (!top || top.score < minScore) return { young: young.length, workedUp: 0 };
+
+    const hook = `fresh scan \u00b7 ignition \u00b7 ${top.category}${top.launchpad ? ` \u00b7 ${top.launchpad}` : ""}`;
+    const rec = await runFor(null, () => workup(new Date().toISOString().replace(/[:.]/g, "-"), top.mint, hook));
+    if (rec?.finalDecision === "APPROVED") {
+      const ev = rec.ev ?? {};
+      const call = openCall({
+        mint: rec.mint, symbol: rec.symbol ?? ev.symbol, category: top.category, launchpad: top.launchpad,
+        conviction: rec.pm?.conviction ?? null,
+        entryRef: ev.pair?.priceUsd ?? null,
+        stop: rec.ticket?.stop_price ?? null,
+        target: rec.ticket?.take_profit?.[0]?.price ?? null,
+        thesis: rec.pm?.thesis ?? null,
+        invalidation: rec.pm?.invalidation ?? null,
+        flags: (ev.mintAccount?.flags ?? []).map((f) => f.flag ?? f),
+        liqUsd: ev.pairs?.totalLiquidityUsd ?? ev.pair?.liquidityUsd ?? null,
+        rtLossPct: ev.route?.roundTripLossPct ?? null,
+        reportFile: rec.reportFile ?? null,
+      });
+      if (call) {
+        const floors = listFloors().filter((f) => f.state === "owned").map((f) => f.n);
+        if (floors.length) broadcast(call.id, floors);
+      }
+    }
+    return { young: young.length, workedUp: 1, outcome: rec?.outcome ?? rec?.finalDecision };
+  } catch (e) {
+    if (e instanceof OutOfCredit) return { halted: e.message };
+    return { error: String(e.message || e) };
+  } finally { freshBusy = false; }
+}
+
 export async function monitorCalls() {
   const open = liveCalls();
   if (!open.length) return { checked: 0, closed: 0 };

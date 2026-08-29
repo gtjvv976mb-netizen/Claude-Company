@@ -142,8 +142,16 @@ export async function runNarrative(ev) {
 
 You may search the web. Use it to establish:
 - What this token actually claims to be, and whether anything backs the claim.
+- THE LORE TEST: is the story ORIGINAL and ORGANIC — a real joke, a real event, a real
+  community in-group — or a template? A true lore has a traceable origin (the post, the
+  moment, the person) and people retell it in their own words. A pasted lore has one
+  phrasing everywhere. Name the origin if you can find it.
+- THE X TEST: is attention on X/Twitter real and RISING? Look for the cashtag and the
+  project account: are DISTINCT, pre-existing accounts talking in their own words, or is
+  it fresh accounts repeating one script? Reply-farming and engagement pods count
+  against, not for. Being late to a true story still loses money — say plainly whether
+  the desk is early, on time, or already exit liquidity.
 - Whether there is a genuine catalyst with a date, or only vibes.
-- Whether attention is rising or already peaked. Being late to a true story still loses money.
 - Any history of the team, prior projects, or prior failures.
 
 Discipline:
