@@ -114,7 +114,13 @@ export async function ask({
       // Streaming, not parse(): the SDK refuses a non-streaming call at these token
       // budgets because it could exceed the HTTP timeout. finalMessage() gives the same
       // assembled response, and the schema check below is the authority on shape anyway.
-      const stream = client.beta.messages.stream({
+      // The retier taught this the hard way, in production: `fallbacks` is an
+      // Opus 5 / Fable 5 parameter — Sonnet rejects it with a 400 — and
+      // `output_config.effort` errors on Haiku 4.5. Every capability gate here
+      // exists because a live cycle hit the 400 for its absence.
+      const opusTier = /opus-5|fable-5/.test(model);
+      const haiku = /haiku/.test(model);
+      const req = {
         model,
         max_tokens: maxTokens,
         system: [
@@ -122,12 +128,17 @@ export async function ask({
           ...(system ? [{ type: "text", text: system }] : []),
         ],
         messages: [{ role: "user", content: prompt }],
-        output_config: { format: betaZodOutputFormat(schema), effort },
+        output_config: haiku
+          ? { format: betaZodOutputFormat(schema) }
+          : { format: betaZodOutputFormat(schema), effort },
+      };
+      if (opusTier) {
         // Server-side fallback: if a safety classifier declines, the request is
         // routed to a comparable model instead of failing the whole cycle.
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default",
-      });
+        req.betas = ["server-side-fallback-2026-07-01"];
+        req.fallbacks = "default";
+      }
+      const stream = client.beta.messages.stream(req);
       const res = await stream.finalMessage();
 
       meter(model, res.usage, seat, effort);
