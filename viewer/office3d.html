@@ -3374,6 +3374,20 @@ if (location.search.includes("demo")) {
           ? `🏢 Demo shift — this floor isn't leased yet. <a href="tower.html">Lease it</a> and this desk goes live for you.`
           : `🔒 Demo shift — this floor's live desk is private to its tenant. <a href="tower.html">Lease your own floor</a> to run one for real.`;
         stage.appendChild(n);
+        // Self-diagnosis: a signed-in viewer without standing sees WHO the server
+        // thinks they are — the difference between "broken" and "wrong wallet"
+        // is the whole support ticket.
+        const tk0 = localStorage.getItem("cc_token");
+        if (tk0) {
+          fetch((window.__API_BASE__ || "") + "/api/me", { headers: { authorization: "Bearer " + tk0 } })
+            .then((r) => r.json()).then((meB) => {
+              if (!meB.wallet) return;
+              const who = document.createElement("div");
+              who.style.cssText = "margin-top:8px;font-size:11px;opacity:.75";
+              who.textContent = `Signed in as ${meB.wallet.slice(0, 4)}…${meB.wallet.slice(-4)} — this wallet has no live standing here. The HQ opens to the wallet in HQ_OWNER / TREASURY_OWNER; a floor opens to its tenant.`;
+              document.getElementById("privnote")?.appendChild(who);
+            }).catch(() => {});
+        }
         // A tenant elsewhere in the building can buy their way in: pay the floor's
         // owner directly, paste the transaction, and the stream opens.
         if (!hello.hq && !hello.vacant && localStorage.getItem("cc_token")) {

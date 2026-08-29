@@ -44,7 +44,8 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
       {
         const sid = url.searchParams.get("sid");
         const who = sid ? auth.walletFor(sid) : null;
-        const isHq = (w) => !!w && (w === leasing.TREASURY || tower.getFloor(50)?.owner === w);
+        const isHq = (w) => !!w && (w === leasing.TREASURY || w === (process.env.HQ_OWNER || "")
+          || tower.getFloor(50)?.owner === w);
         let allowed;
         if (wantFloor == null || wantFloor === 50) allowed = isHq(who) || (!!who && !!leasing.leaseOf(who));
         else {
@@ -114,7 +115,12 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
        * privacy. */
       const HQ_FLOOR = 50;
       // The HQ's owner is the treasury's owner (floors.owner as a future override).
-      const hqOwner = (w) => !!w && (w === leasing.TREASURY || tower.getFloor(HQ_FLOOR)?.owner === w);
+      // Identity and money are different jobs: TREASURY_OWNER is where lease
+      // payments land; HQ_OWNER is the wallet the boss signs in with. They are
+      // often the same wallet — the day they are not, the boss was locked out of
+      // their own building and saw the demo like a tourist.
+      const hqOwner = (w) => !!w && (w === leasing.TREASURY || w === (process.env.HQ_OWNER || "")
+        || tower.getFloor(HQ_FLOOR)?.owner === w);
       // Live data is for people with standing: the HQ's owner anywhere, a tenant
       // on their own floor. Everyone else — every floor, the HQ included — gets
       // the demo shift. The 3D office is the showroom; the data is the product.
