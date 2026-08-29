@@ -34,7 +34,14 @@ How to weigh what you find:
   confident you are. Do not call a pool vault an insider.
 - If holder data failed to fetch, say so and drop confidence. Do not estimate it.
 
-KILL only for a defect that can take a holder's money by design.`,
+KILL only for a defect that can take a holder's money by design.
+
+WHO CREATED IT: for pump.fun coins the evidence bundle carries "deployer" — the
+creator wallet and their record: prior launches, how many ever graduated, how many
+sit dead. A serial deployer with no graduations is a launch farm (the screen already
+kills the worst of these). A first-time deployer is neither good nor bad — it is one
+more thing that cannot be verified. Weigh the record you are given; never invent one
+for a coin where deployer reads unknown.`,
   },
 
   liquidity: {

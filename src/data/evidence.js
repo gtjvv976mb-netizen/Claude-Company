@@ -4,6 +4,7 @@ import * as sol from "./solana.js";
 import { cfg, MINTS } from "../config.js";
 import { emit } from "../lib/bus.js";
 import { whaleFeed } from "../identity.js";
+import * as pf from "./pumpfun.js";
 
 /**
  * Everything the desk knows about one token, fetched deterministically.
@@ -47,6 +48,15 @@ export async function gather(mint, hook = "") {
   };
   const callouts = whaleFeed({ limit: 200 }).filter((w) => w.mint === mint).slice(0, 5);
 
+  // Who created it — the doctrine's deferred question, answered where it is
+  // answerable (pump.fun coins) and skipped on monitor ticks, which need prices,
+  // not biographies. Best-effort: an API failure reads as unknown, never a block.
+  let deployer = null;
+  if (hook !== "monitor" && mint.endsWith("pump")) {
+    deployer = await pf.deployerProfile(mint).catch(() => null);
+    if (deployer && !deployer.ok) deployer = { note: deployer.note ?? "deployer unknown" };
+  }
+
   const vol24 = best?.volume?.h24 ?? null;
   // Depth must be measured across ALL venues, not the single deepest pair. A token
   // trading on 30 pools looks fraudulently thin if you only price the biggest one.
@@ -55,7 +65,7 @@ export async function gather(mint, hook = "") {
 
   return {
     ok: true,
-    promotion, callouts,
+    promotion, callouts, deployer,
     mint,
     hook,
     symbol: best?.baseSymbol ?? "?",
@@ -95,6 +105,14 @@ export function screen(ev) {
   const d = ev.derived || {};
 
   const check = (cond, code, detail) => { if (cond) fails.push({ code, detail }); };
+
+  // The launch farm: many priors, none ever graduated. Fires only on POSITIVE
+  // evidence — a coin whose deployer we could not identify passes this check,
+  // because "unknown" must never be an execution.
+  const dep = ev.deployer;
+  check(dep?.ok && dep.priorLaunches >= 8 && dep.graduated === 0,
+    "serial_deployer",
+    dep?.ok ? `deployer shipped ${dep.priorLaunches}+ coins, zero ever graduated` : null);
 
   const totalLiq = ev.pairs?.totalLiquidityUsd ?? p.liquidityUsd;
   check(totalLiq == null || totalLiq < s.minLiquidityUsd,
