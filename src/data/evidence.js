@@ -66,9 +66,41 @@ export async function gather(mint, hook = "") {
   const liq = Number(totalLiquidityUsd.toFixed(2)) || null;
   const txns24 = (best?.txns?.h24?.buys ?? 0) + (best?.txns?.h24?.sells ?? 0);
 
+  /* THE PINOCCHIO GATE — data hygiene as a pipeline stage, copied from the one
+   * discipline every serious desk shares (GROKSTREET's verification seat, and
+   * RenTec folklore before it): every load-bearing number is cross-checked
+   * against an INDEPENDENT source before anyone reasons on it. Three outcomes:
+   * VERIFIED, WRONG, KILLED — and unverifiable is a kill, not a pass. We fetch
+   * a second price (Jupiter) alongside DexScreener consensus anyway; until now
+   * nobody compared them. */
+  const crosscheck = { verdicts: [], killed: false };
+  const xc = (verdict, check, detail) => {
+    crosscheck.verdicts.push({ check, verdict, detail });
+    if (verdict === "KILLED") crosscheck.killed = true;
+  };
+  const jupUsd = jupPrice?.usdPrice ?? null;
+  if (jupUsd && cons.priceUsd > 0) {
+    const gapPct = Math.abs(jupUsd - cons.priceUsd) / cons.priceUsd * 100;
+    if (gapPct > 25) xc("KILLED", "price_disputed",
+      `DexScreener consensus $${cons.priceUsd} vs Jupiter $${jupUsd} disagree by ${gapPct.toFixed(0)}% — the mark is unverifiable`);
+    else xc("VERIFIED", "price", `two independent sources agree within ${gapPct.toFixed(1)}%`);
+  } else {
+    xc("FLAG", "price_single_source", "only one price source answered — treat the mark with suspicion");
+  }
+  if ((vol24 ?? 0) > 10_000 && txns24 === 0)
+    xc("KILLED", "volume_without_trades", `$${Math.round(vol24)} of volume with zero recorded trades is not a market`);
+  if (cons.priceSpreadPct > 25)
+    xc("FLAG", "venue_spread", `surviving pools still disagree by ${cons.priceSpreadPct}% — a wobbly mark`);
+  const avgTrade = vol24 && txns24 ? vol24 / txns24 : null;
+  if (avgTrade != null && avgTrade > 50_000)
+    xc("FLAG", "suspicious_print", `average trade $${Math.round(avgTrade)} — a whale or a wash, and the tape cannot say which`);
+  const tokenBorn = deployer?.coin?.createdAt ?? null;
+  if (tokenBorn && best?.pairCreatedAt && best.pairCreatedAt < tokenBorn - 3600e3)
+    xc("KILLED", "impossible_age", "the pair predates the token's own creation — the identity is wrong");
+
   return {
     ok: true,
-    promotion, callouts, deployer, marketRegime,
+    promotion, callouts, deployer, marketRegime, crosscheck,
     mint,
     hook,
     symbol: best?.baseSymbol ?? "?",
@@ -134,6 +166,11 @@ export function screen(ev) {
     "fdv_propped", `fdv/liquidity=${d.fdvToLiqRatio} > ceiling ${s.maxFdvToLiqRatio}`);
   check(ev.exitProbe?.roundTripLossPct != null && ev.exitProbe.roundTripLossPct > cfg.maxRoundTripSlippagePct,
     "cannot_exit", `round-trip loss ${ev.exitProbe.roundTripLossPct}% > ceiling ${cfg.maxRoundTripSlippagePct}% at $${cfg.targetSizeUsd}`);
+
+  // The Pinocchio gate's hard kills: a desk must never reason on a number that
+  // two independent sources cannot agree exists.
+  for (const c of (ev.crosscheck?.verdicts ?? []).filter((v) => v.verdict === "KILLED"))
+    check(true, c.check, c.detail);
 
   // A live freeze authority is a honeypot vector no quote can see: a Jupiter
   // round trip proves a ROUTE exists, not that your transfer will execute.

@@ -5,6 +5,7 @@ import { ROOT } from "./config.js";
 import { bus, backlog, emit, runFor, chronicleRead } from "./lib/bus.js";
 import { spend } from "./lib/llm.js";
 import * as store from "./lib/store.js";
+import db from "./lib/store.js";
 import * as tower from "./tower.js";
 import * as auth from "./auth.js";
 import * as leasing from "./leasing.js";
@@ -264,6 +265,9 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           const led = identity.ledger({ limit: 1 });
           const floors = identity.leaderboard(60);
           const occupancy = tower.summary();
+          // The odometer: the receipts of the research machine, counted from its
+          // own permanent record — never estimated, never decorative.
+          const q = (sql) => { try { return db.prepare(sql).get()?.n ?? 0; } catch { return 0; } };
           return json(200, {
             building: {
               floorsTotal: 50,
@@ -274,6 +278,14 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               houseLive: led.totals.house.live ?? 0,
               houseClosedUp: led.totals.house.closed_up ?? 0,
               houseClosedDown: led.totals.house.closed_down ?? 0,
+            },
+            research: {
+              coinsSeen: q("SELECT COUNT(*) n FROM seen"),
+              seatVerdicts: q("SELECT COUNT(*) n FROM verdicts"),
+              workups: q("SELECT COUNT(DISTINCT cycle || '-' || mint) n FROM verdicts"),
+              killsByCode: q("SELECT COUNT(*) n FROM verdicts WHERE killed=1"),
+              watchesOpened: q("SELECT COUNT(*) n FROM watchlist"),
+              lessonsLearned: q("SELECT COUNT(*) n FROM lessons"),
             },
             floors,
           });
