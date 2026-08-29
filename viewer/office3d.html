@@ -45,10 +45,28 @@ body{
 
 .topbar{
   position:relative; z-index:5;
-  display:flex; align-items:baseline; gap:16px; flex-wrap:wrap;
+  display:flex; align-items:baseline; gap:16px; flex-wrap:nowrap;
   padding:12px 20px; background:var(--charcoal); color:var(--on-dark);
   border-bottom:3px solid var(--amber);
 }
+.topbar .spacer{flex:1 1 auto; min-width:0}
+/* The stats keep one line and scroll sideways rather than pushing the bar taller —
+   the dock is positioned from the top of the stage, so a bar that grows downward
+   lands on top of it. */
+.topstats{
+  display:flex; align-items:baseline; gap:16px; flex:0 1 auto;
+  min-width:0; overflow-x:auto; scrollbar-width:none; padding-bottom:2px;
+}
+.topstats::-webkit-scrollbar{display:none}
+.topstats > *{flex:0 0 auto}
+.firm{flex:0 0 auto}
+.tag{flex:0 0 auto}
+@media (max-width:900px){
+  .topbar{gap:12px; padding:10px 14px}
+  .firm{font-size:23px}
+  .tag{display:none}
+}
+@media (max-width:560px){ .topstats{gap:12px} }
 .firm{font-family:"Instrument Serif",Georgia,serif; font-size:29px; line-height:1; letter-spacing:.005em}
 .firm em{font-style:italic; color:var(--amber)}
 .tag{font-size:11.5px; text-transform:uppercase; letter-spacing:.16em; color:rgba(244,236,216,.66); font-weight:600}
@@ -308,11 +326,13 @@ select.dp-in{cursor:pointer}
   <div class="firm">Claude <em>&amp;</em> Co.</div>
   <div class="tag">Solana Research Desk</div>
   <div class="spacer"></div>
-  <div class="stat">Live calls <b id="s-live-calls">—</b></div>
-  <div class="stat">Your floor <b id="s-mine">—</b></div>
-  <div class="stat">Balance <b id="s-bal">—</b></div>
-  <div class="stat" id="s-rentwrap" hidden>Rent <b id="s-rent">—</b></div>
-  <div class="live" id="s-live"><span class="dot"></span><span id="s-livetext">Connecting</span></div>
+  <div class="topstats">
+    <div class="stat">Live calls <b id="s-live-calls">—</b></div>
+    <div class="stat">Your floor <b id="s-mine">—</b></div>
+    <div class="stat">Balance <b id="s-bal">—</b></div>
+    <div class="stat" id="s-rentwrap" hidden>Rent <b id="s-rent">—</b></div>
+    <div class="live" id="s-live"><span class="dot"></span><span id="s-livetext">Connecting</span></div>
+  </div>
 </div>
 
 <div class="wrap">
