@@ -370,6 +370,18 @@ function placeCamera() {
    which makes it useless for checking whether a character actually reads — so this
    drives the camera directly. __figure("Scribe") frames AGENT P; the second argument
    turns the view around them. */
+/* Nav diagnostics: how much of the floor is blocked, and what route a given walk
+   actually takes. A path that is one straight leg through a desk looks identical
+   to a correct one from the outside, so this prints the legs. */
+window.__nav = (fromSeat, toSpot) => {
+  const blocked = NAV.blocked ? NAV.blocked.reduce((a, v) => a + v, 0) : 0;
+  const out = { solids: SOLID.length, cells: NAV.cols * NAV.rows, blocked,
+                pctBlocked: +(100 * blocked / (NAV.cols * NAV.rows)).toFixed(1) };
+  const w = workers[fromSeat], t = SPOTS[toSpot];
+  if (w && t) out.legs = navPath(w.x, w.z, t[0], t[1]).map((l) => l.map((n) => +n.toFixed(1)));
+  return out;
+};
+
 window.__figure = (seat, yaw = Math.PI / 4, width = 3.4) => {
   const w = workers[seat];
   if (!w) return "no such seat: " + Object.keys(workers).join(", ");
@@ -541,6 +553,145 @@ const SPOTS = {
 /* ═══ FURNITURE ═══════════════════════════════════════════════════════════ */
 const TIMBER = 0x8a6540, STEEL = 0x76858a, DARK = 0x3c4a4d;
 
+/* ── solid things, and getting around them ──────────────────────────────────
+   Agents used to walk the straight line between two points, which meant straight
+   through desks, shelves and each other's chairs. Every builder now registers its
+   real world footprint, those footprints are burned into a grid, and walks are
+   A* across it. The grid is inflated by the agent's own radius so a path never
+   scrapes a corner it cannot actually clear.                                    */
+const SOLID = [];
+
+/** Register a built group's true XZ footprint, whatever its rotation. */
+function registerSolid(obj, pad = 0) {
+  obj.updateMatrixWorld(true);
+  const bb = new THREE.Box3().setFromObject(obj);
+  if (!isFinite(bb.min.x) || !isFinite(bb.min.z)) return;
+  SOLID.push({ x0: bb.min.x - pad, z0: bb.min.z - pad, x1: bb.max.x + pad, z1: bb.max.z + pad });
+}
+/** Register a rectangle directly, for things with no group of their own. */
+function solidRect(cx, cz, w, d) {
+  SOLID.push({ x0: cx - w / 2, z0: cz - d / 2, x1: cx + w / 2, z1: cz + d / 2 });
+}
+
+const CELL = 0.5, AGENT_R = 0.42;
+const NAV = { cols: 0, rows: 0, blocked: null, ready: false };
+
+const navCol = (x) => Math.floor((x + HALF_W) / CELL);
+const navRow = (z) => Math.floor((z + HALF_D) / CELL);
+const navX = (c) => -HALF_W + (c + 0.5) * CELL;
+const navZ = (r) => -HALF_D + (r + 0.5) * CELL;
+
+function buildNav() {
+  NAV.cols = Math.ceil((HALF_W * 2) / CELL);
+  NAV.rows = Math.ceil((HALF_D * 2) / CELL);
+  NAV.blocked = new Uint8Array(NAV.cols * NAV.rows);
+
+  // Keep a margin off the walls so nobody walks with their shoulder in the plaster.
+  for (let c = 0; c < NAV.cols; c++) for (let r = 0; r < NAV.rows; r++) {
+    const x = navX(c), z = navZ(r);
+    if (x < -HALF_W + 0.8 || x > HALF_W - 0.8 || z < -HALF_D + 0.8 || z > HALF_D - 0.8)
+      NAV.blocked[r * NAV.cols + c] = 1;
+  }
+  for (const s of SOLID) {
+    const c0 = Math.max(0, navCol(s.x0 - AGENT_R)), c1 = Math.min(NAV.cols - 1, navCol(s.x1 + AGENT_R));
+    const r0 = Math.max(0, navRow(s.z0 - AGENT_R)), r1 = Math.min(NAV.rows - 1, navRow(s.z1 + AGENT_R));
+    for (let c = c0; c <= c1; c++) for (let r = r0; r <= r1; r++) NAV.blocked[r * NAV.cols + c] = 1;
+  }
+  NAV.ready = true;
+}
+
+const navFree = (c, r) =>
+  c >= 0 && r >= 0 && c < NAV.cols && r < NAV.rows && !NAV.blocked[r * NAV.cols + c];
+
+/** Nearest free cell to one that is blocked — a desk chair sits inside a desk. */
+function nearestFree(c, r) {
+  if (navFree(c, r)) return [c, r];
+  for (let ring = 1; ring <= 12; ring++) {
+    for (let dc = -ring; dc <= ring; dc++) for (let dr = -ring; dr <= ring; dr++) {
+      if (Math.max(Math.abs(dc), Math.abs(dr)) !== ring) continue;
+      if (navFree(c + dc, r + dr)) return [c + dc, r + dr];
+    }
+  }
+  return null;
+}
+
+/** Bresenham-ish line of sight, used to pull the staircase out of an A* path. */
+function navClear(ax, az, bx, bz) {
+  const d = Math.hypot(bx - ax, bz - az);
+  const steps = Math.ceil(d / (CELL * 0.5));
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    if (!navFree(navCol(ax + (bx - ax) * t), navRow(az + (bz - az) * t))) return false;
+  }
+  return true;
+}
+
+function navPath(sx, sz, tx, tz) {
+  if (!NAV.ready) return [[tx, tz]];
+  if (navClear(sx, sz, tx, tz)) return [[tx, tz]];
+
+  const start = nearestFree(navCol(sx), navRow(sz));
+  const goal = nearestFree(navCol(tx), navRow(tz));
+  if (!start || !goal) return [[tx, tz]];
+
+  const N = NAV.cols * NAV.rows;
+  const si = start[1] * NAV.cols + start[0], gi = goal[1] * NAV.cols + goal[0];
+  const g = new Float32Array(N).fill(Infinity), f = new Float32Array(N).fill(Infinity);
+  const from = new Int32Array(N).fill(-1), seen = new Uint8Array(N);
+  const h = (i) => {
+    const c = i % NAV.cols, r = (i / NAV.cols) | 0;
+    return Math.hypot(c - goal[0], r - goal[1]);
+  };
+  g[si] = 0; f[si] = h(si);
+  const open = [si];
+
+  while (open.length) {
+    // A binary heap would be tidier, but the grid is 68x50 and this runs on a walk,
+    // not per frame. Linear scan is measurably fine and much harder to get wrong.
+    let bi = 0;
+    for (let i = 1; i < open.length; i++) if (f[open[i]] < f[open[bi]]) bi = i;
+    const cur = open.splice(bi, 1)[0];
+    if (cur === gi) break;
+    seen[cur] = 1;
+    const cc = cur % NAV.cols, cr = (cur / NAV.cols) | 0;
+    for (let dc = -1; dc <= 1; dc++) for (let dr = -1; dr <= 1; dr++) {
+      if (!dc && !dr) continue;
+      const nc = cc + dc, nr = cr + dr;
+      if (!navFree(nc, nr)) continue;
+      // No cutting a diagonal between two blocked cells — that clips desk corners.
+      if (dc && dr && (!navFree(cc + dc, cr) || !navFree(cc, cr + dr))) continue;
+      const ni = nr * NAV.cols + nc;
+      if (seen[ni]) continue;
+      const step = dc && dr ? 1.41421 : 1;
+      const ng = g[cur] + step;
+      if (ng < g[ni]) {
+        g[ni] = ng; f[ni] = ng + h(ni); from[ni] = cur;
+        if (!open.includes(ni)) open.push(ni);
+      }
+    }
+  }
+  if (from[gi] < 0 && gi !== si) return [[tx, tz]];
+
+  const cells = [];
+  for (let i = gi; i >= 0; i = from[i]) { cells.push(i); if (i === si) break; }
+  cells.reverse();
+  const pts = cells.map((i) => [navX(i % NAV.cols), navZ((i / NAV.cols) | 0)]);
+  pts.push([tx, tz]);
+
+  // String-pull: drop any waypoint we can already see past, so the walk reads as a
+  // person crossing a room rather than a token stepping around a board.
+  const out = [];
+  let ax = sx, az = sz, i = 0;
+  while (i < pts.length) {
+    let j = pts.length - 1;
+    while (j > i && !navClear(ax, az, pts[j][0], pts[j][1])) j--;
+    out.push(pts[j]);
+    ax = pts[j][0]; az = pts[j][1];
+    i = j + 1;
+  }
+  return out;
+}
+
 function buildDesk(at, yaw, y = 0, accent = P.teal, kitId = null) {
   const g = new THREE.Group();
   g.position.set(at[0], y, at[1]);
@@ -560,6 +711,7 @@ function buildDesk(at, yaw, y = 0, accent = P.teal, kitId = null) {
   if (kit) kit((size, at2, colour, rough = 0.82) => box(g, size, at2, colour, rough));
 
   room.add(g);
+  registerSolid(g);
   return g;
 }
 
@@ -572,6 +724,7 @@ function buildChair(at, yaw, y = 0) {
   cyl(g, 0.04, 0.42, [0, 0.22, 0], STEEL, 8);
   cyl(g, 0.24, 0.05, [0, 0.03, 0], STEEL, 10);
   room.add(g);
+  registerSolid(g);
   return g;
 }
 
@@ -587,6 +740,7 @@ function buildPlant(at) {
     g.add(m);
   }
   room.add(g);
+  registerSolid(g);
 }
 
 (function buildStations() {
@@ -596,6 +750,7 @@ function buildPlant(at) {
   box(pr, [0.86, 0.10, 0.62], [0, 0.68, 0], DARK);
   box(pr, [0.70, 0.02, 0.44], [0.06, 0.74, 0], P.cream, 0.9);
   box(pr, [0.20, 0.06, 0.20], [-0.3, 0.66, 0.34], P.amber, 0.6);
+  registerSolid(pr);
 
   // shredder, beside the screener
   const sh = new THREE.Group(); sh.position.set(SPOTS.shredder[0], 0, SPOTS.shredder[1]); room.add(sh);
@@ -1579,8 +1734,9 @@ class Worker {
     return new Promise((res) => {
       if (Math.hypot(x - this.x, z - this.z) < 0.05) return res();
       this.wantSeated = false;
-      this.faceTowards(x, z);
-      this.path = { x, z, done: res };
+      const legs = navPath(this.x, this.z, x, z);
+      this.faceTowards(legs[0][0], legs[0][1]);
+      this.path = { legs, i: 0, done: res };
     });
   }
 
@@ -1635,15 +1791,30 @@ class Worker {
     // walk
     let moving = false;
     if (this.path) {
-      const dx = this.path.x - this.x, dz = this.path.z - this.z;
-      const d = Math.hypot(dx, dz);
-      const step = SPEED * dt;
-      if (d <= step) {
-        this.x = this.path.x; this.z = this.path.z;
-        const done = this.path.done; this.path = null; done();
-      } else {
-        this.x += (dx / d) * step; this.z += (dz / d) * step;
-        moving = true;
+      let step = SPEED * dt;
+      // Consume as many legs as this frame's step covers, so a short final leg
+      // never costs a frame of standing still at a corner.
+      while (step > 0 && this.path) {
+        const leg = this.path.legs[this.path.i];
+        const dx = leg[0] - this.x, dz = leg[1] - this.z;
+        const d = Math.hypot(dx, dz);
+        if (d <= step) {
+          this.x = leg[0]; this.z = leg[1];
+          step -= d;
+          this.path.i++;
+          if (this.path.i >= this.path.legs.length) {
+            const done = this.path.done; this.path = null; done();
+          } else {
+            const next = this.path.legs[this.path.i];
+            this.faceTowards(next[0], next[1]);
+            moving = true;
+          }
+        } else {
+          this.x += (dx / d) * step; this.z += (dz / d) * step;
+          this.faceTowards(leg[0], leg[1]);
+          moving = true;
+          step = 0;
+        }
       }
       this.g.position.x = this.x; this.g.position.z = this.z;
     }
@@ -1907,6 +2078,8 @@ const bakedBuckets = bakeStatic(room);
   snackSign.position.set(SPOTS.snackBar[0] - 1.0, 2.15, SPOTS.snackBar[1] - 3.7);
   scene.add(snackSign);
 }
+
+buildNav();   // every fixture has registered its footprint by here
 
 const PICKABLE = [];
 
