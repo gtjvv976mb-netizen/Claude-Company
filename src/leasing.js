@@ -226,6 +226,32 @@ export function chargeDueRent() {
 export const inArrears = (floorNo) =>
   db.prepare("SELECT COUNT(*) n FROM rent WHERE floor_no=? AND paid=0").get(floorNo).n > 0;
 
+/**
+ * Retry unpaid rent against today's balance. Without this, one missed charge
+ * bricked the floor forever: the UI said "top up to resume new calls" while no
+ * code path ever read the top-up — an instruction that corresponded to nothing.
+ * Runs on the same hourly timer as chargeDueRent.
+ */
+export function settleArrears() {
+  const rows = db.prepare("SELECT id, floor_no, wallet, base_units FROM rent WHERE paid=0 ORDER BY id").all();
+  let settled = 0;
+  for (const r of rows) {
+    if (balanceOf(r.wallet) < BigInt(r.base_units)) continue;
+    try {
+      db.exec("BEGIN IMMEDIATE");
+      db.prepare("INSERT INTO spends (wallet, base_units, created_at) VALUES (?,?,?)")
+        .run(r.wallet, r.base_units, Date.now());
+      db.prepare("UPDATE rent SET paid=1 WHERE id=? AND paid=0").run(r.id);
+      db.exec("COMMIT");
+      settled++;
+    } catch (e) {
+      try { db.exec("ROLLBACK"); } catch {}
+      throw e;
+    }
+  }
+  return { settled, remaining: rows.length - settled };
+}
+
 export function config() {
   return {
     mint: MINT, decimals: DECIMALS,

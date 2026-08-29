@@ -59,11 +59,22 @@ export async function grantPass({ floorNo, viewer, signature }) {
   const used = db.prepare("SELECT 1 FROM floor_passes WHERE signature=?").get(signature);
   if (used) return { ok: false, error: "that payment already bought a pass" };
 
+  // Finalized, like every other money path: a confirmed-but-reorged payment must
+  // not grant 30 days of access and permanently burn its signature as used.
   const res = await readRpc(cfg.rpc, "getTransaction",
-    [signature, { encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment: "confirmed" }]);
+    [signature, { encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment: "finalized" }]);
   if (!res?.ok || !res.data) return { ok: false, error: "transaction not found yet — give it a moment" };
   const tx = res.data;
   if (tx.meta?.err) return { ok: false, error: "that transaction failed on chain" };
+
+  // Only a payment made FOR this purchase counts: a months-old transfer between
+  // the same two wallets is not pass revenue, and each old transfer would
+  // otherwise be one free pass.
+  const age = tx.blockTime ? Date.now() - tx.blockTime * 1000 : null;
+  if (age == null || age > 30 * 60e3)
+    return { ok: false, error: "that payment is too old — send the pass payment now, then paste its signature" };
+  if (tx.blockTime * 1000 < lease.created_at)
+    return { ok: false, error: "that payment predates the current lease" };
 
   const deltas = new Map();   // owner wallet -> base-unit delta of MINT
   for (const post of tx.meta?.postTokenBalances ?? []) {
@@ -89,8 +100,15 @@ export async function grantPass({ floorNo, viewer, signature }) {
 
   const now = Date.now();
   const expires = now + PASS_DAYS * 86400e3;
-  db.prepare(`INSERT INTO floor_passes (floor_no, viewer, owner, signature, base_units, granted_at, expires_at)
-              VALUES (?,?,?,?,?,?,?)`)
-    .run(floorNo, viewer, lease.wallet, signature, ownerGain.toString(), now, expires);
+  try {
+    db.prepare(`INSERT INTO floor_passes (floor_no, viewer, owner, signature, base_units, granted_at, expires_at)
+                VALUES (?,?,?,?,?,?,?)`)
+      .run(floorNo, viewer, lease.wallet, signature, ownerGain.toString(), now, expires);
+  } catch (e) {
+    // Double-click race: both requests pass the used-check before either inserts.
+    // The loser's UNIQUE violation is "already bought", not a 500.
+    if (/UNIQUE/i.test(String(e.message))) return { ok: false, error: "that payment already bought a pass" };
+    throw e;
+  }
   return { ok: true, pass: passFor(floorNo, viewer), days: PASS_DAYS };
 }

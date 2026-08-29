@@ -95,6 +95,31 @@ async function push(url, title, body) {
 }
 
 /**
+ * A new call is worth waking up for too. The trade loop STARTS with knowing the
+ * call exists: a tenant whose tab was closed at 3am used to learn about an entry
+ * only by opening the Calls pane later — and about the desk's work only at the
+ * exit. Durable alert + webhook, same machinery as exits, kind 'entry'.
+ */
+export async function announceEntry(call) {
+  const rows = db.prepare(`SELECT d.floor_no, d.size_sol, c.webhook_url
+                           FROM deliveries d LEFT JOIN copy_settings c ON c.floor_no = d.floor_no
+                           WHERE d.call_id=? AND d.verdict='offered'`).all(call.id);
+  const sym = call.symbol || call.mint.slice(0, 6);
+  let sent = 0;
+  for (const r of rows) {
+    const title = `New call — ${sym}`;
+    const body = `${call.thesis || "The desk has published a call."}\n` +
+      `Your floor sized it at ${r.size_sol ?? "?"} SOL. Open your floor's Calls tab for the ticket. ` +
+      `This is research; you trade from your own wallet or not at all.`;
+    const fresh = raise({ floorNo: r.floor_no, callId: call.id, kind: "entry",
+      urgency: "normal", title, body, mint: call.mint });
+    if (fresh && r.webhook_url) push(r.webhook_url, title, body).catch(() => {});
+    if (fresh) sent++;
+  }
+  return { floors: rows.length, alerted: sent };
+}
+
+/**
  * Fan an exit out to every floor that was offered the call. Deliberately not filtered by
  * arrears, unpaid fees, or whether the tenant said they took it — someone who quietly
  * bought without pressing the button still needs to hear that it is time to leave.

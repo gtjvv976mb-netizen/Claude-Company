@@ -11,6 +11,7 @@ import * as jup from "./data/jupiter.js";
 import { callouts, whaleScore } from "./whales.js";
 import { recordWhaleCallout } from "./identity.js";
 import { regime } from "./data/regime.js";
+import { cfg } from "./config.js";
 
 /**
  * THE PENTHOUSE CYCLE — the house team's working day.
@@ -269,9 +270,9 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
       target: p.rec.ticket?.take_profit?.[0]?.price ?? null,
       thesis: p.rec.pm?.thesis ?? null,
       invalidation: p.rec.pm?.invalidation ?? null,
-      flags: (ev.mintAccount?.flags ?? []).map((f) => f.flag ?? f),
+      flags: ev.mintAccount?.error ? null : (ev.mintAccount?.flags ?? []).map((f) => f.flag ?? f),
       liqUsd: ev.pairs?.totalLiquidityUsd ?? ev.pair?.liquidityUsd ?? null,
-      rtLossPct: ev.route?.roundTripLossPct ?? null,
+      rtLossPct: ev.exitProbe?.roundTripLossPct ?? null,
       reportFile: p.rec.reportFile ?? null,
     });
     if (!call) continue;
@@ -339,9 +340,9 @@ export async function freshScan({ minScore = 45 } = {}) {
         target: rec.ticket?.take_profit?.[0]?.price ?? null,
         thesis: rec.pm?.thesis ?? null,
         invalidation: rec.pm?.invalidation ?? null,
-        flags: (ev.mintAccount?.flags ?? []).map((f) => f.flag ?? f),
+        flags: ev.mintAccount?.error ? null : (ev.mintAccount?.flags ?? []).map((f) => f.flag ?? f),
         liqUsd: ev.pairs?.totalLiquidityUsd ?? ev.pair?.liquidityUsd ?? null,
-        rtLossPct: ev.route?.roundTripLossPct ?? null,
+        rtLossPct: ev.exitProbe?.roundTripLossPct ?? null,
         reportFile: rec.reportFile ?? null,
       });
       if (call) {
@@ -356,36 +357,50 @@ export async function freshScan({ minScore = 45 } = {}) {
   } finally { freshBusy = false; }
 }
 
+let monitorBusy = false;
 export async function monitorCalls() {
-  const open = liveCalls();
-  if (!open.length) return { checked: 0, closed: 0 };
-  let closed = 0;
+  // Reentrancy: a slow pass (rate-limited RPC, many open calls) must not overlap
+  // the next tick and double-fire the same exit.
+  if (monitorBusy) return { skipped: "busy" };
+  monitorBusy = true;
+  try {
+    const open = liveCalls();
+    if (!open.length) return { checked: 0, closed: 0 };
+    let closed = 0;
 
-  for (const call of open) {
-    const ev = await gather(call.mint, "monitor");
-    if (ev.error) { noteEvent(call.id, "check_failed", ev.error); continue; }
+    for (const call of open) {
+      // Per-call containment: liveCalls() is newest-first, so one corrupted row
+      // would otherwise block exit evaluation for every OLDER live call, forever.
+      try {
+        const ev = await gather(call.mint, "monitor");
+        if (ev.error) { noteEvent(call.id, "check_failed", ev.error); continue; }
 
-    const now = {
-      mark: ev.pair?.priceUsd ?? null,
-      liqUsd: ev.pairs?.totalLiquidityUsd ?? ev.pair?.liquidityUsd ?? null,
-      rtLossPct: ev.route?.roundTripLossPct ?? null,
-      flags: (ev.mintAccount?.flags ?? []).map((f) => f.flag ?? f),
-    };
-    const exit = evaluateExit(call, now);
-    if (exit.fire) {
-      closeCall(call.id, exit.code, now.mark);
-      // COLONEL DEBRIEF grades the landing — fire and forget; exits never wait.
-      const closed = { ...call, closed_at: Date.now(), close_mark: now.mark, close_reason: exit.code };
-      import("./agents/review.js").then((r) => r.runDebrief(closed)).catch(() => {});
-      emit("call:exit", { callId: call.id, symbol: call.symbol, code: exit.code,
-        urgency: exit.urgency, detail: exit.detail, mark: now.mark });
-      // Durable, per-floor, and sent regardless of arrears — an exit must reach the
-      // tenant whether or not their tab is open and whether or not they owe rent.
-      await announceExit(call, exit);
-      closed++;
-    } else {
-      noteEvent(call.id, "ok", null, now.mark);
+        const now = {
+          mark: ev.pair?.priceUsd ?? null,
+          liqUsd: ev.pairs?.totalLiquidityUsd ?? ev.pair?.liquidityUsd ?? null,
+          rtLossPct: ev.exitProbe?.roundTripLossPct ?? null,
+          flags: (ev.mintAccount?.flags ?? []).map((f) => f.flag ?? f),
+          flagsReadable: !ev.mintAccount?.error,
+        };
+        const exit = evaluateExit(call, now);
+        if (exit.fire) {
+          closeCall(call.id, exit.code, now.mark);
+          // COLONEL DEBRIEF grades the landing — fire and forget; exits never wait.
+          const landing = { ...call, closed_at: Date.now(), close_mark: now.mark, close_reason: exit.code };
+          import("./agents/review.js").then((r) => r.runDebrief(landing)).catch(() => {});
+          emit("call:exit", { callId: call.id, symbol: call.symbol, code: exit.code,
+            urgency: exit.urgency, detail: exit.detail, mark: now.mark });
+          // Durable, per-floor, regardless of arrears — and never awaited: thirty
+          // tenants with hung webhooks must not delay the NEXT call's exit check.
+          announceExit(call, exit).catch((e) => noteEvent(call.id, "announce_failed", String(e.message || e)));
+          closed++;
+        } else {
+          noteEvent(call.id, "ok", null, now.mark);
+        }
+      } catch (e) {
+        try { noteEvent(call.id, "check_failed", String(e.message || e)); } catch {}
+      }
     }
-  }
-  return { checked: open.length, closed };
+    return { checked: open.length, closed };
+  } finally { monitorBusy = false; }
 }

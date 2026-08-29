@@ -68,13 +68,14 @@ ensureColumn("results", "fee_usd", "REAL NOT NULL DEFAULT 0");
 ensureColumn("results", "fee_paid", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("results", "token_usd", "REAL");
 
-/** The wallet's token account for a mint, if it has ever held one. */
-async function tokenAccountOf(wallet, mint) {
+/** ALL of the wallet's token accounts for a mint — an aggregator route can land a
+ * fill in an auxiliary account, and scanning only value[0] would never see it. */
+async function tokenAccountsOf(wallet, mint) {
   const r = await readRpc(cfg.rpc, "getTokenAccountsByOwner",
     [wallet, { mint }, { encoding: "jsonParsed", commitment: "finalized" }]);
   if (!r.ok) return { ok: false, error: r.error };
-  const acct = r.data?.value?.[0]?.pubkey;
-  return acct ? { ok: true, account: acct } : { ok: false, error: "no token account" };
+  const accts = (r.data?.value ?? []).map((v) => v.pubkey);
+  return accts.length ? { ok: true, accounts: accts } : { ok: false, error: "no token account" };
 }
 
 /**
@@ -146,33 +147,44 @@ async function solPrice() {
  */
 export async function scanFills({ floorNo, callId, wallet, mint, limit = 40 }) {
   if (!isAddress(wallet) || !isAddress(mint)) return { ok: false, error: "bad address" };
-  const ta = await tokenAccountOf(wallet, mint);
+  const ta = await tokenAccountsOf(wallet, mint);
   if (!ta.ok) return { ok: true, fills: 0, note: ta.error };   // never held it: not an error
 
-  const sigs = await readRpc(cfg.rpc, "getSignaturesForAddress",
-    [ta.account, { limit, commitment: "finalized" }]);
-  if (!sigs.ok) return { ok: false, error: sigs.error };
+  // Only activity DURING the call belongs to the call. A tenant who traded this
+  // mint last week did not trade the desk's idea — attributing those fills would
+  // bill a performance fee on money the call never made.
+  const call = callId ? db.prepare("SELECT opened_at, closed_at FROM calls WHERE id=?").get(callId) : null;
+  const windowStart = call ? Math.floor(call.opened_at / 1000) - 300 : null;   // 5 min of clock skew grace
+  const windowEnd = call?.closed_at ? Math.floor(call.closed_at / 1000) + 48 * 3600 : null; // exits take time
 
   const solUsd = await solPrice();
   let found = 0;
 
-  for (const s of (sigs.data || []).filter((x) => !x.err).reverse()) {
-    const already = db.prepare("SELECT 1 FROM fills WHERE signature=? AND mint=? LIMIT 1").get(s.signature, mint);
-    if (already) continue;
-    const tx = await readRpc(cfg.rpc, "getTransaction",
-      [s.signature, { encoding: "jsonParsed", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
-    if (!tx.ok || !tx.data) continue;
+  for (const account of ta.accounts) {
+    const sigs = await readRpc(cfg.rpc, "getSignaturesForAddress",
+      [account, { limit, commitment: "finalized" }]);
+    if (!sigs.ok) return { ok: false, error: sigs.error, fills: found };
 
-    const fill = readFill(tx.data, wallet, mint, solUsd);
-    if (!fill) continue;
-    try {
-      db.prepare(`INSERT INTO fills (floor_no,call_id,wallet,mint,side,token_units,quote_usd,signature,slot,block_time,seen_at)
-                  VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
-        .run(floorNo, callId ?? null, wallet, mint, fill.side, fill.tokenUnits, fill.quoteUsd,
-             s.signature, tx.data.slot ?? null, tx.data.blockTime ?? null, Date.now());
-      found++;
-      emit("fill", { floorNo, callId, side: fill.side, quoteUsd: fill.quoteUsd, mint });
-    } catch (e) { if (!/UNIQUE/i.test(String(e.message))) throw e; }
+    for (const s of (sigs.data || []).filter((x) => !x.err).reverse()) {
+      if (windowStart != null && s.blockTime != null && s.blockTime < windowStart) continue;
+      if (windowEnd != null && s.blockTime != null && s.blockTime > windowEnd) continue;
+      const already = db.prepare("SELECT 1 FROM fills WHERE signature=? AND mint=? LIMIT 1").get(s.signature, mint);
+      if (already) continue;
+      const tx = await readRpc(cfg.rpc, "getTransaction",
+        [s.signature, { encoding: "jsonParsed", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
+      if (!tx.ok || !tx.data) continue;
+
+      const fill = readFill(tx.data, wallet, mint, solUsd);
+      if (!fill) continue;
+      try {
+        db.prepare(`INSERT INTO fills (floor_no,call_id,wallet,mint,side,token_units,quote_usd,signature,slot,block_time,seen_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+          .run(floorNo, callId ?? null, wallet, mint, fill.side, fill.tokenUnits, fill.quoteUsd,
+               s.signature, tx.data.slot ?? null, tx.data.blockTime ?? null, Date.now());
+        found++;
+        emit("fill", { floorNo, callId, side: fill.side, quoteUsd: fill.quoteUsd, mint });
+      } catch (e) { if (!/UNIQUE/i.test(String(e.message))) throw e; }
+    }
   }
   return { ok: true, fills: found };
 }

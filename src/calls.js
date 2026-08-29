@@ -66,7 +66,7 @@ export function openCall(c) {
       c.mint, c.symbol ?? null, c.category ?? null, c.launchpad ?? null, c.conviction ?? null,
       c.entryRef ?? null, c.entryLo ?? null, c.entryHi ?? null, c.stop ?? null, c.target ?? null,
       c.thesis ?? null, c.invalidation ?? null,
-      JSON.stringify(c.flags ?? []), c.liqUsd ?? null, c.rtLossPct ?? null,
+      c.flags == null ? null : JSON.stringify(c.flags), c.liqUsd ?? null, c.rtLossPct ?? null,
       Date.now(), c.reportFile ?? null);
     const call = getCall(info.lastInsertRowid);
     emit("call:open", { callId: call.id, mint: call.mint, symbol: call.symbol, category: call.category, launchpad: call.launchpad });
@@ -113,11 +113,18 @@ export function highWaterMark(callId) {
 }
 
 export function evaluateExit(call, now) {
-  const flagsAtCall = new Set(JSON.parse(call.flags_at_call || "[]"));
+  // "Unreadable" and "zero flags" are different facts. A call opened during an
+  // RPC flake stores flags_at_call = null; comparing that as [] would report every
+  // pre-existing authority as "appeared" on the first healthy read and fire a
+  // spurious EXIT NOW on a sound thesis. Skip the comparison unless BOTH reads
+  // are real. Corrupt JSON likewise disables this one trigger, not the monitor.
+  let flagsAtCall = null;
+  try { if (call.flags_at_call != null) flagsAtCall = new Set(JSON.parse(call.flags_at_call)); } catch {}
   const flagsNow = now.flags ?? [];
   const mark = now.mark ?? null;
 
-  const newFlag = flagsNow.find((f) => !flagsAtCall.has(f));
+  const newFlag = (flagsAtCall && now.flagsReadable !== false)
+    ? flagsNow.find((f) => !flagsAtCall.has(f)) : null;
   if (newFlag) return { fire: true, code: "authority_appeared", urgency: "unconditional",
     detail: `a control appeared that was not there at the call: ${newFlag}`, pct: 100 };
 

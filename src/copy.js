@@ -98,13 +98,17 @@ export function saveSettings(floorNo, patch) {
   // previous appetite's list back whenever the appetite changed, so switching to
   // aggressive silently kept conservative's categories and the floor still refused
   // memecoins. Null means "follow whatever the appetite says".
-  const cats = Array.isArray(patch.categories)
-    ? JSON.stringify(patch.categories.filter((c) => c in CATEGORY_RISK))
-    : null;
+  // Omitted key = keep the stored override; the UI form sends only appetite/
+  // bankroll/auto/webhook, and writing NULL for what it did not send silently
+  // wiped explicit category/launchpad overrides on every ordinary save.
+  const raw = db.prepare("SELECT categories, launchpads FROM copy_settings WHERE floor_no=?").get(floorNo) || {};
+  const cats = "categories" in patch
+    ? (Array.isArray(patch.categories) ? JSON.stringify(patch.categories.filter((c) => c in CATEGORY_RISK)) : null)
+    : raw.categories ?? null;
   const hook = "webhookUrl" in patch ? (patch.webhookUrl || null) : cur.webhook_url ?? null;
-  const pads = Array.isArray(patch.launchpads)
-    ? JSON.stringify(patch.launchpads.filter((l) => LAUNCHPADS.includes(l)))
-    : null;
+  const pads = "launchpads" in patch
+    ? (Array.isArray(patch.launchpads) ? JSON.stringify(patch.launchpads.filter((l) => LAUNCHPADS.includes(l))) : null)
+    : raw.launchpads ?? null;
   db.prepare("UPDATE copy_settings SET appetite=?, bankroll_sol=?, auto=?, categories=?, launchpads=?, webhook_url=?, updated_at=? WHERE floor_no=?")
     .run(appetite, bankroll, auto, cats, pads, hook, Date.now(), floorNo);
   return settingsFor(floorNo);
@@ -168,18 +172,26 @@ export function broadcast(callId, leasedFloors) {
     } catch (e) { if (!/UNIQUE/i.test(String(e.message))) throw e; }
   }
   emit("call:broadcast", { callId, symbol: call.symbol, offered, skipped });
+  // Durable per-floor entry alerts + webhooks — the loop starts with hearing
+  // about the call, not with happening to have the tab open. Fire and forget.
+  if (offered) import("./alerts.js").then((a) => a.announceEntry(call)).catch(() => {});
   return { ok: true, offered, skipped };
 }
 
 export const feedFor = (floorNo, limit = 25) => db.prepare(`
   SELECT d.*, c.mint, c.symbol, c.category, c.conviction, c.status, c.entry_ref, c.stop, c.target,
-         c.thesis, c.close_reason, c.close_mark
+         c.thesis, c.invalidation, c.close_reason, c.close_mark,
+         (SELECT e.mark FROM call_events e WHERE e.call_id = c.id AND e.mark IS NOT NULL
+          ORDER BY e.id DESC LIMIT 1) AS last_mark,
+         (SELECT MAX(e.ts) FROM call_events e WHERE e.call_id = c.id AND e.mark IS NOT NULL) AS last_mark_ts
   FROM deliveries d JOIN calls c ON c.id=d.call_id
   WHERE d.floor_no=? ORDER BY d.id DESC LIMIT ?`).all(floorNo, limit);
 
 /** The tenant says they took it. Bookkeeping over a number they declared — never a balance we hold. */
 export function markTaken(floorNo, callId, taken = true) {
-  const r = db.prepare("UPDATE deliveries SET taken=?, taken_at=? WHERE floor_no=? AND call_id=?")
+  // Only an OFFERED delivery can be taken: marking a skipped or ancient call
+  // pulls it into fill-scanning and settlement it was never part of.
+  const r = db.prepare("UPDATE deliveries SET taken=?, taken_at=? WHERE floor_no=? AND call_id=? AND verdict='offered'")
     .run(taken ? 1 : 0, taken ? Date.now() : null, floorNo, callId);
   return r.changes === 1;
 }
