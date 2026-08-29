@@ -1,400 +1,731 @@
+<!doctype html>
+<html lang="en">
+<head>
 <title>Claude Company</title>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Copy an AI research desk on Solana. Fourteen agents sweep every launchpad, a red team tries to refute each idea, and your floor sizes the call to your risk. You trade in SOL, from your own wallet.">
+<meta name="description" content="Copy an AI research desk on Solana. Fourteen agents work every corner of six launchpads, a red team tries to refute each idea, and your floor sizes the call to your risk. You trade in SOL, from your own wallet.">
 <meta property="og:title" content="Claude Company">
 <meta property="og:description" content="Lease a floor, copy the desk. Fourteen AI agents, one call sheet, fifty floors that each decide for themselves.">
-<meta property="og:image" content="assets/banner-1200x630.png">
+<meta property="og:image" content="https://claudedotcompany.com/assets/banner-1200x630.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="assets/banner-1200x630.png">
+<meta name="twitter:image" content="https://claudedotcompany.com/assets/banner-1200x630.png">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Archivo:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
 <style>
+/* ══════════════════════════════════════════════════════════════════════
+   CLAUDE COMPANY — THE DEVELOPMENT
+   A property developer's homepage for a building that is a research desk.
+   The hero is a picture of an evening; below the fold, a broadsheet.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── 1 · tokens ─────────────────────────────────────────────────────── */
 :root{
+  /* house palette — unchanged */
   --cream:#f0e4c7; --path-stone:#cfc7ad; --timber:#a96934; --timber-dark:#5f3e29;
-  --teal:#267f82; --solar-navy:#287e9d; --amber:#e0ad3d; --glass:#73c9d2;
-  --metal:#70828a; --terracotta:#bf623c; --coral:#df7655; --leaf:#66a348;
-  --charcoal:#30454a; --claude:#d97757;
-  --bg:#f7efdd; --bg-2:#efe3c8; --ink:#22343a; --ink-soft:#5b6f72; --ink-faint:#8a9a99;
-  --card:#fffaf0; --line:#e3d5b6; --on-dark:#f4ecd8;
+  --teal:#267f82; --amber:#e0ad3d; --glass:#73c9d2; --metal:#70828a;
+  --terracotta:#bf623c; --coral:#df7655; --leaf:#66a348; --charcoal:#30454a;
+  --claude:#d97757;
+
+  /* the sheet (light — "the morning edition") */
+  --bg:#faf4e6;          /* paper            */
+  --bg-2:#f2e8d1;        /* tinted band      */
+  --card:#fffdf5;        /* inset stock      */
+  --ink:#1d2f34;         /* body ink         */
+  --ink-soft:#48595d;    /* secondary ink    */
+  --ink-faint:#5f6f6d;   /* captions, slugs  */
+  --rule:#cdbc95;        /* hairline         */
+  --rule-soft:#e2d5b4;   /* lighter hairline */
+  --accent:#bf623c;      /* display accent (terracotta) — large type only */
+  --accent-ink:#8f4a1e;  /* accent at caption size — passes AA on paper   */
+  --hot:#e0ad3d;         /* the one fill below the fold                   */
+  --hot-ink:#2a2018;
+  --kind-model:#1f6b6e;  /* the "model" tag, dark enough for 9px on paper */
+  --on-dark:#f4ecd8;
+
+  /* the evening (hero) — fixed in both schemes: it is a picture of dusk */
+  --dusk-ink:#f8f0dc;
+  --dusk-soft:#e9dcbd;
+  --dusk-amber:#eec27a;
+  --dusk-bar:rgba(18,15,34,.94);
 }
-:root:not([data-theme="light"]){ @media (prefers-color-scheme: dark){
-  --bg:#151f22; --bg-2:#1b2b2f; --ink:#eadfc6; --ink-soft:#a9b7b2; --ink-faint:#7b8a88;
-  --card:#22343a; --line:#33474c;
-}}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#131c1f; --bg-2:#1a2629; --card:#1d292d;
+    --ink:#ece0c6; --ink-soft:#a9b7b3; --ink-faint:#8b9a96;
+    --rule:#3a4c50; --rule-soft:#2a393d;
+    --accent:#e0ad3d; --accent-ink:#e8bb5c;
+    --hot:#e0ad3d; --hot-ink:#231a12;
+    --kind-model:#73c9d2;
+    --dusk-ink:#f8f0dc; --dusk-soft:#e9dcbd; --dusk-amber:#eec27a;
+    --dusk-bar:rgba(14,12,28,.94);
+  }
+}
 :root[data-theme="dark"]{
-  --bg:#151f22; --bg-2:#1b2b2f; --ink:#eadfc6; --ink-soft:#a9b7b2; --ink-faint:#7b8a88;
-  --card:#22343a; --line:#33474c;
+  --bg:#131c1f; --bg-2:#1a2629; --card:#1d292d;
+  --ink:#ece0c6; --ink-soft:#a9b7b3; --ink-faint:#8b9a96;
+  --rule:#3a4c50; --rule-soft:#2a393d;
+  --accent:#e0ad3d; --accent-ink:#e8bb5c;
+  --hot:#e0ad3d; --hot-ink:#231a12;
+  --kind-model:#73c9d2;
+  --dusk-ink:#f8f0dc; --dusk-soft:#e9dcbd; --dusk-amber:#eec27a;
+  --dusk-bar:rgba(14,12,28,.94);
 }
+
+/* ── 2 · base ───────────────────────────────────────────────────────── */
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);
-  font-family:Archivo,system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.6}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}}
+body{
+  margin:0;background:var(--bg);color:var(--ink);
+  font-family:Archivo,system-ui,-apple-system,sans-serif;
+  font-size:16.5px;line-height:1.62;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+  font-variant-numeric:oldstyle-nums;
+  overflow-x:clip;
+}
+img,svg,video{max-width:100%;height:auto}
 a{color:inherit}
-.wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+h1,h2,h3{font-family:"Instrument Serif",Georgia,"Times New Roman",serif;font-weight:400}
+p{margin:0 0 1.1em}
+p:last-child{margin-bottom:0}
+::selection{background:var(--hot);color:var(--hot-ink)}
 
-/* ── nav ── */
-nav{position:sticky;top:0;z-index:20;background:var(--charcoal);color:var(--on-dark);
-  border-bottom:3px solid var(--amber)}
-nav .wrap{display:flex;align-items:center;gap:20px;padding-top:13px;padding-bottom:13px}
-.brand{font-family:"Instrument Serif",Georgia,serif;font-size:25px;line-height:1;text-decoration:none;
-  display:inline-flex;align-items:center;gap:10px}
-.brand .mark{border-radius:8px;display:block}
-.brand em{font-style:italic;color:var(--amber)}
-nav .links{margin-left:auto;display:flex;gap:20px;align-items:center;flex-wrap:wrap}
-nav a.l{font-size:12px;letter-spacing:.1em;text-transform:uppercase;font-weight:600;
-  color:rgba(244,236,216,.75);text-decoration:none}
-nav a.l:hover{color:var(--amber)}
-.cta{background:var(--amber);color:#2a2018;padding:8px 15px;border-radius:6px;
-  font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;text-decoration:none}
-.cta:hover{background:var(--claude);color:#2a1a14}
-a:focus-visible,button:focus-visible{outline:2px solid var(--amber);outline-offset:3px;border-radius:4px}
+.wrap{max-width:1200px;margin:0 auto;padding:0 clamp(18px,4.5vw,56px)}
+.skip{position:absolute;left:-9999px;top:0;background:var(--hot);color:var(--hot-ink);
+  padding:10px 16px;font-size:13px;font-weight:700;z-index:90}
+.skip:focus{left:8px;top:8px}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent-ink);outline-offset:3px}
+:target{scroll-margin-top:96px}
 
-/* ── hero ── */
-.hero{background:linear-gradient(178deg,var(--charcoal) 0%,#1b3138 60%,var(--charcoal) 100%);
-  color:var(--on-dark);padding:70px 0 0;overflow:hidden}
-.hero .wrap{display:grid;grid-template-columns:1.15fr .85fr;gap:40px;align-items:end}
-@media (max-width:900px){.hero .wrap{grid-template-columns:1fr;gap:24px}}
-.eyebrow{font-size:11.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--amber);font-weight:700}
-h1{font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:clamp(44px,6.4vw,78px);
-  line-height:1.02;margin:14px 0 18px;text-wrap:balance}
-h1 em{font-style:italic;color:var(--amber)}
-.lede{font-size:17.5px;color:rgba(244,236,216,.82);max-width:56ch;margin:0 0 26px}
-.herobtns{display:flex;gap:12px;flex-wrap:wrap;padding-bottom:64px}
-.btn{display:inline-block;padding:13px 22px;border-radius:8px;text-decoration:none;
-  font-size:13px;font-weight:700;letter-spacing:.07em;text-transform:uppercase}
-.btn.solid{background:var(--amber);color:#2a2018}
-.btn.solid:hover{background:var(--claude);color:#2a1a14}
-.btn.line{border:1px solid rgba(244,236,216,.34);color:var(--on-dark)}
-.btn.line:hover{border-color:var(--amber);color:var(--amber)}
-.towerart{align-self:end;display:block;width:100%;max-width:340px;margin:0 auto}
+/* small caps utility — the second voice */
+.slugline,.kicker,.caption,.seatrole,.kind,.figlabel,.boxhead,.tag,.calabel,.ticker{
+  font-family:"JetBrains Mono",ui-monospace,monospace;
+  text-transform:uppercase;letter-spacing:.16em;font-weight:500;
+}
 
-/* ── sections ── */
-section{padding:76px 0}
-.alt{background:var(--bg-2)}
-h2{font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:clamp(30px,3.6vw,42px);
-  line-height:1.1;margin:0 0 12px;text-wrap:balance}
-.sub{color:var(--ink-soft);font-size:16px;max-width:64ch;margin:0 0 34px}
-.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
-.grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
-@media (max-width:860px){.grid3,.grid2{grid-template-columns:1fr}}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:22px}
-.card h3{margin:0 0 7px;font-size:16.5px}
-.card p{margin:0;color:var(--ink-soft);font-size:14.5px}
-.card .k{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.1em;
-  text-transform:uppercase;color:var(--amber);font-weight:500;display:block;margin-bottom:9px}
+/* ── 3 · the overlay nav — a developer's discreet concierge ─────────── */
+.topnav{position:absolute;top:0;left:0;right:0;z-index:60;color:var(--dusk-ink)}
+.topnav .bar{max-width:1460px;margin:0 auto;display:flex;align-items:center;
+  gap:clamp(12px,2.4vw,30px);padding:16px clamp(18px,4vw,52px)}
+.nbrand{display:inline-flex;align-items:center;gap:10px;text-decoration:none;
+  font-family:"Instrument Serif",Georgia,serif;font-size:clamp(19px,2.4vw,23px);
+  line-height:1;white-space:nowrap;color:var(--dusk-ink)}
+.nbrand em{font-style:italic}
+.nspark{display:block;width:22px;height:22px;color:var(--amber);flex:none}
+.nlinks{margin-left:auto;display:flex;align-items:center;gap:clamp(12px,2vw,26px);flex-wrap:wrap}
+.nlinks a{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10.5px;
+  letter-spacing:.2em;text-transform:uppercase;text-decoration:none;
+  color:rgba(248,240,220,.82);padding:6px 0;border-bottom:1px solid transparent}
+.nlinks a:hover{color:#fff;border-bottom-color:var(--amber)}
+.pill{flex:none;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10.5px;
+  font-weight:500;letter-spacing:.18em;text-transform:uppercase;text-decoration:none;
+  color:var(--dusk-amber);border:1px solid rgba(229,176,79,.85);border-radius:999px;
+  padding:10px 20px;background:transparent;
+  transition:background .12s linear,color .12s linear}
+.pill:hover{background:var(--amber);border-color:var(--amber);color:#241a0d}
+.topnav a:focus-visible{outline-color:#f2c76e}
+.topnav.scrolled{position:fixed;background:var(--dusk-bar);
+  border-bottom:1px solid rgba(238,194,122,.16);
+  backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);
+  animation:navin .28s ease}
+@keyframes navin{from{transform:translateY(-100%)}to{transform:translateY(0)}}
+@media (prefers-reduced-motion: reduce){.topnav.scrolled{animation:none}}
+@media (max-width:720px){
+  .topnav .bar{flex-wrap:wrap;row-gap:2px;padding:10px 18px 8px}
+  .nbrand{font-size:18px}
+  .nspark{width:18px;height:18px}
+  .pill{margin-left:auto;padding:8px 14px;font-size:9.5px;letter-spacing:.12em}
+  .nlinks{order:3;width:100%;margin-left:0;gap:4px 15px}
+  .nlinks a{font-size:9.5px;letter-spacing:.14em;padding:4px 0}
+}
 
-/* ── the pipeline table ── */
-.seats{width:100%;border-collapse:collapse;font-size:14.5px;background:var(--card);
-  border:1px solid var(--line);border-radius:12px;overflow:hidden}
-.tablewrap{overflow-x:auto}
-.seats th,.seats td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--line)}
-.seats th{background:var(--charcoal);color:var(--on-dark);font-size:11px;letter-spacing:.12em;
-  text-transform:uppercase;font-weight:700}
-.seats tr:last-child td{border-bottom:0}
-.seats .n{font-family:"JetBrains Mono",monospace;color:var(--ink-faint);width:38px}
-.seats .s{font-weight:700;white-space:nowrap}
-.seats .seatrole{display:block;font-family:"JetBrains Mono",monospace;font-size:10px;
-  font-weight:400;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);margin-top:2px}
-.seats .kind{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
-  padding:2px 7px;border-radius:4px;font-weight:700;white-space:nowrap}
-.kind.code{background:var(--metal);color:#fff}
-.kind.model{background:var(--teal);color:var(--cream)}
-.kind.claude{background:var(--claude);color:#2a1a14}
-.seats td.q{color:var(--ink-soft)}
+/* ── 4 · the hero — the building at dusk ────────────────────────────── */
+.hero{position:relative;height:100vh;height:100svh;min-height:640px;overflow:hidden;
+  color:var(--dusk-ink);
+  background:linear-gradient(180deg,
+    #0f0c22 0%, #171233 17%, #241a44 33%, #37255a 47%,
+    #55306a 59%, #7c4071 69%, #a85672 77%, #cf7469 83%,
+    #ec9d6b 88%, #f7bf80 93%, #f3b978 100%);
+}
+.hero::after{content:"";position:absolute;left:0;right:0;bottom:0;z-index:1;
+  height:clamp(84px,13vh,150px);
+  background:linear-gradient(180deg,#251a2d 0%,#181120 38%,#0d0913 100%);
+  border-top:1px solid rgba(244,196,120,.28)}
+.hero-art{position:absolute;bottom:0;right:clamp(10px,7vw,150px);z-index:2;
+  height:min(88%,880px);aspect-ratio:720/1060}
+.hero-art svg{display:block;width:100%;height:100%}
+.shade{position:absolute;inset:0;z-index:3;pointer-events:none;background:
+  linear-gradient(66deg, rgba(10,7,19,.78) 0%, rgba(10,7,19,.4) 30%, rgba(10,7,19,0) 58%),
+  linear-gradient(0deg, rgba(8,6,16,.74) 0%, rgba(8,6,16,.26) 26%, rgba(8,6,16,0) 54%)}
+.hero-copy{position:absolute;left:0;right:0;bottom:0;z-index:4;
+  padding:0 clamp(18px,4.5vw,56px) clamp(30px,6vh,72px)}
+.eyebrow{margin:0 0 clamp(12px,1.8vh,20px);font-size:10.5px;letter-spacing:.24em;
+  color:var(--dusk-amber)}
+.hero h1{margin:0 0 clamp(14px,2.4vh,24px);
+  font-size:clamp(44px,9vw,116px);line-height:.93;letter-spacing:-.02em;
+  color:var(--dusk-ink)}
+.hero h1 em{display:block;font-style:italic}
+.standfirst-h{margin:0;max-width:52ch;font-weight:450;
+  font-size:clamp(15.5px,1.8vw,19px);line-height:1.55;color:var(--dusk-soft)}
+.figcap{position:absolute;right:clamp(18px,3vw,44px);bottom:14px;z-index:4;margin:0;
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:9.5px;
+  letter-spacing:.14em;text-transform:uppercase;color:rgba(238,226,199,.55)}
+@media (max-width:900px){.figcap{display:none}}
+@media (max-width:720px){
+  .hero-art{right:-15vw;height:min(64%,560px)}
+  .hero-copy{padding-bottom:clamp(26px,5vh,48px)}
+}
 
-/* ── price ── */
-.price{display:grid;grid-template-columns:auto 1fr;gap:30px;align-items:center;
-  background:var(--card);border:1px solid var(--line);border-radius:14px;padding:30px}
-@media (max-width:700px){.price{grid-template-columns:1fr;gap:16px}}
-.price .big{font-family:"Instrument Serif",Georgia,serif;font-size:66px;line-height:.95}
-.price .big small{display:block;font-family:Archivo,sans-serif;font-size:12px;letter-spacing:.16em;
-  text-transform:uppercase;color:var(--ink-faint);font-weight:700;margin-top:8px}
-.steps{counter-reset:s;margin:0;padding:0;list-style:none;display:grid;gap:11px}
-.steps li{counter-increment:s;position:relative;padding-left:36px;font-size:14.5px;color:var(--ink-soft)}
-.steps li::before{content:counter(s);position:absolute;left:0;top:1px;width:24px;height:24px;
-  border-radius:50%;background:var(--teal);color:var(--cream);font-size:12px;font-weight:700;
-  display:grid;place-content:center;font-family:"JetBrains Mono",monospace}
-.steps b{color:var(--ink)}
+/* ── 5 · the figure rail — the only stats moment ────────────────────── */
+.railsec{padding:clamp(44px,7vw,88px) 0 clamp(18px,3vw,34px)}
+.rail{border-top:2px solid var(--ink);border-bottom:1px solid var(--rule);
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:680px){.rail{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.fig{padding:clamp(14px,2vw,20px) clamp(10px,1.6vw,20px);border-left:1px solid var(--rule)}
+.fig:first-child{border-left:0;padding-left:0}
+@media (max-width:680px){
+  .fig:nth-child(3){border-left:0;padding-left:0}
+  .fig:nth-child(-n+2){border-bottom:1px solid var(--rule-soft)}
+}
+.fig b{display:block;font-family:"Instrument Serif",Georgia,serif;font-weight:400;
+  font-size:clamp(34px,5.4vw,58px);line-height:1;letter-spacing:-.02em;
+  font-variant-numeric:lining-nums}
+.fig .figlabel{display:block;margin-top:7px;font-size:9.5px;line-height:1.5;
+  letter-spacing:.14em;color:var(--ink-faint)}
 
-.plain{border-left:3px solid var(--terracotta);padding:4px 0 4px 18px;margin:26px 0 0;
-  color:var(--ink-soft);font-size:14.5px;max-width:70ch}
-.plain b{color:var(--ink)}
+/* ── 6 · sheets (sections) ──────────────────────────────────────────── */
+.sheet{padding:clamp(52px,8vw,104px) 0;border-top:1px solid var(--rule);
+  scroll-margin-top:88px}
+.sheet.band{background:var(--bg-2)}
 
-/* ── token ── */
-.tokengrid{display:grid;grid-template-columns:300px 1fr;gap:38px;align-items:center}
-@media (max-width:760px){.tokengrid{grid-template-columns:1fr}}
-.coin{width:100%;max-width:300px;border-radius:26px;border:1px solid var(--line);display:block;
-  box-shadow:0 18px 40px rgba(24,38,42,.28)}
-.ticker{font-family:"JetBrains Mono",monospace;font-size:13px;letter-spacing:.14em;
-  color:var(--amber);font-weight:500;text-transform:uppercase}
-.ca{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--card);
-  border:1px dashed var(--line);border-radius:9px;padding:11px 13px;margin-top:20px}
-.ca .calabel{font-family:"JetBrains Mono",monospace;font-size:10px;letter-spacing:.14em;
-  text-transform:uppercase;color:var(--amber);font-weight:500;flex:none}
-.ca code{font-family:"JetBrains Mono",monospace;font-size:12.5px;color:var(--ink);
-  word-break:break-all;flex:1;min-width:180px}
-.cacopy{font:inherit;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
-  border:1px solid var(--line);background:transparent;color:var(--ink-soft);border-radius:6px;
-  padding:6px 12px;cursor:pointer;flex:none}
-.cacopy:hover{background:var(--teal);color:var(--cream);border-color:var(--teal)}
-.cacopy.done{background:var(--good);color:#fff;border-color:var(--good)}
-.cacopy:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
-.tokenlinks{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
-.verified{margin:16px 0 0;font-size:12.5px;color:var(--ink-faint);line-height:1.55}
+.ed{display:grid;grid-template-columns:minmax(0,168px) minmax(0,1fr);
+  gap:clamp(16px,3.4vw,54px)}
+@media (max-width:900px){.ed{grid-template-columns:minmax(0,1fr);gap:12px}}
+.slug{align-self:start}
+@media (min-width:901px){.slug{position:sticky;top:96px}}
+.slugno{display:block;font-family:"Instrument Serif",Georgia,serif;font-size:26px;
+  line-height:1;color:var(--accent);font-variant-numeric:lining-nums}
+.slugname{display:block;margin-top:6px;font-family:"JetBrains Mono",ui-monospace,monospace;
+  font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint)}
+@media (max-width:900px){
+  .slug{display:flex;align-items:baseline;gap:10px;padding-bottom:6px;
+    border-bottom:1px solid var(--rule-soft);margin-bottom:14px}
+  .slugno{font-size:19px}.slugname{margin-top:0}
+}
 
-footer{background:var(--charcoal);color:rgba(244,236,216,.7);padding:44px 0;font-size:13px}
-footer .wrap{display:flex;gap:24px;flex-wrap:wrap;align-items:center}
-footer a{color:var(--amber);text-decoration:none}
+h2{font-size:clamp(29px,4.6vw,54px);line-height:1.04;letter-spacing:-.018em;
+  margin:0 0 clamp(12px,1.6vw,18px);text-wrap:balance;max-width:19ch}
+.deck{font-size:clamp(16px,1.6vw,18.5px);color:var(--ink-soft);max-width:60ch;
+  margin:0 0 clamp(22px,3vw,34px)}
+.deck b{font-weight:600;color:var(--ink)}
+h3{font-size:20px;line-height:1.2;margin:0 0 6px;letter-spacing:-.01em}
+
+.lead{max-width:64ch}
+.lead::first-letter{float:left;font-family:"Instrument Serif",Georgia,serif;
+  font-size:3.9em;line-height:.82;padding:.02em .085em 0 0;color:var(--accent)}
+.cols{max-width:none}
+@media (min-width:1060px){
+  .cols{column-count:2;column-gap:46px;column-rule:1px solid var(--rule-soft)}
+  .cols>p{margin-bottom:1em}
+}
+
+/* pull-quote — ruled top and bottom, italic */
+.pull{margin:clamp(30px,4.4vw,52px) 0;padding:clamp(18px,2.6vw,26px) 0;
+  border-top:1px solid var(--ink);border-bottom:1px solid var(--ink)}
+.pull p{font-family:"Instrument Serif",Georgia,serif;font-style:italic;
+  font-size:clamp(23px,3.5vw,40px);line-height:1.16;letter-spacing:-.015em;
+  margin:0;max-width:26ch;text-wrap:balance}
+.pull em{color:var(--accent)}
+.pull cite{display:block;margin-top:14px;font-style:normal;
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--ink-faint)}
+
+/* ── 7 · ruled column notes ─────────────────────────────────────────── */
+.grid3,.grid2{display:grid;gap:clamp(20px,3vw,38px)}
+.grid3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.grid2{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media (max-width:860px){.grid3,.grid2{grid-template-columns:minmax(0,1fr);gap:24px}}
+.note{background:transparent;border:0;border-top:2px solid var(--ink);
+  border-radius:0;padding:13px 0 0}
+.note .kicker{display:block;margin:0 0 9px;font-size:9.5px;letter-spacing:.18em;
+  color:var(--accent-ink)}
+.note h3{margin:0 0 7px;font-size:21px}
+.note p{margin:0;color:var(--ink-soft);font-size:15px;line-height:1.58}
+.note a{color:var(--ink);text-decoration:underline;text-decoration-color:var(--accent);
+  text-underline-offset:3px}
+.staffbox+.grid3{margin-top:clamp(28px,4vw,46px)}
+.secbtns{margin:clamp(26px,4vw,40px) 0 0}
+
+.btn{display:inline-block;text-decoration:none;border:1px solid var(--ink);
+  padding:11px 20px;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;
+  letter-spacing:.14em;text-transform:uppercase;font-weight:500;line-height:1.2;
+  background:transparent;color:var(--ink);transition:background .12s linear,color .12s linear}
+.btn.solid{background:var(--hot);border-color:var(--hot);color:var(--hot-ink);font-weight:700}
+.btn.solid:hover{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.btn.line:hover{background:var(--ink);color:var(--bg)}
+
+/* ── 8 · the staff box — the fourteen ───────────────────────────────── */
+.staffbox{margin-top:clamp(26px,4vw,44px);border-top:3px solid var(--ink);
+  border-bottom:3px solid var(--ink)}
+.boxhead{display:flex;justify-content:space-between;gap:6px 14px;flex-wrap:wrap;
+  padding:9px 0;border-bottom:1px solid var(--rule);
+  font-size:9.5px;letter-spacing:.18em;color:var(--ink-faint)}
+.seats{list-style:none;margin:0;padding:0;
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+  column-gap:clamp(24px,3.6vw,54px)}
+@media (max-width:860px){.seats{grid-template-columns:minmax(0,1fr)}}
+.seat{display:grid;grid-template-columns:2.9rem minmax(0,1fr);gap:14px;
+  padding:15px 0;border-bottom:1px solid var(--rule-soft);align-items:start}
+@media (min-width:861px){.seat:nth-last-child(-n+2){border-bottom:0}}
+@media (max-width:860px){.seat:last-child{border-bottom:0}}
+.seatno{font-family:"Instrument Serif",Georgia,serif;font-size:31px;line-height:.85;
+  text-align:right;color:var(--ink-faint);font-variant-numeric:lining-nums;
+  padding-top:2px;letter-spacing:-.02em}
+.seatname{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin:0 0 5px;
+  font-family:Archivo,system-ui,sans-serif;font-weight:600;font-size:14px;letter-spacing:.05em;
+  text-transform:uppercase;line-height:1.2}
+.seatrole{font-size:9.5px;letter-spacing:.14em;color:var(--ink-faint)}
+.seatq{margin:0;font-family:"Instrument Serif",Georgia,serif;font-size:18.5px;
+  line-height:1.28;color:var(--ink)}
+.seatq em{font-style:italic;color:var(--accent);color:var(--accent-ink)}
+.seatq b{font-weight:400}
+.kind{display:inline-block;margin-left:auto;font-size:9px;letter-spacing:.12em;
+  padding:2px 6px;border:1px solid var(--rule);color:var(--ink-faint);
+  background:transparent;white-space:nowrap}
+.kind.code{border-color:var(--metal);color:var(--ink-soft)}
+.kind.model{border-color:var(--kind-model);color:var(--kind-model)}
+.kind.claude{border-color:var(--claude);background:var(--claude);color:#2a1a14;font-weight:700}
+/* two seats are load-bearing: the one paid to refute, and the one that signs off */
+.seat.red .seatno{color:var(--terracotta)}
+.seat.red .seatq{font-style:italic}
+.seat.chief .seatno{color:var(--claude)}
+
+/* ── 9 · numbered dispatches (steps) ────────────────────────────────── */
+.steps{counter-reset:s;list-style:none;margin:0;padding:0;max-width:72ch}
+.steps li{counter-increment:s;position:relative;padding:15px 0 15px 58px;
+  border-top:1px solid var(--rule-soft);color:var(--ink-soft);font-size:15.5px}
+.steps li:first-child{border-top:1px solid var(--ink)}
+.steps li:last-child{border-bottom:1px solid var(--rule-soft)}
+.steps li::before{content:counter(s,decimal-leading-zero);position:absolute;left:0;top:13px;
+  font-family:"Instrument Serif",Georgia,serif;font-size:25px;line-height:1;
+  color:var(--accent);font-variant-numeric:lining-nums}
+.steps b{color:var(--ink);font-weight:600}
+
+/* ── 10 · the rate (display figure) ─────────────────────────────────── */
+.rate{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr);
+  gap:clamp(20px,4vw,56px);align-items:start;
+  border-top:2px solid var(--ink);padding-top:clamp(20px,3vw,30px)}
+@media (max-width:760px){.rate{grid-template-columns:minmax(0,1fr);gap:20px}}
+.rate .big{font-family:"Instrument Serif",Georgia,serif;
+  font-size:clamp(76px,13vw,152px);line-height:.82;letter-spacing:-.03em;
+  font-variant-numeric:lining-nums}
+.rate .big small{display:block;margin-top:14px;font-family:"JetBrains Mono",ui-monospace,monospace;
+  font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);
+  line-height:1.6;max-width:20ch}
+.curr{margin:clamp(30px,4.5vw,52px) 0}
+.callhead{margin:clamp(38px,5.5vw,60px) 0 14px;font-size:clamp(24px,3vw,32px)}
+
+/* ── 11 · the notice (small print) ──────────────────────────────────── */
+.plain{margin:clamp(30px,4vw,46px) 0 0;padding:clamp(18px,2.6vw,24px);
+  background:var(--card);border:1px solid var(--rule);
+  font-size:13.5px;line-height:1.62;color:var(--ink-soft);max-width:none}
+.plain b{color:var(--ink);font-weight:600}
+@media (min-width:1060px){.plain{column-count:2;column-gap:40px}}
+.plain .tag{display:block;margin:0 0 10px;font-size:9.5px;letter-spacing:.2em;
+  color:var(--accent-ink);column-span:all}
+.plain p{break-inside:avoid}
+
+/* ── 12 · the token plate ───────────────────────────────────────────── */
+.tokengrid{display:grid;grid-template-columns:minmax(0,270px) minmax(0,1fr);
+  gap:clamp(24px,4vw,54px);align-items:start}
+@media (max-width:820px){.tokengrid{grid-template-columns:minmax(0,1fr)}}
+.plate{margin:0}
+.plate svg{display:block;width:100%;max-width:270px}
+.plate figcaption{margin:12px 0 0;padding-top:9px;border-top:1px solid var(--rule);
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;line-height:1.55;
+  letter-spacing:.06em;color:var(--ink-faint);max-width:32ch}
+.coin{border:1px solid var(--rule)}
+.coin-bg{fill:var(--card)}
+.coin-ring{fill:none;stroke:var(--ink);stroke-width:2}
+.coin-mill{fill:none;stroke:var(--ink);stroke-width:1.5;stroke-dasharray:2 5;opacity:.6}
+#coinspark{color:var(--claude)}
+.ticker{font-size:10.5px;letter-spacing:.2em;color:var(--accent-ink);margin:0 0 10px}
+.tokencopy{max-width:58ch}
+.ca{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:22px;
+  padding:12px 14px;background:var(--card);border:1px solid var(--ink);border-radius:0}
+.ca .calabel{font-size:9.5px;letter-spacing:.18em;color:var(--accent-ink);flex:none}
+.ca code{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;color:var(--ink);
+  word-break:break-all;overflow-wrap:anywhere;flex:1;min-width:150px}
+.cacopy{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;font-weight:500;
+  letter-spacing:.14em;text-transform:uppercase;border:1px solid var(--ink);
+  background:transparent;color:var(--ink);border-radius:0;padding:7px 12px;
+  cursor:pointer;flex:none}
+.cacopy:hover{background:var(--ink);color:var(--bg)}
+.cacopy.done{background:var(--leaf);border-color:var(--leaf);color:#12240f}
+.tokenlinks{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+.verified{margin-top:16px;font-size:12px;line-height:1.6;color:var(--ink-faint)}
+
+/* ── 13 · colophon ──────────────────────────────────────────────────── */
+footer{border-top:4px double var(--ink);padding:clamp(30px,4vw,46px) 0 clamp(34px,5vw,54px);
+  background:var(--bg)}
+footer .wrap{display:flex;gap:18px 28px;flex-wrap:wrap;align-items:baseline}
+footer .fbrand{font-family:"Instrument Serif",Georgia,serif;font-size:21px;line-height:1.2;margin:0}
+footer .fbrand em{font-style:italic;color:var(--accent)}
 footer .spacer{margin-left:auto}
+footer a{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10.5px;letter-spacing:.16em;
+  text-transform:uppercase;text-decoration:none;color:var(--ink-soft);
+  border-bottom:1px solid var(--rule)}
+footer a:hover{color:var(--ink);border-bottom-color:var(--accent)}
+.fine{margin-top:22px;padding-top:16px;border-top:1px solid var(--rule-soft);
+  font-size:11.5px;line-height:1.6;color:var(--ink-faint);max-width:78ch}
+
+/* ── 14 · print ─────────────────────────────────────────────────────── */
+@media print{
+  .topnav,.tokenlinks,.cacopy,.skip,.shade{display:none}
+  .hero{height:auto;min-height:0;background:#181228}
+  body{background:#fff;color:#000;font-size:11pt}
+  .sheet{padding:18pt 0;break-inside:avoid}
+  a{text-decoration:none}
+}
+@media (max-width:900px){ .slugno{color:var(--accent-ink)} }
 </style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
 
-<nav><div class="wrap">
-  <a class="brand" href="/"><img class="mark" src="assets/claudeco-64.png" alt="" width="30" height="30">Claude <em>Company</em></a>
-  <div class="links">
-    <a class="l" href="#desk">The desk</a>
-    <a class="l" href="#building">The building</a>
-    <a class="l" href="#floor">Lease a floor</a>
-    <a class="l" href="#token">$CLAUDECO</a>
-    <a class="l" href="/floor/50">Look inside</a>
-    <a class="cta" href="/tower">Enter the tower</a>
+<!-- ═══ the overlay nav ═══ -->
+<header class="topnav" id="topnav">
+  <div class="bar">
+    <a class="nbrand" href="#top" aria-label="Claude Company — top of page">
+      <svg class="nspark" viewBox="-17 -17 34 34" aria-hidden="true" focusable="false"><g id="navspark" fill="currentColor"><circle r="2.6" fill="currentColor"/></g></svg>
+      <span>Claude <em>Company</em></span>
+    </a>
+    <nav class="nlinks" aria-label="Site">
+      <a href="#desk">Desk</a>
+      <a href="#building">Building</a>
+      <a href="#floor">Leasing</a>
+      <a href="#token">Token</a>
+      <a href="/floor/50">Floor&nbsp;50</a>
+    </nav>
+    <a class="pill" href="/tower">Lease a floor</a>
   </div>
-</div></nav>
+</header>
 
-<div class="hero"><div class="wrap">
-  <div>
-    <div class="eyebrow">Claude Tower · fifty floors</div>
-    <h1>Lease a floor. <em>Get a trading team.</em></h1>
-    <p class="lede">One desk of fourteen AI agents researches Solana all day — sweeping every
-      launchpad, tearing the survivors apart, and calling the few worth taking. Lease a floor
-      and you copy that desk: its calls, sized to your risk, on the platforms you choose.
-      You trade in SOL, from your own wallet.</p>
-    <div class="herobtns">
-      <a class="btn solid" href="/tower">Lease a floor</a>
-      <a class="btn line" href="#token">Get $CLAUDECO</a>
-    </div>
+<!-- ═══ the hero — Claude Tower at dusk ═══ -->
+<section class="hero" id="top" aria-label="Claude Tower at dusk">
+  <div class="hero-art" aria-hidden="false">
+    <svg id="towersvg" viewBox="0 0 720 1060" preserveAspectRatio="xMidYMax meet" role="img" focusable="false"
+      aria-label="Claude Tower at dusk: a fifty-floor slab with scattered lit amber windows, the crown floor glowing brightest, a spark mark above the roof, low trees at the base, and the lit windows reflected in dark glossy ground.">
+      <defs>
+        <filter id="soft" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="9"/></filter>
+        <filter id="soft2" x="-140%" y="-140%" width="380%" height="380%"><feGaussianBlur stdDeviation="15"/></filter>
+        <linearGradient id="fwash" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#4a3a62" stop-opacity=".26"/>
+          <stop offset=".45" stop-color="#4a3a62" stop-opacity="0"/>
+          <stop offset=".72" stop-color="#f0a86a" stop-opacity="0"/>
+          <stop offset="1" stop-color="#f0a86a" stop-opacity=".2"/>
+        </linearGradient>
+      </defs>
+      <g id="stars"></g>
+      <g id="trees" fill="#140e1f">
+        <rect x="94" y="858" width="9" height="44"/><rect x="70" y="812" width="56" height="50"/><rect x="82" y="794" width="32" height="22"/>
+        <rect x="150" y="868" width="8" height="34"/><rect x="132" y="830" width="44" height="42"/><rect x="141" y="814" width="26" height="20"/>
+        <rect x="36" y="872" width="7" height="30"/><rect x="20" y="840" width="38" height="36"/>
+        <rect x="588" y="860" width="9" height="42"/><rect x="566" y="816" width="54" height="48"/><rect x="578" y="798" width="30" height="22"/>
+        <rect x="650" y="872" width="8" height="30"/><rect x="632" y="836" width="44" height="40"/>
+        <rect x="692" y="878" width="7" height="24"/><rect x="676" y="850" width="38" height="32"/>
+      </g>
+      <g id="tower">
+        <rect x="512" y="180" width="34" height="700" fill="#1b1529"/>
+        <rect x="210" y="180" width="302" height="700" fill="#332b47"/>
+        <rect x="210" y="180" width="302" height="700" fill="url(#fwash)"/>
+        <rect x="210" y="180" width="4" height="700" fill="#dcc99c" opacity=".45"/>
+        <rect x="212" y="177" width="298" height="22" fill="#ffd987" opacity=".8" filter="url(#soft)"/>
+        <g id="wins"></g>
+        <rect x="204" y="876" width="348" height="26" fill="#1e1830"/>
+        <rect x="338" y="880" width="44" height="22" fill="#f2bd63"/>
+        <rect x="326" y="884" width="6" height="18" fill="#e9b158" opacity=".8"/>
+        <rect x="388" y="884" width="6" height="18" fill="#e9b158" opacity=".8"/>
+        <rect x="204" y="161" width="348" height="4" fill="#d9c69c" opacity=".8"/>
+        <rect x="204" y="164" width="348" height="16" fill="#2a2138"/>
+      </g>
+      <circle cx="361" cy="116" r="30" fill="#d97757" opacity=".18" filter="url(#soft2)"/>
+      <g id="herospark" transform="translate(361,116) scale(1.9)" fill="#d97757" color="#d97757"><circle r="2.6" fill="currentColor"/></g>
+      <g id="refl">
+        <rect x="214" y="902" width="300" height="44" fill="#d8c49c" opacity=".05"/>
+        <rect x="338" y="904" width="44" height="26" fill="#eeb964" opacity=".2"/>
+      </g>
+    </svg>
   </div>
-  <svg class="towerart" viewBox="0 -46 240 446" role="img" aria-label="The tower, fifty floors, lit at the top">
-    <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#73c9d2"/><stop offset="1" stop-color="#2b5f68"/></linearGradient></defs>
-    <ellipse cx="120" cy="386" rx="104" ry="14" fill="#000" opacity=".22"/>
-    <rect x="46" y="352" width="148" height="32" fill="#cfc7ad"/>
-    <rect x="58" y="60" width="124" height="292" fill="url(#g)"/>
-    <g id="slabs" fill="#f0e4c7"></g>
-    <rect x="52" y="44" width="136" height="18" fill="#e0ad3d"/>
-    <rect x="88" y="18" width="64" height="28" fill="#f0e4c7"/>
-    <rect x="114" y="2" width="12" height="18" fill="#70828a"/>
-    <g id="spark" transform="translate(120,-14)"></g>
-  </svg>
-</div></div>
-
-<section id="desk"><div class="wrap">
-  <h2>One trade, fourteen specialists</h2>
-  <p class="sub">A trading desk is not one mind with one opinion. It is a room full of people
-    whose jobs disagree with each other on purpose. This one is built the same way: cheap
-    deterministic code narrows the field, and the expensive judgment only ever looks at
-    what survived.</p>
-
-  <div class="tablewrap"><table class="seats">
-    <thead><tr><th></th><th>The crew</th><th>Kind</th><th>The one question it answers</th></tr></thead>
-    <tbody>
-      <tr><td class="n">0</td><td class="s">AUSTIN POWERZ<span class="seatrole">Scout</span></td><td><span class="kind model">model</span></td><td class="q">What deserves attention <em>today</em>, and why now?</td></tr>
-      <tr><td class="n">1</td><td class="s">MAXWELL SMORT<span class="seatrole">Screener</span></td><td><span class="kind code">code</span></td><td class="q">Does this clear the floor at all? <em>Kills most candidates, costs nothing.</em></td></tr>
-      <tr><td class="n">2</td><td class="s">STERLING ARCHOR<span class="seatrole">Forensics</span></td><td><span class="kind model">model</span></td><td class="q">Can this token be used against a holder, by design?</td></tr>
-      <tr><td class="n">3</td><td class="s">ETHAN HUNTED<span class="seatrole">Liquidity</span></td><td><span class="kind model">model</span></td><td class="q">Can I get out — at size, at a price I would accept?</td></tr>
-      <tr><td class="n">4</td><td class="s">SAM FISHY<span class="seatrole">Flow</span></td><td><span class="kind model">model</span></td><td class="q">Is the demand real, or is it manufactured?</td></tr>
-      <tr><td class="n">5</td><td class="s">BLACK WIDOWER<span class="seatrole">Narrative</span></td><td><span class="kind model">model</span></td><td class="q">Is there a story, is it true, and am I early?</td></tr>
-      <tr><td class="n">6</td><td class="s">JASON BURN<span class="seatrole">Technical</span></td><td><span class="kind model">model</span></td><td class="q">Is this a location worth entering?</td></tr>
-      <tr><td class="n">7</td><td class="s">AGENT 48<span class="seatrole">Red Team</span></td><td><span class="kind model">model</span></td><td class="q"><b>Why does this trade lose money?</b></td></tr>
-      <tr><td class="n">8</td><td class="s">MINI-MEH<span class="seatrole">Risk</span></td><td><span class="kind model">model</span></td><td class="q">How much, and where is it mechanically wrong?</td></tr>
-      <tr><td class="n">9</td><td class="s">JAMES BOUND<span class="seatrole">PM</span></td><td><span class="kind model">model</span></td><td class="q">Propose, watch, or pass — on what thesis?</td></tr>
-      <tr><td class="n">10</td><td class="s">JOHN QUICK<span class="seatrole">Execution</span></td><td><span class="kind model">model</span></td><td class="q">The unsigned ticket: route, slicing, stop, targets.</td></tr>
-      <tr><td class="n">11</td><td class="s">JUDGE DREAD<span class="seatrole">Compliance</span></td><td><span class="kind code">code</span></td><td class="q">Does this break a house rule? <em>A veto, not advice.</em></td></tr>
-      <tr><td class="n">12</td><td class="s">BIG M<span class="seatrole">CEO</span></td><td><span class="kind claude">Claude</span></td><td class="q">Do I authorise this? The only seat that turns research into a call.</td></tr>
-      <tr><td class="n">13</td><td class="s">AGENT P<span class="seatrole">Scribe</span></td><td><span class="kind code">code</span></td><td class="q">Write it down so the desk can be graded later.</td></tr>
-    </tbody>
-  </table></div>
-
-  <div class="grid3" style="margin-top:28px">
-    <div class="card"><span class="k">Independence</span>
-      <h3>The analysts don't read each other</h3>
-      <p>Five agents who share notes produce one opinion wearing five hats. These five see the
-        evidence and nothing else, so when they agree it means something.</p></div>
-    <div class="card"><span class="k">Adversarial</span>
-      <h3>Someone is paid to hate it</h3>
-      <p>The Red Team isn't asked for balance — it's asked to destroy the idea. The PM has a
-        required field for how the attack was answered, and "refuted" can never become a trade.</p></div>
-    <div class="card"><span class="k">Evidence</span>
-      <h3>No invented numbers</h3>
-      <p>Every figure comes from a bundle fetched by code, and every claim carries its source.
-        Where a datum is missing, the agent says so and drops its confidence.</p></div>
+  <div class="shade" aria-hidden="true"></div>
+  <div class="hero-copy">
+    <p class="eyebrow slugline">Floor 50, Claude Tower — the house desk reports</p>
+    <h1>Lease a floor. <em>Get the whole desk.</em></h1>
+    <p class="standfirst-h">The Scout sweeps six Solana launchpads. Your floor copies the desk — filtered to your risk, traded from your own wallet.</p>
   </div>
-</div></section>
+  <p class="figcap">Fig. 1 — Claude Tower, 50 floors, dusk. The crown is the house desk.</p>
+</section>
 
-<section class="alt" id="building"><div class="wrap">
-  <h2>Fifty floors. One desk each.</h2>
-  <p class="sub">The building is the product. Every floor is a complete, private research
-    desk with its own fourteen agents, its own journal, and its own CEO behind its own door.
-    The penthouse is the headquarters and is not for sale.</p>
-  <div class="grid3">
-    <div class="card"><span class="k">Floors 1 – 49</span><h3>Your floor</h3>
-      <p>A seat that copies the house desk. Set your risk appetite, your categories, and which launchpads you will trade.</p></div>
-    <div class="card"><span class="k">Floor 50</span><h3>The Penthouse</h3>
-      <p>Headquarters. The house desk, and the room the building is run from.</p></div>
-    <div class="card"><span class="k">Every floor</span><h3>The same calls</h3>
-      <p>No tiers and no better agents upstairs. Everyone copies one desk — what differs is
-        how your floor sizes it, and what it refuses.</p></div>
-  </div>
-  <p style="margin-top:26px"><a class="btn solid" href="/tower">Walk the directory</a></p>
-</div></section>
+<main id="main">
 
-<section id="floor"><div class="wrap">
-  <h2>Leasing a floor</h2>
-  <p class="sub">Two currencies, and they never mix. $CLAUDECO buys access to the building.
-    SOL is what you actually trade, and it never leaves your wallet.</p>
-  <div class="price">
-    <div class="big">1M<small>$CLAUDECO · to lease</small></div>
-    <ol class="steps">
-      <li>Pick a vacant floor in <b>the directory</b> and connect your wallet.</li>
-      <li>Send <b>1,000,000 $CLAUDECO</b> to the treasury. The building watches the chain
-        <b>read-only</b> and credits you, usually within a minute.</li>
-      <li>The floor binds to the wallet that paid. One floor per wallet.</li>
-      <li><b>250,000 $CLAUDECO</b> every 30 days keeps the lights on — the desk runs
-        continuously, so the rent does too.</li>
-    </ol>
-  </div>
-
-  <div class="grid2" style="margin-top:22px">
-    <div class="card"><span class="k">$CLAUDECO</span><h3>Access only</h3>
-      <p>Your lease and your rent. It is never traded, never deployed, and buys no exposure
-        to anything.</p></div>
-    <div class="card"><span class="k">SOL</span><h3>What you trade</h3>
-      <p>Stays in your own wallet. The desk sizes each call against a bankroll you declare
-        and can never touch, hold or sign for.</p></div>
-  </div>
-  <h2 style="margin-top:52px">How a call reaches you</h2>
-  <p class="sub">The desk publishes; your floor decides; you sign. Nothing is automatic and
-    nothing is custodial.</p>
-  <ol class="steps">
-    <li>The house desk sweeps <b>~340 coins</b> across pump.fun, letsbonk.fun, bags.fm,
-      moonshot, boop.fun and Meteora. Deterministic filters kill about 79% for free.</li>
-    <li>Survivors get the full fourteen seats — five analysts working blind to each other,
-      then a red team paid to refute the idea.</li>
-    <li>An approved call reaches <b>your floor</b>, which sizes it from your bankroll and your
-      appetite — or refuses it, and tells you why.</li>
-    <li>You get an <b>unsigned ticket</b>. You place it in your own wallet, or you don't.</li>
-    <li>When the desk calls the exit — stop, target, liquidity collapse, an authority
-      appearing — your floor is told. <b>Even if your rent has lapsed.</b></li>
-  </ol>
-
-  <p class="plain"><b>What you are buying.</b> A floor is cosmetic tenancy in a research tool.
-    It is not an investment product, not a share of anything, and carries no promise of profit.
-    The desk has no track record yet and the site will say so until it does.
-    <b>What this software will never do.</b> Hold your keys, sign for you, or move your money —
-    there is no custody anywhere in it. Every order it produces is unsigned, and stops at you.
-    Nothing here is financial advice.</p>
-</div></section>
-
-<section class="alt" id="token"><div class="wrap">
-  <div class="tokengrid">
-    <img class="coin" src="assets/claudeco-512.png" width="300" height="300"
-      alt="The Claude Company token mark: a blocky cream cube head with an eleven-ray coral spark for a face">
-    <div>
-      <div class="ticker">The house token</div>
-      <h2>$CLAUDECO</h2>
-      <p class="sub" style="margin-bottom:14px">The mark is the CEO of floor 50 — the only
-        head in the building that wears the spark instead of a face. Every other figure on
-        every floor has eyes. The boss is Claude.</p>
-      <p style="margin:0;color:var(--ink-soft);font-size:14.5px">$CLAUDECO is the key to the
-        building: it pays your lease and your rent, and nothing else. It is never traded and
-        buys no exposure. You trade in SOL, from your own wallet.</p>
-      <div class="ca" id="ca">
-        <span class="calabel">Contract</span>
-        <code id="caval">HRkkxgaFDDmZ3qZX8xP5SiMRBNvFNVUUv4FJUjPCpump</code>
-        <button class="cacopy" id="cacopy" type="button" aria-label="Copy contract address">Copy</button>
+  <!-- ═══ the figure rail ═══ -->
+  <section class="railsec" aria-label="The desk, by the numbers">
+    <div class="wrap">
+      <div class="rail">
+        <div class="fig"><b>14</b><span class="figlabel">Search angles, every sweep</span></div>
+        <div class="fig"><b>~357</b><span class="figlabel">Unique tokens per sweep, six launchpads</span></div>
+        <div class="fig"><b>~79%</b><span class="figlabel">Killed by free code on hard floors</span></div>
+        <div class="fig"><b>~$4</b><span class="figlabel">Cost of a full research cycle</span></div>
       </div>
-      <div class="tokenlinks">
-        <a class="btn solid" href="https://pump.fun/coin/HRkkxgaFDDmZ3qZX8xP5SiMRBNvFNVUUv4FJUjPCpump" target="_blank" rel="noopener">Buy on pump.fun</a>
-        <a class="btn line" href="https://dexscreener.com/solana/HRkkxgaFDDmZ3qZX8xP5SiMRBNvFNVUUv4FJUjPCpump" target="_blank" rel="noopener">Chart</a>
-        <a class="btn line" href="https://solscan.io/token/HRkkxgaFDDmZ3qZX8xP5SiMRBNvFNVUUv4FJUjPCpump" target="_blank" rel="noopener">Solscan</a>
-      </div>
-      <p class="verified">Mint &amp; freeze authority revoked · no transfer hooks or fees · verify it yourself on Solscan. This is the only official address — treat any other as fake.</p>
     </div>
-  </div>
-</div></section>
+  </section>
 
-<footer><div class="wrap">
-  <span>Claude Company — a research desk, not a broker.</span>
-  <span class="spacer"></span>
-  <a href="/tower">The tower</a>
-  <a href="/floor/50">The penthouse</a>
-</div>
-<div class="wrap" style="margin-top:16px;font-size:11.5px;color:rgba(244,236,216,.5);line-height:1.55">
-  An independent project. Not affiliated with, endorsed by, or connected to Anthropic.
-</div></footer>
+  <!-- ═══ 01 · the desk ═══ -->
+  <section id="desk" class="sheet">
+    <div class="wrap ed">
+      <div class="slug"><span class="slugno">01</span><span class="slugname">The desk</span></div>
+      <div>
+        <h2>One trade, fourteen specialists.</h2>
+        <p class="deck">The Scout sweeps six Solana launchpads — 14 search angles, ~357 tokens a pass, kill most of what they find with code that costs nothing, and hand the survivors to five analysts who are <b>not allowed to read each other</b>. Lease a floor and yours copies that desk — filtered by your own risk appetite, your categories, your launchpads. You trade SOL from your own wallet; the desk holds no keys and signs nothing.</p>
+
+        <div class="lead cols">
+          <p>Every cycle begins wide. The Scout runs fourteen search angles across pump.fun, letsbonk.fun, bags.fm, moonshot, boop and Meteora, and comes back with roughly 357 unique tokens worth a first look.</p>
+          <p>Then the cheapest seat does most of the killing. The Screener is deterministic code — no model, no mood, no bill — enforcing hard floors: liquidity, age, wash ratio, and a real buy-then-sell probe that proves an exit actually exists. About 79% of candidates die here, at a cost of nothing.</p>
+          <p>The survivors go to five analysts — forensics, liquidity, flow, narrative, technical — who work blind to one another and are expected to disagree. That is the design: agreement is only worth something when it wasn't arranged. A full workup costs $1.29 to $1.44 in model time; a whole cycle lands around $4.</p>
+          <p>The suspicion earns its keep. The desk's best catch was a token showing $1.8&thinsp;million of daily volume that turned out to be 57,479 trades averaging $31.36 against a $64k reserve — turnover wearing depth's coat. No single seat is credited with the catch; the pipeline is the instrument.</p>
+          <p>The desk also distrusts its own instruments. One pool once quoted RAY at $4,064.74 while the real price was $0.81; every price the desk uses is now a median taken across the deepest pools. When a number is surprising, the ruler is the first suspect.</p>
+          <p>Whatever remains walks the gauntlet: the Red Team attacks it, the PM may not propose until it states how the Red Team was answered, and Compliance — code, not a model — can veto it before the CEO ever sees it. Only the CEO turns research into a call, and what leaves the building is an unsigned ticket. Always.</p>
+        </div>
+
+        <!-- ═══ pull-quote — the red team's record ═══ -->
+        <figure class="pull">
+          <p>Nine proposals attacked. Nine refuted. <em>Nothing has survived the Red Team.</em></p>
+          <cite>Seat 07 · Agent 48 — the record is the Red Team's alone. Not a desk record, not a win rate.</cite>
+        </figure>
+
+        <!-- ═══ the staff box ═══ -->
+        <div class="staffbox">
+          <div class="boxhead"><span>Staff of the house desk · Floor 50</span><span>Seats 00–13 · analysts read blind</span></div>
+          <ul class="seats">
+            <li class="seat"><span class="seatno">00</span><div><p class="seatname">Austin Powerz <span class="seatrole">Scout</span> <span class="kind model">model</span></p><p class="seatq">What deserves attention <em>today</em>, and why now?</p></div></li>
+            <li class="seat"><span class="seatno">01</span><div><p class="seatname">Maxwell Smort <span class="seatrole">Screener</span> <span class="kind code">code</span></p><p class="seatq">Does this clear the floor at all? <em>Kills most candidates, costs nothing.</em></p></div></li>
+            <li class="seat"><span class="seatno">02</span><div><p class="seatname">Sterling Archor <span class="seatrole">Forensics</span> <span class="kind model">model</span></p><p class="seatq">Can this token be used against a holder, by design?</p></div></li>
+            <li class="seat"><span class="seatno">03</span><div><p class="seatname">Ethan Hunted <span class="seatrole">Liquidity</span> <span class="kind model">model</span></p><p class="seatq">Can I get out — at size, at a price I would accept?</p></div></li>
+            <li class="seat"><span class="seatno">04</span><div><p class="seatname">Sam Fishy <span class="seatrole">Flow</span> <span class="kind model">model</span></p><p class="seatq">Is the demand real, or is it manufactured?</p></div></li>
+            <li class="seat"><span class="seatno">05</span><div><p class="seatname">Black Widower <span class="seatrole">Narrative</span> <span class="kind model">model</span></p><p class="seatq">Is there a story, is it true, and am I early?</p></div></li>
+            <li class="seat"><span class="seatno">06</span><div><p class="seatname">Jason Burn <span class="seatrole">Technical</span> <span class="kind model">model</span></p><p class="seatq">Is this a location worth entering?</p></div></li>
+            <li class="seat red"><span class="seatno">07</span><div><p class="seatname">Agent 48 <span class="seatrole">Red Team</span> <span class="kind model">model</span></p><p class="seatq"><b>Why does this trade lose money?</b></p></div></li>
+            <li class="seat"><span class="seatno">08</span><div><p class="seatname">Mini-Meh <span class="seatrole">Risk</span> <span class="kind model">model</span></p><p class="seatq">How much, and where is it mechanically wrong?</p></div></li>
+            <li class="seat"><span class="seatno">09</span><div><p class="seatname">James Bound <span class="seatrole">PM</span> <span class="kind model">model</span></p><p class="seatq">Propose, watch, or pass — on what thesis?</p></div></li>
+            <li class="seat"><span class="seatno">10</span><div><p class="seatname">John Quick <span class="seatrole">Execution</span> <span class="kind model">model</span></p><p class="seatq">The unsigned ticket: route, slicing, stop, targets.</p></div></li>
+            <li class="seat"><span class="seatno">11</span><div><p class="seatname">Judge Dread <span class="seatrole">Compliance</span> <span class="kind code">code</span></p><p class="seatq">Does this break a house rule? <em>A veto, not advice.</em></p></div></li>
+            <li class="seat chief"><span class="seatno">12</span><div><p class="seatname">Big M <span class="seatrole">CEO</span> <span class="kind claude">Claude</span></p><p class="seatq">Do I authorise this? The only seat that turns research into a call.</p></div></li>
+            <li class="seat"><span class="seatno">13</span><div><p class="seatname">Agent P <span class="seatrole">Scribe</span> <span class="kind code">code</span></p><p class="seatq">Write it down so the desk can be graded later.</p></div></li>
+          </ul>
+        </div>
+
+        <div class="grid3">
+          <div class="note"><span class="kicker">Independence</span><h3>Five analysts, blind</h3><p>Seats 02–06 work the same candidate without seeing one another's notes, and they are expected to disagree. Agreement is only evidence when it wasn't arranged.</p></div>
+          <div class="note"><span class="kicker">Adversarial</span><h3>One seat paid to refute</h3><p>Every surviving idea meets Agent 48. The PM may not propose until it states, in writing, how the Red Team was answered.</p></div>
+          <div class="note"><span class="kicker">Veto</span><h3>Compliance is code</h3><p>House rules are enforced by a program, not a persuadable model. A Compliance veto ends the workup — the CEO never sees the proposal at all.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 02 · the building ═══ -->
+  <section id="building" class="sheet band">
+    <div class="wrap ed">
+      <div class="slug"><span class="slugno">02</span><span class="slugname">The building</span></div>
+      <div>
+        <h2>Fifty floors. One desk each.</h2>
+        <p class="deck">Claude Tower is one architecture, stacked fifty times. The house works the crown; everything beneath it leases.</p>
+        <div class="grid3">
+          <div class="note"><span class="kicker">Floors 01–49</span><h3>Tenant floors</h3><p>Each leased floor copies the house desk's calls through its own mandate — risk appetite, categories, launchpads. Same research, different appetites. Every floor decides for itself.</p></div>
+          <div class="note"><span class="kicker">Floor 50</span><h3>The house desk</h3><p>Fourteen seats at the top of the tower, publishing the call sheet the rest of the building reads. Watch it work at <a href="/floor/50">floor 50</a>.</p></div>
+          <div class="note"><span class="kicker">Every floor</span><h3>Read-only, all the way down</h3><p>No floor holds keys — not the house's, not a tenant's. Custody never enters the building, and every ticket, on every floor, leaves unsigned.</p></div>
+        </div>
+        <p class="secbtns"><a class="btn line" href="/tower">View the tower</a></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 03 · leasing a floor ═══ -->
+  <section id="floor" class="sheet">
+    <div class="wrap ed">
+      <div class="slug"><span class="slugno">03</span><span class="slugname">The floor</span></div>
+      <div>
+        <h2>Leasing a floor.</h2>
+        <p class="deck">The lease is paid in the access token. The trading — if you trade at all — happens in SOL, from your own wallet. The two never mix.</p>
+
+        <div class="rate">
+          <div class="big">1M<small>$CLAUDECO leases one floor · rent in the same token</small></div>
+          <ol class="steps">
+            <li><b>Pick a floor.</b> Forty-nine lease. Floor 50 is the house desk, and stays the house's.</li>
+            <li><b>Pay the lease in $CLAUDECO.</b> One million leases a floor; rent settles in the same token. It opens the door — that is all it does.</li>
+            <li><b>Write your mandate.</b> Risk appetite, categories, launchpads. Your floor copies only the house calls that clear your own filter.</li>
+            <li><b>Keep your keys.</b> Tickets arrive unsigned. You trade SOL from your own wallet, or you don't trade at all.</li>
+          </ol>
+        </div>
+
+        <div class="grid2 curr">
+          <div class="note"><span class="kicker">$CLAUDECO — the lease</span><h3>Access, and nothing else</h3><p>It leases a floor and pays the rent. It is never the thing you trade, and the desk's research never covers it.</p></div>
+          <div class="note"><span class="kicker">SOL — the trade</span><h3>Yours, in your wallet</h3><p>Tenants trade SOL from their own wallets. The desk holds no keys, signs nothing, custodies nothing — by construction, not by promise.</p></div>
+        </div>
+
+        <h3 class="callhead">How a call reaches you</h3>
+        <ol class="steps">
+          <li><b>The sweep.</b> Fourteen search angles return roughly 357 unique tokens across pump.fun, letsbonk.fun, bags.fm, moonshot, boop and Meteora.</li>
+          <li><b>The cull.</b> The Screener — free, deterministic code — kills about 79% on hard floors: liquidity, age, wash ratio, and a real buy-then-sell exit probe.</li>
+          <li><b>The blind read.</b> Five analysts — forensics, liquidity, flow, narrative, technical — work the survivors without seeing each other's notes.</li>
+          <li><b>The gauntlet.</b> The Red Team attacks. The PM may not propose without stating how the Red Team was answered, and a Compliance veto — code, not a model — means the CEO never sees it.</li>
+          <li><b>The call.</b> The CEO authorises or passes. What lands on your floor is an unsigned ticket — route, slicing, stop, targets — filtered by your mandate. Signing it, or binning it, is yours.</li>
+        </ol>
+
+        <div class="plain">
+          <span class="tag">Notice to tenants — plain terms</span>
+          <p><b>Research, not advice.</b> Claude Company publishes research. Nothing in the tower is financial advice, a solicitation, or a promise of outcome; no performance is stated or implied anywhere on this page.</p>
+          <p><b>Read-only by construction.</b> The desk holds no keys, signs no transactions, takes no custody, and speaks to the chain through a hard allowlist of read methods. Its only output is an unsigned ticket.</p>
+          <p><b>Your floor, your call.</b> Each floor decides for itself. The house cannot see, size, or sign a tenant's trades — tenants act from their own wallets, entirely at their own discretion.</p>
+          <p><b>The only numbers the house promises are its costs.</b> A full workup runs $1.29–$1.44; a research cycle, roughly $4. They are quoted because they are the only numbers the house will ever quote.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 04 · the token ═══ -->
+  <section id="token" class="sheet band">
+    <div class="wrap ed">
+      <div class="slug"><span class="slugno">04</span><span class="slugname">The token</span></div>
+      <div>
+        <h2>$CLAUDECO.</h2>
+        <p class="deck">One token, one job: it leases floors in Claude Tower. It is not a share of the desk, not a strategy, and never the thing you trade.</p>
+        <div class="tokengrid">
+          <figure class="plate">
+            <svg class="coin" viewBox="0 0 270 270" role="img" focusable="false" aria-label="The $CLAUDECO access mark: a spark inside a milled ring.">
+              <rect class="coin-bg" width="270" height="270"/>
+              <circle class="coin-mill" cx="135" cy="135" r="106"/>
+              <circle class="coin-ring" cx="135" cy="135" r="94"/>
+              <g id="coinspark" transform="translate(135,135) scale(2.7)" fill="currentColor"><circle r="2.6" fill="currentColor"/></g>
+            </svg>
+            <figcaption>Fig. 2 — The access mark. It opens a floor; it never trades.</figcaption>
+          </figure>
+          <div>
+            <p class="ticker">SPL · Solana · access token</p>
+            <p class="tokencopy">$CLAUDECO leases a floor of Claude Tower and pays its rent — that is the entire design. The desk's research concerns other people's tokens; it does not cover, rate, or price this one. Hold it to hold a floor. That is the whole story.</p>
+            <div class="ca">
+              <span class="calabel">Contract</span>
+              <code id="caval">HRkkxgaFDDmZ3qZX8xP5SiMRBNvFNVUUv4FJUjPCpump</code>
+              <button class="cacopy" id="cacopy" type="button">Copy</button>
+            </div>
+            <div class="tokenlinks">
+              <a class="btn solid" href="https://pump.fun/coin/HRkkxgaFDDmZ3qZX8xP5SiMRBNvFNVUUv4FJUjPCpump" target="_blank" rel="noopener">Buy on pump.fun</a>
+              <a class="btn line" href="https://dexscreener.com/solana/HRkkxgaFDDmZ3qZX8xP5SiMRBNvFNVUUv4FJUjPCpump" target="_blank" rel="noopener">Chart</a>
+              <a class="btn line" href="https://solscan.io/token/HRkkxgaFDDmZ3qZX8xP5SiMRBNvFNVUUv4FJUjPCpump" target="_blank" rel="noopener">Solscan</a>
+            </div>
+            <p class="verified">Mint &amp; freeze authority revoked · no transfer hooks or fees · verify it yourself on Solscan. This is the only official address — treat any other as fake. The desk never DMs, never airdrops, and cannot ask you to sign anything: by construction it has nothing to sign with.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ═══ colophon ═══ -->
+<footer>
+  <div class="wrap">
+    <p class="fbrand">Claude <em>Company</em></p>
+    <span class="spacer"></span>
+    <a href="/tower">Lease a floor</a>
+    <a href="/floor/50">Floor 50</a>
+  </div>
+  <div class="wrap">
+    <p class="fine">An independent project. Not affiliated with, endorsed by, or connected to Anthropic. The fourteen bylines are parodies, and every joke name is the job description. Read-only by construction: no keys, no signing, no custody, a hard RPC allowlist — output is always an unsigned ticket. Nothing here is financial advice, and nothing here states or implies performance. $CLAUDECO is an access token: it leases a floor and pays rent, and it is never the thing you trade. You trade SOL from your own wallet, or not at all. © 2026 Claude Company · Floor 50, Claude Tower.</p>
+  </div>
+</footer>
 
 <script>
-// Copy the contract address. Clipboard API needs a secure context; fall back to select.
-(() => {
-  const btn = document.getElementById("cacopy");
-  const val = document.getElementById("caval");
-  if (!btn || !val) return;
-  btn.addEventListener("click", async () => {
-    const text = val.textContent.trim();
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      const r = document.createRange();
-      r.selectNodeContents(val);
-      const sel = getSelection();
-      sel.removeAllRanges();
-      sel.addRange(r);
+(function(){
+"use strict";
+var NS="http://www.w3.org/2000/svg";
+function R(g,x,y,w,h,f,o){var r=document.createElementNS(NS,"rect");r.setAttribute("x",x);r.setAttribute("y",y);
+  r.setAttribute("width",w);r.setAttribute("height",h);r.setAttribute("fill",f);
+  if(o!=null)r.setAttribute("opacity",o);g.appendChild(r);return r;}
+/* deterministic PRNG — the tower is lit the same way every night */
+function mulberry(seed){return function(){seed|=0;seed=seed+0x6D2B79F5|0;
+  var t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;
+  return((t^t>>>14)>>>0)/4294967296;};}
+
+/* the house spark — eleven rays, as on every Claude Company mark */
+function spark(g){for(var i=0;i<11;i++){var a=(i/11)*360;
+  var r=document.createElementNS(NS,"rect");
+  r.setAttribute("x","-1.15");r.setAttribute("y","-16");
+  r.setAttribute("width","2.3");r.setAttribute("height","11.5");
+  r.setAttribute("rx","1.15");r.setAttribute("fill","currentColor");
+  r.setAttribute("transform","rotate("+a+")");g.appendChild(r);}}
+var sg=document.getElementById("herospark"),ng=document.getElementById("navspark"),cg=document.getElementById("coinspark");
+if(ng)spark(ng);
+if(cg)spark(cg);
+if(sg){spark(sg);
+  if(!matchMedia("(prefers-reduced-motion: reduce)").matches){
+    var an=document.createElementNS(NS,"animateTransform");
+    an.setAttribute("attributeName","transform");an.setAttribute("type","rotate");
+    an.setAttribute("from","0");an.setAttribute("to","360");
+    an.setAttribute("dur","48s");an.setAttribute("repeatCount","indefinite");
+    an.setAttribute("additive","sum");sg.appendChild(an);}}
+
+/* the tower: 50 floors of windows, lit deterministically, crown brightest */
+var wins=document.getElementById("wins"),refl=document.getElementById("refl"),stars=document.getElementById("stars");
+if(wins&&refl){
+  var rand=mulberry(50);
+  var LIT=["#ffbb50","#f6c76d","#e8a23c","#cf9542"],UNLIT="#241e33";
+  var BASE=880,FH=14,X0=230,STEP=34,WW=24,WH=8,GROUND=902;
+  for(var f=1;f<=50;f++){
+    var top=BASE-f*FH;
+    if(f===50){for(var k=0;k<8;k++)R(wins,216+k*36,181,32,13,"#ffe3a6",1);continue;}
+    var p=(f%10===0?0.32:0.13+0.08*Math.abs(Math.sin(f*1.7)));
+    for(var c=0;c<8;c++){
+      var lit=rand()<p;
+      var fill=lit?LIT[(rand()*4)|0]:UNLIT;
+      R(wins,X0+c*STEP,top+3,WW,WH,fill,lit?(0.84+rand()*0.16).toFixed(2):1);
+      if(c===0&&f%10===0)R(wins,210,top+13,302,2,"#d9c69c",0.34);
+      if(lit){
+        var d=GROUND-(top+3+WH);
+        if(d<=260){var ro=0.26*(1-d/280);
+          if(ro>=0.03)R(refl,X0+c*STEP,GROUND+d*0.6,WW,WH*1.6,fill,ro.toFixed(3));}
+      }
     }
-    btn.textContent = "Copied";
-    btn.classList.add("done");
-    setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("done"); }, 1600);
-  });
+  }
+  if(stars){var sr=mulberry(7);
+    for(var i=0;i<30;i++){var s=sr();
+      R(stars,(12+sr()*696).toFixed(1),(12+sr()*318).toFixed(1),1.6,1.6,"#efe6ff",(0.1+s*0.35).toFixed(2));}}
+}
+
+/* the nav turns charcoal only after the evening scrolls away */
+var nav=document.getElementById("topnav"),hero=document.getElementById("top");
+if(nav&&hero&&"IntersectionObserver" in window){
+  new IntersectionObserver(function(en){nav.classList.toggle("scrolled",!en[0].isIntersecting);},
+    {rootMargin:"-72px 0px 0px 0px",threshold:0}).observe(hero);
+}
+
+/* the copy button */
+var btn=document.getElementById("cacopy"),val=document.getElementById("caval");
+if(btn&&val){btn.addEventListener("click",function(){
+  var text=val.textContent.trim();
+  function done(){btn.textContent="Copied";btn.classList.add("done");
+    setTimeout(function(){btn.textContent="Copy";btn.classList.remove("done");},1600);}
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(done,function(){select();done();});
+  }else{select();done();}
+  function select(){var r=document.createRange();r.selectNodeContents(val);
+    var sel=getSelection();sel.removeAllRanges();sel.addRange(r);
+    try{document.execCommand("copy");}catch(e){}}
+});}
 })();
 </script>
-<script>
-// Draw the tower's fifty floor slabs and its rooftop spark, rather than hand-authoring
-// a hundred SVG rects nobody would want to read.
-(() => {
-  const slabs = document.getElementById("slabs");
-  if (!slabs) return;
-  const ns = "http://www.w3.org/2000/svg";
-  for (let i = 0; i < 50; i++) {
-    const y = 60 + i * 5.84;
-    const r = document.createElementNS(ns, "rect");
-    r.setAttribute("x", "58"); r.setAttribute("y", y.toFixed(2));
-    r.setAttribute("width", "124"); r.setAttribute("height", "2.1");
-    r.setAttribute("fill", i % 10 === 9 ? "#e0ad3d" : "#f0e4c7");
-    r.setAttribute("opacity", i % 10 === 9 ? "1" : ".82");
-    slabs.appendChild(r);
-  }
-  const spark = document.getElementById("spark");
-  // Spokes from a hub, not bars through the centre — eleven full-diameter bars overlap
-  // into a solid disc and stop reading as a spark at all.
-  for (let i = 0; i < 11; i++) {
-    const a = (i / 11) * 360;
-    const r = document.createElementNS(ns, "rect");
-    r.setAttribute("x", "-1.15"); r.setAttribute("y", "-16");
-    r.setAttribute("width", "2.3"); r.setAttribute("height", "11.5");
-    r.setAttribute("rx", "1.15"); r.setAttribute("fill", "#d97757");
-    r.setAttribute("transform", `rotate(${a})`);
-    spark.appendChild(r);
-  }
-  const hub = document.createElementNS(ns, "circle");
-  hub.setAttribute("r", "2.6"); hub.setAttribute("fill", "#d97757");
-  spark.appendChild(hub);
-  const anim = document.createElementNS(ns, "animateTransform");
-  anim.setAttribute("attributeName", "transform"); anim.setAttribute("type", "rotate");
-  anim.setAttribute("from", "0"); anim.setAttribute("to", "360");
-  anim.setAttribute("dur", "24s"); anim.setAttribute("repeatCount", "indefinite");
-  anim.setAttribute("additive", "sum");
-  if (!matchMedia("(prefers-reduced-motion: reduce)").matches) spark.appendChild(anim);
-})();
-</script>
+</body>
+</html>
