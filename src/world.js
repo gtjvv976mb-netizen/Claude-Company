@@ -22,7 +22,7 @@ const SEATS = ["Scout", "Screener", "Forensics", "Liquidity", "Flow", "Technical
 // Client-side table sizes, mirrored here so an index is never out of range.
 // If a table grows on the client, grow the constant — an index too large is
 // clamped there anyway, but the variety would silently shrink.
-const ROUTINE_LINES = 3, TASK_LINES = 3, CHATTER_LINES = 8, SNACK_SCRIPTS = 8;
+const ROUTINE_LINES = 3, TASK_LINES = 3, CHATTER_LINES = 8, SNACK_SCRIPTS = 8, VISIT_SCRIPTS = 10;
 
 let timer = null;
 
@@ -33,7 +33,14 @@ export function startWorld() {
   const rnd = Math.random;   // ambience needs no reproducibility, only agreement
   const tick = () => {
     const roll = rnd();
-    if (roll < 0.28) {
+    if (roll < 0.26) {
+      // one agent walks to another's desk and they actually talk — the office
+      // interacting with itself, not fourteen soloists sharing a room
+      const a = SEATS[(rnd() * SEATS.length) | 0];
+      let b = SEATS[(rnd() * SEATS.length) | 0];
+      if (b === a) b = SEATS[(SEATS.indexOf(a) + 3) % SEATS.length];
+      emit("world:visit", { a, b, vi: (rnd() * VISIT_SCRIPTS) | 0 });
+    } else if (roll < 0.44) {
       // two agents take a break together and have the same argument everywhere
       const a = SEATS[(rnd() * SEATS.length) | 0];
       let b = SEATS[(rnd() * SEATS.length) | 0];

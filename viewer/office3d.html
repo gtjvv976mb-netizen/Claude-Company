@@ -467,6 +467,32 @@ window.__nav = (fromSeat, toSpot) => {
   return out;
 };
 
+/* Dev: feed one synthetic event through the same path the live stream uses.
+   The only way to SEE pipeline choreography without paying for a live cycle. */
+window.__handle = (ev) => handle(ev);
+window.__pulse = () => elapsed;
+/* Advance the world by hand — the only honest way to test movement while the
+   pane is hidden and the browser has suspended requestAnimationFrame. */
+window.__step = (ms) => {
+  const dt = 0.05;
+  for (let i = 0; i < ms / 50; i++) {
+    elapsed += dt;
+    for (const id in workers) workers[id].update(dt, elapsed);
+  }
+  return "stepped " + ms + "ms";
+};
+window.__hasPath = (seat) => { const w = workers[seat]; return w ? !!w.path : null; };
+window.__go = (seat, x, z) => { const w = workers[seat]; if (!w) return "no seat";
+  w.moveTo(x, z); return "moving"; };
+window.__path = (seat, x, z) => { const w = workers[seat];
+  return w ? JSON.stringify(navPath(w.x, w.z, x, z)) : "no seat"; };
+window.__where = (seat) => {
+  const w = workers[seat];
+  return w ? { x: +w.x.toFixed(2), z: +w.z.toFixed(2),
+               fromHome: +Math.hypot(w.x - w.home.x, w.z - w.home.z).toFixed(2),
+               carrying: w.doc.visible } : null;
+};
+
 window.__figure = (seat, yaw = Math.PI / 4, width = 3.4) => {
   const w = workers[seat];
   if (!w) return "no such seat: " + Object.keys(workers).join(", ");
@@ -2911,8 +2937,30 @@ const HANDLERS = {
     current.symbol = e.symbol; setStat("s-token", e.symbol);
     tape("Evidence", `${e.symbol} @ $${e.price} · liquidity $${Math.round(e.liq || 0).toLocaleString()}`);
   },
-  "world:snack": (e) => snackBreak(e.a, e.b, e.ti),
+  // Ambient events are cosmetic: a hidden tab drops them rather than queueing a
+  // burst of stale office life for when the viewer returns. The chronicle has them.
+  "world:snack": (e) => { if (!document.hidden) snackBreak(e.a, e.b, e.ti); },
+  "world:visit": (e) => {
+    if (document.hidden) return;
+    const a = who(e.a), h = who(e.b);
+    if (!a || !h || a.typing || h.typing || a.doc.visible || a.path ||
+        inSnackRoom.has(a.id) || inSnackRoom.has(h.id)) return;
+    const [ask, reply] = VISIT_TALK[(e.vi ?? 0) % VISIT_TALK.length];
+    a.run(async () => {
+      // Stand where a colleague stands: beside the desk, facing its occupant.
+      const dx = h.home.x > 0 ? -1.5 : 1.5;
+      await a.moveTo(h.home.x + dx, h.home.z + 0.6);
+      a.faceWorker(h);
+      h.faceWorker(a);                    // hosts turn; they do not leave their seat
+      a.say(ask, 2600);
+      await pause(2400);
+      h.say(reply, 2600);
+      await pause(2200);
+      await a.goHome();
+    });
+  },
   "world:act": (e) => {
+    if (document.hidden) return;
     const p = who(e.seat);
     if (!p || p.typing || p.doc.visible || p.path || inSnackRoom.has(p.id)) return;
     const r = ROUTINE[e.seat];
@@ -3097,6 +3145,21 @@ const SNACK_TALK = [
   ["Did ETHAN HUNTED ever clear that one?", "Stop hit at four."],
   ["Where'd AUSTIN POWERZ go?", "Follow the velvet."],
   ["JUDGE DREAD vetoed it.", "You can't argue with the law."],
+];
+
+/* Desk visits: the director sends A to B's desk and they exchange these. Indexed
+   by the server so every screen hears the same conversation. */
+const VISIT_TALK = [
+  ["Got a second?", "It's your second."],
+  ["Seen anything like this before?", "Twice. Both ended badly."],
+  ["Sanity check?", "That chart is lying to you."],
+  ["Your queue's shorter than mine.", "It really isn't."],
+  ["What killed the last one?", "Wash ratio. As always."],
+  ["Can I borrow your stapler?", "It died with the last thesis."],
+  ["The exit probe clean?", "At size, even."],
+  ["Would you take it?", "I'd want a tighter stop."],
+  ["Coffee run. You in?", "Bring me one back."],
+  ["Anything survive today?", "Ask the shredder."],
 ];
 
 const inSnackRoom = new Set();
