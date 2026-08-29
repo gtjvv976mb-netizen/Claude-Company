@@ -30,8 +30,8 @@ He's the desk's only feedback loop. The only agent whose work compounds 🔁
 
 6/ His first grade, on a stop-out:
 
-"A stop hit at the pre-stated invalidation is the thesis working, not failing — audit sizing and entry timing, not the exit rule." 🎯
+"A stop hit at the pre-stated invalidation is the thesis working, not failing — audit sizing and entry, not the exit rule." 🎯
 
-One agent to say when not to fly. One to make every landing a lesson.
+One says when not to fly. One turns every landing into a lesson.
 
 Sixteen spies. One building 🏢 claudedotcompany.com
