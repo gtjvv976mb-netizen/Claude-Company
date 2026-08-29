@@ -217,6 +217,19 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
 
   for (const p of picks.slice(0, topN)) {
     const ev = p.rec.ev ?? {};
+    // Publication hygiene, from the research's two cheapest A/B-grade rules:
+    // a call without a pre-stated invalidation is unpublishable (it cannot be
+    // graded), and a spike-shaped entry — vertical in the last five minutes —
+    // is the signal-group pattern where the copier is the exit liquidity.
+    if (!p.rec.pm?.invalidation) {
+      emit("call:withheld", { mint: p.rec.mint, reason: "no pre-stated invalidation" });
+      continue;
+    }
+    const m5 = ev.pair?.priceChange?.m5 ?? 0;
+    if (m5 > 20) {
+      emit("call:withheld", { mint: p.rec.mint, reason: `spike-shaped entry: +${m5}% in 5m — copiers would be the exit` });
+      continue;
+    }
     const call = openCall({
       mint: p.rec.mint, symbol: p.rec.symbol ?? ev.symbol, category: p.category, launchpad: p.launchpad,
       conviction: p.conviction,
@@ -277,6 +290,8 @@ export async function freshScan({ minScore = 45 } = {}) {
     const rec = await runFor(null, () => workup(new Date().toISOString().replace(/[:.]/g, "-"), top.mint, hook));
     if (rec?.finalDecision === "APPROVED") {
       const ev = rec.ev ?? {};
+      if (!rec.pm?.invalidation) { emit("call:withheld", { mint: rec.mint, reason: "no pre-stated invalidation" }); return { young: young.length, workedUp: 1, outcome: "withheld" }; }
+      if ((ev.pair?.priceChange?.m5 ?? 0) > 20) { emit("call:withheld", { mint: rec.mint, reason: "spike-shaped entry" }); return { young: young.length, workedUp: 1, outcome: "withheld" }; }
       const call = openCall({
         mint: rec.mint, symbol: rec.symbol ?? ev.symbol, category: top.category, launchpad: top.launchpad,
         conviction: rec.pm?.conviction ?? null,

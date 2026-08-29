@@ -105,6 +105,13 @@ export function closeCall(id, reason, mark) {
  * they are facts, not prices; price-based triggers need confirmation so one thin print
  * cannot close a call.
  */
+/** The call's best price since it opened, from the marks the monitor already
+ * writes. The trailing rules ride this; it costs one indexed query. */
+export function highWaterMark(callId) {
+  const r = db.prepare("SELECT MAX(mark) hwm FROM call_events WHERE call_id=? AND mark IS NOT NULL").get(callId);
+  return r?.hwm ?? null;
+}
+
 export function evaluateExit(call, now) {
   const flagsAtCall = new Set(JSON.parse(call.flags_at_call || "[]"));
   const flagsNow = now.flags ?? [];
@@ -121,11 +128,40 @@ export function evaluateExit(call, now) {
     return { fire: true, code: "liq_collapse", urgency: "unconditional",
       detail: `liquidity fell from $${Math.round(call.liq_at_call).toLocaleString()} to $${Math.round(now.liqUsd).toLocaleString()}`, pct: 100 };
 
-  if (call.stop && mark != null && mark <= call.stop)
-    return { fire: true, code: "stop_hit", urgency: "level", detail: `mark ${mark} at or below the stop ${call.stop}`, pct: 100 };
+  /* Exit geometry, from the one mechanism family with reproducible evidence
+   * behind it (trend-following exits, B-grade across decades): the fixed stop is
+   * a FLOOR that only ever tightens — never widens — and winners are ratcheted
+   * rather than round-tripped.
+   *   breakeven: once the call has been up 35%, it is not allowed to become a loss.
+   *   trail:     once up 50%, a 28% retrace off the high-water mark ends it.
+   * Both express through one effective stop so the precedence stays legible. */
+  const hwm = Math.max(highWaterMark(call.id) ?? 0, mark ?? 0, call.entry_ref ?? 0);
+  let stopEff = call.stop ?? null;
+  let stopWhy = "the stop";
+  if (call.entry_ref && hwm >= call.entry_ref * 1.35) {
+    const be = call.entry_ref * 1.02;
+    if (stopEff == null || be > stopEff) { stopEff = be; stopWhy = "breakeven ratchet (was up 35%+)"; }
+  }
+  if (call.entry_ref && hwm >= call.entry_ref * 1.5) {
+    const trail = hwm * 0.72;
+    if (stopEff == null || trail > stopEff) { stopEff = trail; stopWhy = `trail, 28% off the high of ${hwm}`; }
+  }
+  if (stopEff != null && mark != null && mark <= stopEff) {
+    const code = stopWhy === "the stop" ? "stop_hit" : stopWhy.startsWith("breakeven") ? "breakeven" : "trail_stop";
+    return { fire: true, code, urgency: "level",
+      detail: `mark ${mark} at or below ${stopWhy} (${Number(stopEff.toPrecision(4))})`, pct: 100 };
+  }
 
   if (call.target && mark != null && mark >= call.target)
     return { fire: true, code: "target_hit", urgency: "level", detail: `mark ${mark} reached the target ${call.target}`, pct: 100 };
+
+  /* Stagnation: a reflexive coin that has gone nowhere in a day is not a thesis
+   * resting, it is dead momentum occupying risk budget. Slow sleeves are exempt. */
+  const FAST = new Set(["memecoin", "unclear", "ai"]);
+  if (FAST.has(call.category) && call.entry_ref && hwm < call.entry_ref * 1.15
+      && (Date.now() - call.opened_at) / 3.6e6 > 24)
+    return { fire: true, code: "stagnant", urgency: "level",
+      detail: "24h without ever being up 15% — dead momentum, risk budget released", pct: 100 };
 
   const maxHold = (CATEGORY_RISK[call.category] ?? CATEGORY_RISK.unclear).maxHoldHours;
   const heldHours = (Date.now() - call.opened_at) / 3.6e6;

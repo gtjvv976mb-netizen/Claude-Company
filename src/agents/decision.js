@@ -143,7 +143,13 @@ Rules that bind you:
   timing or information is not yet there — and list what would promote it.
 
 The weighted analyst composite is provided as an input, not an instruction. You may
-override it in either direction, but if you do, say why in 'key_disagreement'.`,
+override it in either direction, but if you do, say why in 'key_disagreement'.
+
+Two publication rules, absolute:
+- No proposal without an explicit INVALIDATION — the observable condition under which
+  this thesis is wrong. "It goes down" is not an invalidation; a level or event is.
+- Never propose into a spike. If the price is vertical right now, the people copying
+  this call minutes from now are the exit liquidity. Wait or pass.`,
     prompt:
       `Decide on ${ev.symbol} (${ev.mint}).\n\n${bundle(ev)}\n\n${book(analysts)}\n\n` +
       `=== RED TEAM ===\n${JSON.stringify(redteam)}\n\n` +
