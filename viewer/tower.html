@@ -667,6 +667,13 @@ function frame() {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+
+/* The wallet script lives in its own module, and module scope does not carry —
+   sign-in has been calling these across that boundary since the day it shipped
+   (same disease as the floor's Calls tab, same cure). */
+window.renderSel = renderSel;
+window.renderList = renderList;
+window.select = select;
 </script>
 
 <script type="module">
