@@ -33,6 +33,18 @@ export function touchSeen(mint, symbol) {
   else db.prepare("INSERT INTO seen (mint,symbol,first_seen,last_seen,looks) VALUES (?,?,?,?,1)").run(mint, symbol, now, now);
 }
 
+/** Any paid judgement on this mint recently — killed, passed, watched, anything.
+ * The fresh lane runs every few minutes; without this it would pay to re-ask the
+ * SAME question about the same coin each pass until the daily brake tripped.
+ * A WATCH promotion is the one sanctioned re-entry, and it bypasses this on
+ * purpose: its rules holding IS the change of circumstances. */
+export function recentlyJudged(mint, withinMs = 6 * 3600 * 1000) {
+  const row = db.prepare(
+    "SELECT seat, verdict, ts FROM verdicts WHERE mint=? AND ts > ? ORDER BY ts DESC LIMIT 1"
+  ).get(mint, Date.now() - withinMs);
+  return row || null;
+}
+
 /** Was this mint killed recently, and why? Stops the desk paying to rediscover trash. */
 export function recentKill(mint, withinMs = 12 * 3600 * 1000) {
   const row = db.prepare(

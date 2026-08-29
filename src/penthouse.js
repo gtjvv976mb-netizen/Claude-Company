@@ -12,6 +12,7 @@ import { callouts, whaleScore } from "./whales.js";
 import { recordWhaleCallout } from "./identity.js";
 import { regime } from "./data/regime.js";
 import { cfg } from "./config.js";
+import * as store from "./lib/store.js";
 
 /**
  * THE PENTHOUSE CYCLE — the house team's working day.
@@ -376,6 +377,10 @@ export async function freshScan({ minScore = 45 } = {}) {
     const young = [];
     for (const c of universe) {
       if (liveCallFor(c.mint)) continue;
+      // Already judged this coin in the last 6h — a 5-minute lane must not pay
+      // to re-ask the same question until circumstances change (that is what
+      // the watchlist is for).
+      if (store.recentlyJudged(c.mint)) continue;
       const age = c.pair?.ageHours ?? 0;
       if (age <= 0 || age >= 48) continue;
       // Pre-screen from pair data already in hand: the lane's one workup slot

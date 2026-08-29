@@ -108,7 +108,7 @@ function startPenthouse() {
   setInterval(research, cycleMins * 60000);
 
   // The sniper lane: cheap, frequent, and only ever pays for ignition.
-  const freshMins = Number(process.env.PENTHOUSE_FRESH_MINS || 20);
+  const freshMins = Number(process.env.PENTHOUSE_FRESH_MINS || 5);
   const fresh = async () => {
     try { const r = await freshScan();
       if (r.workedUp) console.log(`[fresh] worked up the top ignition: ${r.outcome}`);
@@ -122,7 +122,7 @@ function startPenthouse() {
   setInterval(fresh, freshMins * 60000);
 
   // The criteria, acted on: watches whose rules hold go back through the desk.
-  const promoteMins = Number(process.env.PENTHOUSE_WATCH_MINS || 10);
+  const promoteMins = Number(process.env.PENTHOUSE_WATCH_MINS || 5);
   const promote = async () => {
     try { const r = await promoteWatches();
       if (r.workedUp) console.log(`[watch] promoted ${r.outcome} (${r.checked} watched)`);
