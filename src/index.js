@@ -3,6 +3,8 @@ import { startOffice } from "./office.js";
 import { startScanner } from "./scanner.js";
 import { runPenthouseCycle, monitorCalls } from "./penthouse.js";
 import { autoSyncAll } from "./perf.js";
+import { startWorld } from "./world.js";
+import { chroniclePrune } from "./lib/bus.js";
 import { chargeDueRent } from "./leasing.js";
 import { bus } from "./lib/bus.js";
 import { spend } from "./lib/llm.js";
@@ -51,6 +53,7 @@ function startBooks() {
   };
   setInterval(rent, 3600000);
   setTimeout(rent, 30000);
+  setInterval(() => chroniclePrune(), 3600000);
 
   const sync = async () => {
     try { const r = await autoSyncAll();
@@ -133,6 +136,7 @@ async function main() {
       const { url } = startOffice(Number(args[0]) || Number(process.env.PORT) || 4949);
       startScanner();          // watches the treasury for $CLAUDECO; no-ops until TREASURY_OWNER is set
       startBooks();            // rent + fill sync, always
+      startWorld();            // the server runs the office; clients only watch
       startPenthouse();        // the house team's schedule
       console.log(`${C.b}Trading floor live at ${url}${C.x}  (Ctrl-C to close)`);
       narrate();

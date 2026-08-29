@@ -2,7 +2,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { ROOT } from "./config.js";
-import { bus, backlog, emit, runFor } from "./lib/bus.js";
+import { bus, backlog, emit, runFor, chronicleRead } from "./lib/bus.js";
 import { spend } from "./lib/llm.js";
 import * as store from "./lib/store.js";
 import * as tower from "./tower.js";
@@ -149,6 +149,15 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
         if (url.pathname === "/api/record") return json(200, perf.houseRecord());
 
         if (url.pathname === "/api/leaderboard") return json(200, { floors: identity.leaderboard() });
+
+        if (url.pathname === "/api/chronicle") {
+          return json(200, { events: chronicleRead({
+            floor: url.searchParams.has("floor") ? Number(url.searchParams.get("floor")) : null,
+            since: Number(url.searchParams.get("since") || 0),
+            limit: Number(url.searchParams.get("limit") || 200),
+            type: url.searchParams.get("type"),
+          }) });
+        }
 
         if (url.pathname === "/api/whales/feed") {
           const pad = url.searchParams.get("pad") || null;

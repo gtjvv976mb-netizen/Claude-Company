@@ -1870,13 +1870,13 @@ class Worker {
   }
 
   /** The seat's own piece of desk business: sit, work, say its line, clear up. */
-  async doTask() {
+  async doTask(li) {
     const t = TASK[this.id];
     if (!t) return;
     await this.goHome();
     this.busy(true);
     if (t.glyph) puff(this, t.glyph);
-    this.say(t.lines[Math.floor(Math.random() * t.lines.length)], 2800);
+    this.say(t.lines[(li != null ? li : Math.floor(Math.random() * t.lines.length)) % t.lines.length], 2800);
     await pause(2600 + Math.random() * 1800);
     this.busy(false);
   }
@@ -2911,6 +2911,20 @@ const HANDLERS = {
     current.symbol = e.symbol; setStat("s-token", e.symbol);
     tape("Evidence", `${e.symbol} @ $${e.price} · liquidity $${Math.round(e.liq || 0).toLocaleString()}`);
   },
+  "world:snack": (e) => snackBreak(e.a, e.b, e.ti),
+  "world:act": (e) => {
+    const p = who(e.seat);
+    if (!p || p.typing || p.doc.visible || p.path || inSnackRoom.has(p.id)) return;
+    const r = ROUTINE[e.seat];
+    if (e.kind === "errand" && r) {
+      const line = r.lines[(e.li ?? 0) % r.lines.length];
+      p.run(async () => { await errand(p, SPOTS[r.spot], r.glyph, line); });
+    } else if (e.kind === "task" && TASK[e.seat]) {
+      p.run(async () => { await p.doTask(e.li); });
+    } else {
+      p.run(async () => p.say(CHATTER[(e.li ?? 0) % CHATTER.length], 2600));
+    }
+  },
   "identity:changed": (e) => {
     // A tenant renamed the floor or redressed the MD; every open viewer follows suit.
     window.applyIdentity?.(e.identity);
@@ -3088,18 +3102,26 @@ const SNACK_TALK = [
 const inSnackRoom = new Set();
 
 /** Send two agents for a snack and let them actually talk to each other. */
-function snackBreak() {
+function snackBreak(aId, bId, ti) {
+  // With arguments this plays the server's casting — same pair, same argument, on
+  // every screen. Without arguments (demo mode only) it rolls its own dice.
   const free = STAFF.filter((s) => !s.claude).map((s) => workers[s.id])
     .filter((p) => p && !p.typing && !p.doc.visible && !p.path && !inSnackRoom.has(p.id));
-  if (free.length < 2) return;
-  const a = free[Math.floor(Math.random() * free.length)];
-  const b = free.filter((p) => p !== a)[Math.floor(Math.random() * (free.length - 1))];
+  let a, b;
+  if (aId && bId) {
+    a = workers[aId]; b = workers[bId];
+    if (!a || !b || inSnackRoom.has(aId) || inSnackRoom.has(bId) || a.typing || b.typing) return;
+  } else {
+    if (free.length < 2) return;
+    a = free[Math.floor(Math.random() * free.length)];
+    b = free.filter((p) => p !== a)[Math.floor(Math.random() * (free.length - 1))];
+  }
   if (!b) return;
   inSnackRoom.add(a.id); inSnackRoom.add(b.id);
 
   const seats = [SPOTS.snackA, SPOTS.snackB, SPOTS.snackC];
   const [sa, sb] = [seats[0], seats[1]];
-  const script = SNACK_TALK[Math.floor(Math.random() * SNACK_TALK.length)];
+  const script = SNACK_TALK[(ti != null ? ti : Math.floor(Math.random() * SNACK_TALK.length)) % SNACK_TALK.length];
 
   a.run(async () => {
     await a.moveTo(SPOTS.snackBar[0], SPOTS.snackBar[1] - 1.1);
@@ -3127,6 +3149,9 @@ function snackBreak() {
 }
 
 setInterval(() => {
+  // While the server runs the world, the local dice stay in the drawer — every
+  // viewer must see the same office. Demo mode (no desk process) keeps them.
+  if (window.__worldLive) return;
   if (Math.random() < 0.5) { snackBreak(); return; }
   const roam = STAFF.filter((s) => !s.claude);      // the CEO stays in the office
   const spec = roam[Math.floor(Math.random() * roam.length)];
@@ -3153,7 +3178,8 @@ if (location.search.includes("demo")) {
     return m ? m[1] : new URLSearchParams(location.search).get("floor"); })();
   const es = new EventSource((window.__API_BASE__ || "") + (floorParam ? `/events?floor=${floorParam}` : "/events"));
   let ok = false;
-  es.addEventListener("hello", () => { ok = true; liveText.textContent = "Live"; tape("Floor", "Connected to the desk."); });
+  es.addEventListener("hello", () => { ok = true; window.__worldLive = true;   // the server runs the office now
+    liveText.textContent = "Live"; tape("Floor", "Connected to the desk."); });
   es.onmessage = (m) => { try { handle(JSON.parse(m.data)); } catch {} };
   es.onerror = () => { if (!ok) { es.close(); goSim("no desk process on this origin"); } };
   setTimeout(() => { if (!ok) { es.close(); goSim("desk did not answer"); } }, 2500);
