@@ -9,6 +9,7 @@ import { emit, runFor } from "./lib/bus.js";
 import { spend, OutOfCredit, spendSince } from "./lib/llm.js";
 import * as jup from "./data/jupiter.js";
 import { callouts, whaleScore } from "./whales.js";
+import { recordWhaleCallout } from "./identity.js";
 
 /**
  * THE PENTHOUSE CYCLE — the house team's working day.
@@ -143,8 +144,12 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
       c.whales = w;
       c.score += ws.score;
       c.rankWhy = [...c.rankWhy, ...ws.why];
-      if (ws.why.length) emit("whales", { mint: c.mint, symbol: c.pair?.baseSymbol,
-        netUsd: w.netUsd, buyers: w.uniqueBuyers, sellers: w.uniqueSellers, delta: ws.score });
+      if (ws.why.length) {
+        emit("whales", { mint: c.mint, symbol: c.pair?.baseSymbol,
+          netUsd: w.netUsd, buyers: w.uniqueBuyers, sellers: w.uniqueSellers, delta: ws.score });
+        recordWhaleCallout({ mint: c.mint, symbol: c.pair?.baseSymbol, launchpad: c.launchpad,
+          netUsd: w.netUsd, buyers: w.uniqueBuyers, sellers: w.uniqueSellers, delta: ws.score });
+      }
     } catch {}
   }
   scored.sort((a, b) => b.score - a.score);

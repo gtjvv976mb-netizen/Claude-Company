@@ -13,6 +13,7 @@ import * as calls from "./calls.js";
 import * as copy from "./copy.js";
 import * as perf from "./perf.js";
 import * as alerts from "./alerts.js";
+import * as identity from "./identity.js";
 import { callouts } from "./whales.js";
 
 /** Serves the trading floor and streams the desk's real events to it. */
@@ -146,6 +147,32 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
 
         // The house record, computed from chain data rather than self-reported.
         if (url.pathname === "/api/record") return json(200, perf.houseRecord());
+
+        if (url.pathname === "/api/leaderboard") return json(200, { floors: identity.leaderboard() });
+
+        if (url.pathname === "/api/whales/feed") {
+          const pad = url.searchParams.get("pad") || null;
+          return json(200, { callouts: identity.whaleFeed({ launchpad: pad }) });
+        }
+
+        const ledgerMatch = url.pathname.match(/^\/api\/(ledger|floor\/(\d+)\/ledger)$/);
+        if (ledgerMatch) {
+          const floorNo = ledgerMatch[2] != null ? Number(ledgerMatch[2]) : null;
+          return json(200, identity.ledger({ floorNo }));
+        }
+
+        // ── what a tenant gets to name: the floor, the MD, the costume ──
+        const idMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/identity$/);
+        if (idMatch) {
+          const floorNo = Number(idMatch[1]);
+          if (req.method === "GET") return json(200, { identity: identity.identityFor(floorNo), costumes: identity.COSTUMES });
+          if (!me) return json(401, { error: "sign in with your wallet first" });
+          const lease = leasing.leaseFor(floorNo);
+          if (!lease || lease.wallet !== me) return json(403, { error: "this is not your floor" });
+          const body = await readBody();
+          const r = identity.setIdentity(floorNo, body || {});
+          return json(r.ok ? 200 : 400, r);
+        }
 
         // Whale callouts for one mint, read live off the pool.
         const whaleMatch = url.pathname.match(/^\/api\/whales\/([1-9A-HJ-NP-Za-km-z]{32,44})$/);

@@ -2,6 +2,7 @@ import db from "./lib/store.js";
 import { runFor, emit } from "./lib/bus.js";
 import { leaseFor, leaseOf, balanceOf, DECIMALS } from "./leasing.js";
 import { workup } from "./desk.js";
+import { identityFor, ordinal } from "./identity.js";
 
 /**
  * A floor is a rented desk, not a window onto someone else's.
@@ -134,8 +135,11 @@ export async function requestRun({ floorNo, wallet, mint }) {
 }
 
 export function roomState(floorNo, wallet) {
+  const identity = identityFor(floorNo);
+  const floorLabel = ordinal(floorNo);
   const lease = leaseFor(floorNo);
   return {
+    identity, floorLabel,
     floorNo,
     lease,
     isMine: Boolean(wallet && lease && lease.wallet === wallet),
