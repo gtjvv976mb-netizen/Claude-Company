@@ -31,7 +31,7 @@ if (seeded === 0) {
 }
 
 export function listFloors() {
-  return db.prepare("SELECT n, state, owner, name FROM floors ORDER BY n").all();
+  return db.prepare("SELECT n, state, owner, name, md_name FROM floors ORDER BY n").all();
 }
 
 export function getFloor(n) {

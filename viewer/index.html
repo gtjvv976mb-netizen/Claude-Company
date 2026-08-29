@@ -444,18 +444,43 @@ footer a:hover{color:var(--ink);border-bottom-color:var(--accent)}
         <rect x="692" y="878" width="7" height="24"/><rect x="676" y="850" width="38" height="32"/>
       </g>
       <g id="tower">
-        <rect x="512" y="180" width="34" height="700" fill="#1b1529"/>
-        <rect x="210" y="180" width="302" height="700" fill="#332b47"/>
+        <!-- four bands, stepping back at floors 16, 29 and 41 — the built tower's profile -->
+        <rect x="496" y="656" width="26" height="224" fill="#1b1529"/>
+        <rect x="488" y="474" width="24" height="182" fill="#1b1529"/>
+        <rect x="472" y="306" width="22" height="168" fill="#1b1529"/>
+        <rect x="460" y="180" width="20" height="126" fill="#1b1529"/>
+        <rect x="210" y="656" width="302" height="224" fill="#332b47"/>
+        <rect x="218" y="474" width="286" height="182" fill="#372e4c"/>
+        <rect x="228" y="306" width="266" height="168" fill="#3b3152"/>
+        <rect x="240" y="180" width="242" height="126" fill="#403558"/>
         <rect x="210" y="180" width="302" height="700" fill="url(#fwash)"/>
-        <rect x="210" y="180" width="4" height="700" fill="#dcc99c" opacity=".45"/>
-        <rect x="212" y="177" width="298" height="22" fill="#ffd987" opacity=".8" filter="url(#soft)"/>
+        <rect x="210" y="656" width="4" height="224" fill="#dcc99c" opacity=".45"/>
+        <rect x="218" y="474" width="4" height="182" fill="#dcc99c" opacity=".4"/>
+        <rect x="228" y="306" width="4" height="168" fill="#dcc99c" opacity=".35"/>
+        <!-- terraces at each setback: a stone lip and planters, as built -->
+        <g fill="#cfc0a0" opacity=".8">
+          <rect x="206" y="652" width="310" height="5"/>
+          <rect x="214" y="470" width="294" height="5"/>
+          <rect x="224" y="302" width="274" height="5"/>
+        </g>
+        <g fill="#5d8f4a">
+          <rect x="214" y="644" width="12" height="9"/><rect x="496" y="644" width="12" height="9"/>
+          <rect x="222" y="462" width="11" height="9"/><rect x="486" y="462" width="11" height="9"/>
+          <rect x="232" y="294" width="10" height="9"/><rect x="472" y="294" width="10" height="9"/>
+        </g>
+        <rect x="238" y="177" width="246" height="22" fill="#ffd987" opacity=".8" filter="url(#soft)"/>
         <g id="wins"></g>
         <rect x="204" y="876" width="348" height="26" fill="#1e1830"/>
+        <rect x="308" y="866" width="106" height="7" fill="#e9b158" opacity=".9"/>
+        <rect x="312" y="873" width="5" height="29" fill="#8a6540"/>
+        <rect x="404" y="873" width="5" height="29" fill="#8a6540"/>
+        <rect x="298" y="900" width="126" height="4" fill="#3a3050"/>
+        <rect x="306" y="904" width="110" height="4" fill="#332a47"/>
         <rect x="338" y="880" width="44" height="22" fill="#f2bd63"/>
         <rect x="326" y="884" width="6" height="18" fill="#e9b158" opacity=".8"/>
         <rect x="388" y="884" width="6" height="18" fill="#e9b158" opacity=".8"/>
-        <rect x="204" y="161" width="348" height="4" fill="#d9c69c" opacity=".8"/>
-        <rect x="204" y="164" width="348" height="16" fill="#2a2138"/>
+        <rect x="232" y="161" width="258" height="4" fill="#d9c69c" opacity=".8"/>
+        <rect x="232" y="164" width="258" height="16" fill="#2a2138"/>
       </g>
       <circle cx="361" cy="116" r="30" fill="#d97757" opacity=".18" filter="url(#soft2)"/>
       <g id="herospark" transform="translate(361,116) scale(1.9)" fill="#d97757" color="#d97757"><circle r="2.6" fill="currentColor"/></g>
@@ -682,16 +707,20 @@ var wins=document.getElementById("wins"),refl=document.getElementById("refl"),st
 if(wins&&refl){
   var rand=mulberry(50);
   var LIT=["#ffbb50","#f6c76d","#e8a23c","#cf9542"],UNLIT="#241e33";
-  var BASE=880,FH=14,X0=230,STEP=34,WW=24,WH=8,GROUND=902;
+  var BASE=880,FH=14,WW=24,WH=8,GROUND=902;
+  /* the same setbacks the 3D tower has: bands narrow at floors 16, 29 and 41 */
+  function band(f){return f>40?{x0:258,cols:6,step:32}:f>28?{x0:246,cols:7,step:31}
+                        :f>15?{x0:244,cols:7,step:34}:{x0:230,cols:8,step:34};}
   for(var f=1;f<=50;f++){
     var top=BASE-f*FH;
-    if(f===50){for(var k=0;k<8;k++)R(wins,216+k*36,181,32,13,"#ffe3a6",1);continue;}
+    if(f===50){for(var k=0;k<6;k++)R(wins,262+k*33,181,30,13,"#ffe3a6",1);continue;}
+    var bd=band(f),X0=bd.x0,STEP=bd.step;
     var p=(f%10===0?0.32:0.13+0.08*Math.abs(Math.sin(f*1.7)));
-    for(var c=0;c<8;c++){
+    for(var c=0;c<bd.cols;c++){
       var lit=rand()<p;
       var fill=lit?LIT[(rand()*4)|0]:UNLIT;
       R(wins,X0+c*STEP,top+3,WW,WH,fill,lit?(0.84+rand()*0.16).toFixed(2):1);
-      if(c===0&&f%10===0)R(wins,210,top+13,302,2,"#d9c69c",0.34);
+      if(c===0&&f%10===0)R(wins,X0-16,top+13,STEP*bd.cols+8,2,"#d9c69c",0.34);
       if(lit){
         var d=GROUND-(top+3+WH);
         if(d<=260){var ro=0.26*(1-d/280);

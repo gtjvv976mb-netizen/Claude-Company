@@ -93,9 +93,9 @@ button.home.on{background:var(--good,#4f8f52);color:#fff;border-color:transparen
 
 <div class="topbar">
   <div class="firm">Claude <em>Tower</em></div>
-  <div class="tag">50 floors · one desk each</div>
+  <div class="tag">50 floors · one team each · Section 14 upstairs</div>
   <div class="spacer"></div>
-  <div class="stat">Desks taken <b id="s-taken">—</b></div>
+  <div class="stat">Floors taken <b id="s-taken">—</b></div>
   <div class="stat">Available <b id="s-free">—</b></div>
   <button class="home" id="wbtn" type="button">Connect wallet</button>
   <a class="home" href="/">Home</a>
@@ -151,13 +151,15 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 stageEl.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0fa8bb);          // the outdoor sky
-scene.fog = new THREE.Fog(0x8fd8dd, 150, 340);
+// The homepage sells this building at dusk, so the tower is seen at dusk: indigo
+// overhead falling to a violet horizon, warm windows doing the advertising.
+scene.background = new THREE.Color(0x1b1438);
+scene.fog = new THREE.Fog(0x55306a, 150, 340);
 
 /* outdoor light rig, verbatim from the world scene */
-scene.add(new THREE.HemisphereLight(0xedfff5, 0x64714a, 1.38));
-const sun = new THREE.DirectionalLight(0xffdda0, 3.08);
-sun.position.set(-58, 96, 62);
+scene.add(new THREE.HemisphereLight(0x8a7ab8, 0x241a30, 0.85));
+const sun = new THREE.DirectionalLight(0xf7bf80, 1.9);      // the last of the sun, low and warm
+sun.position.set(-72, 38, 84);
 sun.castShadow = renderer.shadowMap.enabled;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.left = -60; sun.shadow.camera.right = 60;
@@ -165,7 +167,7 @@ sun.shadow.camera.top = 70; sun.shadow.camera.bottom = -70;
 sun.shadow.camera.near = 20; sun.shadow.camera.far = 260;
 sun.shadow.bias = -0.00035; sun.shadow.normalBias = 0.035;
 scene.add(sun, sun.target);
-const fill = new THREE.DirectionalLight(0xb8f5ef, 0.78);
+const fill = new THREE.DirectionalLight(0x7c88d8, 0.5);
 fill.position.set(70, 52, -80);
 scene.add(fill);
 
@@ -230,7 +232,7 @@ const floorY = (n) => BASE_Y + (n - 1) * FLOOR_H;   // n is 1-based
 /* ── ground + podium ──────────────────────────────────────────────────────── */
 (function ground() {
   const g = new THREE.Mesh(new THREE.PlaneGeometry(900, 900),
-    new THREE.MeshStandardMaterial({ color: P.grass, roughness: 0.96 }));
+    new THREE.MeshStandardMaterial({ color: 0x2c3a2c, roughness: 0.96 }));
   g.rotation.x = -Math.PI / 2; g.receiveShadow = true; scene.add(g);
   const plaza = new THREE.Mesh(new THREE.CircleGeometry(30, 48),
     new THREE.MeshStandardMaterial({ color: P.pathStone, roughness: 0.94 }));
@@ -267,10 +269,24 @@ const floorY = (n) => BASE_Y + (n - 1) * FLOOR_H;   // n is 1-based
   // podium and entrance
   box([FOOT_X + 3.4, BASE_Y, FOOT_Z + 3.4], [0, BASE_Y / 2, 0], P.pathStone);
   box([FOOT_X + 4.2, 0.22, FOOT_Z + 4.2], [0, BASE_Y + 0.08, 0], P.cream);
-  // entrance canopy + doors on the +Z face
-  box([5.6, 0.24, 1.6], [0, BASE_Y + 1.55, FOOT_Z / 2 + 1.9], P.amber);
-  box([0.3, 1.5, 0.3], [-2.6, BASE_Y + 0.8, FOOT_Z / 2 + 2.5], P.amber);
-  box([0.3, 1.5, 0.3], [2.6, BASE_Y + 0.8, FOOT_Z / 2 + 2.5], P.amber);
+  // The entrance is the whole first impression: a double-height glazed lobby,
+  // a deep canopy on brass columns, front steps down to the plaza, and the
+  // firm's mark glowing above the door (the glow itself is in the lit bake).
+  box([6.8, 2.3, 0.5], [0, BASE_Y + 1.15, FOOT_Z / 2 - 0.1], 0x1d2a30);        // lobby glass, dark
+  box([0.34, 2.3, 0.5], [0, BASE_Y + 1.15, FOOT_Z / 2 + 0.05], P.timberDark);  // door mullion
+  box([7.6, 0.3, 2.6], [0, BASE_Y + 2.45, FOOT_Z / 2 + 1.3], P.amber);         // canopy
+  for (const cx of [-3.4, 3.4]) box([0.3, 2.4, 0.3], [cx, BASE_Y + 1.2, FOOT_Z / 2 + 2.3], P.amber);
+  for (let st = 0; st < 3; st++)                                                // steps to the plaza
+    box([8.4 - st * 0.8, 0.3, 1.1], [0, BASE_Y - 0.15 - st * 0.3, FOOT_Z / 2 + 2.6 + st * 0.9], P.pathStone);
+  // corner piers ground the base so the slab does not sit on air
+  for (const sx of [-1, 1]) for (const sz of [-1, 1])
+    box([0.9, BASE_Y + FLOOR_H * 2, 0.9],
+        [sx * (FOOT_X / 2 + 1.4), (BASE_Y + FLOOR_H * 2) / 2, sz * (FOOT_Z / 2 + 1.4)], P.timberDark);
+  // plaza lamp posts, lit in the glow bake
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2 + 0.31;
+    box([0.22, 2.6, 0.22], [Math.cos(a) * 23, 1.3, Math.sin(a) * 23], P.timberDark);
+  }
 })();
 
 /* ── the stack ────────────────────────────────────────────────────────────── */
@@ -288,6 +304,15 @@ for (let n = 1; n <= FLOORS; n++) {
       box([0.52, FLOOR_H - 0.34, 0.52],
         [sx * (fx / 2 - 0.26), y + 0.34 + (FLOOR_H - 0.34) / 2, sz * (fz / 2 - 0.26)],
         penthouse ? P.amber : P.teal);
+    }
+  }
+  // where the tower steps back it gains a terrace: a wider lip and planters
+  if (n === 16 || n === 29 || n === 41) {
+    const pfx = FOOT_X * setback(n - 1), pfz = FOOT_Z * setback(n - 1);
+    box([pfx + 0.8, 0.18, pfz + 0.8], [0, y + 0.09, 0], P.pathStone);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      box([0.7, 0.5, 0.7], [sx * (pfx / 2 - 0.5), y + 0.42, sz * (pfz / 2 - 0.5)], P.terracotta);
+      box([1.0, 0.8, 1.0], [sx * (pfx / 2 - 0.5), y + 1.0, sz * (pfz / 2 - 0.5)], P.leaf);
     }
   }
   // a brass band every ten floors, so height is countable at a glance
@@ -309,6 +334,82 @@ for (let n = 1; n <= FLOORS; n++) {
   box([0.36, 1.6, 0.36], [0, y + 7.4, 0], P.amber);
 })();
 scene.add(bakeStatic(staticSpecs));
+
+/* Warm windows are what sell a building at dusk. MeshBasicMaterial ignores the
+   light rig entirely, so these read as lit from inside for the cost of one draw. */
+(function litBake() {
+  const lit = [];
+  let seed = 5014;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  for (let n = 1; n <= FLOORS; n++) {
+    const y = floorY(n), k = setback(n);
+    const fx = FOOT_X * k, fz = FOOT_Z * k;
+    const bays = 7;
+    for (let i = 0; i < bays; i++) {
+      if (rnd() < (n === FLOORS ? 0.95 : 0.38)) {
+        const wx = -fx / 2 + (i + 0.5) * (fx / bays);
+        lit.push({ size: [fx / bays * 0.62, FLOOR_H * 0.42, 0.08],
+                   at: [wx, y + FLOOR_H * 0.52, fz / 2 + 0.02],
+                   colour: rnd() < 0.8 ? 0xf3b866 : 0xffd9a0 });
+      }
+      if (rnd() < 0.3) {
+        const wz = -fz / 2 + (i + 0.5) * (fz / bays);
+        lit.push({ size: [0.08, FLOOR_H * 0.42, fz / bays * 0.62],
+                   at: [fx / 2 + 0.02, y + FLOOR_H * 0.52, wz], colour: 0xe8a95a });
+      }
+    }
+  }
+  // the sign above the door, and the lamp heads
+  lit.push({ size: [4.6, 0.5, 0.14], at: [0, BASE_Y + 3.1, FOOT_Z / 2 + 1.2], colour: 0xf3b866 });
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2 + 0.31;
+    lit.push({ size: [0.5, 0.3, 0.5], at: [Math.cos(a) * 23, 2.75, Math.sin(a) * 23], colour: 0xffd9a0 });
+  }
+  const mesh = bakeStatic(lit);
+  mesh.material = new THREE.MeshBasicMaterial({ vertexColors: true });
+  mesh.castShadow = false;
+  scene.add(mesh);
+})();
+
+/* ── people: the building is alive, so people go in and out of it ─────────── */
+const WALKERS = [];
+(function people() {
+  let seed = 907;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const SHIRTS = [0xf2ead6, 0x8d6cae, 0x5c7d8a, 0xbf4a3c, 0x2f4048, 0x9a8a68];
+  const SKINS = [0xd9a074, 0xc98c5f, 0xe0b088, 0xb87a4e];
+  const DOOR = new THREE.Vector3(0, 0.06, FOOT_Z / 2 + 5.4);   // foot of the steps
+
+  function makeWalker() {
+    const g = new THREE.Group();
+    const m = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.85 });
+    const add = (sz, at, c) => { const mm = new THREE.Mesh(BOX, m(c)); mm.scale.set(...sz); mm.position.set(...at); g.add(mm); return mm; };
+    const shirt = SHIRTS[(rnd() * SHIRTS.length) | 0], skin = SKINS[(rnd() * SKINS.length) | 0];
+    const legL = add([0.16, 0.5, 0.16], [0, 0.25, 0.09], 0x2f3a3f);
+    const legR = add([0.16, 0.5, 0.16], [0, 0.25, -0.09], 0x2f3a3f);
+    add([0.3, 0.5, 0.44], [0, 0.75, 0], shirt);
+    add([0.3, 0.3, 0.3], [0, 1.18, 0], skin);
+    g.userData = { legL, legR };
+    scene.add(g);
+    return g;
+  }
+  function resetWalker(w, first) {
+    const a = rnd() * Math.PI * 1.1 - Math.PI * 0.05;          // approach from the front half
+    const edge = new THREE.Vector3(Math.cos(a) * 27, 0.06, Math.abs(Math.sin(a)) * 27 + 4);
+    const leaving = rnd() < 0.5;
+    w.o.userData.path = leaving ? [DOOR.clone(), edge] : [edge, DOOR.clone()];
+    w.o.position.copy(w.o.userData.path[0]);
+    w.t = first ? rnd() : 0;                                   // stagger the first wave
+    w.speed = 0.055 + rnd() * 0.03;
+    w.leaving = leaving;
+  }
+  for (let i = 0; i < 7; i++) {
+    const w = { o: makeWalker(), t: 0, speed: 0.06, leaving: false };
+    resetWalker(w, true);
+    WALKERS.push(w);
+  }
+  window.__resetWalker = resetWalker;   // reused by the frame loop below
+})();
 
 /* ── glass bands: one InstancedMesh so a floor can light up at runtime ────── */
 const glassGeo = new THREE.BoxGeometry(FOOT_X - 0.9, FLOOR_H - 0.46, FOOT_Z - 0.9);
@@ -390,7 +491,11 @@ const listEl = document.getElementById("list"), selEl = document.getElementById(
 let selected = FLOORS;
 
 const shortAddr = (a) => (a ? a.slice(0, 4) + "…" + a.slice(-4) : "");
-const label = (f) => (f.state === "hq" ? "Penthouse" : `Desk ${String(f.n).padStart(2, "0")}`);
+/* The building speaks in floors, and a leased floor answers to its tenant's name. */
+const ord = (n) => { const t = n % 10, h = n % 100;
+  return n + (h >= 11 && h <= 13 ? "th" : t === 1 ? "st" : t === 2 ? "nd" : t === 3 ? "rd" : "th"); };
+const label = (f) => f.state === "hq" ? "Penthouse \u00b7 Section 14"
+  : f.name ? `${f.name} \u00b7 ${ord(f.n)}` : `${ord(f.n)} Floor`;
 
 function renderList() {
   listEl.innerHTML = "";
@@ -544,6 +649,19 @@ function frame() {
   t += dt;
   camTarget.y += (camGoal - camTarget.y) * Math.min(1, dt * 3.4);
   roofSpark.rotation.z = t * 0.5;
+  for (const w of WALKERS) {
+    w.t += dt * w.speed * 3.2;
+    const [from, to] = w.o.userData.path;
+    if (w.t >= 1) { window.__resetWalker(w, false); continue; }
+    w.o.position.lerpVectors(from, to, w.t);
+    w.o.lookAt(to.x, w.o.position.y, to.z);
+    const sw = Math.sin(t * 9 + w.speed * 100) * 0.5;
+    w.o.userData.legL.rotation.x = sw;
+    w.o.userData.legR.rotation.x = -sw;
+    // fade near the door so nobody pops out of existence mid-plaza
+    const nearDoor = (w.leaving ? w.t < 0.12 : w.t > 0.88);
+    w.o.visible = !nearDoor || (w.t * 40) % 1 > 0.15;
+  }
   placeCamera();
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
