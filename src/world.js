@@ -40,7 +40,13 @@ export function startWorld() {
       let b = SEATS[(rnd() * SEATS.length) | 0];
       if (b === a) b = SEATS[(SEATS.indexOf(a) + 3) % SEATS.length];
       emit("world:visit", { a, b, vi: (rnd() * VISIT_SCRIPTS) | 0 });
-    } else if (roll < 0.44) {
+    } else if (roll < 0.40) {
+      // a paper physically changes hands — the office trades documents, visibly
+      const a = SEATS[(rnd() * SEATS.length) | 0];
+      let b = SEATS[(rnd() * SEATS.length) | 0];
+      if (b === a) b = SEATS[(SEATS.indexOf(a) + 5) % SEATS.length];
+      emit("world:paper", { a, b, li: (rnd() * 4) | 0 });
+    } else if (roll < 0.52) {
       // two agents take a break together and have the same argument everywhere
       const a = SEATS[(rnd() * SEATS.length) | 0];
       let b = SEATS[(rnd() * SEATS.length) | 0];

@@ -1790,8 +1790,11 @@ function buildAvatar(spec, index) {
 
   // the sheet of paper they carry
   const doc = new THREE.Mesh(BOX, mat(P.cream, 0.9));
-  doc.scale.set(0.02, 0.22, 0.17);
-  doc.position.set(0.16, 0.96, 0);
+  // A paper nobody can see is a paper nobody passes: folder-sized, manila, and
+  // tilted forward like something actually held rather than a chip of white.
+  doc.scale.set(0.05, 0.34, 0.28);
+  doc.position.set(0.20, 1.00, 0);
+  doc.rotation.z = -0.25;
   doc.visible = false;
   root.add(doc);
 
@@ -3010,9 +3013,10 @@ async function deliver(from, toId, msg, kind = "") {
   const slot = (queues[toId] = ((queues[toId] ?? -1) + 1) % 4);
   const dx = to.home.x > 0 ? -1 : 1;
   await from.moveTo(to.home.x + dx * (1.5 + slot * 0.35), to.home.z + (slot - 1.5) * 0.7);
-  puff(from, "▤");
+  puff(from, "📄");
   from.carry(false);
   to.carry(true, kind);
+  puff(to, "📥");
   await from.goHome();
 }
 
@@ -3049,6 +3053,12 @@ const HANDLERS = {
   // Ambient events are cosmetic: a hidden tab drops them rather than queueing a
   // burst of stale office life for when the viewer returns. The chronicle has them.
   "world:snack": (e) => { if (!document.hidden) snackBreak(e.a, e.b, e.ti); },
+  "world:paper": (e) => {
+    if (document.hidden) return;
+    const a = who(e.a), h = who(e.b);
+    if (!a || !h || a.typing || a.doc.visible || a.path || inSnackRoom.has(a.id) || inSnackRoom.has(h.id)) return;
+    a.run(async () => { await deliver(a, e.b, ["For your desk.", "Sign here.", "Copies.", "From the morning stack."][(e.li ?? 0) % 4]); });
+  },
   "world:visit": (e) => {
     if (document.hidden) return;
     const a = who(e.a), h = who(e.b);
@@ -3152,7 +3162,16 @@ const HANDLERS = {
           p.say("For BIG M.");
           p.carry(false);
           const ceo = who("CEO");
-          ceo?.run(async () => { ceo.carry(true, "green"); ceo.say("Something's come under the door."); });
+          ceo?.run(async () => {
+            // The boss comes to the door for a proposal — the one walk on the
+            // floor that means money might move. Nobody else crosses; he does.
+            ceo.say("Something's come under the door.");
+            await ceo.moveTo(SPOTS.ceoDoor[0], SPOTS.ceoDoor[1] - 0.9);
+            ceo.carry(true, "green");
+            puff(ceo, "📥");
+            await pause(900);
+            await ceo.goHome();
+          });
         } else {
           await p.moveTo(SPOTS.meeting[0], SPOTS.meeting[1]);
           puff(p, "▤"); p.carry(false);
