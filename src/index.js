@@ -139,8 +139,20 @@ function startPenthouse() {
       console.log(`[penthouse] cycle: ${r.considered} seen, ${r.workedUp} worked up, ${r.opened} calls, $${r.costUsd}`);
     } catch (e) { console.log(`[penthouse] cycle failed: ${e.message}`); }
   };
-  setTimeout(research, 15000);                      // let the server settle first
-  setInterval(research, cycleMins * 60000);
+  // The boot cycle made every DEPLOY a paid research run — and with the
+  // mandate hunting to exhaustion, every push could burn to the daily brake.
+  // A restart now only fires the boot cycle if no cycle ran recently.
+  db.exec("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)");
+  const lastCycleAt = Number(db.prepare("SELECT value FROM kv WHERE key='last_cycle_at'").get()?.value ?? 0);
+  const researchStamped = async () => {
+    db.prepare("INSERT INTO kv (key,value) VALUES ('last_cycle_at',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .run(String(Date.now()));
+    await research();
+  };
+  const sinceLast = Date.now() - lastCycleAt;
+  if (sinceLast > (cycleMins / 2) * 60000) setTimeout(researchStamped, 15000);
+  else console.log(`[penthouse] boot cycle skipped — last cycle ${Math.round(sinceLast / 60000)}m ago`);
+  setInterval(researchStamped, cycleMins * 60000);
 
   // The sniper lane: cheap, frequent, and only ever pays for ignition.
   const freshMins = Number(process.env.PENTHOUSE_FRESH_MINS || 5);
