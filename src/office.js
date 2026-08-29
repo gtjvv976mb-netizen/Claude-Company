@@ -123,6 +123,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             runPriceTokens: rooms.RUN_PRICE_TOKENS,
             freeRunsWithLease: rooms.FREE_RUNS_WITH_LEASE,
             balanceBaseUnits: me ? leasing.balanceOf(me).toString() : "0",
+            onchainBaseUnits: me ? await leasing.walletBalanceOf(me).then(String).catch(() => null) : null,
             credits: me ? leasing.creditsFor(me) : [],
             wallet: me ?? null,
           });
@@ -131,8 +132,11 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
         if (url.pathname === "/api/me") {
           if (!me) return json(401, { error: "not signed in" });
           const lease = leasing.leaseOf(me);
+          // On-chain is best-effort: an RPC hiccup must not fail sign-in.
+          const onchain = await leasing.walletBalanceOf(me).catch(() => null);
           return json(200, {
             wallet: me,
+            onchainBaseUnits: onchain == null ? null : onchain.toString(),
             balanceBaseUnits: leasing.balanceOf(me).toString(),
             priceBaseUnits: leasing.PRICE_BASE_UNITS.toString(),
             decimals: leasing.DECIMALS,

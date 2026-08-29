@@ -732,11 +732,19 @@ function renderWallet() {
   wpanel.innerHTML = "";
   const a = document.createElement("div");
   a.className = "addr"; a.textContent = ME.wallet;
+  const wal = document.createElement("div");
+  wal.className = "bal";
+  wal.innerHTML = "In your wallet: <b></b> $CLAUDECO";
+  wal.querySelector("b").textContent = ME.onchainBaseUnits == null ? "—" : fmt(ME.onchainBaseUnits, ME.decimals);
   const bal = document.createElement("div");
   bal.className = "bal";
-  bal.innerHTML = "Credited: <b></b> $CLAUDECO";
+  bal.innerHTML = "Building credit: <b></b> $CLAUDECO";
   bal.querySelector("b").textContent = fmt(ME.balanceBaseUnits, ME.decimals);
-  wpanel.append(a, bal);
+  const note = document.createElement("div");
+  note.className = "bal";
+  note.style.opacity = ".7";
+  note.textContent = "Credit is what you've sent the treasury and not yet spent — it pays leases, rent and runs.";
+  wpanel.append(a, wal, bal, note);
   if (ME.lease) {
     const m = document.createElement("div");
     m.className = "mine";

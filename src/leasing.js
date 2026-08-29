@@ -1,6 +1,8 @@
 import db from "./lib/store.js";
 import { isAddress } from "./lib/base58.js";
 import { FLOORS, HQ_FLOOR } from "./tower.js";
+import { readRpc } from "./lib/http.js";
+import { cfg } from "./config.js";
 
 /**
  * Floor leasing, paid in $CLAUDECO.
@@ -80,6 +82,27 @@ CREATE INDEX IF NOT EXISTS idx_spends_wallet ON spends(wallet);
 const sum = (rows) => rows.reduce((t, r) => t + BigInt(r.base_units), 0n);
 
 /** Credited minus spent, in base units. */
+/* The credit ledger above is the BUILDING'S number — deposits to the treasury
+ * minus spends. It is not, and was never, the wallet's own holdings; showing it
+ * under the bare label "Balance" convinced the first real user their tokens had
+ * vanished. This is the wallet's actual on-chain $CLAUDECO, read-only, cached
+ * for thirty seconds so a busy page does not become an RPC bill. */
+const onchainCache = new Map();
+export async function walletBalanceOf(wallet) {
+  const hit = onchainCache.get(wallet);
+  if (hit && Date.now() - hit.ts < 30_000) return hit.v;
+  const res = await readRpc(cfg.rpc, "getTokenAccountsByOwner",
+    [wallet, { mint: MINT }, { encoding: "jsonParsed" }]);
+  // readRpc wraps: { ok, data } — reading .value off the wrapper cost this
+  // function its first probe, where it reported a whale's balance as zero.
+  if (!res?.ok) throw new Error(res?.error || "rpc failed");
+  let total = 0n;
+  for (const acc of res.data?.value ?? [])
+    total += BigInt(acc.account?.data?.parsed?.info?.tokenAmount?.amount ?? "0");
+  onchainCache.set(wallet, { ts: Date.now(), v: total });
+  return total;
+}
+
 export function balanceOf(wallet) {
   const credited = sum(db.prepare("SELECT base_units FROM credits WHERE wallet = ?").all(wallet));
   const spent = sum(db.prepare("SELECT base_units FROM spends WHERE wallet = ?").all(wallet));
