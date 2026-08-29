@@ -83,6 +83,9 @@ export async function sweep({ angles = ANGLES } = {}) {
   const pads = {};
   for (const t of out) if (t.launchpad) pads[t.launchpad] = (pads[t.launchpad] || 0) + 1;
   emit("scout:universe", { total: out.length, fresh: out.length, launchpads: pads });
+  // The ledger: keep what this sweep saw, so later gates can ask what a coin
+  // looked like when we FIRST saw it, and what its liquidity actually held at.
+  try { (await import("./data/snapshots.js")).record(out); } catch {}
   return out;
 }
 

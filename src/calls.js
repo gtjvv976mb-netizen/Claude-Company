@@ -58,6 +58,12 @@ CREATE INDEX IF NOT EXISTS idx_call_events ON call_events(call_id, id DESC);
 ensureColumn("calls", "launchpad", "TEXT");
 
 export function openCall(c) {
+  // Every pump.fun-origin call carries the one invalidation the research pass
+  // found casually decisive: the observed profitable snipers' exit rule was
+  // "the creator sold". Tenants deserve the same tripwire in writing.
+  if (c.mint?.endsWith("pump") && c.invalidation && !/deployer|creator/i.test(c.invalidation)) {
+    c = { ...c, invalidation: c.invalidation.replace(/\.?\s*$/, "") + ". Thesis void if the deployer wallet sells." };
+  }
   try {
     const info = db.prepare(`
       INSERT INTO calls (mint,symbol,category,launchpad,conviction,entry_ref,entry_lo,entry_hi,stop,target,
@@ -161,6 +167,16 @@ export function evaluateExit(call, now) {
 
   if (call.target && mark != null && mark >= call.target)
     return { fire: true, code: "target_hit", urgency: "level", detail: `mark ${mark} reached the target ${call.target}`, pct: 100 };
+
+  /* Thesis expiry — the time barrier. A call is a claim about NOW; the research
+   * pass found our geometry had a stop and a target but no clock, and time is
+   * the dimension memecoins actually die along. Fast sleeves get 48h to work,
+   * everything else a week; expiry is not failure, it is the thesis ageing out. */
+  const ageMs = Date.now() - call.opened_at;
+  const fast = call.category === "memecoin" || call.category === "unclear";
+  if (ageMs > (fast ? 48 : 168) * 3600e3)
+    return { fire: true, code: "thesis_expired", urgency: "normal",
+      detail: `the thesis had ${fast ? 48 : 168}h to work and time has run out — exit at the market`, pct: 100 };
 
   /* Stagnation: a reflexive coin that has gone nowhere in a day is not a thesis
    * resting, it is dead momentum occupying risk budget. Slow sleeves are exempt. */

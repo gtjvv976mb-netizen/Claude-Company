@@ -64,6 +64,7 @@ function startBooks() {
   setInterval(rent, 3600000);
   setTimeout(rent, 30000);
   setInterval(() => chroniclePrune(), 3600000);
+  setInterval(() => { import("./data/snapshots.js").then((sn) => sn.prune()).catch(() => {}); }, 3600000);
 
   const sync = async () => {
     try { const r = await autoSyncAll();

@@ -111,7 +111,11 @@ export function rank(c) {
    * now re-igniting on a real trend — or never having left their highs at all.
    * The signature is the same ignition read on an aged tape: buyers accelerating
    * hard against their own recent pace, on a coin old enough to have died once. */
-  if (age >= 24 * 14) {
+  /* Revival now means the SURVIVOR cohort: only ~4.6% of launchpad coins live
+   * past 90 days, and a "revival" younger than that is usually an abandoned
+   * mint sharing a ticker. The 2-13-week middle ground belongs to no lane —
+   * by the doctrine's own math it is where the bodies are. */
+  if (age >= 24 * 90) {
     if (buyAccel >= 3 && buysH1 >= 40 && h1 > 0 && h1 <= 25) {
       s += 25; why.push(`revival: ${buysH1} buys this hour on a ${Math.round(age / 24)}d-old coin, ${buyAccel.toFixed(1)}x its pace`);
       if (h6 > 10 && h24 > 0) { s += 8; why.push("the comeback is holding, not spiking"); }
@@ -124,6 +128,14 @@ export function rank(c) {
 
   const txns = (p.txns?.h24?.buys ?? 0) + (p.txns?.h24?.sells ?? 0);
   if (txns > 500) { s += 8; why.push("actively traded"); }
+
+  /* Who is behind the tape. The 655,770-token pump.fun study's strongest
+   * graduation predictor was FEW LARGE HUMAN BUYS — real conviction arrives in
+   * size, while a thousand dust swaps is a bot choir. Average trade size is
+   * volume the desk already has, read a second way. */
+  const avgTrade = txns > 0 ? vol24 / txns : 0;
+  if (txns >= 200 && avgTrade >= 150) { s += 8; why.push(`real size behind the tape ($${Math.round(avgTrade)}/trade)`); }
+  if (txns >= 2000 && avgTrade < 15) { s -= 10; why.push(`dust swarm ($${Math.round(avgTrade)}/trade over ${txns} trades)`); }
 
   return { score: Math.round(s), why };
 }

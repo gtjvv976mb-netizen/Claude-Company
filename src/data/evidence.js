@@ -2,6 +2,7 @@ import * as ds from "./dexscreener.js";
 import * as jup from "./jupiter.js";
 import * as sol from "./solana.js";
 import { cfg, MINTS } from "../config.js";
+import * as snapshots from "./snapshots.js";
 import { emit } from "../lib/bus.js";
 import { whaleFeed } from "../identity.js";
 import * as pf from "./pumpfun.js";
@@ -133,6 +134,41 @@ export function screen(ev) {
     "fdv_propped", `fdv/liquidity=${d.fdvToLiqRatio} > ceiling ${s.maxFdvToLiqRatio}`);
   check(ev.exitProbe?.roundTripLossPct != null && ev.exitProbe.roundTripLossPct > cfg.maxRoundTripSlippagePct,
     "cannot_exit", `round-trip loss ${ev.exitProbe.roundTripLossPct}% > ceiling ${cfg.maxRoundTripSlippagePct}% at $${cfg.targetSizeUsd}`);
+
+  // A live freeze authority is a honeypot vector no quote can see: a Jupiter
+  // round trip proves a ROUTE exists, not that your transfer will execute.
+  const flags = (ev.mintAccount?.flags ?? []).map((f) => f.flag ?? f);
+  check(flags.includes("freeze_authority_live"),
+    "freezable", "freeze authority is live — accounts can be frozen mid-trade");
+
+  // One wallet holding half the float (pool already excluded upstream).
+  check(ev.holders?.ok && ev.holders.top1Pct > 50,
+    "holder_concentration", `largest non-pool account holds ${ev.holders?.top1Pct}% of supply`);
+
+  // THE DEAD ZONE. Measured across 41,470 migrations: 73% of graduates trade
+  // below 0.4x their migration price within 20 minutes — and DexScreener first
+  // surfaces pairs exactly there, so our earliest sighting is structurally near
+  // the worst entry. A young coin trading at less than half of what it was when
+  // we FIRST saw it is a knife, not a discount.
+  if (p.ageHours != null && p.ageHours < 72 && p.priceUsd) {
+    const born = Date.now() - p.ageHours * 3600e3;
+    const first = snapshots.firstSince(ev.mint, born);
+    if (first && Date.now() - first.ts > 30 * 60e3 && first.price > 0) {
+      const ratio = p.priceUsd / first.price;
+      check(ratio < 0.5, "post_migration_dump",
+        `trading at ${(ratio * 100).toFixed(0)}% of first-sighting price — the graduate dead zone`);
+    }
+  }
+
+  // Liquidity that HELD, not liquidity that posed: rugs pass momentary
+  // snapshots by design (median rug: $2,832). Applied once we have ~8h of
+  // observations; the spot check above still guards the young.
+  {
+    const held = snapshots.liqOver(ev.mint, Date.now() - 24 * 3600e3);
+    check(held.observations >= 96 && held.minLiq != null && held.minLiq < s.minLiquidityUsd,
+      "liquidity_did_not_hold",
+      `liquidity dipped to $${Math.round(held.minLiq)} inside 24h (floor $${s.minLiquidityUsd})`);
+  }
 
   return { pass: fails.length === 0, fails };
 }

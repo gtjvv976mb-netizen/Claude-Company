@@ -13,7 +13,7 @@
  * analysts, red team, risk, PM, compliance, CEO — with the watch's own context
  * attached. Promotion buys a re-examination, never a shortcut past the gauntlet.
  */
-import db from "./lib/store.js";
+import db, { ensureColumn } from "./lib/store.js";
 import { emit } from "./lib/bus.js";
 import { pairsFor, shapePair, consensus } from "./data/dexscreener.js";
 
@@ -28,11 +28,15 @@ CREATE TABLE IF NOT EXISTS watchlist (
   created_at  INTEGER NOT NULL,
   expires_at  INTEGER NOT NULL,
   status      TEXT NOT NULL DEFAULT 'watching',  -- watching | promoted | expired | superseded
+  held_count  INTEGER NOT NULL DEFAULT 0,        -- consecutive checks the rules have held
   last_checked INTEGER,
   resolved_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_watchlist_status ON watchlist(status, expires_at);
 `);
+// Production's table predates the debounce column; CREATE TABLE IF NOT EXISTS
+// is not a migration.
+ensureColumn("watchlist", "held_count", "INTEGER NOT NULL DEFAULT 0");
 
 /** One live watch per mint: a fresh WATCH verdict replaces the old one. */
 export function addWatch({ mint, symbol, category, rules, note }) {
@@ -88,11 +92,22 @@ export async function checkWatchlist() {
       (rules.price_above_usd == null || (px.priceUsd ?? 0) > rules.price_above_usd) &&
       (rules.buys_h1_at_least == null || (deep.txns?.h1?.buys ?? 0) >= rules.buys_h1_at_least) &&
       (rules.liq_at_least_usd == null || (px.liquidityUsd ?? 0) >= rules.liq_at_least_usd);
+    // The warp-id debounce: rules must hold on TWO consecutive checks before we
+    // pay for a promotion — a single flash pattern is how false positives look.
     if (held) {
-      db.prepare("UPDATE watchlist SET status='promoted', resolved_at=? WHERE id=?").run(Date.now(), w.id);
-      emit("watch:promoted", { mint: w.mint, symbol: w.symbol, rules,
-        now: { priceUsd: px.priceUsd, buysH1: deep.txns?.h1?.buys ?? 0, liqUsd: px.liquidityUsd } });
-      promoted.push({ ...w, rules });
+      const count = (w.held_count ?? 0) + 1;
+      if (count >= 2) {
+        db.prepare("UPDATE watchlist SET status='promoted', held_count=?, resolved_at=? WHERE id=?")
+          .run(count, Date.now(), w.id);
+        emit("watch:promoted", { mint: w.mint, symbol: w.symbol, rules,
+          now: { priceUsd: px.priceUsd, buysH1: deep.txns?.h1?.buys ?? 0, liqUsd: px.liquidityUsd } });
+        promoted.push({ ...w, rules });
+      } else {
+        db.prepare("UPDATE watchlist SET held_count=? WHERE id=?").run(count, w.id);
+        emit("watch:holding", { mint: w.mint, symbol: w.symbol, consecutive: count });
+      }
+    } else if (w.held_count) {
+      db.prepare("UPDATE watchlist SET held_count=0 WHERE id=?").run(w.id);
     }
   }
   return { checked: rows.length, promoted };

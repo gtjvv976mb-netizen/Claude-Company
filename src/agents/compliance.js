@@ -32,6 +32,17 @@ export function complianceCheck({ pm, risk, redteam, ticket, ev }) {
 
   if (pm?.decision === "PROPOSE" && ticket) {
     const px = ev?.pair?.priceUsd;
+
+    // The Hummingbot lesson, from their own honestly-published live run (-1.54%
+    // over 334 trades): a target that is not a large multiple of round-trip cost
+    // is a machine for paying the market. We MEASURE that cost; use it.
+    const rt = ev?.exitProbe?.roundTripLossPct;
+    const tp1 = ticket.take_profit?.[0]?.price;
+    if (rt != null && rt > 0 && tp1 > 0 && px > 0) {
+      const edgePct = ((tp1 - px) / px) * 100;
+      v(edgePct < 5 * rt, "edge_below_cost",
+        `first target is ${edgePct.toFixed(1)}% away but the measured round trip costs ${rt}% — edge must be >= 5x cost.`);
+    }
     v(!(ticket.entry_zone_low > 0) || !(ticket.entry_zone_high >= ticket.entry_zone_low),
       "bad_entry_zone", `entry zone ${ticket.entry_zone_low}-${ticket.entry_zone_high} is not a valid range.`);
 

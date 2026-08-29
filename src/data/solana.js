@@ -48,7 +48,10 @@ export async function mintInfo(mint) {
 export async function topHolders(mint, supplyRaw) {
   const r = await readRpc(cfg.rpc, "getTokenLargestAccounts", [mint]);
   if (!r.ok) return { ok: false, error: r.error };
-  const accounts = r.data?.value || [];
+  // The Raydium authority's token account is the POOL — counting it as a holder
+  // both masks and manufactures concentration. Exclude it before any math.
+  const RAYDIUM_AUTH = "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1";
+  const accounts = (r.data?.value || []).filter((a) => a.address !== RAYDIUM_AUTH);
   const supply = Number(supplyRaw);
   if (!supply || !accounts.length) return { ok: false, error: "no supply or no accounts" };
 
