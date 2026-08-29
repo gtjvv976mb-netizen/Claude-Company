@@ -1293,7 +1293,106 @@ const SEATQ = {
   Scribe:      ["code",   "Write it down so the desk can be graded later."],
   CEO:         ["claude", "Do I authorise this?"],
 };
-const DOSSIER = {};
+const DOSSIER = {
+  Scout: {  // AUSTIN POWERZ
+    brief: "Finds what the desk should be looking at today, and states why it matters now.",
+    detail: "Runs a sweep across 14 search angles and returns roughly 357 unique tokens per pass, drawn from pump.fun, letsbonk.fun, bags.fm, moonshot, boop and Meteora. Six venues, one pass. The standing question is what deserves attention today, and why now - the timing half of it is not optional.",
+    method: "Model call - costs money on every sweep.",
+    known: "Arriving loud, early, and with 357 names.",
+    note: "Attention is not a recommendation. Roughly four in five of its names die at the Screener.",
+  },
+  Screener: {  // MAXWELL SMORT
+    brief: "The floor test: the hard thresholds a candidate clears before anyone spends a dollar on it.",
+    detail: "Deterministic code, no model call, no cost. Applies hard floors - liquidity, age, wash ratio, and a live buy-then-sell exit probe - and eliminates roughly 79% of what the Scout brings in. Everything past this point costs $1.29-$1.44 to work up, which is the entire reason the gate sits here.",
+    method: "Deterministic code. Free, no model in the loop.",
+    known: "Missing it by that much, on purpose.",
+    note: "Rejects nothing on judgement. A name either clears the floor or it does not.",
+  },
+  Forensics: {  // STERLING ARCHOR
+    brief: "Asks whether the token itself can be turned against a holder by design.",
+    detail: "Inspects mint authority, freeze authority, Token-2022 transfer hooks and holder concentration - the mechanisms by which a contract can strand or tax the people holding it. Runs blind: no access to the liquidity, flow, technical or narrative findings, and no knowledge of what those seats concluded.",
+    method: "Model call. Billable, and run blind to the other analysts.",
+    known: "Reading the paperwork nobody else opened.",
+    note: "Reads the contract, not the crowd. A clean mint says nothing about whether anyone wants it.",
+  },
+  Liquidity: {  // ETHAN HUNTED
+    brief: "Asks whether a position can be exited at size, at a price the desk would accept.",
+    detail: "Runs a real buy-then-sell round trip at size and reports the quote that came back, not a mid price. The exit is tested by attempting it, at the size in question, rather than inferred from a number posted on a screen. Runs blind to the other four analysts, with no sight of the forensic, flow, technical or narrative findings.",
+    method: "Model call. Billable, and quotes real size, not a mid.",
+    known: "Planning the way out before the way in.",
+    note: "A mid price is not an exit. The only number it trusts is one a round trip gave back.",
+  },
+  Flow: {  // SAM FISHY
+    brief: "Determines whether the demand behind a token is real or manufactured.",
+    detail: "Interrogates a candidate's trading activity for authenticity rather than size: is the demand real, or is it manufactured. Runs blind alongside Forensics, Liquidity, Technical and Narrative - no shared context, no coordination - so the five are expected to contradict one another, and that is the design.",
+    method: "Model call. Costs money per workup.",
+    known: "Works in the dark. Prefers it.",
+    note: "Volume is a claim, not a measurement. Reports on demand only; soundness is not its call.",
+  },
+  Technical: {  // JASON BURN
+    brief: "Assesses whether the current price location is worth entering at all.",
+    detail: "Asks whether this is a location worth entering, and answers it without reference to what Forensics, Liquidity, Flow or Narrative found. The blind separation is deliberate: the five analysts are expected to disagree violently, and a technical read that flatters the others counts for no more than one that fights them.",
+    method: "Model call. Costs money per workup.",
+    known: "No memory of how it got here.",
+    note: "Reaches no candidate the Screener has already killed on liquidity, age or wash ratio.",
+  },
+  Narrative: {  // BLACK WIDOWER
+    brief: "Establishes whether a story exists, whether it is true, and whether the desk is early.",
+    detail: "Works the claim rather than the chart: what is being said about the token, whether it can be verified, and whether the desk arrived before the crowd. Never reports that no story exists - only that one could not be verified. Absence of a fetch is not evidence. Runs blind to the other four analysts.",
+    method: "Model call. Costs money per workup.",
+    known: "Fluent cover. Rarely the same one twice.",
+    note: "An unverified story is logged as unverified, never as a negative finding.",
+  },
+  "Red Team": {  // AGENT 48
+    brief: "Attacks the candidate before the desk can, on the assumption the trade loses money.",
+    detail: "Its entire remit is one question - why does this trade lose money - put to a candidate before any proposal exists. Standing record is 9 refuted, 0 survived; that figure belongs to this seat alone and is not a desk record or a win rate. The PM may not propose until it has stated how the Red Team was answered.",
+    method: "Model call; costs money on every workup it runs.",
+    known: "Bald, barcoded, always uses the side door.",
+    note: "The 9-0 record is this seat's and nobody else's. It counts refutations, not outcomes.",
+  },
+  Risk: {  // MINI-MEH
+    brief: "Sets the size, and names the point at which the trade is mechanically wrong.",
+    detail: "Reads all five analyst reports and the Red Team's verdict, then answers two questions and no others: how much, and where this is mechanically wrong. A level here is not an opinion — it is where the thesis is void regardless of the story. It does not argue for or against a candidate. It bounds one.",
+    method: "Model call; paid for on every workup it touches.",
+    known: "Says little, mirrors the boss, halves the size.",
+    note: "It sets size. It does not decide what is done with the number.",
+  },
+  PM: {  // JAMES BOUND
+    brief: "Turns five disagreeing analysts into one call: propose, watch, or pass - and the thesis behind it.",
+    detail: "Reads five analyst reports written blind to each other and expected to conflict, and resolves them into a single call. May not propose anything until it has stated on the record how the Red Team was answered. The output is one of three words - propose, watch, pass - and the thesis that carries it.",
+    method: "Model call; one of the paid seats in every workup.",
+    known: "Perfect manners. Answers to M. Signs nothing.",
+    note: "A proposal is not a trade. Nothing this seat writes authorises itself.",
+  },
+  Execution: {  // JOHN QUICK
+    brief: "Writes how an order would be worked — route, slicing, stop, targets — on a ticket nobody signs.",
+    detail: "Takes the PM's thesis and the size Risk set, and writes the route, the slice schedule, the stop and the targets. It runs only when the PM proposes, the size is above zero, and the Red Team did not refute. The ticket is unsigned by construction: the desk holds no keys and signs nothing. A human carries it to their own wallet, or it does not happen.",
+    method: "Model call. Runs only on a live proposal.",
+    known: "Came out of retirement over a pencil.",
+    note: "The output is a ticket, never a trade. Nothing here signs, holds or moves a wallet.",
+  },
+  Compliance: {  // JUDGE DREAD
+    brief: "Checks proposals against the house rules and vetoes the ones that break them.",
+    detail: "Deterministic code, not a model: the same input yields the same verdict. It runs on the drafted ticket, after the PM and Risk are done. A veto marks the proposal VETOED, and a vetoed proposal never reaches the CEO at all — so this seat's refusal outranks the authorising one. Costs nothing to run.",
+    method: "Deterministic code. No model call, no cost, no discretion.",
+    known: "I am the law. Also the linter.",
+    note: "A veto, not advice. It cannot be argued with — and the CEO never sees what it stops.",
+  },
+  Scribe: {  // AGENT P
+    brief: "Writes the desk's record down so its decisions can be graded later.",
+    detail: "Deterministic code, no model call, no cost. Writes the thesis, the Red Team's verdict, the size, how the Red Team was answered and where the five analysts disagreed — so a call can be graded later against what was actually known at the time. Nothing is written to persuade.",
+    method: "Deterministic code. Free; runs on every workup.",
+    known: "Does not speak. Files everything.",
+    note: "Keeps the record; renders no opinion. If a seat's reasoning is absent later, it was absent then.",
+  },
+  CEO: {  // BIG M
+    brief: "The authorising seat: nothing leaves the floor without a yes here.",
+    detail: "Receives the PM's thesis, the size Risk set, the Red Team's verdict, the unsigned ticket and the Compliance result, and puts one question to them: do I authorise this. Only a proposal that already cleared Compliance ever reaches the door. A yes is an instruction to nobody — the desk is read-only and moves no funds.",
+    method: "Claude. The authorising seat, not an analyst.",
+    known: "Has never once been in the field.",
+    note: "A yes authorises a ticket, not a trade. The seat can approve; it cannot sign.",
+  },
+};
 
 /* Dossier text is authored, not user input, but it lands in innerHTML — so it is
    escaped anyway. The one that would actually bite is an apostrophe in a name. */
