@@ -1,4 +1,4 @@
-import db from "./lib/store.js";
+import db, { ensureColumn } from "./lib/store.js";
 
 /**
  * CLAUDE TOWER — fifty floors, one desk each.
@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS floors (
 );
 CREATE INDEX IF NOT EXISTS idx_floors_owner ON floors(owner);
 `);
+// Production grew this column under an older build; nothing in the current tree
+// created it, so every FRESH database died on the first floors SELECT.
+ensureColumn("floors", "md_name", "TEXT");
 
 // Seed the stack once.
 const seeded = db.prepare("SELECT COUNT(*) n FROM floors").get().n;
