@@ -2,11 +2,14 @@ import { ask } from "../lib/llm.js";
 import { RedTeamOut, RiskOut, PMOut, TicketOut, ScoutOut } from "./schemas.js";
 import { cfg } from "../config.js";
 
-const bundle = (ev) => "=== EVIDENCE BUNDLE ===\n" + JSON.stringify(ev, null, 2);
+// Compact on purpose: 2-space pretty-printing inflated every downstream prompt
+// ~25% for nothing a model needs. The PM and Risk read ~20k tokens per run of
+// this bundle plus the book.
+const bundle = (ev) => "=== EVIDENCE BUNDLE ===\n" + JSON.stringify(ev);
 const book = (analysts) =>
   "=== ANALYST BOOK ===\n" +
   Object.entries(analysts)
-    .map(([k, v]) => `--- ${k.toUpperCase()} (score ${v.score}, confidence ${v.confidence}) ---\n${JSON.stringify(v, null, 2)}`)
+    .map(([k, v]) => `--- ${k.toUpperCase()} (score ${v.score}, confidence ${v.confidence}) ---\n${JSON.stringify(v)}`)
     .join("\n\n");
 
 /** SCOUT — turns a raw firehose into a ranked shortlist with a reason for each. */
@@ -32,7 +35,7 @@ say so rather than dressing it up. Return at most ${cfg.maxCandidates} picks. Re
 fewer — or none — is a valid and often correct answer.`,
     prompt:
       `Here is today's raw feed. Rank what deserves a full workup.\n\n` +
-      JSON.stringify(candidates, null, 2),
+      JSON.stringify(candidates),
   });
 }
 
@@ -107,7 +110,7 @@ Method — follow it explicitly:
    by noise before the thesis resolves.
 
 Returning 0 is a real and frequently correct answer.`,
-    prompt: `Size this idea for ${ev.symbol}.\n\n${bundle(ev)}\n\n${book(analysts)}\n\n=== RED TEAM ===\n${JSON.stringify(redteam, null, 2)}`,
+    prompt: `Size this idea for ${ev.symbol}.\n\n${bundle(ev)}\n\n${book(analysts)}\n\n=== RED TEAM ===\n${JSON.stringify(redteam)}`,
   });
 }
 
@@ -143,8 +146,8 @@ The weighted analyst composite is provided as an input, not an instruction. You 
 override it in either direction, but if you do, say why in 'key_disagreement'.`,
     prompt:
       `Decide on ${ev.symbol} (${ev.mint}).\n\n${bundle(ev)}\n\n${book(analysts)}\n\n` +
-      `=== RED TEAM ===\n${JSON.stringify(redteam, null, 2)}\n\n` +
-      `=== RISK ===\n${JSON.stringify(risk, null, 2)}\n\n` +
+      `=== RED TEAM ===\n${JSON.stringify(redteam)}\n\n` +
+      `=== RISK ===\n${JSON.stringify(risk)}\n\n` +
       `=== WEIGHTED ANALYST COMPOSITE ===\n${weightedScore.toFixed(1)} / 100 ` +
       `(weights: ${JSON.stringify(cfg.weights)})`,
   });
@@ -178,7 +181,7 @@ The stop price must match the risk seat's stop exactly. You do not get to move i
     prompt:
       `Write the unsigned ticket for ${ev.symbol}.\n\n` +
       `Current price (evidence.pair.priceUsd): ${ev.pair?.priceUsd}\n` +
-      `Exit probe: ${JSON.stringify(ev.exitProbe, null, 2)}\n\n` +
-      `=== PM DECISION ===\n${JSON.stringify(pm, null, 2)}\n\n=== RISK ===\n${JSON.stringify(risk, null, 2)}`,
+      `Exit probe: ${JSON.stringify(ev.exitProbe)}\n\n` +
+      `=== PM DECISION ===\n${JSON.stringify(pm)}\n\n=== RISK ===\n${JSON.stringify(risk)}`,
   });
 }

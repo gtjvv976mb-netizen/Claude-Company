@@ -171,7 +171,11 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
     } catch (e) {
       // Out of credit is terminal: the remaining candidates cannot be worked up either,
       // and the cycle should end with what it has rather than crash the process.
-      if (e instanceof OutOfCredit) { stopped = "out of credit"; emit("cycle:halted", { reason: "out_of_credit" }); break; }
+      if (e instanceof OutOfCredit) {
+        stopped = e.constructor.name === "BudgetExhausted" ? "daily budget reached" : "out of credit";
+        emit("cycle:halted", { reason: e.constructor.name === "BudgetExhausted" ? "daily_budget" : "out_of_credit" });
+        break;
+      }
       emit("cycle:error", { mint: c.mint, error: String(e.message) });
       continue;
     }

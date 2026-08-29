@@ -6,7 +6,7 @@ import { complianceCheck } from "./agents/compliance.js";
 import { runCEO } from "./agents/ceo.js";
 import { writeOrderSlip } from "./order.js";
 import { emit } from "./lib/bus.js";
-import { spend } from "./lib/llm.js";
+import { spend, assertDailyBudget} from "./lib/llm.js";
 import { cfg } from "./config.js";
 import * as store from "./lib/store.js";
 import { writeReport } from "./report.js";
@@ -49,6 +49,10 @@ export async function buildUniverse() {
  * a result the desk wants written down, not a silent drop.
  */
 export async function workup(cycle, mint, hook = "") {
+  // Both spenders — the penthouse cycle and a tenant's floor run — pass through here,
+  // so this is where the daily cap bites. Before the free stages, deliberately: a
+  // workup that cannot afford its model stages should not pretend to start.
+  assertDailyBudget(cfg.dailyBudgetUsd);
   emit("token:start", { mint, hook });
 
   const ev = await gather(mint, hook);

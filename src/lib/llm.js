@@ -17,6 +17,22 @@ CREATE INDEX IF NOT EXISTS idx_spend_ts ON llm_spend(ts);
 /** Billing failures are terminal for a cycle: retrying just burns time. */
 export class OutOfCredit extends Error {}
 
+/** The daily cap tripping is handled exactly like an empty balance — every existing
+ * OutOfCredit path (halt the cycle, fail the floor run cleanly) already does the
+ * right thing, so the brake subclasses it rather than inventing a parallel path. */
+export class BudgetExhausted extends OutOfCredit {}
+
+/** Throws before any tokens are spent if the last 24h already cost the cap. */
+export function assertDailyBudget(capUsd) {
+  if (!capUsd || capUsd <= 0) return;
+  const spent = spendSince(Date.now() - 24 * 3600e3).usd;
+  if (spent >= capUsd) {
+    emit("cycle:budget", { usedUsd: spent, capUsd, window: "24h" });
+    throw new BudgetExhausted(
+      `daily budget spent: $${spent.toFixed(2)} of $${capUsd} in 24h — the desk pauses, monitoring continues`);
+  }
+}
+
 const client = new Anthropic();
 
 // Anthropic list price, USD per 1M tokens. Used only for the desk's own
@@ -178,7 +194,9 @@ export async function askWithWeb({ seat, model, effort, schema, prompt, system, 
       model,
       max_tokens: maxTokens,
       system: SHARED_RULES + (system ? `\n\n${system}` : ""),
-      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 4 }],
+      // max_uses 4 fed ~41k tokens of raw results back through the loop per run;
+      // two searches answer "is there a story and is it true" or nothing will.
+      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 2 }],
       output_config: { effort },
       messages: [{ role: "user", content: prompt }],
     });

@@ -50,20 +50,23 @@ export const cfg = {
     narrative: 0.14,
   },
 
-  // Every stage defaults to the strongest model. Cost lever: set any of these to
-  // claude-sonnet-5 (or claude-haiku-4-5 for the mechanical ones) via env.
-  // Effort is tuned per stage instead — it cuts spend without cutting model tier.
+  // Defaults are the economical tier; env vars UPGRADE a seat, they no longer rescue
+  // the bill. Measured 2026-08-29: all-Opus ran $1.29-1.44 a workup, and three seats
+  // were most of it — Red Team thinking at xhigh (31% of all spend by itself),
+  // Narrative dragging ~41k tokens of raw web results in per run, and five analysts
+  // filling bounded schemas on the priciest model in the house. Judgment seats keep
+  // Opus; evidence-shaped verdicts do not need it.
   models: {
-    scout:      process.env.DESK_MODEL_SCOUT      || "claude-opus-5",
-    forensics:  process.env.DESK_MODEL_FORENSICS  || "claude-opus-5",
-    liquidity:  process.env.DESK_MODEL_LIQUIDITY  || "claude-opus-5",
-    flow:       process.env.DESK_MODEL_FLOW       || "claude-opus-5",
-    narrative:  process.env.DESK_MODEL_NARRATIVE  || "claude-opus-5",
-    technical:  process.env.DESK_MODEL_TECHNICAL  || "claude-opus-5",
+    scout:      process.env.DESK_MODEL_SCOUT      || "claude-haiku-4-5",
+    forensics:  process.env.DESK_MODEL_FORENSICS  || "claude-sonnet-5",
+    liquidity:  process.env.DESK_MODEL_LIQUIDITY  || "claude-sonnet-5",
+    flow:       process.env.DESK_MODEL_FLOW       || "claude-sonnet-5",
+    narrative:  process.env.DESK_MODEL_NARRATIVE  || "claude-sonnet-5",
+    technical:  process.env.DESK_MODEL_TECHNICAL  || "claude-sonnet-5",
     redteam:    process.env.DESK_MODEL_REDTEAM    || "claude-opus-5",
-    risk:       process.env.DESK_MODEL_RISK       || "claude-opus-5",
+    risk:       process.env.DESK_MODEL_RISK       || "claude-sonnet-5",
     pm:         process.env.DESK_MODEL_PM         || "claude-opus-5",
-    execution:  process.env.DESK_MODEL_EXECUTION  || "claude-opus-5",
+    execution:  process.env.DESK_MODEL_EXECUTION  || "claude-sonnet-5",
   },
 
   effort: {
@@ -73,11 +76,17 @@ export const cfg = {
     flow: "high",
     narrative: "medium",
     technical: "medium",
-    redteam: "xhigh",   // the adversary gets the most room to think
+    redteam: "high",    // the adversary keeps the strongest MODEL; xhigh thinking alone
+                        // was ~14k output tokens a run and a third of the whole bill
     risk: "high",
-    pm: "xhigh",        // and so does the decision-maker
+    pm: "high",
     execution: "medium",
   },
+
+  // The desk stops paying, not the process: past this 24h spend, cycles skip their
+  // model stages and say so on the tape. Monitoring (prices, exits) costs nothing
+  // and keeps running.
+  dailyBudgetUsd: Number(process.env.DESK_DAILY_BUDGET_USD || 10),
 };
 
 /** The RPC URL embeds an API key. Never print it raw — mask it wherever it is shown. */
