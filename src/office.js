@@ -154,8 +154,10 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           return json(200, { events: chronicleRead({
             floor: url.searchParams.has("floor") ? Number(url.searchParams.get("floor")) : null,
             since: Number(url.searchParams.get("since") || 0),
+            before: Number(url.searchParams.get("before") || 0),
             limit: Number(url.searchParams.get("limit") || 200),
             type: url.searchParams.get("type"),
+            exclude: url.searchParams.get("exclude"),
           }) });
         }
 

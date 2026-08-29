@@ -41,9 +41,11 @@ try {
 } catch {}
 
 /** The permanent record. Everything emit() ever said, queryable. */
-export function chronicleRead({ floor = null, since = 0, limit = 200, type = null } = {}) {
+export function chronicleRead({ floor = null, since = 0, before = 0, limit = 200, type = null, exclude = null } = {}) {
   limit = Math.min(500, Math.max(1, limit | 0));
   const conds = ["id > ?"]; const args = [since | 0];
+  if (before > 0) { conds.push("id < ?"); args.push(before | 0); }
+  if (exclude) { conds.push("type NOT LIKE ?"); args.push(String(exclude).slice(0, 40) + "%"); }
   if (floor != null) { conds.push("(floor IS NULL OR floor = ?)"); args.push(floor); }
   if (type) { conds.push("type LIKE ?"); args.push(String(type).slice(0, 40) + "%"); }
   const rows = db.prepare(
@@ -53,9 +55,14 @@ export function chronicleRead({ floor = null, since = 0, limit = 200, type = nul
     .filter(Boolean).reverse();
 }
 
-/** The chronicle records everything but does not hoard: keep the newest 200k rows. */
-export function chroniclePrune(keep = 200_000) {
+/** Two-tier retention. Ambience (world:*) is scenery and expires fast, or it would
+ * drown the record — at ~10 events a minute it alone is ~14k rows a day. The
+ * pipeline's history keeps the long horizon; that is the part that must survive
+ * "no matter how long". */
+export function chroniclePrune(keep = 200_000, keepWorld = 5_000) {
   try {
+    db.prepare(`DELETE FROM chronicle WHERE type LIKE 'world:%' AND id <=
+      (SELECT COALESCE(MAX(id),0) FROM chronicle WHERE type LIKE 'world:%') - ?`).run(keepWorld);
     db.prepare("DELETE FROM chronicle WHERE id <= (SELECT COALESCE(MAX(id),0) FROM chronicle) - ?").run(keep);
   } catch {}
 }

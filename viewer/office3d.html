@@ -2803,17 +2803,101 @@ const setStat = (id, v) => { const e = document.getElementById(id); if (e) e.tex
 const short = (m) => (m ? m.slice(0, 4) + "…" + m.slice(-4) : "");
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function tape(seat, msg, cls = "") {
+const atBottom = () => tapeEl.scrollHeight - tapeEl.scrollTop - tapeEl.clientHeight < 60;
+
+function tapeRow(seat, msg, cls, ts) {
   const row = document.createElement("div");
-  row.className = "row " + cls;
-  row.innerHTML = `<span class="t">${new Date().toLocaleTimeString([], { hour12: false })}</span><span class="who"></span><span class="msg"></span>`;
+  row.className = "row " + (cls || "");
+  const d = ts ? new Date(ts) : new Date();
+  const today = new Date().toDateString() === d.toDateString();
+  const stamp = (today ? "" : (d.getMonth() + 1) + "/" + d.getDate() + " ") +
+    d.toLocaleTimeString([], { hour12: false });
+  row.innerHTML = `<span class="t"></span><span class="who"></span><span class="msg"></span>`;
+  row.querySelector(".t").textContent = stamp;
   row.querySelector(".who").textContent = crewName(seat);
   row.querySelector(".msg").textContent = msg;
-  tapeEl.appendChild(row);
-  while (tapeEl.children.length > 240) tapeEl.firstChild.remove();
-  tapeEl.scrollTop = tapeEl.scrollHeight;
+  return row;
+}
+
+function tape(seat, msg, cls = "", ts = null) {
+  const stick = atBottom();
+  tapeEl.appendChild(tapeRow(seat, msg, cls, ts));
+  // Trim only while the reader is riding the live edge. Someone scrolled up is
+  // reading history, and history must not be eaten out from under them.
+  if (stick) {
+    while (tapeEl.children.length > 1200) tapeEl.firstChild.remove();
+    tapeEl.scrollTop = tapeEl.scrollHeight;
+  }
 }
 window.tape = tape;
+
+/* ── the tape is a window onto the chronicle ────────────────────────────────
+   It used to start blank on every visit and cap at 240 rows — the record only
+   existed while you happened to be watching. Now the last stretch of the
+   chronicle backfills on connect, and scrolling to the top pulls ever older
+   pages until the true start of the record. */
+function fmtTape(e) {
+  const money = (v) => v == null ? "" : "$" + Math.round(v).toLocaleString();
+  switch (e.type) {
+    case "cycle:start":     return ["Floor", `Cycle ${String(e.cycle).slice(0, 16)} opened`, "hi"];
+    case "cycle:end":       return ["Floor", `Cycle closed — ${e.count ?? 0} calls, $${e.spendUsd ?? 0}${e.stopped ? " (" + e.stopped + ")" : ""}`, "hi"];
+    case "cycle:halted":    return ["Floor", `Cycle halted — ${e.reason}`, "bad"];
+    case "cycle:budget":    return ["Floor", `Budget: $${e.usedUsd} of $${e.capUsd}`, "warn"];
+    case "scout:universe":  return ["Scout", `${e.total} names in, ${e.fresh} fresh`];
+    case "scout:shortlist": return ["Scout", `Shortlist: ${e.count} for full workup`, "hi"];
+    case "scout:skip":      return ["Scout", `skip ${short(e.mint)} — ${e.reason}`, "warn"];
+    case "token:start":     return ["Floor", `── ${short(e.mint)}${e.hook ? " — " + e.hook : ""}`, "hi"];
+    case "token:evidence":  return ["Evidence", `${e.symbol} @ $${e.price} · liq ${money(e.liq)}`];
+    case "token:end":       return ["Floor", `${e.symbol || short(e.mint)} → ${String(e.outcome).replace(/_/g, " ")}${e.detail ? " — " + e.detail : ""}`,
+                                    e.outcome === "killed" || e.outcome === "screened_out" ? "warn" : ""];
+    case "seat:verdict":    return [e.seat, `${e.detail || ""}${e.score != null ? " " + Math.round(e.score) + "/100" : ""}`.trim() || "reported",
+                                    e.kill || e.pass === false ? "bad" : e.pass === true ? "good" : ""];
+    case "seat:failed":     return [e.seat, `seat failed — ${e.error}`, "bad"];
+    case "seat:searching":  return [e.seat, "searching the web"];
+    case "whales":          return ["Whales", `${e.symbol || short(e.mint)}: ${e.buyers ?? "?"} buying, net ${money(e.netUsd)}`, "hi"];
+    case "order:slip":      return ["CEO", `unsigned order — ${e.symbol} ${e.size ? "$" + e.size : ""}`, "good"];
+    case "identity:changed": return ["Floor", `Nameplate: ${e.identity?.floorName || "—"} · MD ${e.identity?.mdName || "—"}`];
+    default: return null;   // world:* ambience and thinking ticks stay off the tape
+  }
+}
+
+let oldestChron = null, chronBusy = false, chronDone = false;
+async function loadChronicle(before) {
+  if (chronBusy || chronDone) return 0;
+  chronBusy = true;
+  try {
+    const base = window.__API_BASE__ || "";
+    const q = new URLSearchParams({ limit: "250", exclude: "world:" });
+    const fp = location.pathname.match(/\/floor\/(\d+)/);
+    if (fp) q.set("floor", fp[1]);
+    if (before) q.set("before", String(before));
+    const r = await fetch(`${base}/api/chronicle?${q}`);
+    const { events = [] } = await r.json();
+    if (!events.length || events[0].id == null) { chronDone = !!before; return 0; }
+    oldestChron = events[0].id;
+    if (events.length < 250) chronDone = true;
+
+    const frag = document.createDocumentFragment();
+    for (const e of events) {
+      const f = fmtTape(e);
+      if (f) frag.appendChild(tapeRow(f[0], f[1], f[2], e.ts));
+    }
+    if (chronDone) {
+      const start = tapeRow("Floor", "— the start of the record —", "hi", events[0]?.ts);
+      frag.insertBefore(start, frag.firstChild);
+    }
+    const keepHeight = tapeEl.scrollHeight, keepTop = tapeEl.scrollTop;
+    tapeEl.insertBefore(frag, tapeEl.firstChild);
+    tapeEl.scrollTop = keepTop + (tapeEl.scrollHeight - keepHeight);   // no jump
+    return events.length;
+  } catch { return 0; }
+  finally { chronBusy = false; }
+}
+
+window.loadChronicle = loadChronicle;
+tapeEl.addEventListener("scroll", () => {
+  if (tapeEl.scrollTop < 40 && oldestChron) loadChronicle(oldestChron);
+});
 
 function memo({ symbol, decision, thesis, conviction, size, stop, gmgn }) {
   const m = document.createElement("div");
@@ -3241,8 +3325,12 @@ if (location.search.includes("demo")) {
     return m ? m[1] : new URLSearchParams(location.search).get("floor"); })();
   const es = new EventSource((window.__API_BASE__ || "") + (floorParam ? `/events?floor=${floorParam}` : "/events"));
   let ok = false;
+  let backfilled = false;
   es.addEventListener("hello", () => { ok = true; window.__worldLive = true;   // the server runs the office now
-    liveText.textContent = "Live"; tape("Floor", "Connected to the desk."); });
+    liveText.textContent = "Live";
+    if (!backfilled) { backfilled = true;
+      window.loadChronicle?.().then(() => { tapeEl.scrollTop = tapeEl.scrollHeight; }); }
+    tape("Floor", "Connected to the desk."); });
   es.onmessage = (m) => { try { handle(JSON.parse(m.data)); } catch {} };
   es.onerror = () => { if (!ok) { es.close(); goSim("no desk process on this origin"); } };
   setTimeout(() => { if (!ok) { es.close(); goSim("desk did not answer"); } }, 2500);
