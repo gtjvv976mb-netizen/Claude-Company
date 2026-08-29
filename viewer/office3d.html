@@ -288,6 +288,19 @@ function placeCamera() {
   camera.position.set(camTarget.x + Math.cos(camYaw) * r, camTarget.y + h, camTarget.z + Math.sin(camYaw) * r);
   camera.lookAt(camTarget);
 }
+/* Inspect one figure up close. The scroll wheel is deliberately clamped for players,
+   which makes it useless for checking whether a character actually reads — so this
+   drives the camera directly. __figure("Scribe") frames AGENT P; the second argument
+   turns the view around them. */
+window.__figure = (seat, yaw = Math.PI / 4, width = 3.4) => {
+  const w = workers[seat];
+  if (!w) return "no such seat: " + Object.keys(workers).join(", ");
+  camTarget.set(w.g.position.x, 1.0, w.g.position.z);
+  camYaw = yaw; camWorldWidth = width;
+  resize();
+  return seat + " framed";
+};
+
 function resize() {
   const w = stageEl.clientWidth || 1, h = stageEl.clientHeight || 1;
   renderer.setSize(w, h, false);
@@ -752,116 +765,436 @@ function buildSpark(radius, rays, thickness, colour, emissive = 0.55) {
  * Kept to two or three boxes each: at fourteen figures the silhouette has to read from
  * across the room, and detail that only resolves up close costs draw calls for nothing.
  */
-const ACCESSORY = {
-  // Each figure has to be identifiable at a glance from across an isometric room, so the
-  // rule is the same one caricaturists use: take the two or three things a person is
-  // known for and drop everything else. Boxes are parented to bones, not skinned, so they
-  // ride the existing walk cycle for free.
 
-  // AUSTIN POWERZ — velvet, a ruffled jabot, the glasses and the mop. The scout seat
-  // is the one that goes everywhere, and this one has never once been subtle about it.
-  Scout: (j, add) => { add(j.Chest, [0.31, 0.42, 0.51], [-0.01, 1.20, 0], 0x6b3f8f);
-                       add(j.Chest, [0.07, 0.26, 0.13], [0.16, 1.26, 0], 0xf0e4c7);
-                       add(j.Head, [0.36, 0.16, 0.38], [-0.03, 1.79, 0], 0x6f4f30);
-                       add(j.Head, [0.03, 0.08, 0.10], [0.16, 1.65, 0.08], 0x2a231e);
-                       add(j.Head, [0.03, 0.08, 0.10], [0.16, 1.65, -0.08], 0x2a231e); },
-
-  // MAXWELL SMORT — grey suit, narrow tie, and the shoe held to his ear. He is right
-  // far more often than the shoe would suggest.
-  Screener: (j, add) => { add(j.Chest, [0.31, 0.42, 0.51], [-0.01, 1.20, 0], 0x8a9296);
-                          add(j.Chest, [0.05, 0.24, 0.07], [0.16, 1.26, 0], 0x2f3a3f);
-                          add(j.Head, [0.31, 0.09, 0.33], [-0.01, 1.79, 0], 0x2a231e);
-                          add(j.Head, [0.12, 0.09, 0.24], [0.02, 1.68, 0.24], 0x1d1916);
-                          add(j.Head, [0.12, 0.05, 0.10], [0.02, 1.63, 0.30], 0x1d1916); },
-
-  // STERLING ARCHOR — black turtleneck, the hair, and a tumbler he is never without.
-  Forensics: (j, add) => { add(j.Chest, [0.31, 0.42, 0.51], [-0.01, 1.20, 0], 0x1d1916);
-                           add(j.Chest, [0.24, 0.07, 0.28], [0, 1.42, 0], 0x1d1916);
-                           add(j.Head, [0.32, 0.11, 0.34], [-0.02, 1.79, 0], 0x2a231e);
-                           add(j.LowerArmR, [0.11, 0.12, 0.11], [0.06, 0.88, -0.27], 0xdfe7ea);
-                           add(j.LowerArmR, [0.09, 0.05, 0.09], [0.06, 0.86, -0.27], 0x8a6540); },
-
-  // ETHAN HUNTED — climbing harness, chest rig, and the line. Dressed to leave a
-  // building at speed, which is precisely what this seat is asked.
-  Liquidity: (j, add) => { add(j.Chest, [0.31, 0.42, 0.51], [-0.01, 1.20, 0], 0x1d2a30);
-                           add(j.Chest, [0.06, 0.30, 0.09], [0.16, 1.26, 0.11], 0x3a4a50);
-                           add(j.Chest, [0.06, 0.30, 0.09], [0.16, 1.26, -0.11], 0x3a4a50);
-                           add(j.Chest, [0.30, 0.06, 0.50], [-0.01, 1.10, 0], 0x2a231e);
-                           add(j.Chest, [0.13, 0.13, 0.13], [-0.14, 1.10, 0.20], 0xd7f04a);
-                           add(j.Head, [0.31, 0.09, 0.33], [-0.01, 1.79, 0], 0x2a231e); },
-
-  // SAM FISHY — the three green eyes. Nothing else is needed; the goggles ARE the
-  // character, and they read from anywhere on the floor.
-  Flow: (j, add) => { add(j.Chest, [0.31, 0.42, 0.51], [-0.01, 1.20, 0], 0x1d2a30);
-                      add(j.Head, [0.31, 0.10, 0.33], [-0.01, 1.79, 0], 0x2f3a3f);
-                      add(j.Head, [0.09, 0.09, 0.34], [0.15, 1.70, 0], 0x2f3a3f);
-                      add(j.Head, [0.05, 0.07, 0.07], [0.20, 1.70, 0.10], 0xd7f04a);
-                      add(j.Head, [0.05, 0.07, 0.07], [0.20, 1.70, -0.10], 0xd7f04a);
-                      add(j.Head, [0.05, 0.07, 0.07], [0.20, 1.62, 0], 0xd7f04a); },
-
-  // JASON BURN — grey jacket, cropped hair, three days of stubble, and the rolled
-  // newspaper. No gadgets: this one improvises with whatever the room contains.
-  Technical: (j, add) => { add(j.Chest, [0.31, 0.40, 0.51], [-0.01, 1.21, 0], 0x4a4f52);
-                           add(j.Chest, [0.10, 0.26, 0.14], [0.15, 1.24, 0], 0x2f3a3f);
-                           add(j.Head, [0.31, 0.09, 0.33], [-0.01, 1.79, 0], 0x2a231e);
-                           add(j.Head, [0.04, 0.07, 0.24], [0.16, 1.56, 0], 0x2a231e);
-                           add(j.LowerArmR, [0.05, 0.05, 0.26], [0.05, 0.84, -0.27], 0xf0e4c7); },
-
-  // BLACK WIDOWER — red hair, black suit, gauntlets at both wrists. The seat that
-  // decides whether a story is true, run by the one who is best at telling them.
-  Narrative: (j, add) => { add(j.Chest, [0.31, 0.42, 0.51], [-0.01, 1.20, 0], 0x1d1916);
-                           add(j.Chest, [0.06, 0.06, 0.30], [0.16, 1.13, 0], 0xe0ad3d);
-                           add(j.Head, [0.34, 0.14, 0.36], [-0.02, 1.78, 0], 0xb0503f);
-                           add(j.Head, [0.16, 0.20, 0.10], [-0.06, 1.62, 0.17], 0xb0503f);
-                           add(j.Head, [0.16, 0.20, 0.10], [-0.06, 1.62, -0.17], 0xb0503f);
-                           add(j.LowerArmL, [0.16, 0.11, 0.16], [0.04, 0.82, 0.26], 0x3a4a50);
-                           add(j.LowerArmR, [0.16, 0.11, 0.16], [0.04, 0.82, -0.26], 0x3a4a50); },
-
-  // AGENT 48 — bald, black suit, red tie, and the barcode on the back of the skull.
-  "Red Team": (j, add) => { add(j.Head, [0.33, 0.11, 0.33], [0, 1.79, 0], 0xd8b08c);
-                            add(j.Head, [0.03, 0.10, 0.16], [-0.16, 1.72, 0], 0x1d1916);
-                            add(j.Chest, [0.31, 0.42, 0.51], [-0.01, 1.20, 0], 0x1d1916);
-                            add(j.Chest, [0.05, 0.26, 0.12], [0.16, 1.26, 0], 0xf4f4f4);
-                            add(j.Chest, [0.06, 0.22, 0.06], [0.17, 1.24, 0], 0xb0503f); },
-
-  // MINI-MEH — grey jumpsuit and a bald head. The size gag is in AVATAR_SCALE below,
-  // which is also, exactly, this seat's job.
-  Risk: (j, add) => { add(j.Head, [0.33, 0.11, 0.33], [0, 1.79, 0], 0xd8b08c);
-                      add(j.Chest, [0.31, 0.42, 0.51], [-0.01, 1.19, 0], 0x8a9296); },
-
-  // JAMES BOUND — dinner jacket, white shirt, black bow tie. The only figure on the
-  // floor dressed for somewhere else entirely.
-  PM: (j, add) => { add(j.Chest, [0.31, 0.42, 0.51], [-0.01, 1.19, 0], 0x1d1916);
-                    add(j.Chest, [0.05, 0.26, 0.12], [0.16, 1.26, 0], 0xf4f4f4);
-                    add(j.Chest, [0.07, 0.05, 0.17], [0.17, 1.38, 0], 0x1d1916);
-                    add(j.Chest, [0.07, 0.10, 0.05], [0.17, 1.38, 0], 0x1d1916);
-                    add(j.Head, [0.32, 0.10, 0.34], [-0.02, 1.79, 0], 0x1d1916); },
-
-  // JOHN QUICK — black suit, white collar, and the beard.
-  Execution: (j, add) => { add(j.Chest, [0.31, 0.42, 0.51], [-0.01, 1.19, 0], 0x1d1916);
-                           add(j.Chest, [0.05, 0.24, 0.10], [0.16, 1.28, 0], 0xf4f4f4);
-                           add(j.Head, [0.06, 0.11, 0.26], [0.15, 1.55, 0], 0x2a231e);
-                           add(j.Head, [0.31, 0.15, 0.33], [-0.03, 1.76, 0], 0x2a231e); },
-
-  // JUDGE DREAD — the helmet never comes off, the visor is gold, the shoulder is armoured.
-  Compliance: (j, add) => { add(j.Head, [0.36, 0.30, 0.36], [0, 1.72, 0], 0x2f4048);
-                            add(j.Head, [0.05, 0.09, 0.34], [0.18, 1.66, 0], 0xe0ad3d);
-                            add(j.Head, [0.13, 0.10, 0.13], [-0.03, 1.91, 0], 0xe0ad3d);
-                            add(j.UpperArmL, [0.23, 0.15, 0.23], [0, 1.35, 0.26], 0xe0ad3d);
-                            add(j.Chest, [0.06, 0.14, 0.14], [0.16, 1.32, 0.11], 0xe0ad3d); },
-
-  // AGENT P — teal, flat orange bill, brown fedora. The smallest figure on the floor
-  // and the only one that never says a word.
-  Scribe: (j, add) => { add(j.Chest, [0.32, 0.44, 0.52], [-0.01, 1.19, 0], 0x2f9e9e);
-                        add(j.Head, [0.34, 0.30, 0.36], [0, 1.66, 0], 0x2f9e9e);
-                        add(j.Head, [0.14, 0.07, 0.26], [0.20, 1.62, 0], 0xdf7655);
-                        add(j.Head, [0.30, 0.11, 0.32], [-0.01, 1.85, 0], 0x8a6540);
-                        add(j.Head, [0.42, 0.03, 0.44], [-0.01, 1.80, 0], 0x8a6540); },
-};
 
 // Scaling the root shrinks the figure without touching the rig, the walk cycle or the
 // desk it sits at. Only one seat wants it, and for that seat it is the whole point.
-const AVATAR_SCALE = { Risk: 0.66, Scribe: 0.78 };
+const AVATAR_SCALE = { Forensics: 1.14, Liquidity: 1.04, Technical: 0.94, Narrative: 0.93, "Red Team": 1.07, Risk: 0.6, Execution: 1.09, Compliance: 1.06, Scribe: 0.8 };
+
+/* ── figures ────────────────────────────────────────────────────────────────
+   A shared humanoid with props bolted on is enough for a hat; it is not enough
+   for a platypus or a robot cop. FIGURE rebuilds the body itself: it repaints the palette, drops parts that character does not have, and
+   adds boxes to the SKINNED mesh so custom anatomy deforms with the rig instead
+   of floating beside it.
+     pal   palette overrides — skin, hair, eye, shirt, trousers, apron, boots
+     drop  palette keys removed from the body entirely
+     body  extra skinned boxes: [joint, [w,h,d], [world-rest centre], colour]
+   Centres are in world REST space, same convention as BODY: the figure stands
+   ~1.8 tall, the head cube sits at y=1.62, +X is the face, +Z is its left.      */
+const FIGURE = {
+  // Austin Powerz — A violet column topped by a brown mop 0.68 across — wider than his 0.65 shoulder span, so the hair breaks the shoulder line before anything else resolves; under it a near-black bar across the eyes, a cream frill cascading down the chest, and cream cuffs at both wrists that keep him identifiable from behind
+  Scout: {
+    pal: { skin: 0xd9a97f, hair: 0x8f5f30, shirt: 0x7a4fa3, trousers: 0x6a4392, boots: 0x33263a },
+    drop: ["eye", "apron", "hair"],
+    body: [
+      ["Head", [0.48, 0.26, 0.68], [-0.02, 1.89, 0], 0x8f5f30],  // mop top slab, 0.68 deep — proud of the 0.65 shoulder span so the h
+      ["Head", [0.1, 0.32, 0.42], [-0.19, 1.64, 0], 0x8f5f30],  // mop back mass to the nape, x -0.24 tucked inside the slab's -0.26 
+      ["Head", [0.34, 0.28, 0.19], [-0.04, 1.65, 0.23], 0x8f5f30],  // hair curtain, left — inner face z 0.135 bites 0.015 into the skull
+      ["Head", [0.34, 0.28, 0.19], [-0.04, 1.65, -0.23], 0x8f5f30],  // hair curtain, right — mirror of the left
+      ["Chest", [0.07, 0.13, 0.28], [0.155, 1.325, 0], 0xe8dcc0],  // jabot tier 1, widest at the throat (0.28 deep, beats the dropped a
+      ["Chest", [0.07, 0.12, 0.24], [0.162, 1.215, 0], 0xe8dcc0],  // jabot tier 2, tapering
+      ["Spine", [0.07, 0.2, 0.18], [0.152, 1.1, 0], 0xe8dcc0],  // jabot tier 3, narrowest
+      ["Chest", [0.05, 0.22, 0.12], [0.148, 1.29, 0.17], 0x543a78],  // oversized left lapel, front face 0.173 recessed behind the frill (
+      ["Chest", [0.05, 0.22, 0.12], [0.148, 1.29, -0.17], 0x543a78],  // oversized right lapel, mirror
+      ["LowerArmL", [0.135, 0.07, 0.135], [0, 1.075, 0.26], 0xe8dcc0],  // lace cuff, left — caps the bare tan forearm and reads from the bac
+      ["LowerArmR", [0.135, 0.07, 0.135], [0, 1.075, -0.26], 0xe8dcc0],  // lace cuff, right
+    ],
+    accessory: [
+      ["Head", [0.05, 0.12, 0.34], [0.17, 1.65, 0], 0x141416],  // heavy black rim — 0.12 tall, 0.34 across, proud of the face on bot
+      ["Head", [0.02, 0.06, 0.09], [0.175, 1.65, 0.075], 0x8e9aa6],  // left lens, recessed 0.010 inside the rim front so the black frames
+      ["Head", [0.02, 0.06, 0.09], [0.175, 1.65, -0.075], 0x8e9aa6],  // right lens, recessed the same
+    ],
+  },
+  // Maxwell Smort — Grey suit, charcoal trousers, cream shirt strip and a narrow navy tie — with a black dress shoe harnessed to the side of his head by a tan strap, pale sole facing out and toe jutting well past his nose, so the head silhouette is wrong from the front as well as the side; one foot is in a white sock, which is where the shoe came from
+  Screener: {
+    pal: { skin: 0xd7a882, hair: 0x2f2a26, eye: 0x231f1c, shirt: 0x8f929a, trousers: 0x64666e, apron: 0xe0dcd3 },
+    drop: ["boots"],
+    body: [
+      ["Head", [0.3, 0.1, 0.32], [-0.01, 1.735, 0], 0x2f2a26],  // hair wrapping the sides and back, sized monotonically inside the d
+      ["Chest", [0.07, 0.07, 0.28], [0.125, 1.395, 0], 0xe0dcd3],  // cream shirt collar band, caps the top of the shirt strip
+      ["Chest", [0.035, 0.36, 0.07], [0.158, 1.175, 0], 0x2b3340],  // the whole narrow navy tie as ONE box on Chest — no waist seam to s
+      ["Hips", [0.27, 0.15, 0.42], [0, 0.945, 0], 0x8f929a],  // boxy sixties jacket hem, steps out past the trousers — the silhoue
+      ["LowerArmL", [0.14, 0.14, 0.14], [0, 1.03, 0.26], 0x8f929a],  // left jacket cuff line — covers the upper forearm so a suited man i
+      ["LowerArmR", [0.14, 0.14, 0.14], [0, 1.03, -0.26], 0x8f929a],  // right jacket cuff line, mirror
+      ["LowerLegL", [0.2, 0.09, 0.17], [0.02, 0.05, 0.1], 0xe6e1d5],  // bare white sock — the left shoe is on his head, and the asymmetry 
+      ["LowerLegR", [0.2, 0.09, 0.17], [0.02, 0.05, -0.1], 0x22201f],  // the one shoe he still has on
+    ],
+    accessory: [
+      ["Head", [0.34, 0.14, 0.14], [0.09, 1.6, 0.21], 0x1c1a19],  // the shoe phone — toe at x 0.26, a clear 0.11 past the face plane, 
+      ["Head", [0.34, 0.14, 0.03], [0.09, 1.6, 0.295], 0xece6d9],  // pale sole covering the ENTIRE outer face of the shoe — bright enou
+      ["Head", [0.11, 0.14, 0.05], [-0.02, 1.6, 0.335], 0x1c1a19],  // heel block projecting +Z off the rear of the sole, so heel and sol
+      ["Head", [0.14, 0.05, 0.44], [0.02, 1.855, 0.06], 0x7a6250],  // tan strap over the crown — the shoe is HARNESSED, not held: a rais
+      ["Head", [0.14, 0.22, 0.05], [0.02, 1.74, 0.255], 0x7a6250],  // strap running down the near side and across the shoe's instep, tyi
+      ["Head", [0.14, 0.2, 0.05], [0.02, 1.73, -0.175], 0x7a6250],  // strap down the far side — the symmetry is what makes it read as a 
+    ],
+  },
+  // Sterling Archor — A broad black slab of a man with a tan gun-harness strapped over one shoulder and across his chest, a heavy forward-swept fringe shading the eyes, a pale jutting chin, and a light grey turtleneck ring under it
+  Forensics: {
+    pal: { skin: 0xd7a684, hair: 0x38312a, eye: 0x1a1712, shirt: 0x33343c, trousers: 0x1e1f24, boots: 0x2a2b31 },
+    drop: ["apron", "hair"],
+    body: [
+      ["Chest", [0.34, 0.11, 0.44], [0, 1.425, 0], 0x4e515c],  // turtleneck collar ring — wider and deeper than the head so it read
+      ["Head", [0.22, 0.11, 0.28], [0.13, 1.565, 0], 0xd7a684],  // the jaw — juts 0.09 past the face plane, clears the collar by 0.03
+      ["Head", [0.34, 0.14, 0.44], [0.01, 1.83, 0], 0x38312a],  // hair top cap — the widest mass on him above the shoulders
+      ["Head", [0.32, 0.14, 0.42], [-0.04, 1.695, 0], 0x38312a],  // hair side and back mass — flares 0.06 past the head each side, sto
+      ["Head", [0.16, 0.12, 0.32], [0.19, 1.735, 0], 0x38312a],  // the quiff — bottom sits on the eye line, 0.12 proud of the face
+      ["Chest", [0.26, 0.12, 0.68], [0, 1.385, 0], 0x33343c],  // shoulder slab capping OVER the upper arms — 0.68 across, the broad
+      ["Chest", [0.3, 0.13, 0.13], [0, 1.405, -0.29], 0x8a6a42],  // tan holster strap crossing the right shoulder, proud of the slab t
+      ["Chest", [0.06, 0.21, 0.11], [0.14, 1.265, -0.16], 0x8a6a42],  // strap running down the chest front from the shoulder
+      ["Chest", [0.06, 0.09, 0.34], [0.145, 1.2, 0.02], 0x8a6a42],  // cross-body band — the long tan bar on the black chest
+      ["LowerArmL", [0.14, 0.17, 0.14], [0, 1.03, 0.265], 0x33343c],  // left sleeve cuff to the wrist — black down to a small pale hand
+      ["LowerArmR", [0.14, 0.17, 0.14], [0, 1.03, -0.265], 0x33343c],  // right sleeve cuff to the wrist
+    ],
+    accessory: [
+      ["LowerArmR", [0.12, 0.08, 0.12], [0.115, 0.875, -0.28], 0xbe8a45],  // scotch in the bottom of the tumbler, pushed clear of the fist
+      ["LowerArmR", [0.12, 0.09, 0.12], [0.115, 0.955, -0.28], 0xb9c2c9],  // the glass above the liquid, gripped against the cuff
+    ],
+  },
+  // Ethan Hunted — A dark slate man in a TAN climbing harness — straps over both shoulders, two down the chest into a steel buckle, a tan belt at the waist — with a fat tan rope coil bulging 0.11 off his back and pale grey guards on both shins, plus a black earpiece and boom on his left cheek. At 20 units
+  Liquidity: {
+    pal: { skin: 0xc49a76, hair: 0x2a2119, eye: 0x1d1a17, shirt: 0x2b3038, trousers: 0x24272c, boots: 0x1a1c20 },
+    drop: ["apron"],
+    body: [
+      ["Chest", [0.26, 0.06, 0.09], [0, 1.42, 0.15], 0x8a7d63],  // left shoulder strap: tan webbing (3.3:1 on the suit), runs the ful
+      ["Chest", [0.26, 0.06, 0.09], [0, 1.42, -0.15], 0x8a7d63],  // right shoulder strap, mirror
+      ["Chest", [0.05, 0.26, 0.07], [0.14, 1.28, 0.11], 0x8a7d63],  // front vertical, left: buried 0.005 into the chest face and 0.045 p
+      ["Chest", [0.05, 0.26, 0.07], [0.14, 1.28, -0.11], 0x8a7d63],  // front vertical, right
+      ["Chest", [0.05, 0.05, 0.4], [0.135, 1.3, 0], 0x8a7d63],  // sternum strap, raised to chest height and inset to z +/-0.20 so bo
+      ["Chest", [0.06, 0.12, 0.19], [0.155, 1.3, 0], 0xc6c9cd],  // steel harness buckle: z +/-0.095 overlaps both verticals by 0.02 a
+      ["Hips", [0.27, 0.08, 0.4], [0, 0.95, 0], 0x8a7d63],  // harness belt in the same tan webbing (3.7:1 on the trousers), thic
+      ["Chest", [0.12, 0.22, 0.28], [-0.17, 1.2, 0.04], 0xa8965f],  // THE SILHOUETTE: rope coil moved off the hip to the back, 0.11 prou
+      ["LowerLegL", [0.06, 0.16, 0.17], [0.1, 0.34, 0.1], 0x6e757d],  // left shin guard in gear grey (3.2:1 on the trousers), capped at y 
+      ["LowerLegR", [0.06, 0.16, 0.17], [0.1, 0.34, -0.1], 0x6e757d],  // right shin guard, mirror
+    ],
+    accessory: [
+      ["Head", [0.09, 0.1, 0.07], [0, 1.65, 0.165], 0x2f343a],  // comms earpiece on his left ear, 0.05 proud — dark on tan skin at 5
+      ["Head", [0.16, 0.05, 0.05], [0.1, 1.6, 0.155], 0x2f343a],  // boom mic along the left jaw, welded to the earpiece and out 0.03 p
+    ],
+  },
+  // Sam Fishy — A black-suited figure carrying visible hardware
+  Flow: {
+    pal: { skin: 0x1b1e1c, shirt: 0x1e2220, trousers: 0x1a1e1c, boots: 0x141614 },
+    drop: ["hair", "eye", "apron"],
+    body: [
+      ["Neck", [0.22, 0.1, 0.22], [0, 1.42, 0], 0x222824],  // hard collar
+      ["Chest", [0.11, 0.22, 0.18], [-0.165, 1.3, 0], 0x2c322e],  // rebreather canister on his back
+      ["Hips", [0.28, 0.07, 0.4], [0, 0.925, 0], 0x121614],  // utility belt as a SHAPE read
+      ["UpperLegL", [0.1, 0.16, 0.06], [0, 0.72, 0.2], 0x252b27],  // drop-leg pouch on the OUTER thigh
+      ["UpperLegR", [0.1, 0.16, 0.06], [0, 0.72, -0.2], 0x252b27],  // drop-leg pouch, outer right thigh
+    ],
+    accessory: [
+      ["Head", [0.36, 0.1, 0.38], [0, 1.72, 0], 0x252b27],  // helmet band
+      ["Head", [0.05, 0.18, 0.24], [0.165, 1.665, 0], 0x222824],  // visor housing, grown to hold the bigger lenses
+      ["Head", [0.05, 0.07, 0.07], [0.195, 1.712, 0], 0x7de88c],  // green lens, apex of the triangle
+      ["Head", [0.05, 0.07, 0.07], [0.195, 1.628, 0.07], 0x7de88c],  // green lens, lower left
+      ["Head", [0.05, 0.07, 0.07], [0.195, 1.628, -0.07], 0x7de88c],  // green lens, lower right
+      ["Head", [0.09, 0.12, 0.16], [-0.215, 1.7, 0], 0x252b27],  // rear sensor pod
+      ["Head", [0.04, 0.07, 0.07], [-0.27, 1.7, 0], 0x7de88c],  // rear green lamp
+    ],
+  },
+  // Jason Burn — Hard square shoulders capping a grey column, a pale raised collar with no neck showing under it, two near-black patch pockets, a darker hem step, hair shaved to a thin dark lid — and one cool-white bar of rolled newsprint clamped horizontally under his left arm, the only bright thing on him
+  Technical: {
+    pal: { skin: 0xbc9576, eye: 0x39312a, shirt: 0x71716a, trousers: 0x4e4d46, boots: 0x3b362f },
+    drop: ["apron", "hair"],
+    body: [
+      ["Head", [0.31, 0.05, 0.31], [0, 1.785, 0], 0x2f2720],  // crop: a 0.05 dark lid on a 0.30 skull, replacing the default cap a
+      ["Head", [0.02, 0.08, 0.28], [0.152, 1.525, 0], 0x8d7256],  // jaw shadow, pulled inboard of the eyeballs (0.162 vs 0.165) and of
+      ["Chest", [0.26, 0.08, 0.5], [0, 1.37, 0], 0x71716a],  // hard square shoulder yoke, 0.04 proud per side, bottom flush with 
+      ["Chest", [0.24, 0.09, 0.38], [0, 1.42, 0], 0x8f8f86],  // stand collar, reparented off the Neck onto the Chest where a jacke
+      ["Spine", [0.05, 0.16, 0.17], [0.135, 1.06, 0.105], 0x464640],  // patch pocket, left front: 0.04 proud and ~38% darker than the jack
+      ["Spine", [0.05, 0.16, 0.17], [0.135, 1.06, -0.105], 0x464640],  // patch pocket, right front — the pair breaks the bare front slab le
+      ["Hips", [0.28, 0.12, 0.38], [0, 0.92, 0], 0x63635d],  // cinched jacket hem, pulled back to z0.19 so it no longer eats the 
+      ["LowerArmL", [0.13, 0.16, 0.13], [0, 1.03, 0.26], 0x71716a],  // jacket sleeve to the wrist, left — narrowed to match the 0.13 bice
+      ["LowerArmR", [0.13, 0.16, 0.13], [0, 1.03, -0.26], 0x71716a],  // jacket sleeve to the wrist, right. Grey arms merging into the grey
+    ],
+    accessory: [
+      ["UpperArmL", [0.28, 0.09, 0.09], [0.08, 1.23, 0.25], 0xdcdcd2],  // the newspaper, now carried HORIZONTAL and clamped under the left a
+      ["UpperArmL", [0.12, 0.09, 0.09], [-0.12, 1.23, 0.25], 0x9a9488],  // the darker printed tail of the roll, stacked END-TO-END behind the
+    ],
+  },
+  // Black Widower — A small matte-black operative inside a helmet of auburn hair — wide crown, curtains past the jaw, a mass at the nape that swallows the neck so only the pale face shows; charcoal webbing (stepped chest strap, thigh pouch, wrist bracers) and one brass buckle break the black
+  Narrative: {
+    pal: { skin: 0xd8b49a, hair: 0xb0472c, eye: 0x1e1c1f, shirt: 0x1e1e25, trousers: 0x171720, boots: 0x0d0d10 },
+    drop: ["apron"],
+    body: [
+      ["Head", [0.36, 0.06, 0.5], [-0.03, 1.8, 0], 0xb0472c],  // crown slab: widens the top of the head from 0.32 to 0.50 deep so t
+      ["Head", [0.12, 0.31, 0.36], [-0.17, 1.625, 0], 0xb0472c],  // back mane, y 1.47-1.78 — tops into the hair cap (1.745) so there i
+      ["Head", [0.3, 0.31, 0.1], [-0.02, 1.625, 0.2], 0xb0472c],  // hair curtain, her left cheek — 0.10 proud, stops 0.02 short of the
+      ["Head", [0.3, 0.31, 0.1], [-0.02, 1.625, -0.2], 0xb0472c],  // hair curtain, her right cheek
+      ["Chest", [0.3, 0.08, 0.46], [-0.08, 1.43, 0], 0xb0472c],  // hair piled on the shoulders — on CHEST, y 1.39-1.47, so it stays p
+      ["Chest", [0.05, 0.25, 0.1], [0.14, 1.285, 0.11], 0x34343e],  // harness strap, upper run — shoulder to mid-chest, 0.045 proud of t
+      ["Spine", [0.05, 0.12, 0.1], [0.14, 1.1, 0.02], 0x34343e],  // harness strap, lower run — steps 0.09 inboard to fake a diagonal a
+      ["Spine", [0.27, 0.07, 0.38], [0, 1.005, 0], 0x3f3527],  // belt at the natural waist, on SPINE so it never tears against the 
+      ["Spine", [0.05, 0.1, 0.14], [0.155, 1.005, 0], 0xc2a355],  // brass buckle, 0.10x0.14 face overhanging the strap — the only brig
+      ["Hips", [0.36, 0.08, 0.36], [0, 0.91, 0], 0x34343e],  // hip flare, 0.06 proud FRONT AND BACK (the arms hang at z 0.19, so 
+      ["UpperLegR", [0.13, 0.16, 0.07], [0.02, 0.62, -0.195], 0x34343e],  // thigh rig on the outer right leg — swings with the leg, and breaks
+      ["LowerArmL", [0.16, 0.16, 0.14], [0, 1.02, 0.26], 0x34343e],  // bracer, left — y 0.94-1.10 from the elbow down, leaving 0.08 of ba
+      ["LowerArmR", [0.16, 0.16, 0.14], [0, 1.02, -0.26], 0x34343e],  // bracer, right
+    ],
+  },
+  // Agent 48 — A bare pale head sitting straight on a hard graphite shoulder yoke, flat black suit, a white shirt wedge split by one red tie, two red-gloved hands. At 20 units
+  "Red Team": {
+    pal: { skin: 0xd2b79c, eye: 0x2a2a2e, shirt: 0x14151a, trousers: 0x14151a, boots: 0x2b2d34 },
+    drop: ["hair", "apron"],
+    body: [
+      ["Chest", [0.3, 0.1, 0.62], [0, 1.385, 0], 0x32343c],  // jacket yoke, wider and deeper than the torso and spanning both sho
+      ["Chest", [0.03, 0.25, 0.24], [0.133, 1.275, 0], 0xd9d5cc],  // white shirt wedge, authored (apron dropped)
+      ["Chest", [0.05, 0.06, 0.075], [0.16, 1.372, 0], 0x9e2f2f],  // tie knot, back face buried at x0.135 inside the white panel so the
+      ["Chest", [0.03, 0.22, 0.055], [0.157, 1.27, 0], 0x9e2f2f],  // red tie down the white wedge, overlapping the knot above
+      ["Spine", [0.055, 0.17, 0.045], [0.145, 1.105, 0], 0x9e2f2f],  // tie continuing over the closed jacket, tapering
+      ["Head", [0.03, 0.12, 0.04], [-0.165, 1.635, 0.08], 0x9e2f2f],  // barcode bar on the bare skull
+      ["Head", [0.03, 0.12, 0.04], [-0.165, 1.635, 0], 0x9e2f2f],  // barcode bar, centre, same width and rhythm
+      ["Head", [0.03, 0.12, 0.04], [-0.165, 1.635, -0.08], 0x9e2f2f],  // barcode bar, third of three, same width and rhythm
+      ["LowerArmL", [0.13, 0.185, 0.13], [0, 1.0225, 0.26], 0x14151a],  // black jacket sleeve covering the whole upper forearm to the elbow
+      ["LowerArmR", [0.13, 0.185, 0.13], [0, 1.0225, -0.26], 0x14151a],  // black jacket sleeve, right
+      ["LowerArmL", [0.14, 0.11, 0.13], [0, 0.905, 0.26], 0x9e2f2f],  // red glove, left
+      ["LowerArmR", [0.14, 0.11, 0.13], [0, 0.905, -0.26], 0x9e2f2f],  // red glove, right
+    ],
+  },
+  // MINI-MEH — A knee-high grey jumpsuit with an enormous bald head balanced on it
+  Risk: {
+    pal: { skin: 0xd3ab88, shirt: 0x8a8d8a, apron: 0x757873, boots: 0x45463f, eye: 0x2a2622 },
+    drop: ["hair", "eye", "trousers"],
+    body: [
+      ["Head", [0.42, 0.42, 0.42], [0.01, 1.7, 0], 0xd3ab88],  // oversized bald baby head, swallows the default head cube
+      ["Head", [0.03, 0.06, 0.06], [0.215, 1.69, 0.09], 0x2a2622],  // left eye, sized for the bigger head
+      ["Head", [0.03, 0.06, 0.06], [0.215, 1.69, -0.09], 0x2a2622],  // right eye, sized for the bigger head
+      ["Head", [0.03, 0.035, 0.15], [0.215, 1.575, 0], 0x9c7c60],  // flat straight mouth, permanently unimpressed
+      ["Chest", [0.27, 0.05, 0.45], [0, 1.395, 0], 0x9a9d98],  // jumpsuit collar yoke at the top of the chest
+      ["Hips", [0.3, 0.22, 0.44], [0, 0.9, 0], 0x8a8d8a],  // chunky toddler hips, replaces the dropped default hips
+      ["Hips", [0.31, 0.05, 0.45], [0, 0.975, 0], 0x5f625e],  // jumpsuit waist band, above the hip joint
+      ["UpperLegL", [0.2, 0.42, 0.2], [0, 0.63, 0.11], 0x8a8d8a],  // thick left thigh
+      ["LowerLegL", [0.19, 0.36, 0.18], [0, 0.26, 0.11], 0x8a8d8a],  // thick left shin
+      ["UpperLegR", [0.2, 0.42, 0.2], [0, 0.63, -0.11], 0x8a8d8a],  // thick right thigh
+      ["LowerLegR", [0.19, 0.36, 0.18], [0, 0.26, -0.11], 0x8a8d8a],  // thick right shin
+    ],
+  },
+  // James Bound — A tall cream slab of shirt-front down a near-black torso, squared jacket shoulders wider than anyone else on the floor, black bow tie above it and black cummerbund below, flared hem, and a martini glass that never leaves his right hand
+  PM: {
+    pal: { skin: 0xc09a7c, hair: 0x2b241f, eye: 0x3a3229, shirt: 0x252d42, trousers: 0x1c2233, boots: 0x16181f },
+    drop: ["apron"],
+    body: [
+      ["Chest", [0.05, 0.22, 0.24], [0.15, 1.31, 0], 0xe3dfd2],  // shirt-front plastron, upper: cream slab y1.20-1.42 z+/-0.12, front
+      ["Spine", [0.05, 0.16, 0.18], [0.145, 1.16, 0], 0xe3dfd2],  // shirt-front plastron, lower: narrows to z+/-0.09, y1.08-1.24 so it
+      ["Neck", [0.2, 0.08, 0.3], [0.02, 1.435, 0], 0xe3dfd2],  // wing collar wrapping the neck, z+/-0.15 flush with the head, top 0
+      ["Neck", [0.07, 0.1, 0.18], [0.165, 1.425, 0], 0x141620],  // bow tie, front face x0.20 standing 0.05 clear of the head's face p
+      ["Chest", [0.06, 0.22, 0.09], [0.165, 1.3, 0.165], 0x3b4562],  // satin lapel, left: front face x0.195 steps 0.02 proud of the plast
+      ["Chest", [0.06, 0.22, 0.09], [0.165, 1.3, -0.165], 0x3b4562],  // satin lapel, right
+      ["ShoulderL", [0.22, 0.1, 0.2], [0, 1.355, 0.28], 0x252d42],  // structured shoulder pad, left: spans z0.18-0.38, overlapping the c
+      ["ShoulderR", [0.22, 0.1, 0.2], [0, 1.355, -0.28], 0x252d42],  // structured shoulder pad, right
+      ["Spine", [0.07, 0.11, 0.34], [0.15, 1.055, 0], 0x141620],  // cummerbund, y1.00-1.11, cutting the white front off at the waist a
+      ["Hips", [0.3, 0.17, 0.46], [0, 0.935, 0], 0x252d42],  // jacket hem, x+/-0.15 z+/-0.23 flaring well past both the hip box a
+      ["LowerArmL", [0.14, 0.18, 0.14], [0, 1.05, 0.26], 0x252d42],  // jacket sleeve, left: y0.96-1.14, overlapping the upper arm by 0.03
+      ["LowerArmR", [0.14, 0.18, 0.14], [0, 1.05, -0.26], 0x252d42],  // jacket sleeve, right
+    ],
+    accessory: [
+      ["LowerArmR", [0.14, 0.09, 0.14], [0.11, 1.015, -0.26], 0xd6dbd2],  // martini coupe bowl, held at the cuff and forward of it
+      ["LowerArmR", [0.07, 0.09, 0.06], [0.085, 0.935, -0.26], 0xc6ccc2],  // coupe stem and foot, overlapping the hand by 0.01 so the glass rea
+    ],
+  },
+  // John Quick — The tallest, darkest man in the room
+  Execution: {
+    pal: { skin: 0xb08a70, hair: 0x2a221e, eye: 0x2e2822, shirt: 0x3a3944, trousers: 0x1b1b20, apron: 0x17171c, boots: 0x2c231d },
+    body: [
+      ["Head", [0.3, 0.32, 0.11], [-0.01, 1.6, 0.195], 0x2a221e],  // hair curtain, left — outer face at z 0.25, a full 0.10 clear of th
+      ["Head", [0.3, 0.32, 0.11], [-0.01, 1.6, -0.195], 0x2a221e],  // hair curtain, right — mirror
+      ["Head", [0.08, 0.3, 0.32], [-0.18, 1.62, 0], 0x2a221e],  // back-of-skull mass, 0.07 proud behind the head
+      ["Chest", [0.11, 0.33, 0.28], [-0.165, 1.335, 0], 0x2a221e],  // the long hair actually falling down his back — moved onto Chest so
+      ["Head", [0.14, 0.15, 0.32], [0.155, 1.535, 0], 0x2a221e],  // full beard, front face at x 0.225 = a 0.075 jut off the face plane
+      ["Head", [0.04, 0.045, 0.26], [0.155, 1.705, 0], 0x2a221e],  // heavy brow bar directly above the eyes, overhanging them by 0.01 —
+      ["Neck", [0.15, 0.1, 0.2], [0, 1.42, 0], 0x17171c],  // black shirt collar buttoned to the throat
+      ["ShoulderL", [0.22, 0.1, 0.21], [0, 1.365, 0.295], 0x3a3944],  // tailored suit shoulder, left — outer face at 0.40 for an 0.80 shou
+      ["ShoulderR", [0.22, 0.1, 0.21], [0, 1.365, -0.295], 0x3a3944],  // tailored suit shoulder, right
+      ["Hips", [0.31, 0.24, 0.44], [0, 0.86, 0], 0x3a3944],  // jacket skirt that actually hangs: y 0.74-0.98, a 0.10 drop below t
+      ["LowerArmL", [0.14, 0.17, 0.14], [0, 1.035, 0.26], 0x3a3944],  // suit sleeve, left — now works, because the charcoal against 0xb08a
+      ["LowerArmR", [0.14, 0.17, 0.14], [0, 1.035, -0.26], 0x3a3944],  // suit sleeve, right
+    ],
+    accessory: [
+      ["LowerArmR", [0.06, 0.18, 0.06], [0.045, 0.875, -0.335], 0xb8944f],  // brass pencil gripped in the right fist. Shortened to 0.18 and hung
+    ],
+  },
+  // JUDGE DREAD — The widest, hardest thing on the floor
+  Compliance: {
+    pal: { skin: 0x4a5561, shirt: 0x2b3242, trousers: 0x272d38 },
+    drop: ["hair", "eye", "apron", "boots"],
+    body: [
+      ["Head", [0.33, 0.08, 0.34], [0, 1.635, 0], 0xf0c96a],  // gold visor band wrapped fully around the helmet, proud on all four
+      ["Head", [0.38, 0.17, 0.38], [0, 1.835, 0], 0x4a5561],  // helmet crown overhanging the head cube by 0.04 on every side, so t
+      ["Head", [0.12, 0.12, 0.34], [-0.17, 1.53, 0], 0x4a5561],  // helmet back skirt, sits below the gold band so it never covers it
+      ["ShoulderL", [0.26, 0.16, 0.32], [0, 1.36, 0.31], 0x4a5561],  // left pauldron, inner edge buried 0.08 into the cuirass so no armpi
+      ["ShoulderR", [0.26, 0.16, 0.32], [0, 1.36, -0.31], 0x4a5561],  // right pauldron, mirror
+      ["Chest", [0.32, 0.28, 0.46], [0.01, 1.28, 0], 0x36415a],  // chest cuirass, swallows the stock shirt box entirely and bridges t
+      ["Chest", [0.05, 0.12, 0.11], [0.19, 1.3, 0.09], 0xd4ad55],  // gold badge standing 0.045 proud of the cuirass, offset to one side
+      ["Spine", [0.3, 0.22, 0.44], [0.01, 1.06, 0], 0x36415a],  // abdomen plate, continues the cuirass down to the belt with no wais
+      ["Hips", [0.36, 0.12, 0.48], [0.01, 0.95, 0], 0x22282f],  // heavy duty belt, 0.03 proud of the abdomen plate and the darkest h
+      ["LowerLegL", [0.2, 0.11, 0.18], [0.04, 0.395, 0.1], 0x4a5561],  // left knee plate riding the shin so it tracks the joint, 0.065 prou
+      ["LowerLegR", [0.2, 0.11, 0.18], [0.04, 0.395, -0.1], 0x4a5561],  // right knee plate, mirror
+      ["LowerLegL", [0.3, 0.15, 0.18], [0.05, 0.075, 0.1], 0x1e242b],  // left sabaton, half again as long and heavy as a stock boot
+      ["LowerLegR", [0.3, 0.15, 0.18], [0.05, 0.075, -0.1], 0x1e242b],  // right sabaton, mirror
+    ],
+  },
+  // AGENT P — A squat teal barrel of an animal in a brown fedora
+  Scribe: {
+    pal: { skin: 0x46a08b, shirt: 0x46a08b, trousers: 0x46a08b, boots: 0xd08a44 },
+    drop: ["hair", "apron", "eye"],
+    body: [
+      ["Chest", [0.3, 0.26, 0.46], [0.01, 1.35, 0], 0x46a08b],  // barrel body y1.22-1.48: one fat teal mass that swallows the Neck b
+      ["Hips", [0.3, 0.3, 0.44], [0.01, 0.83, 0], 0x46a08b],  // low body mass down to y0.68
+      ["Spine", [0.08, 0.42, 0.34], [0.15, 1.16, 0], 0xcfc09a],  // cream belly in ONE piece, 0.34 of a 0.46-wide body: a belly patch 
+      ["Head", [0.38, 0.11, 0.50], [0.32, 1.575, 0], 0xe8892b],  // orange slab bill, tip at x0.47: 0.44 wide against a 0.30 head (0.0
+      ["Head", [0.11, 0.035, 0.18], [0.44, 1.645, 0], 0xa04f16],  // dark nostril patch sitting ON TOP of the bill tip
+      ["Head", [0.05, 0.07, 0.08], [0.165, 1.69, 0.085], 0x1b2320],  // beady left eye, wide-set, 0.04 proud of the face and clear of both
+      ["Head", [0.05, 0.07, 0.08], [0.165, 1.69, -0.085], 0x1b2320],  // beady right eye, mirror
+      ["Hips", [0.50, 0.09, 0.56], [-0.38, 0.795, 0], 0x2f7d6b],  // one-piece paddle tail, 0.52 wide against a 0.44 body and 0.04 into
+      ["LowerArmL", [0.22, 0.06, 0.24], [0.03, 0.845, 0.31], 0xe8892b],  // webbed paddle hand, 0.24 across z against a 0.12 forearm and swung
+      ["LowerArmR", [0.22, 0.06, 0.24], [0.03, 0.845, -0.31], 0xe8892b],  // webbed paddle hand, mirror
+      ["LowerLegL", [0.26, 0.06, 0.24], [0.06, 0.035, 0.12], 0xe8892b],  // webbed foot flange, as wide as it is long (kills the shoe shape)
+      ["LowerLegR", [0.26, 0.06, 0.24], [0.06, 0.035, -0.12], 0xe8892b],  // webbed foot flange, mirror
+    ],
+    accessory: [
+      ["Head", [0.36, 0.06, 0.42], [-0.06, 1.785, 0], 0x5d3f24],  // fedora brim, set back and narrowed in x so the bill out-reaches it
+      ["Head", [0.26, 0.17, 0.28], [-0.06, 1.9, 0], 0x3a2718],  // dark crown seated on the brim
+    ],
+  },
+};
+
+/* ── desk tasks ─────────────────────────────────────────────────────────────
+   ROUTINE is what a seat does when it leaves its desk. TASK is what it does AT
+   the desk: props that appear only while that seat is working, in the desk's own
+   local frame (+X the seated side, +Z the operative's right, surface at y=0.80).
+   They live in a group toggled by busy(), so an idle floor stays uncluttered and
+   you can tell at a glance which seats are actually running.                    */
+const TASK = {
+  Scout: {  // Austin Powerz — sweep
+    glyph: "✦",
+    lines: ["Yeah baby, this one's got potential!", "Oh behave. Next candidate, please.", "Smashing, baby. Add it to the list."],
+    props: [
+      [[0.3, 0.02, 0.44], [0.3, 0.815, 0], 0xe8dcc0],  // contact sheet of candidates, pushed to the operative's side 
+      [[0.06, 0.22, 0.3], [0.3, 0.91, -0.4], 0xd8cdb6],  // propped board of prospects, thickened to 0.06 so it survives
+      [[0.12, 0.03, 0.16], [0.28, 0.835, 0.34], 0x7a4fa3],  // purple shortlist card, the one he likes
+      [[0.09, 0.11, 0.09], [0.26, 0.86, 0.46], 0x7a4fa3],  // purple mug, clear of the card and within reach
+    ],
+  },
+  Screener: {  // Maxwell Smort — reject
+    glyph: "✗",
+    lines: ["Missed it by that much.", "Would you believe... a hard no?", "Sorry about that, Chief. Rejected."],
+    props: [
+      [[0.24, 0.18, 0.3], [0.02, 0.89, 0.34], 0xc9bda6],  // the reject pile on his right, four and a half times taller —
+      [[0.18, 0.04, 0.24], [0.02, 0.82, -0.34], 0xd8cdb6],  // the pass stack on his left, a wafer — the 21 percent
+      [[0.09, 0.14, 0.09], [0.26, 0.87, 0.06], 0x5c4a44],  // wooden rejection stamp, handle up, in the near working zone 
+      [[0.13, 0.03, 0.13], [0.26, 0.815, 0.2], 0x7a4340],  // ink pad beside the stamp, well used
+    ],
+  },
+  Forensics: {  // Sterling Archor — autopsy
+    glyph: "⚠",
+    lines: ["Freeze authority? Do you want rugs?", "Yep. Total honeypot. Phrasing.", "Mint's still open. Danger zone."],
+    props: [
+      [[0.3, 0.03, 0.42], [0.02, 0.815, -0.04], 0xd9cfba],  // the contract laid open, flat on the desk surface
+      [[0.14, 0.07, 0.14], [0.02, 0.865, -0.16], 0x2a2b31],  // dark exhibit block resting ON the contract — the token under
+      [[0.1, 0.28, 0.1], [-0.14, 0.94, -0.36], 0x8a6533],  // scotch bottle out at the far left corner, silhouetted agains
+      [[0.22, 0.08, 0.24], [0.2, 0.84, -0.4], 0x8c4a42],  // stack of oxblood case folders on his left
+    ],
+  },
+  Liquidity: {  // Ethan Hunted — exit
+    glyph: "→",
+    lines: ["Half the size, twice the exit.", "Book's thin. Four ticks to get out.", "If I can't leave, I don't enter."],
+    props: [
+      [[0.28, 0.02, 0.34], [0.24, 0.81, 0.02], 0xcfc7b6],  // printed depth ladder — the one light prop, on his side of th
+      [[0.09, 0.04, 0.09], [0.36, 0.82, -0.28], 0x8f7c4e],  // brass stopwatch, running — warm, rhymes with the webbing, si
+      [[0.1, 0.06, 0.1], [0.34, 0.83, 0.3], 0x9c5b4c],  // muted rust exit button, the desk's one accent hue
+    ],
+  },
+  Flow: {  // Sam Fishy — sweep
+    glyph: "▲",
+    lines: ["Same wallet. Fourteen names.", "That bid is wearing a costume.", "Real demand doesn't blink like that."],
+    props: [
+      [[0.06, 0.16, 0.3], [0.14, 0.88, 0], 0x14181a],  // low console standing on the desk
+      [[0.025, 0.09, 0.18], [0.172, 0.885, 0], 0x2f6e3c],  // readout on the +x face, which is the seated side, so it face
+      [[0.05, 0.12, 0.18], [0.1, 0.86, 0.32], 0x161a1b],  // second blade screen turned to his right, dark
+      [[0.07, 0.035, 0.11], [0.18, 0.8175, -0.26], 0x1a1e1c],  // earpiece off, resting on the desk within reach of the seat
+    ],
+  },
+  Technical: {  // Jason Burn — sweep
+    glyph: "◎",
+    lines: ["Three exits. Volume at the door.", "Level holds, or I don't go in.", "Nothing in this room is friendly."],
+    props: [
+      [[0.36, 0.02, 0.48], [0.06, 0.815, 0], 0xd4cdb9],  // chart printout laid flat across the desk
+      [[0.03, 0.014, 0.18], [-0.02, 0.829, -0.12], 0x4d6055],  // price trace, first step: low and to his left
+      [[0.03, 0.014, 0.2], [0.06, 0.829, 0.1], 0x4d6055],  // price trace, second step: higher and to his right. Two offse
+      [[0.035, 0.014, 0.44], [0.13, 0.829, 0], 0x8c6150],  // the single long brick-red bar above the steps — now unmistak
+    ],
+  },
+  Narrative: {  // Black Widower — verify
+    glyph: "¶",
+    lines: ["Source is real. The motive isn't.", "This broke nine hours ago. We're late.", "Two sources or it doesn't run."],
+    props: [
+      [[0.3, 0.02, 0.38], [0.1, 0.81, 0], 0xd6cbb2],  // open dossier, pulled onto her side of the desk
+      [[0.16, 0.03, 0.12], [0.06, 0.835, 0.22], 0xb9ae95],  // clipping laid across the corner, to her right
+      [[0.06, 0.09, 0.06], [0.14, 0.865, -0.18], 0xa8452e],  // red pin, enlarged past the read threshold — the only saturat
+      [[0.1, 0.03, 0.16], [0.2, 0.815, -0.3], 0x14141a],  // burner phone, face down within reach
+    ],
+  },
+  "Red Team": {  // Agent 48 — postmortem
+    glyph: "✗",
+    lines: ["Fees. It is always the fees.", "The loss was the entry, not the exit.", "Every trade dies of something."],
+    props: [
+      [[0.26, 0.02, 0.32], [0.26, 0.81, 0], 0xcdc7b9],  // trade ticket, square to the desk and pushed clear of the tor
+      [[0.06, 0.02, 0.28], [0.26, 0.826, 0], 0x9e2f2f],  // one thick red line struck along the page, running the reader
+      [[0.04, 0.04, 0.2], [0.3, 0.82, 0.26], 0x9e2f2f],  // red pen laid on his writing side, parallel to the desk edge
+      [[0.14, 0.07, 0.2], [0.24, 0.835, -0.3], 0x3a3c44],  // graphite case for the finished file
+    ],
+  },
+  Risk: {  // MINI-MEH — size
+    glyph: "½",
+    lines: ["Half that. Then half it again.", "Where does this lose everything?", "Size it small. I have seen this movie."],
+    props: [
+      [[0.09, 0.14, 0.09], [0.02, 0.87, 0.18], 0x9a6f5a],  // tall stack of counting chips: the ask
+      [[0.09, 0.06, 0.09], [0.02, 0.83, 0.3], 0x7d8a72],  // short stack beside it: what he will actually allow
+      [[0.18, 0.03, 0.14], [0.1, 0.815, -0.05], 0x4a4b48],  // flat keypad slab
+      [[0.04, 0.16, 0.1], [-0.02, 0.88, -0.22], 0x8a4a42],  // small red marker flag planted where it breaks
+    ],
+  },
+  PM: {  // James Bound — dossier
+    glyph: "♠",
+    lines: ["The thesis first. Then the cheque.", "Watch. I want it to survive a winter.", "Pass. Charming, but it won't compound."],
+    props: [
+      [[0.3, 0.04, 0.38], [0.18, 0.83, 0], 0xb6a37f],  // manila dossier open on the near half of the desk, bottom y0.
+      [[0.2, 0.04, 0.24], [0.12, 0.83, -0.34], 0xe3dfd2],  // the one-page thesis, thickened to 0.04 so it reads, and set 
+      [[0.18, 0.09, 0.24], [0.1, 0.855, 0.36], 0xcfc6ae],  // stack of passed-over decks, the tallest thing on the desk
+      [[0.05, 0.04, 0.2], [0.25, 0.865, 0.04], 0x141620],  // black pen lying across the open dossier
+    ],
+  },
+  Execution: {  // John Quick — ticket
+    glyph: "✎",
+    lines: ["Route it dark. Leave no print.", "The stop does not move. Ever.", "Unsigned. So it never happened."],
+    props: [
+      [[0.42, 0.015, 0.52], [0.06, 0.8075, 0], 0x4a423a],  // warm leather blotter, sitting flush on the desk at y 0.80 — 
+      [[0.21, 0.02, 0.28], [0.1, 0.825, 0.06], 0xd7d1c1],  // the unsigned ticket, bottom flush on the blotter face
+      [[0.16, 0.05, 0.2], [-0.04, 0.84, -0.15], 0xb3a68b],  // stack of carbon slips, pulled inboard to z -0.25 so it sits 
+      [[0.09, 0.05, 0.09], [-0.06, 0.84, 0.2], 0x9a5348],  // muted brick stop-marker chip, moved inboard and off the tick
+    ],
+  },
+  Compliance: {  // JUDGE DREAD — veto
+    glyph: "§",
+    lines: ["Rule 14. Denied.", "Clause 9 is not a suggestion.", "I am the law. Also the linter."],
+    props: [
+      [[0.24, 0.04, 0.18], [0.24, 0.82, -0.1], 0xe4dcc9],  // stack of submitted paper, moved forward to the seated side o
+      [[0.22, 0.035, 0.06], [0.24, 0.85, -0.1], 0x8a3b34],  // red DENIED bar across the top sheet, base buried in the pape
+      [[0.14, 0.04, 0.12], [0.2, 0.82, 0.26], 0x8a3b34],  // ink pad on his right hand side
+      [[0.11, 0.15, 0.11], [0.2, 0.895, 0.26], 0x2a2f36],  // stamp block standing in the pad, bottom sunk into it
+    ],
+  },
+  Scribe: {  // AGENT P — minute
+    glyph: "✎",
+    lines: ["*chatters*", "*licks the pencil, writes it all down*", "*taps the ledger twice, underlines it*"],
+    props: [
+      [[0.24, 0.03, 0.17], [0.05, 0.815, -0.09], 0xe6dcc3],  // open ledger left page. RESOLVED: props are DESK-frame and un
+      [[0.24, 0.03, 0.17], [0.05, 0.815, 0.09], 0xd8cbaa],  // open ledger right page
+      [[0.1, 0.09, 0.1], [0, 0.845, 0.3], 0x2b3a44],  // inkwell, widened to 0.10 so it clears the read threshold uns
+      [[0.06, 0.24, 0.06], [0, 0.96, 0.3], 0xd9d2c0],  // quill, thickened to 0.06 and standing to y1.08
+    ],
+  },
+};
 
 function buildAvatar(spec, index) {
   const root = new THREE.Group();
@@ -883,8 +1216,13 @@ function buildAvatar(spec, index) {
         trousers: TROUSERS[(index * 2) % TROUSERS.length],
         apron: spec.apron ?? P.leaf, boots: BOOTS[index % BOOTS.length] };
 
-  // The CEO has no hair and no eyes — the spark stands in for a face.
-  const parts = claude ? BODY.filter((b) => b[3] !== "hair" && b[3] !== "eye") : BODY;
+  const fig = FIGURE[spec.id] || {};
+  Object.assign(pal, fig.pal || {});
+
+  // The CEO has no hair and no eyes — the spark stands in for a face. Other figures
+  // drop whatever that character does not have.
+  const gone = new Set(claude ? ["hair", "eye"] : (fig.drop || []));
+  const parts = BODY.filter((b) => !gone.has(b[3]));
 
   const specs = parts.map(([joint, size, centre, key]) => {
     // The head cube shares the `skin` key with the forearms; the CEO needs them apart.
@@ -892,6 +1230,8 @@ function buildAvatar(spec, index) {
     return { size, at: centre, colour: (isHeadCube && pal.head) ? pal.head : pal[key],
              bone: JOINT_ORDER.indexOf(joint) };
   });
+  for (const [joint, size, centre, colour] of fig.body || [])
+    specs.push({ size, at: centre, colour, bone: JOINT_ORDER.indexOf(joint) });
   const mesh = new THREE.SkinnedMesh(buildBodyGeometry(specs), bodyMat);
   mesh.castShadow = renderer.shadowMap.enabled;
   mesh.receiveShadow = true;
@@ -902,20 +1242,17 @@ function buildAvatar(spec, index) {
   root.updateMatrixWorld(true);
   mesh.bind(new THREE.Skeleton(JOINT_ORDER.map((n) => joints[n])), new THREE.Matrix4());
 
-  // Props are separate meshes parented to bones, so they follow the skinned animation
-  // without needing to be skinned themselves.
-  const kit = ACCESSORY[spec.id];
-  if (kit) {
-    const add = (bone, size, centre, colour) => {
-      if (!bone) return;
-      const rest = JOINT_REST[Object.keys(JOINT_REST).find((n) => joints[n] === bone)] || [0, 0, 0];
-      const m = new THREE.Mesh(BOX, mat(colour, 0.8));
-      m.scale.set(size[0], size[1], size[2]);
-      m.position.set(centre[0] - rest[0], centre[1] - rest[1], centre[2] - rest[2]);
-      m.castShadow = renderer.shadowMap.enabled;
-      bone.add(m);
-    };
-    kit(joints, add);
+  // Rigid worn props — a hat brim, a held tumbler — ride a bone instead of being
+  // skinned. Anything that should BEND with the figure belongs in fig.body above.
+  for (const [joint, size, centre, colour] of fig.accessory || []) {
+    const bone = joints[joint];
+    if (!bone) continue;
+    const rest = JOINT_REST[joint];
+    const m = new THREE.Mesh(BOX, mat(colour, 0.8));
+    m.scale.set(size[0], size[1], size[2]);
+    m.position.set(centre[0] - rest[0], centre[1] - rest[1], centre[2] - rest[2]);
+    m.castShadow = renderer.shadowMap.enabled;
+    bone.add(m);
   }
 
   let spark = null, built_halo = null;
@@ -1066,7 +1403,22 @@ class Worker {
     this.doc.material = mat(kind === "red" ? 0xd98878 : kind === "green" ? 0xa9cf9f : P.cream, 0.9);
   }
 
-  busy(on) { this.typing = !!on; }
+  busy(on) {
+    this.typing = !!on;
+    if (this.taskGroup) this.taskGroup.visible = !!on;
+  }
+
+  /** The seat's own piece of desk business: sit, work, say its line, clear up. */
+  async doTask() {
+    const t = TASK[this.id];
+    if (!t) return;
+    await this.goHome();
+    this.busy(true);
+    if (t.glyph) puff(this, t.glyph);
+    this.say(t.lines[Math.floor(Math.random() * t.lines.length)], 2800);
+    await pause(2600 + Math.random() * 1800);
+    this.busy(false);
+  }
 
   eat(on) { this.eating = !!on; this.snackMesh.visible = !!on; }
 
@@ -1353,8 +1705,27 @@ const bakedBuckets = bakeStatic(room);
 }
 
 STAFF.forEach((spec, i) => {
-  workers[spec.id] = new Worker(spec, i);
+  const w = new Worker(spec, i);
+  workers[spec.id] = w;
 
+  const task = TASK[spec.id];
+  if (task && task.props && task.props.length) {
+    // Positioned and turned exactly like the desk it sits on, so the design can be
+    // authored in the desk's local frame and never has to know where the desk is.
+    const g = new THREE.Group();
+    g.position.set(spec.desk[0], spec.y ?? 0, spec.desk[1]);
+    g.rotation.y = -deskYaw(spec) + Math.PI;
+    for (const [size, at, colour] of task.props) {
+      const m = new THREE.Mesh(BOX, mat(colour, 0.85));
+      m.scale.set(size[0], size[1], size[2]);
+      m.position.set(at[0], at[1], at[2]);
+      m.castShadow = renderer.shadowMap.enabled;
+      g.add(m);
+    }
+    g.visible = false;
+    scene.add(g);
+    w.taskGroup = g;
+  }
 });
 
 /* ── camera controls ──────────────────────────────────────────────────────── */
@@ -1766,7 +2137,9 @@ setInterval(() => {
   const r = ROUTINE[spec.id];
   const line = r ? r.lines[Math.floor(Math.random() * r.lines.length)]
                  : CHATTER[Math.floor(Math.random() * CHATTER.length)];
-  if (r && Math.random() < 0.45) p.run(async () => { await errand(p, SPOTS[r.spot], r.glyph, line); });
+  const roll = Math.random();
+  if (r && roll < 0.40) p.run(async () => { await errand(p, SPOTS[r.spot], r.glyph, line); });
+  else if (TASK[spec.id] && roll < 0.80) p.run(async () => { await p.doTask(); });
   else p.run(async () => p.say(line, 2600));
 }, 5400);
 
