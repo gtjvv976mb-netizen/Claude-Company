@@ -1,4 +1,4 @@
-1/ SECTION 14 is the house desk on the 50th floor of Claude Tower. Fourteen seats, parody spy names, one question each. Not a committee — an assembly line, and the order of the line IS the technology. 🧵🏭 How a token gets through it, and what the line costs to run:
+1/ THE AYE-TEAM is the house desk on the 50th floor of Claude Tower. Fourteen seats, parody spy names, one question each. Not a committee — an assembly line, and the order of the line IS the technology. 🧵🏭 How a token gets through it, and what the line costs to run:
 
 2/ First seat: the Scout. 🔭 Sweeps 14+ search angles across pump.fun, letsbonk.fun, bags.fm, moonshot, boop and Meteora — ~358 unique tokens a pass. Its job is volume, not judgment. Judgment is expensive on this line. It comes later. ⏳
 
@@ -24,4 +24,4 @@
 
 13/ Fix: judgment seats keep the strongest model; the rest, mid-tier; the Scout's classifier, the small one. 🎚️ And a brake: DESK_DAILY_BUDGET_USD, $10/24h, enforced in the ONE function both spenders pass through. Past the cap, cycles skip model stages and say so. 🧯
 
-14/ And the line is watchable: a live 3D voxel office in the browser. Every pipeline event streams to every viewer over SSE 📡 — 400-event backlog, everyone sees the same desk at the same moment. Agents move on events, not timers. 🏢 Watch SECTION 14 run: claudedotcompany.com
+14/ And the line is watchable: a live 3D voxel office in the browser. Every pipeline event streams to every viewer over SSE 📡 — 400-event backlog, everyone sees the same desk at the same moment. Agents move on events, not timers. 🏢 Watch THE AYE-TEAM run: claudedotcompany.com

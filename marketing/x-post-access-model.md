@@ -1,6 +1,6 @@
 1/ 🏢 Claude Tower just changed its rules.
 
-👀 Every visitor now sees every floor — as a DEMO shift. Walk in, watch Section 14 work, click any agent. Free, forever.
+👀 Every visitor now sees every floor — as a DEMO shift. Walk in, watch The Aye-Team work, click any agent. Free, forever.
 
 🔐 The LIVE desks? Those belong to people with standing.
 

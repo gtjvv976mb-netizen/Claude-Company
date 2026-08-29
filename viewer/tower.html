@@ -93,7 +93,7 @@ button.home.on{background:var(--good,#4f8f52);color:#fff;border-color:transparen
 
 <div class="topbar">
   <div class="firm">Claude <em>Tower</em></div>
-  <div class="tag">50 floors · one team each · Section 14 upstairs</div>
+  <div class="tag">50 floors · one team each · The Aye-Team upstairs</div>
   <div class="spacer"></div>
   <div class="stat">Floors taken <b id="s-taken">—</b></div>
   <div class="stat">Available <b id="s-free">—</b></div>
@@ -494,7 +494,7 @@ const shortAddr = (a) => (a ? a.slice(0, 4) + "…" + a.slice(-4) : "");
 /* The building speaks in floors, and a leased floor answers to its tenant's name. */
 const ord = (n) => { const t = n % 10, h = n % 100;
   return n + (h >= 11 && h <= 13 ? "th" : t === 1 ? "st" : t === 2 ? "nd" : t === 3 ? "rd" : "th"); };
-const label = (f) => f.state === "hq" ? "Penthouse \u00b7 Section 14"
+const label = (f) => f.state === "hq" ? "Penthouse \u00b7 The Aye-Team"
   : f.name ? `${f.name} \u00b7 ${ord(f.n)}` : `${ord(f.n)} Floor`;
 
 function renderList() {

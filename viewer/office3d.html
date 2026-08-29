@@ -355,7 +355,7 @@ select.dp-in{cursor:pointer}
 
 <div class="topbar">
   <div class="firm">Claude <em>&amp;</em> Co.</div>
-  <div class="tag" id="s-floortag">Section 14 · The House Desk</div>
+  <div class="tag" id="s-floortag">The Aye-Team · The House Desk</div>
   <div class="spacer"></div>
   <div class="topstats">
     <div class="stat">Live calls <b id="s-live-calls">—</b></div>
@@ -3369,7 +3369,7 @@ if (location.search.includes("demo")) {
         const n = document.createElement("div");
         n.id = "privnote";
         n.innerHTML = hello.hq
-          ? `🕵️ Demo shift — Section 14's live desk runs in private. <a href="tower.html">Lease a floor</a> to copy its real calls and watch the house live.`
+          ? `🕵️ Demo shift — The Aye-Team's live desk runs in private. <a href="tower.html">Lease a floor</a> to copy its real calls and watch the house live.`
           : hello.vacant
           ? `🏢 Demo shift — this floor isn't leased yet. <a href="tower.html">Lease it</a> and this desk goes live for you.`
           : `🔒 Demo shift — this floor's live desk is private to its tenant. <a href="tower.html">Lease your own floor</a> to run one for real.`;
@@ -3511,7 +3511,7 @@ const tapeEl2 = document.getElementById("tape");
 
 const RAIL = document.getElementById("rail");
 const RAIL_TITLE = document.getElementById("rail-title");
-const PANE_TITLE = { tape: "The Tape", inbox: "Big M", desk: "My Desk", calls: "Live Calls", crew: "Section 14",
+const PANE_TITLE = { tape: "The Tape", inbox: "Big M", desk: "My Desk", calls: "Live Calls", crew: "The Aye-Team",
   whales: "Whale Callouts", stats: "The Building's Books", ranks: "The Leaderboard", ledger: "The Record Book" };
 const PANE_TABS = { tape: "tab-tape", inbox: "tab-inbox", desk: "tab-desk", calls: "tab-calls", crew: "tab-crew",
   whales: "tab-whales", stats: "tab-stats", ranks: "tab-ranks", ledger: "tab-ledger" };
@@ -3568,7 +3568,7 @@ const fmtTok = (base, dec) => (Number(BigInt(base) / 10n ** BigInt(Math.max(0, d
 
 let ROOM = null;
 
-/** "50th Floor · Section 14" on the house desk; "12th Floor · <their name>" on a
+/** "50th Floor · The Aye-Team" on the house desk; "12th Floor · <their name>" on a
  * tenant's. Fetched once at boot rather than waiting for the Desk tab, because the
  * label and the boss figure are wrong until it lands. */
 async function primeIdentity() {
@@ -3580,7 +3580,7 @@ async function primeIdentity() {
     const id = body.identity || {};
     if (tag && body.floorLabel) {
       tag.textContent = id.isHQ
-        ? `${body.floorLabel} \u00b7 Section 14 \u00b7 The House Desk`
+        ? `${body.floorLabel} \u00b7 The Aye-Team \u00b7 The House Desk`
         : `${body.floorLabel} \u00b7 ${id.floorName || "Unnamed floor"}`;
     }
     window.applyIdentity?.(id, body.floorLabel);
@@ -4235,7 +4235,7 @@ window.load_whales = async () => {
   const el = document.getElementById("whalespanel");
   el.innerHTML = "";
   const h = document.createElement("p"); h.className = "dp-note";
-  h.textContent = "Pump.fun callouts: distinct wallets taking size, net of the pool's own mirrored side. The desk watches; whether it matters is Section 14's call.";
+  h.textContent = "Pump.fun callouts: distinct wallets taking size, net of the pool's own mirrored side. The desk watches; whether it matters is The Aye-Team's call.";
   el.appendChild(h);
   try {
     const { status, body } = await call_api("/api/whales/feed?pad=pump.fun");

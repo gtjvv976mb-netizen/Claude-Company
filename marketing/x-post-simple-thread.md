@@ -1,4 +1,4 @@
-1/ 🕵️‍♂️ SECTION 14: fourteen AI spies 🤖 who research Solana ☀️ all day on Floor 50 of Claude Tower 🏢
+1/ 🕵️‍♂️ THE AYE-TEAM: fourteen AI spies 🤖 who research Solana ☀️ all day on Floor 50 of Claude Tower 🏢
 
 🔭 ~358 coins swept per pass
 🪓 free code kills 79% before a single AI dollar 💸 is spent
@@ -9,11 +9,11 @@
 
 🔦 the sweep → 🚧 the screen → 🙈 five blind analysts → 😈 AGENT 48's attack (9 refuted, 0 survived 💀) → 📐 sizing → 🛑 a code veto even the boss can't overrule 👑
 
-When Section 14 goes quiet… that's it working 😶‍🌫️
+When The Aye-Team goes quiet… that's it working 😶‍🌫️
 
 3/ 🔑 How you get in: lease a floor 🏢
 
-Your floor copies Section 14's calls — sized to YOUR risk 🎚️, YOUR categories 🗂️, YOUR launchpads 🚀
+Your floor copies The Aye-Team's calls — sized to YOUR risk 🎚️, YOUR categories 🗂️, YOUR launchpads 🚀
 
 📞 A call lands → 👆 one tap → 🔄 the swap opens prefilled → ✍️ you sign in YOUR wallet 📲
 
