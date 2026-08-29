@@ -115,6 +115,75 @@ body{
 .runrow .sym{font-weight:600;flex:none}
 .runrow .out{margin-left:auto;font-size:10px;letter-spacing:.07em;text-transform:uppercase;font-weight:700}
 .locked{padding:18px;text-align:center;color:var(--ink-faint);font-size:13px;line-height:1.6}
+/* the dossier: an in-world personnel file, opened by clicking a figure */
+.dossier{
+  position:absolute; right:16px; top:16px; bottom:16px; width:min(330px, calc(100% - 32px));
+  z-index:7; display:none; flex-direction:column; overflow:hidden;
+  background:var(--card); color:var(--ink);
+  border:1px solid var(--card-line); border-radius:3px;
+  box-shadow:0 18px 44px rgba(0,0,0,.42), 0 1px 0 rgba(255,255,255,.05) inset;
+}
+.dossier.on{display:flex; animation:dossierIn .16s ease-out}
+@keyframes dossierIn{from{opacity:0; transform:translateY(-6px)} to{opacity:1; transform:none}}
+.dossier .dhead{
+  position:relative; padding:14px 15px 12px; border-bottom:1px solid var(--card-line);
+  background:linear-gradient(180deg,#283d43,var(--card));
+}
+.dossier .dstamp{
+  font-size:9.5px; letter-spacing:.22em; text-transform:uppercase; color:var(--ink-faint);
+}
+.dossier h3{
+  margin:5px 0 0; font-family:"Instrument Serif",Georgia,serif; font-weight:400;
+  font-size:25px; line-height:1.06; letter-spacing:.01em;
+}
+.dossier .dseat{
+  margin-top:5px; font-size:11px; letter-spacing:.13em; text-transform:uppercase;
+  color:var(--ink-soft);
+}
+.dossier .dclose{
+  position:absolute; right:9px; top:9px; width:26px; height:26px; padding:0; cursor:pointer;
+  background:transparent; border:1px solid transparent; border-radius:3px;
+  color:var(--ink-faint); font-size:16px; line-height:1;
+}
+.dossier .dclose:hover{border-color:var(--card-line); color:var(--ink)}
+.dossier .dbody{padding:13px 15px 16px; overflow:auto; font-size:13px; line-height:1.55}
+.dossier .dbrief{
+  margin:0 0 12px; font-size:14.5px; line-height:1.45; color:var(--ink);
+  border-left:2px solid var(--amber); padding-left:10px;
+}
+.dossier .drow{margin:0 0 11px}
+.dossier .dk{
+  display:block; font-size:9.5px; letter-spacing:.18em; text-transform:uppercase;
+  color:var(--ink-faint); margin-bottom:3px;
+}
+.dossier .dv{margin:0; color:var(--ink-soft)}
+.dossier .dv.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px}
+.dossier .dq{
+  margin:0; padding:9px 11px; background:#1b2b2f; border:1px solid var(--card-line);
+  border-radius:3px; font-family:"Instrument Serif",Georgia,serif; font-size:15px;
+  line-height:1.4; color:var(--ink);
+}
+.dossier .dkind{
+  display:inline-block; padding:2px 7px; border-radius:2px; font-size:9.5px;
+  letter-spacing:.13em; text-transform:uppercase; border:1px solid;
+}
+.dossier .dkind.model{color:#e0ad3d; border-color:#6b5624; background:#312a17}
+.dossier .dkind.code{color:#7bbd80; border-color:#37543a; background:#1c2b1e}
+.dossier .dkind.claude{color:#d97757; border-color:#6d3b2c; background:#33211b}
+.dossier .dnote{
+  margin:13px 0 0; padding-top:11px; border-top:1px dashed var(--card-line);
+  font-size:12px; color:var(--ink-soft);
+}
+.dossier .dstat{
+  display:flex; gap:14px; margin:0 0 12px; padding:9px 11px;
+  background:#1b2b2f; border:1px solid var(--card-line); border-radius:3px;
+}
+.dossier .dstat div{flex:1}
+.dossier .dstat b{display:block; font-size:15px; font-weight:600; color:var(--ink)}
+.dossier .dstat span{
+  font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-faint);
+}
+@media (max-width:1000px){ .dossier{left:16px; right:16px; width:auto} }
 .alertbar{position:absolute;left:0;right:0;top:0;z-index:6;display:none;flex-direction:column;gap:1px}
 .alertbar.on{display:flex}
 .alertrow{display:flex;align-items:center;gap:12px;padding:11px 16px;background:var(--warn,#c08a2e);
@@ -211,7 +280,16 @@ select.dp-in{cursor:pointer}
       <div class="t">Opening the floor…</div>
       <div class="s">Claude &amp; Co.</div>
     </div>
-    <div class="hint">Drag to orbit · scroll to zoom</div>
+    <div class="hint">Drag to orbit · scroll to zoom · click an agent</div>
+    <aside class="dossier" id="dossier" role="dialog" aria-modal="false" aria-labelledby="d-name">
+      <div class="dhead">
+        <button class="dclose" id="d-close" aria-label="Close">✕</button>
+        <div class="dstamp" id="d-stamp">Personnel file</div>
+        <h3 id="d-name"></h3>
+        <div class="dseat" id="d-seat"></div>
+      </div>
+      <div class="dbody" id="d-body"></div>
+    </aside>
   </div>
   <aside class="rail">
     <div class="railhead">
@@ -1196,6 +1274,33 @@ const TASK = {
   },
 };
 
+/* The one question each seat exists to answer, and how it actually runs:
+   model = an LLM call that costs money, code = free deterministic code,
+   claude = the authorising seat. DOSSIER carries the written file card.       */
+const SEATQ = {
+  Scout:       ["model",  "What deserves attention today, and why now?"],
+  Screener:    ["code",   "Does this clear the floor at all?"],
+  Forensics:   ["model",  "Can this token be used against a holder, by design?"],
+  Liquidity:   ["model",  "Can I get out \u2014 at size, at a price I would accept?"],
+  Flow:        ["model",  "Is the demand real, or is it manufactured?"],
+  Technical:   ["model",  "Is this a location worth entering?"],
+  Narrative:   ["model",  "Is there a story, is it true, and am I early?"],
+  "Red Team":  ["model",  "Why does this trade lose money?"],
+  Risk:        ["model",  "How much, and where is it mechanically wrong?"],
+  PM:          ["model",  "Propose, watch, or pass \u2014 on what thesis?"],
+  Execution:   ["model",  "The unsigned ticket: route, slicing, stop, targets."],
+  Compliance:  ["code",   "Does this break a house rule? A veto, not advice."],
+  Scribe:      ["code",   "Write it down so the desk can be graded later."],
+  CEO:         ["claude", "Do I authorise this?"],
+};
+const DOSSIER = {};
+
+/* Dossier text is authored, not user input, but it lands in innerHTML — so it is
+   escaped anyway. The one that would actually bite is an apostrophe in a name. */
+const esc = (t) => String(t == null ? "" : t)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+
 function buildAvatar(spec, index) {
   const root = new THREE.Group();
   const joints = {};
@@ -1704,6 +1809,8 @@ const bakedBuckets = bakeStatic(room);
   scene.add(snackSign);
 }
 
+const PICKABLE = [];
+
 STAFF.forEach((spec, i) => {
   const w = new Worker(spec, i);
   workers[spec.id] = w;
@@ -1726,7 +1833,82 @@ STAFF.forEach((spec, i) => {
     scene.add(g);
     w.taskGroup = g;
   }
+
+  // Raycasting a SkinnedMesh means resolving the pose on every test, and the result
+  // is fiddly on a figure mid-stride. One invisible box per agent is exact enough to
+  // click, costs nothing, and moves with them for free.
+  const hit = new THREE.Mesh(BOX, new THREE.MeshBasicMaterial({ visible: false }));
+  hit.scale.set(0.86, 2.0, 0.86);
+  hit.position.set(0, 1.0, 0);
+  hit.userData.seat = spec.id;
+  w.g.add(hit);
+  PICKABLE.push(hit);
 });
+
+/* ── the dossier ─────────────────────────────────────────────────────────── */
+const dossierEl = document.getElementById("dossier");
+const dNameEl = document.getElementById("d-name"), dSeatEl = document.getElementById("d-seat");
+const dBodyEl = document.getElementById("d-body"), dStampEl = document.getElementById("d-stamp");
+const KIND_LABEL = { model: "Model call", code: "Code only", claude: "Claude" };
+
+function openDossier(seatId) {
+  const spec = STAFF.find((x) => x.id === seatId);
+  if (!spec) return;
+  const d = DOSSIER[seatId] || {};
+  const [kind, question] = SEATQ[seatId] || ["model", ""];
+
+  dStampEl.textContent = spec.claude ? "Floor 50 \u00b7 authorising seat" : "Personnel file";
+  dNameEl.textContent = spec.name || seatId;
+  dSeatEl.textContent = seatId + (spec.role ? " \u00b7 " + spec.role : "");
+
+  dBodyEl.innerHTML =
+    (d.brief ? `<p class="dbrief">${esc(d.brief)}</p>` : "") +
+    (question ? `<div class="drow"><span class="dk">Asks</span><p class="dq">${esc(question)}</p></div>` : "") +
+    (d.detail ? `<div class="drow"><span class="dk">Method of work</span><p class="dv">${esc(d.detail)}</p></div>` : "") +
+    `<div class="drow"><span class="dk">Runs as</span><p class="dv">` +
+      `<span class="dkind ${kind}">${KIND_LABEL[kind] || kind}</span>` +
+      (d.method ? ` &nbsp;${esc(d.method)}` : "") + `</p></div>` +
+    (d.known ? `<div class="drow"><span class="dk">Known for</span><p class="dv">${esc(d.known)}</p></div>` : "") +
+    (d.note ? `<p class="dnote">${esc(d.note)}</p>` : "");
+
+  dossierEl.classList.add("on");
+  dossierEl.dataset.seat = seatId;
+}
+function closeDossier() { dossierEl.classList.remove("on"); delete dossierEl.dataset.seat; }
+
+document.getElementById("d-close").addEventListener("click", closeDossier);
+addEventListener("keydown", (e) => { if (e.key === "Escape") closeDossier(); });
+
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+function pickSeat(clientX, clientY) {
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.x = ((clientX - r.left) / r.width) * 2 - 1;
+  ndc.y = -((clientY - r.top) / r.height) * 2 + 1;
+  raycaster.setFromCamera(ndc, camera);
+  const hits = raycaster.intersectObjects(PICKABLE, false);
+  return hits.length ? hits[0].object.userData.seat : null;
+}
+
+(function picking() {
+  const el = renderer.domElement;
+  let downX = 0, downY = 0, moved = 0;
+  el.addEventListener("pointerdown", (e) => { downX = e.clientX; downY = e.clientY; moved = 0; });
+  el.addEventListener("pointermove", (e) => {
+    moved = Math.max(moved, Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY));
+    if (!el.classList.contains("dragging")) {
+      el.style.cursor = pickSeat(e.clientX, e.clientY) ? "pointer" : "";
+    }
+  });
+  el.addEventListener("pointerup", (e) => {
+    // An orbit also ends in a pointerup. Anything past a few pixels was a drag, and
+    // opening a card there would fight the camera the player was just using.
+    if (moved > 5) return;
+    const seat = pickSeat(e.clientX, e.clientY);
+    if (seat) openDossier(seat);
+    else if (dossierEl.classList.contains("on")) closeDossier();
+  });
+})();
 
 /* ── camera controls ──────────────────────────────────────────────────────── */
 (function controls() {
