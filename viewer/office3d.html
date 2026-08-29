@@ -663,6 +663,8 @@ const STAFF = [
   { id:"Red Team",   name:"AGENT 48",    role:"Fulfils the contract", desk:[15.4,-1.0], stand:[13.8,-1.0], apron:0x8c2f27 },
   { id:"Risk",       name:"MINI-MEH",      role:"Makes your size smaller", desk:[15.4,5.5],  stand:[13.8,5.5],   apron:0x70828a },
   { id:"Execution",  name:"JOHN QUICK", role:"Executes. Fast.", desk:[2.5,8.2],   stand:[2.5,6.7],    apron:0x5f9445 },
+  { id:"Regime",     name:"MURDOCK",    role:"Reads the weather",     desk:[9.7,-5.6],  stand:[9.7,-4.1],   apron:0x4a7c9a },
+  { id:"Review",     name:"COLONEL DEBRIEF", role:"Grades every landing", desk:[-11.6,-2.6], stand:[-11.6,-1.1], apron:0x6b6f45 },
   { id:"Scribe",     name:"AGENT P",     role:"Says nothing. Files everything.",    desk:[-5.5,8.2],  stand:[-5.5,6.7],   apron:0xc8863c },
 ];
 
@@ -1415,6 +1417,20 @@ const FIGURE = {
       ["LowerLegR", [0.3, 0.15, 0.18], [0.05, 0.075, -0.1], 0x1e242b],  // right sabaton, mirror
     ],
   },
+  // MURDOCK — the pilot: leather flight jacket, aviator cap with goggles up, a
+  // white scarf. Reads the weather; flies or doesn't.
+  Regime: (j, add) => { add(j.Chest, [0.32, 0.40, 0.52], [-0.01, 1.20, 0], 0x6b4a2e);
+                        add(j.Chest, [0.10, 0.08, 0.30], [0.15, 1.36, 0], 0xf4f4f4);
+                        add(j.Head, [0.33, 0.13, 0.33], [0, 1.79, 0], 0x5a3d24);
+                        add(j.Head, [0.12, 0.09, 0.30], [0.13, 1.85, 0], 0x8fd8dd);
+                        add(j.Head, [0.34, 0.04, 0.34], [0, 1.87, 0], 0x5a3d24); },
+  // COLONEL DEBRIEF — the officer: olive uniform, peaked cap, a clipboard that
+  // never leaves the left hand. Grades every landing.
+  Review: (j, add) => { add(j.Chest, [0.31, 0.42, 0.51], [-0.01, 1.19, 0], 0x5f6340);
+                        add(j.Chest, [0.06, 0.06, 0.34], [0.15, 1.10, 0], 0x3a3d28);
+                        add(j.Head, [0.34, 0.10, 0.34], [0, 1.80, 0], 0x4a4d30);
+                        add(j.Head, [0.15, 0.03, 0.31], [0.19, 1.76, 0], 0x2e3020);
+                        add(j.LowerArmL, [0.03, 0.22, 0.17], [0.06, 0.90, 0.27], 0xd8cbaa); },
   // AGENT P — A squat teal barrel of an animal in a brown fedora
   Scribe: {
     pal: { skin: 0x46a08b, shirt: 0x46a08b, trousers: 0x46a08b, boots: 0xd08a44 },
@@ -1566,6 +1582,22 @@ const TASK = {
       [[0.11, 0.15, 0.11], [0.2, 0.895, 0.26], 0x2a2f36],  // stamp block standing in the pad, bottom sunk into it
     ],
   },
+  Regime: {  // MURDOCK — weather check
+    glyph: "\u2601",
+    lines: ["SOL climbing. BTC climbing. Fly.", "Crosswinds. Mixed regime.", "Grounded. Both majors negative."],
+    props: [
+      [[0.20, 0.03, 0.28], [0.05, 0.815, 0], 0x2a4a6a],
+      [[0.02, 0.08, 0.20], [0.05, 0.87, 0], 0xd7f04a],
+    ],
+  },
+  Review: {  // COLONEL DEBRIEF — the after-action report
+    glyph: "\u2711",
+    lines: ["Grade: good process. Bad luck.", "That was luck, not judgment.", "One lesson. Write it down."],
+    props: [
+      [[0.22, 0.03, 0.30], [0.05, 0.815, 0.1], 0xf0e4c7],
+      [[0.10, 0.08, 0.10], [0.08, 0.86, -0.3], 0x8a3b34],
+    ],
+  },
   Scribe: {  // AGENT P — minute
     glyph: "✎",
     lines: ["*chatters*", "*licks the pencil, writes it all down*", "*taps the ledger twice, underlines it*"],
@@ -1595,6 +1627,8 @@ const SEATQ = {
   Execution:   ["model",  "The unsigned ticket: route, slicing, stop, targets."],
   Compliance:  ["code",   "Does this break a house rule? A veto, not advice."],
   Scribe:      ["code",   "Write it down so the desk can be graded later."],
+  Regime:      ["code",   "Is it flying weather? SOL and BTC decide, not hope."],
+  Review:      ["model",  "What did the last landing teach us?"],
   CEO:         ["claude", "Do I authorise this?"],
 };
 const DOSSIER = {
@@ -1681,6 +1715,20 @@ const DOSSIER = {
     method: "Deterministic code. No model call, no cost, no discretion.",
     known: "I am the law. Also the linter.",
     note: "A veto, not advice. It cannot be argued with — and the CEO never sees what it stops.",
+  },
+  Regime: {  // MURDOCK
+    brief: "Reads the market's weather, and grounds the established sleeve when trend is against it.",
+    detail: "Deterministic code, no model call. Pulls 30 days of SOL and BTC, computes their trailing 25-day returns, and declares the regime: risk-on, mixed, or risk-off. When both majors are negative the established sleeve is grounded — a veto from the time-series momentum literature, not an opinion. Unknown weather never grounds anyone.",
+    method: "Deterministic code. Free; checked once per cycle.",
+    known: "Howls at the moon. Right about the wind.",
+    note: "A veto, not an alpha signal. MURDOCK never says buy — only 'not in this weather.'",
+  },
+  Review: {  // COLONEL DEBRIEF
+    brief: "The post-mortem officer: one closed call, one debrief, one transferable lesson.",
+    detail: "Runs once per closed call. Grades the PROCESS, not the outcome — a sound thesis that lost is good process with bad luck; a wrong thesis that won is the dangerous one. The lesson is one sentence the PM reads before every new proposal, which makes this the desk's only feedback loop — and the only seat whose work compounds.",
+    method: "Model call at low effort, only when a call closes.",
+    known: "Files the report before the dust settles.",
+    note: "Grades process, never outcome. Luck is not a strategy and gets called by name.",
   },
   Scribe: {  // AGENT P
     brief: "Writes the desk's record down so its decisions can be graded later.",
@@ -2145,6 +2193,20 @@ const DESK_KIT = {
                        b([0.22, 0.03, 0.30], [-0.14, 0.93, 0.52], 0xf0e4c7);
                        b([0.10, 0.02, 0.10], [-0.14, 0.95, 0.52], 0xe0ad3d); },
 
+  // MURDOCK — a barometer, a wind sock on a stick, and the weather board
+  Regime: (b) => { b([0.12, 0.22, 0.12], [0.16, 0.92, 0.56], 0x8a9296);
+                   b([0.10, 0.04, 0.10], [0.16, 1.05, 0.56], 0xe0ad3d);
+                   b([0.04, 0.34, 0.04], [0.18, 0.98, -0.55], 0x5f3e29);
+                   b([0.14, 0.07, 0.05], [0.18, 1.17, -0.51], 0xdf7655);
+                   b([0.05, 0.42, 0.72], [-0.44, 1.22, 0], 0x2a4a6a);
+                   b([0.02, 0.10, 0.26], [-0.40, 1.30, -0.14], 0xd7f04a);
+                   b([0.02, 0.08, 0.20], [-0.40, 1.12, 0.16], 0x8fd8dd); },
+  // COLONEL DEBRIEF — the after-action wall: framed reports, a red GRADE stamp
+  Review: (b) => { b([0.05, 0.52, 0.80], [-0.44, 1.24, 0], 0x4a4d30);
+                   for (let i = 0; i < 6; i++) b([0.02, 0.13, 0.10], [-0.41, 1.06 + (i % 2) * 0.22, -0.28 + ((i / 2) | 0) * 0.24], 0xf0e4c7);
+                   b([0.14, 0.12, 0.14], [0.18, 0.86, -0.5], 0x8a3b34);
+                   b([0.22, 0.05, 0.30], [0.10, 0.82, 0.5], 0xd8cbaa);
+                   b([0.20, 0.03, 0.26], [0.10, 0.86, 0.5], 0xf0e4c7); },
   // AGENT P — a spare fedora on its stand, the blueprint of somebody else's scheme,
   // and the cabinet the whole floor answers to.
   Scribe: (b) => { b([0.14, 0.03, 0.14], [0.16, 0.81, 0.58], 0x5f3e29);
@@ -3258,6 +3320,8 @@ const ROUTINE = {
   PM:          { spot: "meeting",  glyph: "\u2709", lines: ["Bound. James Bound.", "Shaken. Not signed.", "BLOWFELD had a point. Here's the answer."] },
   Execution:   { spot: "printer",  glyph: "\u2713", lines: ["Ticket's ready.", "Yeah. I'm thinking I'm filled.", "Routed. Sliced. Done."] },
   Compliance:  { spot: "shredder", glyph: "\u2696", lines: ["I am the law.", "House rule nine. Denied.", "That is not a judgement call."] },
+  Regime:      { spot: "cooler",   glyph: "\u2601", lines: ["Winds are shifting.", "Clear skies. For now.", "I don't fly in that."] },
+  Review:      { spot: "archive",  glyph: "\u2711", lines: ["Debrief at four.", "The report writes itself. Badly.", "Process, gentlemen. Process."] },
   Scribe:      { spot: "archive",  glyph: "\u270e", lines: ["*chatters*", "*adjusts hat*", "*files everything, says nothing*"] },
 };
 const CHATTER = ["Coffee?", "Seen the volume on that?", "Mine's a pass.", "Printer's jammed again.",

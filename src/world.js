@@ -17,7 +17,7 @@
 import { emit } from "./lib/bus.js";
 
 const SEATS = ["Scout", "Screener", "Forensics", "Liquidity", "Flow", "Technical",
-  "Narrative", "Red Team", "Risk", "PM", "Execution", "Compliance", "Scribe"];
+  "Narrative", "Red Team", "Risk", "PM", "Execution", "Compliance", "Scribe", "Regime", "Review"];
 
 // Client-side table sizes, mirrored here so an index is never out of range.
 // If a table grows on the client, grow the constant — an index too large is

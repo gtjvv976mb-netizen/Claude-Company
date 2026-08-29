@@ -10,6 +10,7 @@ import { spend, OutOfCredit, spendSince } from "./lib/llm.js";
 import * as jup from "./data/jupiter.js";
 import { callouts, whaleScore } from "./whales.js";
 import { recordWhaleCallout } from "./identity.js";
+import { regime } from "./data/regime.js";
 
 /**
  * THE PENTHOUSE CYCLE — the house team's working day.
@@ -159,6 +160,12 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
   const startSpend = spend.usd;
   emit("cycle:start", { cycle, desk: "penthouse" });
 
+  // MURDOCK reads the weather once per cycle. Risk-off (SOL and BTC both
+  // negative over ~25d) grounds the ESTABLISHED sleeve — the one whose returns
+  // ride the majors — per the TSMOM veto. Unknown weather never grounds anyone.
+  const wx = await regime();
+  emit("seat:verdict", { seat: "Regime", detail: `${wx.regime} · SOL ${wx.solRet25d}% / BTC ${wx.btcRet25d}% (25d)` });
+
   // 1-3. Everything free: sweep, classify, screen.
   const universe = await sweep();
   const scored = [];
@@ -243,6 +250,10 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
     // is the signal-group pattern where the copier is the exit liquidity.
     if (!p.rec.pm?.invalidation) {
       emit("call:withheld", { mint: p.rec.mint, reason: "no pre-stated invalidation" });
+      continue;
+    }
+    if (wx.regime === "risk_off" && p.category === "established") {
+      emit("call:withheld", { mint: p.rec.mint, reason: `MURDOCK: not flying weather — SOL ${wx.solRet25d}% / BTC ${wx.btcRet25d}% over 25d` });
       continue;
     }
     const m5 = ev.pair?.priceChange?.m5 ?? 0;
@@ -363,6 +374,9 @@ export async function monitorCalls() {
     const exit = evaluateExit(call, now);
     if (exit.fire) {
       closeCall(call.id, exit.code, now.mark);
+      // COLONEL DEBRIEF grades the landing — fire and forget; exits never wait.
+      const closed = { ...call, closed_at: Date.now(), close_mark: now.mark, close_reason: exit.code };
+      import("./agents/review.js").then((r) => r.runDebrief(closed)).catch(() => {});
       emit("call:exit", { callId: call.id, symbol: call.symbol, code: exit.code,
         urgency: exit.urgency, detail: exit.detail, mark: now.mark });
       // Durable, per-floor, and sent regardless of arrears — an exit must reach the

@@ -5,6 +5,7 @@ import { cfg, MINTS } from "../config.js";
 import { emit } from "../lib/bus.js";
 import { whaleFeed } from "../identity.js";
 import * as pf from "./pumpfun.js";
+import { regime } from "./regime.js";
 
 /**
  * Everything the desk knows about one token, fetched deterministically.
@@ -47,6 +48,7 @@ export async function gather(mint, hook = "") {
     lastPaidAt: approved.reduce((m, o) => Math.max(m, o.paidAt ?? 0), 0) || null,
   };
   const callouts = whaleFeed({ limit: 200 }).filter((w) => w.mint === mint).slice(0, 5);
+  const marketRegime = await regime().catch(() => ({ regime: "unknown" }));
 
   // Who created it — the doctrine's deferred question, answered where it is
   // answerable (pump.fun coins) and skipped on monitor ticks, which need prices,
@@ -65,7 +67,7 @@ export async function gather(mint, hook = "") {
 
   return {
     ok: true,
-    promotion, callouts, deployer,
+    promotion, callouts, deployer, marketRegime,
     mint,
     hook,
     symbol: best?.baseSymbol ?? "?",

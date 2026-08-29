@@ -1,6 +1,7 @@
 import { ask } from "../lib/llm.js";
 import { RedTeamOut, RiskOut, PMOut, TicketOut, ScoutOut } from "./schemas.js";
 import { cfg } from "../config.js";
+import { recentLessons } from "./review.js";
 
 // Compact on purpose: 2-space pretty-printing inflated every downstream prompt
 // ~25% for nothing a model needs. The PM and Risk read ~20k tokens per run of
@@ -166,7 +167,10 @@ Two publication rules, absolute:
 - Never propose into a spike. If the price is vertical right now, the people copying
   this call minutes from now are the exit liquidity. Wait or pass.`,
     prompt:
-      `Decide on ${ev.symbol} (${ev.mint}).\n\n${bundle(ev)}\n\n${book(analysts)}\n\n` +
+      `Decide on ${ev.symbol} (${ev.mint}).\n\n` +
+      `=== LESSONS FROM CLOSED CALLS (Colonel Debrief) ===\n` +
+      `${recentLessons(5).map((l) => `[${l.grade}] ${l.symbol}: ${l.lesson}`).join("\n") || "(no closed calls yet)"}\n\n` +
+      `${bundle(ev)}\n\n${book(analysts)}\n\n` +
       `=== RED TEAM ===\n${JSON.stringify(redteam)}\n\n` +
       `=== RISK ===\n${JSON.stringify(risk)}\n\n` +
       `=== WEIGHTED ANALYST COMPOSITE ===\n${weightedScore.toFixed(1)} / 100 ` +
