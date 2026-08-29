@@ -280,6 +280,8 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               houseClosedDown: led.totals.house.closed_down ?? 0,
             },
             research: {
+              grokEnabled: !!process.env.XAI_API_KEY,
+              xReads: q("SELECT COUNT(*) n FROM llm_spend WHERE seat='XRead'"),
               coinsSeen: q("SELECT COUNT(*) n FROM seen"),
               seatVerdicts: q("SELECT COUNT(*) n FROM verdicts"),
               workups: q("SELECT COUNT(DISTINCT cycle || '-' || mint) n FROM verdicts"),
