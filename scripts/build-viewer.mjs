@@ -20,6 +20,7 @@ const PAGES = [
   { src: "tower.html",    out: "tower.html" },
   { src: "office3d.html", out: "floor.html" },
   { src: "buy.html",      out: "buy.html" },
+  { src: "404.html",      out: "404.html" },
 ];
 const ASSETS = [
   "claudeco-512.png", "claudeco-256.png", "claudeco-64.png",

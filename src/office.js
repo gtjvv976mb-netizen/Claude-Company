@@ -44,8 +44,8 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
         const sid = url.searchParams.get("sid");
         const who = sid ? auth.walletFor(sid) : null;
         const l = leasing.leaseFor(wantFloor);
-        if (l && (!who || l.wallet !== who)) {
-          res.write(`event: hello\ndata: ${JSON.stringify({ private: true, floor: wantFloor })}\n\n`);
+        if (!l || !who || l.wallet !== who) {
+          res.write(`event: hello\ndata: ${JSON.stringify({ private: true, vacant: !l, floor: wantFloor })}\n\n`);
           res.end();
           return;
         }
@@ -106,9 +106,11 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
        * privacy. */
       const HQ_FLOOR = 50;
       const floorPrivate = (floorNo) => {
-        if (floorNo === HQ_FLOOR) return false;
+        if (floorNo === HQ_FLOOR) return false;   // the showroom
         const l = leasing.leaseFor(floorNo);
-        if (!l) return false;                     // vacant floors have nothing to hide
+        // Vacant floors show the demo too: a visitor is a visitor, and the only
+        // live desks are the house's and the one you pay rent on.
+        if (!l) return true;
         return !me || l.wallet !== me;
       };
 

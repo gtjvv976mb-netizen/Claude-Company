@@ -3352,7 +3352,9 @@ if (location.search.includes("demo")) {
       if (stage && !document.getElementById("privnote")) {
         const n = document.createElement("div");
         n.id = "privnote";
-        n.innerHTML = `🔒 Demo shift — this floor's live desk is private to its tenant. <a href="/tower">Lease your own floor</a> to run one for real.`;
+        n.innerHTML = hello.vacant
+          ? `🏢 Demo shift — this floor isn't leased yet. <a href="tower.html">Lease it</a> and this desk goes live for you.`
+          : `🔒 Demo shift — this floor's live desk is private to its tenant. <a href="tower.html">Lease your own floor</a> to run one for real.`;
         stage.appendChild(n);
       }
       return;
