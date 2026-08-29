@@ -374,7 +374,7 @@ select.dp-in{cursor:pointer}
       <div class="t">Opening the floor…</div>
       <div class="s">Claude &amp; Co.</div>
     </div>
-    <div class="hint">Drag to orbit · scroll to zoom · click an agent</div>
+    <div class="hint" id="hint">Drag to orbit · right-drag or WASD to pan · double-click to travel · scroll to zoom · R resets</div>
     <aside class="dossier" id="dossier" role="dialog" aria-modal="false" aria-labelledby="d-name">
       <div class="dhead">
         <button class="dclose" id="d-close" aria-label="Close">✕</button>
@@ -474,6 +474,60 @@ function placeCamera() {
   camera.position.set(camTarget.x + Math.cos(camYaw) * r, camTarget.y + h, camTarget.z + Math.sin(camYaw) * r);
   camera.lookAt(camTarget);
 }
+
+/* ── travel: the pivot is a place you take, not a place you're given ─────────
+   The orbit alone can only circle the room's centre; verifying an agent in a
+   far corner needs the pivot to GO there. Pan moves it (right-drag, two
+   fingers, or WASD), a double-click glides it to any floor point or agent,
+   and follow keeps it glued to a walking figure until the player pans away. */
+let followSeat = null;   // seat id the pivot is glued to, or null
+let glide = null;        // {x,z} the pivot is easing toward, or null
+
+const hintEl = document.getElementById("hint");
+function updateHint() {
+  if (!hintEl) return;
+  hintEl.textContent = followSeat
+    ? "Following " + ((STAFF.find((s) => s.id === followSeat) || {}).name || followSeat)
+      + " · drag to circle them · pan or R to let go"
+    : "Drag to orbit · right-drag or WASD to pan · double-click to travel · scroll to zoom · R resets";
+}
+
+function panCamera(dxPx, dyPx) {
+  if (followSeat) { followSeat = null; updateHint(); }
+  glide = null;
+  // Floored: a mid-layout zero width would otherwise cross the floor per pixel.
+  const wpp = camWorldWidth / Math.max(stageEl.clientWidth, 320);
+  const fx = -Math.cos(camYaw), fz = -Math.sin(camYaw);         // screen-up on the ground
+  const rx = Math.sin(camYaw), rz = -Math.cos(camYaw);          // screen-right
+  // A vertical pixel covers more ground the shallower the camera sits.
+  const gpp = wpp / Math.max(Math.sin(camElev), 0.2);
+  camTarget.x = THREE.MathUtils.clamp(camTarget.x - rx * dxPx * wpp + fx * dyPx * gpp, -HALF_W, HALF_W);
+  camTarget.z = THREE.MathUtils.clamp(camTarget.z - rz * dxPx * wpp + fz * dyPx * gpp, -HALF_D, HALF_D);
+  placeCamera();
+}
+
+function followFigure(seatId) {
+  if (!workers[seatId]) return false;
+  followSeat = seatId; glide = null;
+  if (camWorldWidth > 20) { camWorldWidth = 20; resize(); }
+  updateHint();
+  return true;
+}
+function glideTo(x, z) {
+  followSeat = null;
+  glide = { x: THREE.MathUtils.clamp(x, -HALF_W, HALF_W),
+            z: THREE.MathUtils.clamp(z, -HALF_D, HALF_D) };
+  updateHint();
+}
+function resetView() {
+  followSeat = null; glide = null;
+  camTarget.set(0, 1.1, -1.6);
+  camYaw = Math.PI / 4; camElev = ISO_ELEV; camWorldWidth = 38;
+  resize(); updateHint();
+}
+window.__pan = panCamera;
+window.__follow = (seat) => followFigure(seat) ? "following " + seat : "no such seat";
+window.__resetView = resetView;
 /* Inspect one figure up close. The scroll wheel is deliberately clamped for players,
    which makes it useless for checking whether a character actually reads — so this
    drives the camera directly. __figure("Scribe") frames AGENT P; the second argument
@@ -519,6 +573,7 @@ window.__where = (seat) => {
 window.__figure = (seat, yaw = Math.PI / 4, width = 3.4) => {
   const w = workers[seat];
   if (!w) return "no such seat: " + Object.keys(workers).join(", ");
+  followSeat = null; glide = null;
   camTarget.set(w.g.position.x, 1.0, w.g.position.z);
   camYaw = yaw; camWorldWidth = width;
   resize();
@@ -2789,6 +2844,21 @@ function openDossier(seatId) {
     (d.known ? `<div class="drow"><span class="dk">Known for</span><p class="dv">${esc(d.known)}</p></div>` : "") +
     (d.note ? `<p class="dnote">${esc(d.note)}</p>` : "");
 
+  // Shadow this agent: the camera pivot glues to them through their whole
+  // routine — desk, deliveries, snack room — until the player pans away.
+  const fBtn = document.createElement("button");
+  fBtn.className = "dp-btn";
+  fBtn.style.marginTop = "10px";
+  const fLabel = () => followSeat === seatId
+    ? "Stop following" : "\u{1F3A5} Follow " + (spec.name || seatId);
+  fBtn.textContent = fLabel();
+  fBtn.addEventListener("click", () => {
+    if (followSeat === seatId) { followSeat = null; updateHint(); }
+    else followFigure(seatId);
+    fBtn.textContent = fLabel();
+  });
+  dBodyEl.appendChild(fBtn);
+
   dossierEl.classList.add("on");
   dossierEl.dataset.seat = seatId;
 }
@@ -2825,7 +2895,7 @@ function pickSeat(clientX, clientY) {
   el.addEventListener("pointerup", (e) => {
     // An orbit also ends in a pointerup. Anything past a few pixels was a drag, and
     // opening a card there would fight the camera the player was just using.
-    if (moved > 5) return;
+    if (moved > 5 || e.button !== 0) return;
     const seat = pickSeat(e.clientX, e.clientY);
     if (seat) openDossier(seat);
     else if (dossierEl.classList.contains("on")) closeDossier();
@@ -2835,23 +2905,40 @@ function pickSeat(clientX, clientY) {
 /* ── camera controls ──────────────────────────────────────────────────────── */
 (function controls() {
   const el = renderer.domElement;
-  let dragging = false, px = 0, py = 0;
+  el.style.touchAction = "none";
+  el.addEventListener("contextmenu", (e) => e.preventDefault());
+  const pts = new Map();          // pointerId → last position
+  let mode = null;                // "orbit" | "pan", decided at pointerdown
   el.addEventListener("pointerdown", (e) => {
-    dragging = true; px = e.clientX; py = e.clientY;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    // A second finger, the right or middle button, or shift all mean travel.
+    mode = (pts.size >= 2 || e.button === 2 || e.button === 1 || e.shiftKey) ? "pan" : "orbit";
     el.classList.add("dragging"); el.setPointerCapture(e.pointerId);
   });
   el.addEventListener("pointermove", (e) => {
-    if (!dragging) return;
+    const p = pts.get(e.pointerId);
+    if (!p) return;
+    const dx = e.clientX - p.x, dy = e.clientY - p.y;
+    p.x = e.clientX; p.y = e.clientY;
+    if (mode === "pan") {
+      // Each finger of a two-finger pan reports its own motion; halving each
+      // approximates the centroid so the floor doesn't travel at double speed.
+      panCamera(dx / pts.size, dy / pts.size);
+      return;
+    }
     // Drag right should turn the world right, as every 3D viewer does. Our camera is
     // parameterised x=cos(yaw), z=sin(yaw) while OrbitControls uses x=sin(t), z=cos(t) —
     // a reflection, so yaw = pi/2 - t. OrbitControls subtracts on a right drag, which
     // means ours has to ADD. Subtracting inverted the horizontal orbit.
-    camYaw += (e.clientX - px) * 0.006;
-    camElev = THREE.MathUtils.clamp(camElev + (e.clientY - py) * 0.004, 0.22, 1.35);
-    px = e.clientX; py = e.clientY;
+    camYaw += dx * 0.006;
+    camElev = THREE.MathUtils.clamp(camElev + dy * 0.004, 0.22, 1.35);
     placeCamera();
   });
-  const stop = (e) => { dragging = false; el.classList.remove("dragging"); try { el.releasePointerCapture(e.pointerId); } catch {} };
+  const stop = (e) => {
+    pts.delete(e.pointerId);
+    if (!pts.size) { mode = null; el.classList.remove("dragging"); }
+    try { el.releasePointerCapture(e.pointerId); } catch {}
+  };
   el.addEventListener("pointerup", stop);
   el.addEventListener("pointercancel", stop);
   el.addEventListener("wheel", (e) => {
@@ -2859,6 +2946,35 @@ function pickSeat(clientX, clientY) {
     camWorldWidth = THREE.MathUtils.clamp(camWorldWidth + e.deltaY * 0.03, 12, 74);
     resize();
   }, { passive: false });
+
+  // Double-click travels: to the agent under the cursor (and stays with them),
+  // or to any point on the floor itself.
+  el.addEventListener("dblclick", (e) => {
+    const seat = pickSeat(e.clientX, e.clientY);
+    if (seat) { followFigure(seat); return; }
+    const r = el.getBoundingClientRect();
+    ndc.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+    ndc.y = -((e.clientY - r.top) / r.height) * 2 + 1;
+    raycaster.setFromCamera(ndc, camera);
+    const pt = new THREE.Vector3();
+    if (raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), pt)) {
+      glideTo(pt.x, pt.z);
+    }
+  });
+
+  // Keyboard travel — never while the player is typing in a dock field.
+  addEventListener("keydown", (e) => {
+    if (e.target.closest?.("input,textarea,select") || e.target.isContentEditable) return;
+    const k = e.key.toLowerCase();
+    if (k === "r") { resetView(); return; }
+    const step = 46;
+    if (k === "a" || k === "arrowleft") panCamera(step, 0);
+    else if (k === "d" || k === "arrowright") panCamera(-step, 0);
+    else if (k === "w" || k === "arrowup") panCamera(0, step);
+    else if (k === "s" || k === "arrowdown") panCamera(0, -step);
+    else return;
+    e.preventDefault();
+  });
 })();
 
 /* ── render loop ──────────────────────────────────────────────────────────── */
@@ -2872,12 +2988,24 @@ window.__floor = { THREE, renderer, scene, camera, workers, room,
     geometries: renderer.info.memory.geometries,
     textures: renderer.info.memory.textures,
     camWorldWidth, camYaw, camElev, bakedBuckets,
+    camTarget: { x: +camTarget.x.toFixed(2), z: +camTarget.z.toFixed(2) },
+    following: followSeat,
   }) };
 let elapsed = 0;
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
   elapsed += dt;
   for (const id in workers) workers[id].update(dt, elapsed);
+  // The pivot travels: glued to a followed figure, or easing toward a
+  // double-clicked point. Manual pan clears both, so they never fight.
+  const want = followSeat && workers[followSeat] ? workers[followSeat].g.position : glide;
+  if (want) {
+    const ease = Math.min(1, dt * 6);
+    camTarget.x += (want.x - camTarget.x) * ease;
+    camTarget.z += (want.z - camTarget.z) * ease;
+    if (!followSeat && Math.hypot(want.x - camTarget.x, want.z - camTarget.z) < 0.04) glide = null;
+    placeCamera();
+  }
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
