@@ -293,6 +293,46 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
     if (floors.length) broadcast(call.id, floors);
   }
 
+  /* THE MANDATE — every cycle ends in a call. Not by lowering the bar: by
+   * refusing to stop interviewing. If the shortlist pass opened nothing, the
+   * desk keeps working straight down the ranked list — same gauntlet per coin,
+   * more coins — until a call is published, the ranked market is exhausted, or
+   * the daily money brake calls time. Those are the only three exits: the
+   * mandate can spend the whole day's budget hunting, but it cannot force a
+   * seat to lie, because a forced call is just a loss with paperwork. */
+  if (!opened.length && process.env.PENTHOUSE_MUST_CALL !== "0") {
+    const alreadyTried = new Set(shortlist.map((c) => c.mint));
+    let hunted = 0;
+    for (const c of scored) {
+      if (opened.length) break;
+      if (alreadyTried.has(c.mint) || liveCallFor(c.mint) || store.recentlyJudged(c.mint)) continue;
+      if (wx.regime === "risk_off" && c.category === "established") continue;
+      hunted++;
+      emit("cycle:hunting", { symbol: c.pair?.baseSymbol, score: c.score, hunted });
+      let rec;
+      try {
+        rec = await runFor(null, () => workup(cycle,
+          c.mint, `the mandate · hunting for this cycle's call · ${c.category}${c.launchpad ? ` · ${c.launchpad}` : ""}`));
+      } catch (e) {
+        if (e instanceof OutOfCredit) {
+          stopped = e.constructor.name === "BudgetExhausted" ? "daily budget reached mid-hunt" : "out of credit mid-hunt";
+          emit("cycle:halted", { reason: "hunt_budget" });
+          break;
+        }
+        emit("cycle:error", { mint: c.mint, error: String(e.message) });
+        continue;
+      }
+      if (!rec || rec.outcome === "no_data") continue;
+      workedUp++;
+      if (rec.finalDecision === "APPROVED") {
+        const pub = publishApproved(rec, { category: c.category, launchpad: c.launchpad });
+        if (pub.callId) opened.push({ id: pub.callId });
+      }
+    }
+    if (!opened.length && !stopped)
+      emit("cycle:hunt_dry", { hunted, note: "the ranked market offered no coin that survived the gauntlet" });
+  }
+
   const cost = spend.usd - startSpend;
   emit("cycle:end", { cycle, count: opened.length, spendUsd: Number(cost.toFixed(4)), stopped });
   return { cycle, considered: universe.length, ranked: scored.length,
