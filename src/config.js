@@ -30,7 +30,10 @@ export const cfg = {
   // Deterministic screen floors. These kill before any token is spent.
   screen: {
     minLiquidityUsd: num("DESK_MIN_LIQUIDITY_USD", 75000),
-    minPairAgeHours: num("DESK_MIN_PAIR_AGE_HOURS", 24),
+    // 24h here quietly strangled the sniper lane: the free screen killed every
+    // coin the ignition path is FOR. The research's floor is one hour past
+    // migration (rugs express inside the first hour); 1.5h keeps a margin.
+    minPairAgeHours: num("DESK_MIN_PAIR_AGE_HOURS", 1.5),
     minVolume24hUsd: num("DESK_MIN_VOL24_USD", 50000),
     maxVolToLiqRatio: num("DESK_MAX_VOL_LIQ", 40),   // above this, suspect wash
     minTxns24h: num("DESK_MIN_TXNS24", 200),

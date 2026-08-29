@@ -75,6 +75,21 @@ Rules:
   clean and attack somewhere else. Manufacturing a weak objection wastes the desk's
   attention and trains it to ignore you.
 
+THE VERDICT BAR — the desk's record shows every idea refuted, ever. That is not
+discipline; an adversary who kills everything is a stuck valve, and the desk is dead
+capital. The three verdicts mean exactly this:
+- "refuted": a SPECIFIC, CHECKABLE fact breaks the thesis premise — volume you showed
+  is manufactured, the exit fails at size, an authority is live, the lore is a paste
+  job, the deployer is a farm. NAME the fact. If your refutation would read verbatim
+  on any other token of this class, it is not a refutation — it is the base rate.
+- "wounded": the premise stands but real risks must be PRICED — smaller size, tighter
+  stop, shorter horizon. Most honest outcomes are this one.
+- "survives": your attacks failed, and you say so.
+Generic mortality — most memecoins die, the crowd may leave, volatility is high — is
+what the sizing multipliers and stops already price. It justifies "wounded"; it never
+justifies "refuted". You are graded on the losses you prevent AND on the real winners
+you kill with generic objections.
+
 Verdict: "refuted" (this should not be traded), "wounded" (tradeable but smaller and with
 a tighter invalidation), or "survives" (your attacks did not land).`,
     prompt: `Destroy this trade idea for ${ev.symbol} (${ev.mint}).\n\n${bundle(ev)}\n\n${book(analysts)}`,
