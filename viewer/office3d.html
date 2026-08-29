@@ -2127,6 +2127,400 @@ const bakedBuckets = bakeStatic(room);
   scene.add(snackSign);
 }
 
+/* ── the fit-out ────────────────────────────────────────────────────────────
+   The floor had desks and little else. These are the things an office actually
+   has: a meeting table people sit around, a lounge, a real kitchenette, filing,
+   a server rack, a coat stand. Each declares the rectangle it blocks — wall-hung
+   pieces declare none, because you walk underneath them.                        */
+const FITOUT = [
+  // meeting_table — A long timber boardroom table, long axis along x, set just north of the designated meeti
+  { at: [0, 4.4], foot: [-2.7, 3.8, 2.7, 5], parts: [
+    ["box", [5.4, 0.1, 1.2], [0, 0.75, 4.4], 0xa96934],  // table top slab
+    ["box", [5, 0.12, 0.1], [0, 0.64, 3.85], 0x5f3e29],  // apron rail, south edge
+    ["box", [5, 0.12, 0.1], [0, 0.64, 4.95], 0x5f3e29],  // apron rail, north edge
+    ["box", [0.16, 0.7, 0.16], [-2.35, 0.35, 3.95], 0x5f3e29],  // table leg
+    ["box", [0.16, 0.7, 0.16], [-2.35, 0.35, 4.85], 0x5f3e29],  // table leg
+    ["box", [0.16, 0.7, 0.16], [2.35, 0.35, 3.95], 0x5f3e29],  // table leg
+    ["box", [0.16, 0.7, 0.16], [2.35, 0.35, 4.85], 0x5f3e29],  // table leg
+    ["box", [4.4, 0.06, 0.44], [0, 0.83, 4.4], 0xf0e4c7],  // cream runner down the table centre
+    ["cyl", 0.2, 0.1, [0, 0.91, 4.4], 0x30454a],  // conference speaker puck on the runner
+    ["box", [0.36, 0.06, 0.26], [-1.6, 0.83, 4.05], 0xfbf6e8],  // stack of paper on the bare wood
+    ["box", [0.36, 0.06, 0.26], [1.6, 0.83, 4.75], 0xfbf6e8],  // stack of paper on the bare wood
+    ["cyl", 0.09, 0.18, [-0.85, 0.89, 4.8], 0xf0e4c7],  // mug
+    ["cyl", 0.09, 0.18, [0.85, 0.89, 4], 0xbf623c],  // mug
+  ] },
+  // meeting_chair_n1 — Meeting chair on the south long side of the table, seat facing north into the table
+  { at: [-1.7, 3.28], foot: [-1.96, 3.02, -1.44, 3.54], parts: [
+    ["box", [0.52, 0.09, 0.52], [-1.7, 0.46, 3.28], 0x30454a],  // seat pan
+    ["box", [0.46, 0.06, 0.46], [-1.7, 0.535, 3.28], 0x267f82],  // seat cushion
+    ["box", [0.52, 0.62, 0.1], [-1.7, 0.8, 3.07], 0x30454a],  // backrest panel
+    ["box", [0.44, 0.36, 0.07], [-1.7, 0.84, 3.135], 0x267f82],  // back cushion on the table-facing face
+    ["box", [0.08, 0.43, 0.08], [-1.9, 0.215, 3.08], 0x70828a],  // chair leg
+    ["box", [0.08, 0.43, 0.08], [-1.5, 0.215, 3.08], 0x70828a],  // chair leg
+    ["box", [0.08, 0.43, 0.08], [-1.9, 0.215, 3.48], 0x70828a],  // chair leg
+    ["box", [0.08, 0.43, 0.08], [-1.5, 0.215, 3.48], 0x70828a],  // chair leg
+  ] },
+  // meeting_chair_n2 — Second meeting chair on the south long side, seat facing north into the table, mirrored 
+  { at: [1.7, 3.28], foot: [1.44, 3.02, 1.96, 3.54], parts: [
+    ["box", [0.52, 0.09, 0.52], [1.7, 0.46, 3.28], 0x30454a],  // seat pan
+    ["box", [0.46, 0.06, 0.46], [1.7, 0.535, 3.28], 0x267f82],  // seat cushion
+    ["box", [0.52, 0.62, 0.1], [1.7, 0.8, 3.07], 0x30454a],  // backrest panel
+    ["box", [0.44, 0.36, 0.07], [1.7, 0.84, 3.135], 0x267f82],  // back cushion on the table-facing face
+    ["box", [0.08, 0.43, 0.08], [1.5, 0.215, 3.08], 0x70828a],  // chair leg
+    ["box", [0.08, 0.43, 0.08], [1.9, 0.215, 3.08], 0x70828a],  // chair leg
+    ["box", [0.08, 0.43, 0.08], [1.5, 0.215, 3.48], 0x70828a],  // chair leg
+    ["box", [0.08, 0.43, 0.08], [1.9, 0.215, 3.48], 0x70828a],  // chair leg
+  ] },
+  // meeting_chair_s1 — Meeting chair on the north long side of the table, seat facing south into the table, so 
+  { at: [-1.7, 5.52], foot: [-1.96, 5.26, -1.44, 5.78], parts: [
+    ["box", [0.52, 0.09, 0.52], [-1.7, 0.46, 5.52], 0x30454a],  // seat pan
+    ["box", [0.46, 0.06, 0.46], [-1.7, 0.535, 5.52], 0x267f82],  // seat cushion
+    ["box", [0.52, 0.62, 0.1], [-1.7, 0.8, 5.73], 0x30454a],  // backrest panel
+    ["box", [0.44, 0.36, 0.07], [-1.7, 0.84, 5.665], 0x267f82],  // back cushion on the table-facing face
+    ["box", [0.08, 0.43, 0.08], [-1.9, 0.215, 5.32], 0x70828a],  // chair leg
+    ["box", [0.08, 0.43, 0.08], [-1.5, 0.215, 5.32], 0x70828a],  // chair leg
+    ["box", [0.08, 0.43, 0.08], [-1.9, 0.215, 5.72], 0x70828a],  // chair leg
+    ["box", [0.08, 0.43, 0.08], [-1.5, 0.215, 5.72], 0x70828a],  // chair leg
+  ] },
+  // meeting_chair_s2 — Second meeting chair on the north long side, seat facing south into the table, mirrored 
+  { at: [1.7, 5.52], foot: [1.44, 5.26, 1.96, 5.78], parts: [
+    ["box", [0.52, 0.09, 0.52], [1.7, 0.46, 5.52], 0x30454a],  // seat pan
+    ["box", [0.46, 0.06, 0.46], [1.7, 0.535, 5.52], 0x267f82],  // seat cushion
+    ["box", [0.52, 0.62, 0.1], [1.7, 0.8, 5.73], 0x30454a],  // backrest panel
+    ["box", [0.44, 0.36, 0.07], [1.7, 0.84, 5.665], 0x267f82],  // back cushion on the table-facing face
+    ["box", [0.08, 0.43, 0.08], [1.5, 0.215, 5.32], 0x70828a],  // chair leg
+    ["box", [0.08, 0.43, 0.08], [1.9, 0.215, 5.32], 0x70828a],  // chair leg
+    ["box", [0.08, 0.43, 0.08], [1.5, 0.215, 5.72], 0x70828a],  // chair leg
+    ["box", [0.08, 0.43, 0.08], [1.9, 0.215, 5.72], 0x70828a],  // chair leg
+  ] },
+  // presentation_board — Free-standing whiteboard on metal feet at the west head of the meeting table, its writte
+  { at: [-4.88, 4.4], foot: [-5.15, 3.35, -4.6, 5.45], parts: [
+    ["box", [0.5, 0.1, 0.22], [-4.9, 0.05, 3.55], 0x70828a],  // floor foot
+    ["box", [0.5, 0.1, 0.22], [-4.9, 0.05, 5.25], 0x70828a],  // floor foot
+    ["box", [0.1, 1.75, 0.1], [-4.9, 0.975, 3.55], 0x70828a],  // upright post on the foot
+    ["box", [0.1, 1.75, 0.1], [-4.9, 0.975, 5.25], 0x70828a],  // upright post on the foot
+    ["box", [0.1, 1.36, 2.1], [-4.9, 1.42, 4.4], 0x5f3e29],  // board frame carried on the posts
+    ["box", [0.06, 1.1, 1.76], [-4.82, 1.42, 4.4], 0xfbf6e8],  // whiteboard writing face, inset in the frame and turn
+    ["box", [0.05, 0.12, 1], [-4.775, 1.8, 4.15], 0x267f82],  // marker line drawn on the board
+    ["box", [0.05, 0.5, 0.12], [-4.775, 1.45, 4.9], 0xdf7655],  // marker line drawn on the board
+    ["box", [0.24, 0.08, 1.94], [-4.76, 0.78, 4.4], 0xa96934],  // marker tray set into the bottom of the frame
+    ["box", [0.07, 0.07, 0.26], [-4.76, 0.855, 4], 0xdf7655],  // marker on the tray
+    ["box", [0.07, 0.07, 0.26], [-4.76, 0.855, 4.6], 0x267f82],  // marker on the tray
+  ] },
+  // lounge_rug — A wide cream rug with a terracotta border, amber corner blocks and two teal stripes — on
+  { at: [6.6, 3.95], foot: [0, 0, 0, 0], parts: [
+    ["box", [4.12, 0.06, 0.18], [6.6, 0.03, 3.18], 0x267f82],  // teal stripe, front (clear of the table, fully visibl
+    ["box", [4.12, 0.06, 1.36], [6.6, 0.03, 3.95], 0xf0e4c7],  // cream field
+    ["box", [4.12, 0.06, 0.18], [6.6, 0.03, 4.72], 0x267f82],  // teal stripe, back (between table and sofa, visible)
+    ["box", [0.24, 0.08, 1.72], [4.42, 0.04, 3.95], 0xbf623c],  // border bar, west
+    ["box", [0.24, 0.08, 1.72], [8.78, 0.04, 3.95], 0xbf623c],  // border bar, east
+    ["box", [4.12, 0.08, 0.24], [6.6, 0.04, 2.97], 0xbf623c],  // border bar, south
+    ["box", [4.12, 0.08, 0.24], [6.6, 0.04, 4.93], 0xbf623c],  // border bar, north
+    ["box", [0.24, 0.08, 0.24], [4.42, 0.04, 2.97], 0xe0ad3d],  // amber corner block, south-west
+    ["box", [0.24, 0.08, 0.24], [8.78, 0.04, 2.97], 0xe0ad3d],  // amber corner block, south-east
+    ["box", [0.24, 0.08, 0.24], [4.42, 0.04, 4.93], 0xe0ad3d],  // amber corner block, north-west
+    ["box", [0.24, 0.08, 0.24], [8.78, 0.04, 4.93], 0xe0ad3d],  // amber corner block, north-east
+  ] },
+  // lounge_sofa — A low charcoal three-seater on a timber plinth with teal cushions, a coral throw pillow 
+  { at: [6.6, 5.55], foot: [4.9, 5, 8.3, 6.1], parts: [
+    ["box", [3.4, 0.2, 1.1], [6.6, 0.1, 5.55], 0x5f3e29],  // timber plinth
+    ["box", [0.3, 0.44, 1.1], [5.05, 0.42, 5.55], 0x30454a],  // left arm
+    ["box", [0.3, 0.44, 1.1], [8.15, 0.42, 5.55], 0x30454a],  // right arm
+    ["box", [3.4, 0.7, 0.3], [6.6, 0.55, 5.95], 0x30454a],  // back panel
+    ["box", [1.38, 0.22, 0.8], [5.89, 0.31, 5.4], 0x267f82],  // left seat cushion
+    ["box", [1.38, 0.22, 0.8], [7.31, 0.31, 5.4], 0x267f82],  // right seat cushion
+    ["box", [1.3, 0.4, 0.16], [5.9, 0.62, 5.72], 0x267f82],  // left back cushion
+    ["box", [1.3, 0.4, 0.16], [7.3, 0.62, 5.72], 0x267f82],  // right back cushion
+    ["box", [0.36, 0.32, 0.14], [5.45, 0.58, 5.52], 0xdf7655],  // coral throw pillow
+    ["box", [0.3, 0.1, 0.62], [8.15, 0.69, 5.5], 0xf0e4c7],  // folded blanket, sitting exactly on the right arm
+  ] },
+  // lounge_coffee_table — A low timber coffee table standing on the rug in front of the sofa, holding a steel tray
+  { at: [6.6, 3.8], foot: [5.9, 3.4, 7.3, 4.2], parts: [
+    ["box", [0.12, 0.38, 0.12], [6.02, 0.19, 3.52], 0x5f3e29],  // leg front-left
+    ["box", [0.12, 0.38, 0.12], [7.18, 0.19, 3.52], 0x5f3e29],  // leg front-right
+    ["box", [0.12, 0.38, 0.12], [6.02, 0.19, 4.08], 0x5f3e29],  // leg back-left
+    ["box", [0.12, 0.38, 0.12], [7.18, 0.19, 4.08], 0x5f3e29],  // leg back-right
+    ["box", [1.2, 0.06, 0.62], [6.6, 0.17, 3.8], 0x5f3e29],  // lower shelf, carried on the legs
+    ["box", [1.4, 0.08, 0.8], [6.6, 0.42, 3.8], 0xa96934],  // table top
+    ["box", [0.46, 0.06, 0.34], [6.25, 0.49, 3.8], 0x8a9296],  // metal tray, 0.12 in from the top's west edge
+    ["cyl", 0.09, 0.13, [6.25, 0.585, 3.8], 0xf0e4c7],  // mug on tray
+    ["box", [0.36, 0.07, 0.28], [7, 0.495, 3.75], 0xfbf6e8],  // book, lower
+    ["box", [0.26, 0.06, 0.18], [7, 0.56, 3.75], 0x2a4a6a],  // book, upper (inset 0.05 all round, no flush edge)
+    ["box", [0.4, 0.06, 0.3], [6.4, 0.23, 3.8], 0xe0ad3d],  // magazine on shelf
+  ] },
+  // lounge_floor_lamp — A metal floor lamp with a cream drum shade and a small timber tray shelf around the pole
+  { at: [8.67, 5.65], foot: [8.3, 5.25, 9.05, 6.05], parts: [
+    ["cyl", 0.32, 0.08, [8.67, 0.04, 5.65], 0x30454a],  // weighted base
+    ["cyl", 0.16, 0.1, [8.67, 0.13, 5.65], 0x70828a],  // base riser
+    ["cyl", 0.05, 0.4, [8.67, 0.38, 5.65], 0x70828a],  // pole, lower
+    ["cyl", 0.24, 0.07, [8.67, 0.615, 5.65], 0xa96934],  // timber tray shelf, 0.13 clear of the sofa arm
+    ["cyl", 0.07, 0.11, [8.57, 0.705, 5.55], 0xbf623c],  // cup on tray shelf, clear of the pole
+    ["cyl", 0.05, 0.75, [8.67, 1.025, 5.65], 0x70828a],  // pole, upper
+    ["cyl", 0.09, 0.08, [8.67, 1.44, 5.65], 0xe0ad3d],  // brass collar
+    ["cyl", 0.3, 0.38, [8.67, 1.67, 5.65], 0xf0e4c7],  // drum shade
+    ["cyl", 0.2, 0.06, [8.67, 1.89, 5.65], 0xe0ad3d],  // shade cap
+  ] },
+  // lounge_plant — A potted leafy plant in a terracotta pot with a coral rim, standing on the rug's back-le
+  { at: [4.75, 4.6], foot: [4.35, 4.2, 5.15, 5], parts: [
+    ["box", [0.64, 0.44, 0.64], [4.75, 0.22, 4.6], 0xbf623c],  // terracotta pot
+    ["box", [0.74, 0.12, 0.74], [4.75, 0.5, 4.6], 0xdf7655],  // pot rim
+    ["box", [0.56, 0.08, 0.56], [4.75, 0.6, 4.6], 0x1d2a30],  // soil, resting on the rim and inset 0.09
+    ["box", [0.11, 0.66, 0.11], [4.75, 0.97, 4.6], 0x5f3e29],  // trunk
+    ["box", [0.3, 0.16, 0.28], [4.9, 1.02, 4.6], 0x66a348],  // low side sprig
+    ["box", [0.66, 0.24, 0.56], [4.75, 1.21, 4.6], 0x66a348],  // leaf cluster, low
+    ["box", [0.52, 0.24, 0.66], [4.72, 1.43, 4.62], 0x66a348],  // leaf cluster, mid
+    ["box", [0.42, 0.22, 0.42], [4.78, 1.63, 4.57], 0x66a348],  // leaf cluster, top
+  ] },
+  // kitchen_fridge — A tall steel office fridge at the left end of the kitchenette run, freezer on top, a pap
+  { at: [-4.05, 12.04], foot: [-4.62, 11.53, -3.48, 12.5], parts: [
+    ["box", [1.06, 0.08, 0.72], [-4.05, 0.04, 12.14], 0x1d2a30],  // recessed plinth
+    ["box", [1.1, 1.94, 0.8], [-4.05, 1.05, 12.1], 0x70828a],  // fridge carcass
+    ["box", [1.14, 0.08, 0.84], [-4.05, 2.06, 12.08], 0x8a9296],  // fridge top cap
+    ["box", [1.02, 0.48, 0.08], [-4.05, 1.73, 11.67], 0x8a9296],  // freezer door panel
+    ["box", [1.02, 1.28, 0.08], [-4.05, 0.79, 11.67], 0x8a9296],  // fridge door panel
+    ["box", [0.07, 0.24, 0.07], [-3.66, 1.62, 11.605], 0x1d2a30],  // freezer handle
+    ["box", [0.07, 0.6, 0.07], [-3.66, 1, 11.605], 0x1d2a30],  // fridge door handle
+    ["box", [0.3, 0.36, 0.06], [-4.28, 1.02, 11.6], 0xfbf6e8],  // note stuck on the door
+    ["box", [0.1, 0.1, 0.06], [-4.28, 1.13, 11.56], 0xe0ad3d],  // amber magnet pinning the note
+    ["cyl", 0.14, 0.18, [-4.28, 2.19, 12.1], 0xbf623c],  // pot on top of the fridge
+    ["box", [0.32, 0.26, 0.3], [-4.28, 2.41, 12.1], 0x66a348],  // plant foliage
+  ] },
+  // sink_counter — The sink half of the counter run: timber base cabinets under a cream worktop, a steel ba
+  { at: [-2.1, 12.1], foot: [-3.48, 11.69, -0.75, 12.5], parts: [
+    ["box", [2.7, 0.1, 0.58], [-2.1, 0.05, 12.21], 0x1d2a30],  // toe kick
+    ["box", [2.7, 0.74, 0.68], [-2.1, 0.47, 12.16], 0x5f3e29],  // base cabinet carcass
+    ["box", [2.7, 0.08, 0.76], [-2.1, 0.88, 12.12], 0xf0e4c7],  // worktop slab
+    ["box", [1.28, 0.62, 0.08], [-2.74, 0.48, 11.79], 0xa96934],  // cabinet door left
+    ["box", [1.28, 0.62, 0.08], [-1.46, 0.48, 11.79], 0xa96934],  // cabinet door right
+    ["box", [0.34, 0.06, 0.07], [-2.32, 0.7, 11.725], 0x70828a],  // door handle left
+    ["box", [0.34, 0.06, 0.07], [-1.88, 0.7, 11.725], 0x70828a],  // door handle right
+    ["box", [1.12, 0.1, 0.58], [-2.1, 0.97, 12.15], 0x8a9296],  // steel sink basin
+    ["box", [0.86, 0.06, 0.38], [-2.1, 1.01, 12.11], 0x73c9d2],  // water standing in the basin
+    ["cyl", 0.05, 0.34, [-2.1, 1.19, 12.38], 0x70828a],  // tap column
+    ["box", [0.07, 0.07, 0.3], [-2.1, 1.325, 12.25], 0x70828a],  // tap spout arm
+    ["box", [0.13, 0.24, 0.13], [-1.15, 1.04, 12.27], 0xdf7655],  // washing-up bottle
+    ["box", [0.3, 0.1, 0.24], [-3.1, 0.97, 12.27], 0x267f82],  // folded tea towel
+    ["cyl", 0.15, 0.1, [-3.08, 0.97, 11.97], 0xfbf6e8],  // stack of clean plates
+  ] },
+  // coffee_counter — The coffee half of the counter run: drawers and a cupboard under a cream worktop, a char
+  { at: [0.6, 12.1], foot: [-0.75, 11.69, 1.95, 12.5], parts: [
+    ["box", [2.7, 0.1, 0.58], [0.6, 0.05, 12.21], 0x1d2a30],  // toe kick
+    ["box", [2.7, 0.74, 0.68], [0.6, 0.47, 12.16], 0x5f3e29],  // base cabinet carcass
+    ["box", [2.7, 0.08, 0.76], [0.6, 0.88, 12.12], 0xf0e4c7],  // worktop slab
+    ["box", [1.28, 0.26, 0.08], [-0.06, 0.68, 11.79], 0xa96934],  // upper drawer front
+    ["box", [1.28, 0.3, 0.08], [-0.06, 0.34, 11.79], 0xa96934],  // lower drawer front
+    ["box", [1.28, 0.62, 0.08], [1.26, 0.48, 11.79], 0xa96934],  // cabinet door
+    ["box", [0.36, 0.06, 0.07], [-0.06, 0.75, 11.725], 0x70828a],  // upper drawer handle
+    ["box", [0.36, 0.06, 0.07], [-0.06, 0.41, 11.725], 0x70828a],  // lower drawer handle
+    ["box", [0.07, 0.34, 0.07], [0.7, 0.48, 11.725], 0x70828a],  // cabinet door handle
+    ["box", [0.56, 0.42, 0.44], [0.3, 1.13, 12.21], 0x30454a],  // coffee machine body
+    ["box", [0.6, 0.06, 0.48], [0.3, 1.37, 12.2], 0x1d2a30],  // coffee machine top plate
+    ["box", [0.16, 0.14, 0.12], [0.3, 1.16, 11.95], 0x70828a],  // brew head and spout
+    ["cyl", 0.09, 0.14, [0.3, 0.99, 11.9], 0xfbf6e8],  // cup under the spout
+    ["box", [0.12, 0.08, 0.06], [0.12, 1.28, 11.97], 0xe0ad3d],  // machine ready light
+    ["cyl", 0.08, 0.12, [1.06, 0.98, 12.27], 0xbf623c],  // mug
+    ["cyl", 0.08, 0.12, [1.28, 0.98, 12.27], 0x267f82],  // mug
+    ["cyl", 0.13, 0.26, [1.62, 1.05, 12.23], 0xa96934],  // coffee bean canister
+    ["cyl", 0.14, 0.06, [1.62, 1.21, 12.23], 0x1d2a30],  // canister lid
+  ] },
+  // microwave_end_unit — The right end of the counter run: a cupboard under the worktop carrying a steel microwav
+  { at: [2.85, 12.1], foot: [1.95, 11.69, 3.75, 12.5], parts: [
+    ["box", [1.8, 0.1, 0.58], [2.85, 0.05, 12.21], 0x1d2a30],  // toe kick
+    ["box", [1.8, 0.74, 0.68], [2.85, 0.47, 12.16], 0x5f3e29],  // base cabinet carcass
+    ["box", [1.8, 0.08, 0.76], [2.85, 0.88, 12.12], 0xf0e4c7],  // worktop slab
+    ["box", [1.7, 0.62, 0.08], [2.85, 0.48, 11.79], 0xa96934],  // cabinet door
+    ["box", [0.07, 0.34, 0.07], [2.12, 0.48, 11.725], 0x70828a],  // cabinet door handle
+    ["box", [0.88, 0.46, 0.54], [2.62, 1.15, 12.17], 0x8a9296],  // microwave body
+    ["box", [0.48, 0.32, 0.06], [2.46, 1.15, 11.88], 0x30454a],  // microwave door window
+    ["box", [0.24, 0.32, 0.06], [2.93, 1.15, 11.88], 0x1d2a30],  // microwave keypad
+    ["box", [0.06, 0.28, 0.12], [2.76, 1.15, 11.86], 0x70828a],  // microwave door handle
+    ["cyl", 0.15, 0.28, [3.4, 1.06, 12.25], 0xf0e4c7],  // kettle
+    ["cyl", 0.11, 0.06, [3.4, 1.23, 12.25], 0x30454a],  // kettle lid
+    ["box", [0.42, 0.06, 0.3], [3.42, 0.95, 11.93], 0xa96934],  // mug tray
+    ["cyl", 0.07, 0.11, [3.32, 1.035, 11.93], 0xfbf6e8],  // mug on the tray
+    ["cyl", 0.07, 0.11, [3.52, 1.035, 11.93], 0xe0ad3d],  // mug on the tray
+  ] },
+  // overhead_cupboards — A three-door cupboard row over the sink and coffee counters, on a teal tiled splashback 
+  { at: [-0.75, 12.24], foot: [0, 0, 0, 0], parts: [
+    ["box", [7.2, 0.6, 0.06], [0.15, 1.22, 12.47], 0x267f82],  // tiled splashback along the whole run
+    ["box", [5.2, 0.7, 0.4], [-0.75, 1.87, 12.3], 0x5f3e29],  // wall cupboard carcass
+    ["box", [5.1, 0.06, 0.28], [-0.75, 1.49, 12.34], 0xe0ad3d],  // under-cupboard light strip
+    ["box", [1.66, 0.6, 0.08], [-2.5, 1.87, 12.07], 0xa96934],  // cupboard door left
+    ["box", [1.66, 0.6, 0.08], [-0.75, 1.87, 12.07], 0xa96934],  // cupboard door middle
+    ["box", [1.66, 0.6, 0.08], [1, 1.87, 12.07], 0xa96934],  // cupboard door right
+    ["box", [0.32, 0.06, 0.06], [-2.5, 1.62, 12.01], 0x70828a],  // cupboard handle left
+    ["box", [0.32, 0.06, 0.06], [-0.75, 1.62, 12.01], 0x70828a],  // cupboard handle middle
+    ["box", [0.32, 0.06, 0.06], [1, 1.62, 12.01], 0x70828a],  // cupboard handle right
+    ["box", [5.3, 0.06, 0.46], [-0.75, 2.25, 12.27], 0xa96934],  // cornice along the top
+  ] },
+  // kitchen_bin — A small round pedal bin tucked at the right end of the counter run, charcoal body with a
+  { at: [4.25, 12.01], foot: [3.75, 11.62, 4.59, 12.45], parts: [
+    ["cyl", 0.3, 0.56, [4.25, 0.28, 12.1], 0x30454a],  // bin body
+    ["cyl", 0.32, 0.07, [4.25, 0.5, 12.1], 0x1d2a30],  // reinforcing band
+    ["cyl", 0.34, 0.08, [4.25, 0.6, 12.1], 0x70828a],  // bin lid
+    ["box", [0.34, 0.06, 0.22], [4.25, 0.67, 12.1], 0x1d2a30],  // drop slot on the lid
+    ["box", [0.28, 0.06, 0.18], [4.25, 0.03, 11.71], 0x70828a],  // foot pedal plate
+    ["box", [0.08, 0.2, 0.08], [4.25, 0.1, 11.77], 0x70828a],  // pedal post
+    ["box", [0.22, 0.2, 0.06], [4.25, 0.34, 11.79], 0x66a348],  // recycling badge
+  ] },
+  // filing_cabinet_bank — A bank of four grey filing cabinets shoulder to shoulder along the west wall, three draw
+  { at: [-16.5, 9.8], foot: [-17, 7.95, -15.95, 11.65], parts: [
+    ["box", [0.8, 1.74, 3.56], [-16.56, 0.87, 9.8], 0x30454a],  // dark carcass of the cabinet bank, floor to cap
+    ["box", [0.1, 1.56, 0.8], [-16.11, 0.87, 8.45], 0x70828a],  // cabinet 1 drawer front
+    ["box", [0.1, 1.56, 0.8], [-16.11, 0.87, 9.35], 0x70828a],  // cabinet 2 drawer front
+    ["box", [0.1, 1.56, 0.8], [-16.11, 0.87, 10.25], 0x70828a],  // cabinet 3 drawer front
+    ["box", [0.1, 1.56, 0.8], [-16.11, 0.87, 11.15], 0x70828a],  // cabinet 4 drawer front
+    ["box", [0.14, 0.07, 3.56], [-16.1, 0.61, 9.8], 0x1d2a30],  // lower drawer seam across the bank
+    ["box", [0.14, 0.07, 3.56], [-16.1, 1.13, 9.8], 0x1d2a30],  // upper drawer seam across the bank
+    ["box", [0.09, 0.07, 0.44], [-16.03, 0.35, 8.45], 0x1d2a30],  // bottom drawer pull, cabinet 1
+    ["box", [0.09, 0.07, 0.44], [-16.03, 0.87, 8.45], 0x1d2a30],  // middle drawer pull, cabinet 1
+    ["box", [0.09, 0.07, 0.44], [-16.03, 1.39, 8.45], 0x1d2a30],  // top drawer pull, cabinet 1
+    ["box", [0.09, 0.07, 0.44], [-16.03, 0.35, 9.35], 0x1d2a30],  // bottom drawer pull, cabinet 2
+    ["box", [0.09, 0.07, 0.44], [-16.03, 0.87, 9.35], 0x1d2a30],  // middle drawer pull, cabinet 2
+    ["box", [0.09, 0.07, 0.44], [-16.03, 1.39, 9.35], 0x1d2a30],  // top drawer pull, cabinet 2
+    ["box", [0.09, 0.07, 0.44], [-16.03, 0.35, 10.25], 0x1d2a30],  // bottom drawer pull, cabinet 3
+    ["box", [0.09, 0.07, 0.44], [-16.03, 0.87, 10.25], 0x1d2a30],  // middle drawer pull, cabinet 3
+    ["box", [0.09, 0.07, 0.44], [-16.03, 1.39, 10.25], 0x1d2a30],  // top drawer pull, cabinet 3
+    ["box", [0.09, 0.07, 0.44], [-16.03, 0.35, 11.15], 0x1d2a30],  // bottom drawer pull, cabinet 4
+    ["box", [0.09, 0.07, 0.44], [-16.03, 0.87, 11.15], 0x1d2a30],  // middle drawer pull, cabinet 4
+    ["box", [0.09, 0.07, 0.44], [-16.03, 1.39, 11.15], 0x1d2a30],  // top drawer pull, cabinet 4
+    ["box", [0.92, 0.1, 3.6], [-16.52, 1.79, 9.8], 0xa96934],  // timber cap along the top
+    ["box", [0.44, 0.16, 0.6], [-16.45, 1.92, 8.6], 0xfbf6e8],  // stack of loose paper on the cap
+    ["box", [0.46, 0.34, 0.32], [-16.47, 2.01, 10.9], 0xbf623c],  // archive box on the cap
+  ] },
+  // server_rack — A near-black two-bay server rack flush against the east wall, stacked metal unit faces l
+  { at: [16.5, 10.15], foot: [15.85, 8.98, 16.98, 11.3], parts: [
+    ["box", [0.86, 0.1, 2.24], [16.52, 0.05, 10.15], 0x30454a],  // rack plinth
+    ["box", [0.9, 2, 1.02], [16.5, 1.1, 9.61], 0x1d2a30],  // rack bay A
+    ["box", [0.9, 2, 1.02], [16.5, 1.1, 10.71], 0x1d2a30],  // rack bay B
+    ["box", [0.12, 0.26, 0.88], [16.01, 0.6, 9.61], 0x8a9296],  // server unit face
+    ["box", [0.12, 0.26, 0.88], [16.01, 1.06, 9.61], 0x70828a],  // server unit face
+    ["box", [0.12, 0.26, 0.88], [16.01, 1.52, 9.61], 0x8a9296],  // server unit face
+    ["box", [0.12, 0.26, 0.88], [16.01, 0.6, 10.71], 0x70828a],  // server unit face
+    ["box", [0.12, 0.26, 0.88], [16.01, 1.06, 10.71], 0x8a9296],  // server unit face
+    ["box", [0.12, 0.26, 0.88], [16.01, 1.52, 10.71], 0x70828a],  // server unit face
+    ["box", [0.08, 0.12, 0.14], [15.93, 0.6, 9.3], 0x66a348],  // blinking status light, green
+    ["box", [0.08, 0.12, 0.14], [15.93, 1.06, 9.3], 0xe0ad3d],  // blinking status light, amber
+    ["box", [0.08, 0.12, 0.14], [15.93, 1.52, 9.3], 0x73c9d2],  // blinking status light, blue
+    ["box", [0.08, 0.12, 0.14], [15.93, 0.6, 10.4], 0xdf7655],  // blinking status light, red
+    ["box", [0.08, 0.12, 0.14], [15.93, 1.06, 10.4], 0x66a348],  // blinking status light, green
+    ["box", [0.08, 0.12, 0.14], [15.93, 1.52, 10.4], 0xe0ad3d],  // blinking status light, amber
+    ["box", [0.94, 0.1, 2.2], [16.48, 2.15, 10.16], 0x70828a],  // rack top plate
+    ["box", [0.62, 0.24, 0.84], [16.51, 2.32, 9.8], 0x2a4a6a],  // network switch box on top
+  ] },
+  // coat_rack — A dark timber coat stand on a weighted disc, two crossed arms with amber pegs, a navy co
+  { at: [-8.7, 11.9], foot: [-9.45, 11.4, -7.95, 12.4], parts: [
+    ["cyl", 0.45, 0.1, [-8.7, 0.05, 11.9], 0x1d2a30],  // weighted base disc
+    ["cyl", 0.09, 1.76, [-8.7, 0.98, 11.9], 0x5f3e29],  // coat rack post
+    ["box", [1.3, 0.1, 0.12], [-8.7, 1.8, 11.9], 0x5f3e29],  // upper cross arm
+    ["box", [0.12, 0.1, 0.9], [-8.7, 1.64, 11.9], 0x5f3e29],  // lower cross arm
+    ["box", [0.15, 0.15, 0.15], [-9.32, 1.88, 11.9], 0xe0ad3d],  // peg
+    ["box", [0.15, 0.15, 0.15], [-8.08, 1.88, 11.9], 0xe0ad3d],  // peg
+    ["box", [0.15, 0.15, 0.15], [-8.7, 1.72, 11.52], 0xe0ad3d],  // peg
+    ["box", [0.15, 0.15, 0.15], [-8.7, 1.72, 12.28], 0xe0ad3d],  // peg
+    ["box", [0.5, 0.2, 0.34], [-9.18, 1.7, 11.9], 0x2a4a6a],  // shoulders of a hung coat
+    ["box", [0.44, 0.8, 0.3], [-9.18, 1.26, 11.9], 0x2a4a6a],  // body of the hung coat
+    ["box", [0.5, 0.2, 0.34], [-8.22, 1.7, 11.9], 0xbf623c],  // shoulders of a second coat
+    ["box", [0.44, 0.72, 0.3], [-8.22, 1.3, 11.9], 0xbf623c],  // body of the second coat
+    ["box", [0.16, 0.62, 0.14], [-8.7, 1.35, 12.22], 0xdf7655],  // scarf hanging off the rear peg
+  ] },
+  // status_ticker_board — A wide status board mounted flat on the south wall: teal header with a live indicator, t
+  { at: [4, 12.3], foot: [0, 0, 0, 0], parts: [
+    ["box", [5.2, 1.56, 0.3], [4, 1.72, 12.34], 0x30454a],  // board frame bolted to the wall
+    ["box", [4.84, 1.22, 0.12], [4, 1.74, 12.16], 0x1d2a30],  // dark display panel
+    ["box", [4.84, 0.24, 0.1], [4, 2.2, 12.08], 0x267f82],  // teal header band
+    ["box", [0.3, 0.16, 0.08], [1.85, 2.2, 12.02], 0xe0ad3d],  // live indicator on the header
+    ["box", [2.3, 0.13, 0.08], [3.05, 1.9, 12.07], 0xf0e4c7],  // ticker row 1 label
+    ["box", [0.9, 0.13, 0.08], [5.6, 1.9, 12.07], 0x66a348],  // ticker row 1 value, up
+    ["box", [2.6, 0.13, 0.08], [3.2, 1.66, 12.07], 0xf0e4c7],  // ticker row 2 label
+    ["box", [0.9, 0.13, 0.08], [5.6, 1.66, 12.07], 0xdf7655],  // ticker row 2 value, down
+    ["box", [2, 0.13, 0.08], [2.9, 1.42, 12.07], 0xf0e4c7],  // ticker row 3 label
+    ["box", [0.9, 0.13, 0.08], [5.6, 1.42, 12.07], 0xe0ad3d],  // ticker row 3 value, flat
+    ["box", [4.84, 0.2, 0.09], [4, 1.24, 12.07], 0xe0ad3d],  // scrolling strip along the bottom
+    ["box", [5.2, 0.12, 0.42], [4, 0.92, 12.28], 0xa96934],  // timber ledge under the board
+  ] },
+  // wall_clock — A small square charcoal-cased clock with a cream face, four dark marks, dark hands and a
+  { at: [-16.9, 6.7], foot: [0, 0, 0, 0], parts: [
+    ["box", [0.16, 0.7, 0.7], [-16.91, 2.15, 6.7], 0x30454a],  // clock case set against the wall
+    ["box", [0.07, 0.56, 0.56], [-16.795, 2.15, 6.7], 0xf0e4c7],  // clock face
+    ["box", [0.06, 0.09, 0.07], [-16.73, 2.37, 6.7], 0x1d2a30],  // twelve o'clock mark
+    ["box", [0.06, 0.09, 0.07], [-16.73, 1.93, 6.7], 0x1d2a30],  // six o'clock mark
+    ["box", [0.06, 0.07, 0.09], [-16.73, 2.15, 6.48], 0x1d2a30],  // nine o'clock mark
+    ["box", [0.06, 0.07, 0.09], [-16.73, 2.15, 6.92], 0x1d2a30],  // three o'clock mark
+    ["box", [0.07, 0.26, 0.06], [-16.725, 2.27, 6.7], 0x1d2a30],  // minute hand at twelve
+    ["box", [0.07, 0.06, 0.17], [-16.725, 2.15, 6.775], 0x1d2a30],  // hour hand at three
+    ["box", [0.08, 0.09, 0.09], [-16.72, 2.15, 6.7], 0xe0ad3d],  // centre boss over the hand pivot
+  ] },
+  // waste_bin — A metal waste drum with a teal recycling band, heaped over the brim with paper and two m
+  { at: [-5.7, 11.95], foot: [-6.3, 11.5, -5.05, 12.4], parts: [
+    ["cyl", 0.38, 0.62, [-5.7, 0.31, 11.95], 0x70828a],  // bin drum
+    ["cyl", 0.39, 0.12, [-5.7, 0.24, 11.95], 0x267f82],  // recycling band
+    ["cyl", 0.42, 0.09, [-5.7, 0.645, 11.95], 0x8a9296],  // bin rim
+    ["cyl", 0.33, 0.14, [-5.7, 0.68, 11.95], 0xfbf6e8],  // paper heaped to the brim
+    ["box", [0.22, 0.2, 0.22], [-5.55, 0.83, 11.85], 0xfbf6e8],  // crumpled sheet on the pile
+    ["box", [0.18, 0.17, 0.18], [-5.85, 0.81, 12.05], 0xf0e4c7],  // crumpled sheet on the pile
+    ["box", [0.2, 0.19, 0.2], [-6.13, 0.095, 12.23], 0xfbf6e8],  // crumpled sheet that missed
+    ["box", [0.16, 0.16, 0.16], [-5.18, 0.08, 12.18], 0xf0e4c7],  // crumpled sheet that missed
+  ] },
+  // snake_plant — A snake plant standing in the water-cooler corner: six stiff upright blades of different
+  { at: [10.9, 6.35], foot: [10.4, 5.85, 11.4, 6.85], parts: [
+    ["box", [0.78, 0.62, 0.78], [10.9, 0.31, 6.35], 0xbf623c],  // square terracotta pot
+    ["box", [0.9, 0.12, 0.9], [10.9, 0.66, 6.35], 0xdf7655],  // pot rim
+    ["box", [0.7, 0.08, 0.7], [10.9, 0.7, 6.35], 0x5f3e29],  // soil
+    ["box", [0.16, 1.4, 0.26], [10.9, 1.42, 6.35], 0x66a348],  // tall centre blade
+    ["box", [0.14, 1.1, 0.24], [10.68, 1.27, 6.27], 0x267f82],  // blade
+    ["box", [0.14, 1.24, 0.22], [11.1, 1.34, 6.47], 0x66a348],  // blade
+    ["box", [0.24, 0.92, 0.14], [10.98, 1.18, 6.11], 0x66a348],  // short blade
+    ["box", [0.22, 1.02, 0.14], [10.8, 1.23, 6.59], 0x267f82],  // blade
+    ["box", [0.13, 0.78, 0.2], [10.62, 1.11, 6.51], 0x66a348],  // short blade
+    ["box", [0.17, 0.14, 0.27], [10.9, 2.05, 6.35], 0xe0ad3d],  // yellow tip capping the tall blade
+    ["box", [0.15, 0.14, 0.23], [11.1, 1.89, 6.47], 0xe0ad3d],  // yellow tip capping a blade
+  ] },
+  // fern_planter — A broad low fern, flat layers of foliage spreading sideways out of a wide cream planter 
+  { at: [-12.25, 11.5], foot: [-13, 10.75, -11.5, 12.25], parts: [
+    ["box", [1.3, 0.42, 1.3], [-12.25, 0.21, 11.5], 0xf0e4c7],  // wide low planter
+    ["box", [1.42, 0.12, 1.42], [-12.25, 0.46, 11.5], 0xa96934],  // planter rim
+    ["box", [1.16, 0.08, 1.16], [-12.25, 0.5, 11.5], 0x5f3e29],  // soil
+    ["box", [1.3, 0.13, 0.4], [-12.25, 0.59, 11.3], 0x66a348],  // lower frond spread
+    ["box", [0.4, 0.13, 1.24], [-12.4, 0.59, 11.55], 0x66a348],  // lower frond spread
+    ["box", [1.06, 0.13, 0.36], [-12.1, 0.71, 11.65], 0x267f82],  // middle frond spread
+    ["box", [0.36, 0.13, 1], [-12, 0.71, 11.35], 0x66a348],  // middle frond spread
+    ["box", [0.82, 0.13, 0.62], [-12.25, 0.83, 11.45], 0x66a348],  // upper frond spread
+    ["box", [0.44, 0.3, 0.44], [-12.25, 1.02, 11.45], 0x66a348],  // crown
+    ["box", [0.16, 0.48, 0.3], [-12.6, 1.09, 11.7], 0x66a348],  // frond standing up
+    ["box", [0.3, 0.4, 0.16], [-11.95, 1.05, 11.25], 0x267f82],  // frond standing up
+  ] },
+  // cactus_pot — A blocky cactus, square trunk with two crooked arms and a coral flower on its crown, plu
+  { at: [11.3, -3.8], foot: [10.75, -4.25, 11.85, -3.35], parts: [
+    ["box", [0.7, 0.56, 0.7], [11.3, 0.28, -3.8], 0x30454a],  // small square pot
+    ["box", [0.78, 0.12, 0.78], [11.3, 0.5, -3.8], 0xe0ad3d],  // pot band
+    ["box", [0.62, 0.1, 0.62], [11.3, 0.61, -3.8], 0x8a9296],  // gravel top dressing
+    ["box", [0.36, 1.2, 0.36], [11.3, 1.26, -3.8], 0x66a348],  // square cactus trunk
+    ["box", [0.42, 0.2, 0.2], [11, 1.1, -3.8], 0x66a348],  // left arm, out
+    ["box", [0.2, 0.52, 0.2], [10.89, 1.36, -3.8], 0x66a348],  // left arm, up
+    ["box", [0.38, 0.18, 0.18], [11.6, 1.42, -3.8], 0x66a348],  // right arm, out
+    ["box", [0.18, 0.4, 0.18], [11.7, 1.63, -3.8], 0x66a348],  // right arm, up
+    ["box", [0.2, 0.16, 0.2], [11.3, 1.94, -3.8], 0xdf7655],  // flower on the crown
+    ["box", [0.2, 0.42, 0.2], [11.1, 0.87, -3.56], 0x66a348],  // second small cactus stem
+    ["box", [0.16, 0.14, 0.16], [11.1, 1.15, -3.56], 0xe0ad3d],  // flower on the small stem
+  ] },
+];
+
+(function buildFitout() {
+  for (const piece of FITOUT) {
+    const g = new THREE.Group();
+    for (const part of piece.parts) {
+      if (part[0] === "cyl") cyl(g, part[1], part[2], part[3], part[4], 10);
+      else box(g, part[1], part[2], part[3]);
+    }
+    room.add(g);
+    const f = piece.foot;
+    // A declared rectangle, not the mesh bounds: a wall cupboard hangs over floor
+    // people walk on, and Box3 would wall it off.
+    if (f[2] > f[0] && f[3] > f[1]) SOLID.push({ x0: f[0], z0: f[1], x1: f[2], z1: f[3] });
+  }
+})();
+
 buildNav();   // every fixture has registered its footprint by here
 
 const PICKABLE = [];
