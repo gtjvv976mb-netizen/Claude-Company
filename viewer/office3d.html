@@ -84,6 +84,14 @@ body{
 #stage{position:relative; min-width:0; overflow:hidden}
 #stage canvas{display:block; width:100%; height:100%; cursor:grab}
 #stage canvas.dragging{cursor:grabbing}
+#privnote{
+  position:absolute; left:50%; transform:translateX(-50%); top:70px; z-index:6;
+  max-width:min(560px, calc(100% - 32px));
+  padding:10px 16px; border-radius:8px; font-size:13px; line-height:1.5; text-align:center;
+  background:rgba(27,43,47,.92); color:var(--on-dark);
+  border:1px solid var(--amber); box-shadow:0 8px 24px rgba(0,0,0,.35);
+}
+#privnote a{color:var(--amber); font-weight:600}
 .hint{
   position:absolute; left:14px; bottom:12px; z-index:3;
   font-size:11px; letter-spacing:.1em; text-transform:uppercase;
@@ -3324,10 +3332,32 @@ if (location.search.includes("demo")) {
 } else if (location.protocol.startsWith("http")) {
   const floorParam = (() => { const m = location.pathname.match(/\/floor\/(\d+)/);
     return m ? m[1] : new URLSearchParams(location.search).get("floor"); })();
-  const es = new EventSource((window.__API_BASE__ || "") + (floorParam ? `/events?floor=${floorParam}` : "/events"));
+  // The tenant's token rides the stream URL so the server can tell owner from
+  // visitor; the token comes from the same origin the stream goes to.
+  const sid = (() => { try { return localStorage.getItem("cc_token"); } catch { return null; } })();
+  const es = new EventSource((window.__API_BASE__ || "") +
+    (floorParam ? `/events?floor=${floorParam}${sid ? "&sid=" + encodeURIComponent(sid) : ""}` : "/events"));
   let ok = false;
   let backfilled = false;
-  es.addEventListener("hello", () => { ok = true; window.__worldLive = true;   // the server runs the office now
+  es.addEventListener("hello", (m) => {
+    let hello = {}; try { hello = JSON.parse(m.data); } catch {}
+    if (hello.private) {
+      // A leased floor's live desk belongs to its tenant. Visitors get the demo
+      // shift — and are told so, rather than left wondering why nothing is real.
+      es.close();
+      goSim("This floor's live desk is private to its tenant.");
+      tape("Floor", "You're watching a demo shift. This floor's live desk is private to its tenant — lease your own in the tower.", "warn");
+      window.__privateFloor = true;          // stops the alert poller 403ing forever
+      const stage = document.getElementById("stage");
+      if (stage && !document.getElementById("privnote")) {
+        const n = document.createElement("div");
+        n.id = "privnote";
+        n.innerHTML = `🔒 Demo shift — this floor's live desk is private to its tenant. <a href="/tower">Lease your own floor</a> to run one for real.`;
+        stage.appendChild(n);
+      }
+      return;
+    }
+    ok = true; window.__worldLive = true;   // the server runs the office now
     liveText.textContent = "Live";
     if (!backfilled) { backfilled = true;
       window.loadChronicle?.().then(() => { tapeEl.scrollTop = tapeEl.scrollHeight; }); }
@@ -3794,7 +3824,11 @@ async function loadCalls() {
   if (FLOOR_N == null) { callsPanel.innerHTML = `<p class="locked">No floor in this address.</p>`; return; }
   if (!callsPanel.children.length) callsPanel.innerHTML = `<p class="locked">Loading the sheet…</p>`;
   try {
-    const { body } = await call_api(`/api/floor/${FLOOR_N}/feed`);
+    const { status, body } = await call_api(`/api/floor/${FLOOR_N}/feed`);
+    if (status === 403 && body.private) {
+      callsPanel.innerHTML = `<p class="locked">This floor's call sheet is private to its tenant.<br><br>Lease your own floor in the tower to get calls sized to your risk.</p>`;
+      return;
+    }
     renderCalls(body);
     paintHud({ feed: body.feed, settings: body.settings, budget: BUDGET, rent: body.rent });
   } catch (e) {
@@ -4057,7 +4091,7 @@ async function askNotify() {
 }
 
 async function pollAlerts() {
-  if (FLOOR_N == null) return;
+  if (FLOOR_N == null || window.__privateFloor) return;
   try {
     const { body } = await call_api(`/api/floor/${FLOOR_N}/alerts`);
     renderAlerts(body.unread || []);

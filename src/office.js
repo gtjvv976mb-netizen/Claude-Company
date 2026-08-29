@@ -37,6 +37,19 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
       });
       // ?floor=N gives a tenant only their own desk's work; no argument is the house view.
       const wantFloor = url.searchParams.has("floor") ? Number(url.searchParams.get("floor")) : null;
+      // EventSource cannot send headers, so the tenant's token rides the query
+      // string (same-origin HTTPS). A visitor to a leased floor is told plainly
+      // and the stream ends — the client runs its demo shift instead.
+      if (wantFloor != null && wantFloor !== 50) {
+        const sid = url.searchParams.get("sid");
+        const who = sid ? auth.walletFor(sid) : null;
+        const l = leasing.leaseFor(wantFloor);
+        if (l && (!who || l.wallet !== who)) {
+          res.write(`event: hello\ndata: ${JSON.stringify({ private: true, floor: wantFloor })}\n\n`);
+          res.end();
+          return;
+        }
+      }
       res.write(`event: hello\ndata: ${JSON.stringify({ backlog: backlog(wantFloor), floor: wantFloor })}\n\n`);
       // A room shows two things at once: the HOUSE desk working (floor null, the same
       // for every visitor) and that floor's own activity. Filtering strictly to the floor
@@ -86,6 +99,18 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
 
       const bearer = (req.headers.authorization || "").replace(/^Bearer /, "") || null;
       const me = auth.walletFor(bearer);
+
+      /* Floors 1-49 are leased offices: their live data belongs to the tenant.
+       * The 50th floor is the house desk and stays public — it is the showroom.
+       * Enforced here, because a client that merely chooses not to look is not
+       * privacy. */
+      const HQ_FLOOR = 50;
+      const floorPrivate = (floorNo) => {
+        if (floorNo === HQ_FLOOR) return false;
+        const l = leasing.leaseFor(floorNo);
+        if (!l) return false;                     // vacant floors have nothing to hide
+        return !me || l.wallet !== me;
+      };
 
       const readBody = () => new Promise((resolve) => {
         let raw = ""; let over = false;
@@ -170,6 +195,10 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           return json(200, { callouts: identity.whaleFeed({ launchpad: pad }) });
         }
 
+        const chronFloor = url.pathname === "/api/chronicle" && url.searchParams.has("floor")
+          ? Number(url.searchParams.get("floor")) : null;
+        if (chronFloor != null && floorPrivate(chronFloor)) url.searchParams.delete("floor");
+
         const ledgerMatch = url.pathname.match(/^\/api\/(ledger|floor\/(\d+)\/ledger)$/);
         if (ledgerMatch) {
           const floorNo = ledgerMatch[2] != null ? Number(ledgerMatch[2]) : null;
@@ -200,6 +229,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
         if (alertMatch) {
           const floorNo = Number(alertMatch[1]);
           if (!alertMatch[2]) {
+            if (floorPrivate(floorNo)) return json(403, { private: true, error: "tenant only" });
             return json(200, { unread: alerts.unreadFor(floorNo), recent: alerts.recentFor(floorNo) });
           }
           if (!me) return json(401, { error: "sign in with your wallet first" });
@@ -234,6 +264,8 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           const floorNo = Number(copyMatch[1]);
           const what = copyMatch[2];
           if (what === "feed" && req.method === "GET") {
+            if (floorPrivate(floorNo)) return json(403, { private: true,
+              error: "this floor's live desk is private to its tenant" });
             return json(200, { feed: copy.feedFor(floorNo), settings: copy.settingsFor(floorNo),
                                appetites: copy.APPETITES, rent: leasing.rentStatus(floorNo),
                                record: perf.recordFor(floorNo) });
