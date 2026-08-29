@@ -380,12 +380,53 @@ export async function promoteWatches() {
   } finally { promoteBusy = false; }
 }
 
+/**
+ * THE NAMING RACE — the Grok-trade mechanism, read off the chain instead of X.
+ *
+ * The documented $42k-in-15-minutes Grok trade worked like this: a high-reach
+ * X event with a NAMEABLE gap fires, dozens of tokens launch racing to claim
+ * the name, one wins the race and runs 11x while the rest die. We do not need
+ * an X feed to see the race: when several very young launches share a name
+ * inside the same few hours, that cluster IS the on-chain shadow of a trending
+ * event. The tradeable fact is the race itself — back only the coin WINNING it
+ * (deepest book + our normal ignition read), and mark the losers untouchable,
+ * because a naming race pays exactly one winner.
+ */
+export function namingRaces(universe) {
+  const stop = new Set(["coin", "token", "the", "official", "meme", "solana", "sol", "pump", "fun", "inu", "ai"]);
+  const clusters = new Map();
+  for (const c of universe) {
+    const age = c.pair?.ageHours ?? 0;
+    if (age <= 0 || age > 12) continue;                       // the race is hours old, not days
+    const words = `${c.pair?.baseSymbol ?? ""} ${c.pair?.baseName ?? ""}`
+      .toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !stop.has(w));
+    for (const w of new Set(words)) {
+      if (!clusters.has(w)) clusters.set(w, []);
+      clusters.get(w).push(c);
+    }
+  }
+  const races = new Map();   // mint -> {theme, size, leader}
+  for (const [theme, coins] of clusters) {
+    const distinct = [...new Map(coins.map((c) => [c.mint, c])).values()];
+    if (distinct.length < 4) continue;                        // four rivals in 12h = an event, not a coincidence
+    distinct.sort((a, b) => (b.pair?.liquidityUsd ?? 0) - (a.pair?.liquidityUsd ?? 0));
+    const leader = distinct[0].mint;
+    for (const c of distinct) {
+      const prev = races.get(c.mint);
+      if (!prev || distinct.length > prev.size)
+        races.set(c.mint, { theme, size: distinct.length, leader: c.mint === leader });
+    }
+  }
+  return races;
+}
+
 let freshBusy = false;
 export async function freshScan({ minScore = 45 } = {}) {
   if (freshBusy) return { skipped: "busy" };
   freshBusy = true;
   try {
     const universe = await sweep();
+    const races = namingRaces(universe);
     const young = [];
     for (const c of universe) {
       if (liveCallFor(c.mint)) continue;
@@ -405,8 +446,16 @@ export async function freshScan({ minScore = 45 } = {}) {
           || tx < (cfg.screen?.minTxns24h ?? 50)) continue;
       const cat = classify(c);
       const r = rank(c);
+      // The race adjustment: the winner of a live naming race gets the seat;
+      // the losers are untouchable at any score — the race pays one coin.
+      const race = races.get(c.mint);
+      if (race) {
+        if (race.leader) { r.score += 18; r.why.push(`winning a naming race: ${race.size} launches chasing "${race.theme}"`); }
+        else { r.score -= 40; r.why.push(`losing a naming race for "${race.theme}" — the winner takes it all`); }
+      }
       if (r.score <= 0) continue;
-      young.push({ ...c, category: cat.category, score: r.score, rankWhy: r.why });
+      young.push({ ...c, category: cat.category, score: r.score, rankWhy: r.why,
+        race: race?.leader ? race : null });
     }
     young.sort((a, b) => b.score - a.score);
     const top = young[0];
@@ -414,7 +463,10 @@ export async function freshScan({ minScore = 45 } = {}) {
       top: top ? { symbol: top.pair?.baseSymbol, score: top.score } : null });
     if (!top || top.score < minScore) return { young: young.length, workedUp: 0 };
 
-    const hook = `fresh scan \u00b7 ignition \u00b7 ${top.category}${top.launchpad ? ` \u00b7 ${top.launchpad}` : ""}`;
+    const hook = `fresh scan \u00b7 ignition \u00b7 ${top.category}${top.launchpad ? ` \u00b7 ${top.launchpad}` : ""}` +
+      (top.race ? ` \u00b7 WINNING A NAMING RACE: ${top.race.size} fresh launches share "${top.race.theme}" \u2014 ` +
+        `establish which X event fired this race and whether THIS is the canonical token for it; ` +
+        `the race pays one winner and the rest go to zero` : "");
     const rec = await runFor(null, () => workup(new Date().toISOString().replace(/[:.]/g, "-"), top.mint, hook));
     const pub = publishApproved(rec, { category: top.category, launchpad: top.launchpad });
     return { young: young.length, workedUp: 1, outcome: pub.outcome ?? rec?.outcome ?? rec?.finalDecision };
