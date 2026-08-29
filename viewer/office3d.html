@@ -410,7 +410,6 @@ select.dp-in{cursor:pointer}
     <div class="stat">Wallet <b id="s-wal">—</b></div>
     <div class="stat">Credit <b id="s-bal">—</b></div>
     <div class="stat" id="s-rentwrap" hidden>Rent <b id="s-rent">—</b></div>
-    <button class="shift" id="shiftbtn" type="button" title="Switch the floor's lighting">&#x263E; Night shift</button>
     <div class="live" id="s-live"><span class="dot"></span><span id="s-livetext">Connecting</span></div>
   </div>
 </div>
@@ -448,6 +447,7 @@ select.dp-in{cursor:pointer}
     <button class="dtab" id="tab-stats" role="tab" aria-selected="false">Stats</button>
     <button class="dtab" id="tab-ranks" role="tab" aria-selected="false">Ranks</button>
     <button class="dtab" id="tab-ledger" role="tab" aria-selected="false">Ledger</button>
+    <button class="dtab" id="shiftbtn" type="button" aria-label="Switch between day and night shift" title="Switch the floor's lighting">&#x263E;</button>
   </div>
 
   <aside class="rail" id="rail">
@@ -588,9 +588,9 @@ window.__resetView = resetView;
   if (!btn) return;
   const label = () => {
     const day = document.documentElement.dataset.theme === "light";
-    btn.textContent = day ? "\u2600 Day shift" : "\u263e Night shift";
-    btn.title = day ? "The floor in daylight. Click for the night shift."
-                    : "The floor after hours. Click for the day shift.";
+    btn.textContent = day ? "\u2600" : "\u263e";
+    btn.title = day ? "Day shift. Click for the night shift."
+                    : "Night shift. Click for the day shift.";
   };
   btn.addEventListener("click", () => {
     const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
