@@ -2717,6 +2717,7 @@ function tape(seat, msg, cls = "") {
   while (tapeEl.children.length > 240) tapeEl.firstChild.remove();
   tapeEl.scrollTop = tapeEl.scrollHeight;
 }
+window.tape = tape;
 
 function memo({ symbol, decision, thesis, conviction, size, stop, gmgn }) {
   const m = document.createElement("div");
@@ -3212,6 +3213,11 @@ function togglePane(which, onOpen) {
 
 document.getElementById("rail-close").addEventListener("click", closeRail);
 document.getElementById("tab-crew").addEventListener("click", () => togglePane("crew"));
+// Three separate module scripts share this page, and module scope does not carry
+// between them — the old Calls handler duplicated the pane logic for exactly this
+// reason. The dock helpers go on window so the other scripts can reach them.
+window.togglePane = togglePane;
+window.showPane = showPane;
 tabDesk.addEventListener("click", () => togglePane("desk", loadRoom));
 tabTape.addEventListener("click", () => togglePane("tape"));
 tabInbox.addEventListener("click", () => togglePane("inbox"));
@@ -3419,6 +3425,55 @@ const tabCalls = document.getElementById("tab-calls");
 
 tabCalls.addEventListener("click", () => togglePane("calls", loadCalls));
 
+/* ── buying a call, without ever touching the transaction ──────────────────
+   The desk's whole security story is that it cannot sign, so the buy path must
+   not create a place where it could. Jupiter's embeddable swap widget does the
+   quoting, wallet connect and signing entirely inside its own audited code —
+   the page only says WHICH token and HOW MUCH, prefilled from the call sheet.
+   The script loads lazily on the first Buy click: visitors who never trade
+   never run third-party code. If it cannot load (adblock, offline), we fall
+   back to the external GMGN link, which is what the button did before. */
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+let jupLoading = null;
+function loadJupiter() {
+  if (window.Jupiter) return Promise.resolve(true);
+  if (jupLoading) return jupLoading;
+  jupLoading = new Promise((res) => {
+    const sc = document.createElement("script");
+    sc.src = "https://plugin.jup.ag/plugin-v1.js";
+    sc.async = true;
+    sc.onload = () => res(!!window.Jupiter);
+    sc.onerror = () => res(false);
+    document.head.appendChild(sc);
+    setTimeout(() => res(!!window.Jupiter), 8000);
+  });
+  return jupLoading;
+}
+
+async function openSwap({ mint, symbol, sol, side = "buy" }) {
+  const ok = await loadJupiter();
+  if (!ok) {
+    window.open(`https://gmgn.ai/sol/token/${mint}?tab=${side}`, "_blank", "noopener");
+    return;
+  }
+  const buying = side === "buy";
+  window.Jupiter.init({
+    displayMode: "modal",
+    formProps: {
+      initialInputMint: buying ? SOL_MINT : mint,
+      initialOutputMint: buying ? mint : SOL_MINT,
+      // Raw units: SOL is 9 decimals. Sells start empty — only the wallet knows
+      // the balance, and guessing a number here would just be wrong.
+      ...(buying && sol ? { initialAmount: String(Math.round(sol * 1e9)) } : {}),
+    },
+    onSuccess: ({ txid }) => {
+      // tape() lives in another module script; reach it via window and shrug if the
+      // tape is not there — the wallet already showed the user their fill.
+      if (txid) window.tape?.("Filled", `${symbol || mint.slice(0, 6)} — ${txid.slice(0, 8)}… (your wallet, your signature)`, "hi");
+    },
+  });
+}
+
 async function loadCalls() {
   if (FLOOR_N == null) { callsPanel.innerHTML = `<p class="locked">No floor in this address.</p>`; return; }
   if (!callsPanel.children.length) callsPanel.innerHTML = `<p class="locked">Loading the sheet…</p>`;
@@ -3492,11 +3547,15 @@ function renderCalls({ feed = [], settings }) {
     if (c.verdict === "offered" && c.status === "live") {
       const act = document.createElement("div");
       act.className = "act";
+      const buy = document.createElement("button");
+      buy.className = "dp-btn"; buy.type = "button";
+      buy.textContent = c.taken ? `Buy again (${c.size_sol} SOL)` : `Buy ${c.size_sol} SOL`;
+      buy.onclick = () => openSwap({ mint: c.mint, symbol: c.symbol, sol: c.size_sol, side: "buy" });
       const link = document.createElement("a");
-      link.className = "dp-btn";
+      link.className = "dp-btn ghost";
       link.href = `https://gmgn.ai/sol/token/${c.mint}?tab=buy`;
       link.target = "_blank"; link.rel = "noopener";
-      link.textContent = c.taken ? "Open again" : "Place it yourself";
+      link.textContent = "GMGN";
       const mark = document.createElement("button");
       mark.className = "dp-btn ghost"; mark.type = "button";
       mark.textContent = c.taken ? "Taken ✓" : "Mark as taken";
@@ -3504,7 +3563,7 @@ function renderCalls({ feed = [], settings }) {
         await call_api(`/api/floor/${FLOOR_N}/take`, { method: "POST", body: JSON.stringify({ callId: c.call_id, taken: !c.taken }) });
         loadCalls();
       };
-      act.append(link, mark);
+      act.append(buy, link, mark);
       el.appendChild(act);
     }
     callsPanel.appendChild(el);
@@ -3512,7 +3571,7 @@ function renderCalls({ feed = [], settings }) {
 
   const note = document.createElement("p");
   note.className = "dp-note";
-  note.textContent = "Every ticket is unsigned. The desk never holds your keys and never places a trade — you sign, in your own wallet, or you don't.";
+  note.textContent = "Buy opens a swap you sign in your own wallet — the desk never holds keys, never signs, and never sees the transaction. The size is a suggestion from your floor's risk settings; your wallet shows the real numbers before anything happens.";
   callsPanel.appendChild(note);
 }
 
@@ -3701,10 +3760,10 @@ function renderAlerts(unread) {
     why.textContent = (a.body || "").split("\n")[0];
     const go = document.createElement("div"); go.className = "go";
     if (a.mint) {
-      const sell = document.createElement("a");
-      sell.href = `https://gmgn.ai/sol/token/${a.mint}?tab=sell`;
-      sell.target = "_blank"; sell.rel = "noopener";
-      sell.textContent = "Open to sell";
+      const sell = document.createElement("button");
+      sell.type = "button";
+      sell.textContent = "Sell now";
+      sell.onclick = () => openSwap({ mint: a.mint, side: "sell" });
       go.appendChild(sell);
     }
     const ack = document.createElement("button");
