@@ -314,6 +314,17 @@ select.dp-in{cursor:pointer}
 .memo .unsigned{margin-top:7px; font-size:10.5px; color:var(--ink-faint); line-height:1.45}
 .empty{color:var(--ink-faint); font-size:12.5px; text-align:center; padding:26px 12px; line-height:1.6}
 
+.datapanel{flex:1; min-height:0; overflow-y:auto; display:none; flex-direction:column; gap:9px; padding:12px}
+.datapanel.on{display:flex}
+.datarow{
+  display:flex; align-items:baseline; gap:10px; padding:8px 10px;
+  background:var(--card); border:1px solid var(--card-line); border-radius:3px; font-size:12.5px;
+}
+.datarow b{font-family:"JetBrains Mono",ui-monospace,monospace; font-size:12.5px; font-variant-numeric:tabular-nums}
+.datarow .grow{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.datarow .up{color:var(--good)} .datarow .down{color:var(--bad)}
+.datarow .faint{color:var(--ink-faint); font-size:10.5px}
+.data-h{font-size:10px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-faint); margin:4px 0 0}
 .crewpanel{flex:1; min-height:0; overflow-y:auto; display:none; flex-direction:column}
 .crewpanel.on{display:flex}
 .legend{padding:11px 13px; display:flex; flex-wrap:wrap; gap:6px 10px}
@@ -324,7 +335,7 @@ select.dp-in{cursor:pointer}
 
 <div class="topbar">
   <div class="firm">Claude <em>&amp;</em> Co.</div>
-  <div class="tag">Solana Research Desk</div>
+  <div class="tag" id="s-floortag">Section 14 · The House Desk</div>
   <div class="spacer"></div>
   <div class="topstats">
     <div class="stat">Live calls <b id="s-live-calls">—</b></div>
@@ -359,6 +370,9 @@ select.dp-in{cursor:pointer}
     <button class="dtab" id="tab-calls" role="tab" aria-selected="false">Calls</button>
     <button class="dtab" id="tab-desk" role="tab" aria-selected="false">Desk</button>
     <button class="dtab" id="tab-crew" role="tab" aria-selected="false">Crew</button>
+    <button class="dtab" id="tab-whales" role="tab" aria-selected="false">Whales<span class="dot" id="whale-dot"></span></button>
+    <button class="dtab" id="tab-ranks" role="tab" aria-selected="false">Ranks</button>
+    <button class="dtab" id="tab-ledger" role="tab" aria-selected="false">Ledger</button>
   </div>
 
   <aside class="rail" id="rail">
@@ -370,6 +384,9 @@ select.dp-in{cursor:pointer}
     <div class="inbox" id="inbox"></div>
     <div class="deskpanel" id="deskpanel"></div>
     <div class="callspanel" id="callspanel"></div>
+    <div class="datapanel" id="whalespanel"></div>
+    <div class="datapanel" id="rankspanel"></div>
+    <div class="datapanel" id="ledgerpanel"></div>
     <div class="crewpanel" id="crewpanel">
       <div class="legend" id="legend"></div>
       <p class="note">Every figure is one agent. They move because a pipeline stage actually
@@ -1072,6 +1089,19 @@ function buildSpark(radius, rays, thickness, colour, emissive = 0.55) {
 // desk it sits at. Only one seat wants it, and for that seat it is the whole point.
 const AVATAR_SCALE = { Forensics: 1.14, Liquidity: 1.04, Technical: 0.94, Narrative: 0.93, "Red Team": 1.07, Risk: 0.6, Execution: 1.09, Compliance: 1.06, Scribe: 0.8 };
 
+/* A tenant's Managing Director wears what the tenant picked. Costumes are palette
+   work, not geometry — the same figure, dressed. Ids match the server's list. */
+const COSTUME_PAL = {
+  charcoal:  { shirt: 0x3a4045, trousers: 0x2c3236, apron: 0x3a4045, boots: 0x1d2124 },
+  tweed:     { shirt: 0x8a6f4d, trousers: 0x5f5340, apron: 0x8a6f4d, boots: 0x453629 },
+  flight:    { shirt: 0x6b4f35, trousers: 0x2f3a3f, apron: 0x6b4f35, boots: 0x1d2124 },
+  trench:    { shirt: 0x9a8a68, trousers: 0x4a4438, apron: 0x9a8a68, boots: 0x3a332a },
+  tracksuit: { shirt: 0x6b3f8f, trousers: 0x6b3f8f, apron: 0xd7a3c8, boots: 0xf4f4f4 },
+  labcoat:   { shirt: 0xf0e4c7, trousers: 0x3a4a50, apron: 0xf0e4c7, boots: 0x2f3a3f },
+  tux:       { shirt: 0x1d1916, trousers: 0x1d1916, apron: 0xf4f4f4, boots: 0x1d1916 },
+  vest:      { shirt: 0xd7f04a, trousers: 0x2f3a3f, apron: 0xe0ad3d, boots: 0x5f3e29 },
+};
+
 /* ── figures ────────────────────────────────────────────────────────────────
    A shared humanoid with props bolted on is enough for a hat; it is not enough
    for a platypus or a robot cop. FIGURE rebuilds the body itself: it repaints the palette, drops parts that character does not have, and
@@ -1647,6 +1677,7 @@ function buildAvatar(spec, index) {
 
   const fig = FIGURE[spec.id] || {};
   Object.assign(pal, fig.pal || {});
+  if (spec.costume && COSTUME_PAL[spec.costume]) Object.assign(pal, COSTUME_PAL[spec.costume]);
 
   // The CEO has no hair and no eyes — the spark stands in for a face. Other figures
   // drop whatever that character does not have.
@@ -2581,6 +2612,43 @@ STAFF.forEach((spec, i) => {
   PICKABLE.push(hit);
 });
 
+/** Tear one worker out of the scene and build them again from their (edited) spec.
+ * Used exactly once so far: the boss. On the house floor the corner office is BIG M;
+ * on a leased floor it is the tenant's Managing Director, in the tenant's costume,
+ * under the tenant's name. */
+function rebuildWorker(seatId) {
+  const idx = STAFF.findIndex((x) => x.id === seatId);
+  if (idx < 0) return;
+  const old = workers[seatId];
+  if (old) {
+    scene.remove(old.g);
+    for (let i = PICKABLE.length - 1; i >= 0; i--)
+      if (PICKABLE[i].userData.seat === seatId) PICKABLE.splice(i, 1);
+  }
+  const w = new Worker(STAFF[idx], idx);
+  workers[seatId] = w;
+  if (old && old.taskGroup) w.taskGroup = old.taskGroup;
+  const hit = new THREE.Mesh(BOX, new THREE.MeshBasicMaterial({ visible: false }));
+  hit.scale.set(0.86, 2.0, 0.86);
+  hit.position.set(0, 1.0, 0);
+  hit.userData.seat = seatId;
+  w.g.add(hit);
+  PICKABLE.push(hit);
+}
+
+window.applyIdentity = (identity) => {
+  if (!identity || identity.isHQ) return;
+  const spec = STAFF.find((x) => x.id === "CEO");
+  const name = (identity.mdName || "MANAGING DIRECTOR").toUpperCase();
+  const costume = identity.costume || null;
+  if (spec.name === name && (spec.costume || null) === costume) return;   // nothing changed
+  spec.name = name;
+  spec.role = "Managing Director";
+  spec.claude = false;                    // the spark belongs to the penthouse
+  spec.costume = costume;
+  rebuildWorker("CEO");
+};
+
 /* ── the dossier ─────────────────────────────────────────────────────────── */
 const dossierEl = document.getElementById("dossier");
 const dNameEl = document.getElementById("d-name"), dSeatEl = document.getElementById("d-seat");
@@ -3179,8 +3247,10 @@ const tapeEl2 = document.getElementById("tape");
 
 const RAIL = document.getElementById("rail");
 const RAIL_TITLE = document.getElementById("rail-title");
-const PANE_TITLE = { tape: "The Tape", inbox: "Big M", desk: "My Desk", calls: "Live Calls", crew: "The Crew" };
-const PANE_TABS = { tape: "tab-tape", inbox: "tab-inbox", desk: "tab-desk", calls: "tab-calls", crew: "tab-crew" };
+const PANE_TITLE = { tape: "The Tape", inbox: "Big M", desk: "My Desk", calls: "Live Calls", crew: "Section 14",
+  whales: "Whale Callouts", ranks: "The Leaderboard", ledger: "The Record Book" };
+const PANE_TABS = { tape: "tab-tape", inbox: "tab-inbox", desk: "tab-desk", calls: "tab-calls", crew: "tab-crew",
+  whales: "tab-whales", ranks: "tab-ranks", ledger: "tab-ledger" };
 let openPane = null;
 
 function showPane(which) {
@@ -3191,6 +3261,8 @@ function showPane(which) {
   panel.classList.toggle("on", which === "desk");
   document.getElementById("callspanel").classList.toggle("on", which === "calls");
   document.getElementById("crewpanel").classList.toggle("on", which === "crew");
+  for (const pane of ["whales", "ranks", "ledger"])
+    document.getElementById(pane + "panel").classList.toggle("on", which === pane);
 
   for (const [pane, id] of Object.entries(PANE_TABS))
     document.getElementById(id).setAttribute("aria-selected", String(pane === which));
@@ -3215,6 +3287,9 @@ function togglePane(which, onOpen) {
 
 document.getElementById("rail-close").addEventListener("click", closeRail);
 document.getElementById("tab-crew").addEventListener("click", () => togglePane("crew"));
+for (const pane of ["whales", "ranks", "ledger"])
+  document.getElementById("tab-" + pane).addEventListener("click", () =>
+    togglePane(pane, () => window["load_" + pane]?.()));
 // Three separate module scripts share this page, and module scope does not carry
 // between them — the old Calls handler duplicated the pane logic for exactly this
 // reason. The dock helpers go on window so the other scripts can reach them.
@@ -3228,6 +3303,26 @@ const fmtTok = (base, dec) => (Number(BigInt(base) / 10n ** BigInt(Math.max(0, d
   .toLocaleString(undefined, { maximumFractionDigits: 0 });
 
 let ROOM = null;
+
+/** "50th Floor · Section 14" on the house desk; "12th Floor · <their name>" on a
+ * tenant's. Fetched once at boot rather than waiting for the Desk tab, because the
+ * label and the boss figure are wrong until it lands. */
+async function primeIdentity() {
+  try {
+    const { status, body } = await api(`/api/floor/${FLOOR}`);
+    if (status !== 200) return;
+    ROOM = body;
+    const tag = document.getElementById("s-floortag");
+    const id = body.identity || {};
+    if (tag && body.floorLabel) {
+      tag.textContent = id.isHQ
+        ? `${body.floorLabel} \u00b7 Section 14 \u00b7 The House Desk`
+        : `${body.floorLabel} \u00b7 ${id.floorName || "Unnamed floor"}`;
+    }
+    window.applyIdentity?.(id, body.floorLabel);
+  } catch {}
+}
+if (FLOOR != null) primeIdentity();
 
 async function loadRoom() {
   if (FLOOR == null) { panel.innerHTML = `<p class="locked">No floor in this address.</p>`; return; }
@@ -3309,6 +3404,40 @@ function renderRoom() {
       go.disabled = false; go.textContent = "Research";
     }
     setTimeout(loadRoom, 800);
+  });
+
+  // ── the nameplate: what a tenant gets to call things ──
+  panel.appendChild(mk("div", "dp-h", "Nameplate"));
+  const idNow = ROOM.identity || {};
+  const fIn = mk("input", "dp-in");
+  fIn.value = idNow.floorName || ""; fIn.maxLength = 28;
+  fIn.placeholder = "Name this floor"; fIn.setAttribute("aria-label", "Floor name");
+  const mIn = mk("input", "dp-in");
+  mIn.value = idNow.mdName || ""; mIn.maxLength = 24;
+  mIn.placeholder = "Name your Managing Director"; mIn.setAttribute("aria-label", "Managing Director name");
+  const cSel = mk("select", "dp-in");
+  for (const c of [["", "Costume: the default"], ["charcoal", "The Charcoal Suit"], ["tweed", "Tweed & Elbow Patches"],
+                   ["flight", "The Flight Jacket"], ["trench", "The Trench"], ["tracksuit", "Velour Tracksuit"],
+                   ["labcoat", "The Lab Coat"], ["tux", "Evening Wear"], ["vest", "Hi-Vis & Hard Hat"]]) {
+    const o = document.createElement("option"); o.value = c[0]; o.textContent = c[1];
+    if (idNow.costume === c[0]) o.selected = true;
+    cSel.appendChild(o);
+  }
+  cSel.setAttribute("aria-label", "Managing Director costume");
+  const idSave = mk("button", "dp-btn ghost", "Save nameplate");
+  const idMsg = mk("p", "dp-note",
+    "The floor takes your name on the tower list. Your figurehead is a Managing Director \u2014 CEO is the penthouse's title.");
+  panel.append(fIn, mIn, cSel, idSave, idMsg);
+  idSave.addEventListener("click", async () => {
+    idSave.textContent = "Saving\u2026";
+    const payload = {};
+    if (fIn.value.trim() !== (idNow.floorName || "")) payload.floorName = fIn.value.trim();
+    if (mIn.value.trim() !== (idNow.mdName || "")) payload.mdName = mIn.value.trim();
+    if (cSel.value && cSel.value !== (idNow.costume || "")) payload.costume = cSel.value;
+    const { status, body } = await api(`/api/floor/${FLOOR}/identity`, { method: "POST", body: JSON.stringify(payload) });
+    idSave.textContent = "Save nameplate";
+    if (status === 200) { idMsg.textContent = "Saved."; primeIdentity(); }
+    else idMsg.textContent = (body.errors || [body.error || "could not save"]).join(" \u00b7 ");
   });
 
   // ── settings ──
@@ -3810,6 +3939,125 @@ function paintWhales(w, el) {
     el.appendChild(r);
   }
 }
+
+/* ── the three record panels: whales, ranks, the book ─────────────────────
+   All read-only, all real rows from the server, all honest when empty. */
+const money = (v) => v == null ? "—" : (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 2 });
+const ago = (ts) => {
+  const m = Math.max(0, Math.round((Date.now() - ts) / 60000));
+  return m < 60 ? m + "m ago" : m < 1440 ? Math.round(m / 60) + "h ago" : Math.round(m / 1440) + "d ago";
+};
+const drow = (parts) => {
+  const r = document.createElement("div"); r.className = "datarow";
+  for (const [cls, text] of parts) {
+    const e = document.createElement(cls === "b" || cls.startsWith("b ") ? "b" : "span");
+    if (cls !== "b" && cls !== "span") e.className = cls.replace(/^b /, "");
+    e.textContent = text;
+    r.appendChild(e);
+  }
+  return r;
+};
+const empty = (el, text) => { const p = document.createElement("p"); p.className = "locked"; p.textContent = text; el.appendChild(p); };
+
+window.load_whales = async () => {
+  const el = document.getElementById("whalespanel");
+  el.innerHTML = "";
+  const h = document.createElement("p"); h.className = "dp-note";
+  h.textContent = "Pump.fun callouts: distinct wallets taking size, net of the pool's own mirrored side. The desk watches; whether it matters is Section 14's call.";
+  el.appendChild(h);
+  try {
+    const { body } = await call_api("/api/whales/feed?pad=pump.fun");
+    const rows = body.callouts || [];
+    localStorage.setItem("cc-whales-seen", String(rows[0]?.ts || 0));
+    document.getElementById("whale-dot")?.classList.remove("on");
+    if (!rows.length) return empty(el, "No pump.fun callouts on record yet. They appear here as sweeps find distinct whales taking size.");
+    for (const w of rows) {
+      el.appendChild(drow([
+        ["b grow", w.symbol || w.mint.slice(0, 6)],
+        ["span", `${w.buyers ?? "?"} buying · ${w.sellers ?? "?"} selling`],
+        ["b " + ((w.net_usd ?? 0) >= 0 ? "up" : "down"), money(w.net_usd)],
+        ["faint", ago(w.ts)],
+      ]));
+    }
+  } catch { empty(el, "Could not reach the desk."); }
+};
+
+window.load_ranks = async () => {
+  const el = document.getElementById("rankspanel");
+  el.innerHTML = "";
+  const h = document.createElement("p"); h.className = "dp-note";
+  h.textContent = "Floors ranked by realised, settled results only — open positions are not achievement. Rewards will hang off this board.";
+  el.appendChild(h);
+  try {
+    const { body } = await call_api("/api/leaderboard");
+    const rows = body.floors || [];
+    if (!rows.length) return empty(el, "No settled results anywhere in the building yet. The first floor to close a copied call ranks first.");
+    rows.forEach((f, i) => {
+      el.appendChild(drow([
+        ["b", "#" + (i + 1)],
+        ["b grow", (f.floor_name || ordC(f.floor_no)) + (f.md_name ? " · MD " + f.md_name : "")],
+        ["span", f.settled + " settled"],
+        ["b " + (f.pnl_usd >= 0 ? "up" : "down"), money(f.pnl_usd)],
+      ]));
+    });
+  } catch { empty(el, "Could not reach the desk."); }
+};
+
+window.load_ledger = async () => {
+  const el = document.getElementById("ledgerpanel");
+  el.innerHTML = "";
+  try {
+    const { body } = await call_api(FLOOR_N != null ? `/api/floor/${FLOOR_N}/ledger` : "/api/ledger");
+    const t = body.totals || {};
+    const h = document.createElement("p"); h.className = "dp-note";
+    h.textContent = `The record book. House: ${t.house?.calls ?? 0} calls, ${t.house?.live ?? 0} live, ` +
+      `${t.house?.closed_up ?? 0} closed up, ${t.house?.closed_down ?? 0} closed down. ` +
+      `Floors: ${t.floors?.settled ?? 0} settled, ${money(t.floors?.pnl_usd)} realised. ` +
+      "This page exists so the desk can be judged on what it said, and the floors on what they did.";
+    el.appendChild(h);
+
+    const hh = document.createElement("div"); hh.className = "data-h"; hh.textContent = "The house's calls";
+    el.appendChild(hh);
+    if (!(body.house || []).length) empty(el, "No calls published yet.");
+    for (const c of body.house || []) {
+      el.appendChild(drow([
+        ["b grow", (c.symbol || c.mint.slice(0, 6)) + (c.launchpad ? " · " + c.launchpad : "")],
+        ["span", c.status === "live" ? "live" : (c.close_reason || "closed").replace(/_/g, " ")],
+        ["b " + ((c.move_pct ?? 0) >= 0 ? "up" : "down"), c.move_pct != null ? c.move_pct + "%" : "—"],
+        ["faint", ago(c.opened_at)],
+      ]));
+    }
+
+    const fh = document.createElement("div"); fh.className = "data-h";
+    fh.textContent = FLOOR_N != null ? "This floor's settled trades" : "Every floor's settled trades";
+    el.appendChild(fh);
+    if (!(body.floors || []).length) empty(el, "Nothing settled yet. A trade lands here when a copied call is fully closed and synced.");
+    for (const r of body.floors || []) {
+      el.appendChild(drow([
+        ["b grow", (r.floor_name ? r.floor_name : ordC(r.floor_no)) + (r.symbol ? " · " + r.symbol : "")],
+        ["span", money(r.bought_usd) + " in"],
+        ["b " + (r.pnl_usd >= 0 ? "up" : "down"), money(r.pnl_usd)],
+        ["faint", ago(r.settled_at)],
+      ]));
+    }
+  } catch { el.innerHTML = ""; empty(el, "Could not reach the desk."); }
+};
+
+/** Client-side ordinal, matching the server's: the HUD speaks in floors. */
+function ordC(n) {
+  const t = n % 10, h = n % 100;
+  return n + (h >= 11 && h <= 13 ? "th" : t === 1 ? "st" : t === 2 ? "nd" : t === 3 ? "rd" : "th") + " Floor";
+}
+
+/* light the whale dot when the feed has rows newer than last look */
+(async () => {
+  try {
+    const { body } = await call_api("/api/whales/feed?pad=pump.fun");
+    const newest = body.callouts?.[0]?.ts || 0;
+    if (newest > Number(localStorage.getItem("cc-whales-seen") || 0))
+      document.getElementById("whale-dot")?.classList.add("on");
+  } catch {}
+})();
 
 if (FLOOR_N != null) { refreshBudget(); loadCalls(); pollAlerts(); askNotify(); }
 setInterval(pollAlerts, 20000);
