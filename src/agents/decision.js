@@ -2,6 +2,7 @@ import { ask } from "../lib/llm.js";
 import { RedTeamOut, RiskOut, PMOut, TicketOut, ScoutOut } from "./schemas.js";
 import { cfg } from "../config.js";
 import { recentLessons } from "./review.js";
+import { emit } from "../lib/bus.js";
 
 // Compact on purpose: 2-space pretty-printing inflated every downstream prompt
 // ~25% for nothing a model needs. The PM and Risk read ~20k tokens per run of
@@ -131,13 +132,7 @@ Returning 0 is a real and frequently correct answer.`,
 }
 
 /** PM — the only seat that decides. Must answer the red team out loud. */
-export async function runPM(ev, analysts, redteam, risk, weightedScore) {
-  return ask({
-    seat: "PM",
-    model: cfg.models.pm,
-    effort: cfg.effort.pm,
-    schema: PMOut,
-    system: `You are the PORTFOLIO MANAGER. You are the only seat that decides.
+const PM_SYSTEM = `You are the PORTFOLIO MANAGER. You are the only seat that decides.
 
 You have five analysts, an adversary, and a risk officer. Your job is not to average them —
 it is to work out which of them is actually right about THIS token, and to say so.
@@ -178,8 +173,9 @@ Two publication rules, absolute:
 - No proposal without an explicit INVALIDATION — the observable condition under which
   this thesis is wrong. "It goes down" is not an invalidation; a level or event is.
 - Never propose into a spike. If the price is vertical right now, the people copying
-  this call minutes from now are the exit liquidity. Wait or pass.`,
-    prompt:
+  this call minutes from now are the exit liquidity. Wait or pass.`;
+
+const pmPrompt = (ev, analysts, redteam, risk, weightedScore) =>
       `Decide on ${ev.symbol} (${ev.mint}).\n\n` +
       `=== LESSONS FROM CLOSED CALLS (Colonel Debrief) ===\n` +
       `${recentLessons(5).map((l) => `[${l.grade}] ${l.symbol}: ${l.lesson}`).join("\n") || "(no closed calls yet)"}\n\n` +
@@ -187,7 +183,35 @@ Two publication rules, absolute:
       `=== RED TEAM ===\n${JSON.stringify(redteam)}\n\n` +
       `=== RISK ===\n${JSON.stringify(risk)}\n\n` +
       `=== WEIGHTED ANALYST COMPOSITE ===\n${weightedScore.toFixed(1)} / 100 ` +
-      `(weights: ${JSON.stringify(cfg.weights)})`,
+      `(weights: ${JSON.stringify(cfg.weights)})`;
+
+export async function runPM(ev, analysts, redteam, risk, weightedScore, opts = {}) {
+  // A tenant floor may hire Grok as its Managing Director: the PM seat of that
+  // floor's runs thinks on grok-4.6. Same brief, same schema, same rails —
+  // the brain is the only thing that changes, and a Grok answer that cannot
+  // hold the schema falls back to the Claude seat rather than break the run.
+  if (opts.pmProvider === "grok") {
+    const { grokAsk } = await import("../lib/grok.js");
+    const g = await grokAsk({
+      seat: "PM(grok)",
+      system: PM_SYSTEM,
+      prompt: pmPrompt(ev, analysts, redteam, risk, weightedScore),
+      shape: `{"decision":"PROPOSE|WATCH|PASS","conviction":0-100,"thesis":"...","invalidation":"...",` +
+        `"time_horizon":"...","how_red_team_was_answered":"...","key_disagreement":"...",` +
+        `"watch_triggers":["..."],` +
+        `"watch_rules":{"price_above_usd":number|null,"buys_h1_at_least":number|null,"liq_at_least_usd":number|null,"hours":1-72} or null}`,
+      validate: PMOut,
+    });
+    if (g.ok) { emit("seat:verdict", { seat: "PM", detail: "thinking on Grok" }); return g.out; }
+    emit("seat:failed", { seat: "PM(grok)", error: g.error + " — falling back to the Claude seat" });
+  }
+  return ask({
+    seat: "PM",
+    model: cfg.models.pm,
+    effort: cfg.effort.pm,
+    schema: PMOut,
+    system: PM_SYSTEM,
+    prompt: pmPrompt(ev, analysts, redteam, risk, weightedScore),
   });
 }
 

@@ -1,4 +1,5 @@
 import db, { ensureColumn } from "./lib/store.js";
+import crypto from "node:crypto";
 import { emit } from "./lib/bus.js";
 import { CATEGORY_RISK } from "./market.js";
 
@@ -72,6 +73,9 @@ CREATE INDEX IF NOT EXISTS idx_deliveries_floor ON deliveries(floor_no, id DESC)
  */
 // Migrations for databases that predate these columns — production is always one of them.
 ensureColumn("copy_settings", "bankroll_sol", "REAL NOT NULL DEFAULT 5");
+ensureColumn("copy_settings", "webhook_url", "TEXT");
+ensureColumn("copy_settings", "executor_url", "TEXT");
+ensureColumn("copy_settings", "executor_secret", "TEXT");
 ensureColumn("copy_settings", "launchpads", "TEXT");
 ensureColumn("deliveries", "size_sol", "REAL", "size_usd");
 
@@ -106,11 +110,19 @@ export function saveSettings(floorNo, patch) {
     ? (Array.isArray(patch.categories) ? JSON.stringify(patch.categories.filter((c) => c in CATEGORY_RISK)) : null)
     : raw.categories ?? null;
   const hook = "webhookUrl" in patch ? (patch.webhookUrl || null) : cur.webhook_url ?? null;
+  // The executor lane: setting a URL mints the floor's signing secret once;
+  // clearing the URL keeps the secret so re-enabling doesn't rotate it under
+  // a bot the tenant already configured.
+  let execUrl = cur.executor_url ?? null, execSecret = cur.executor_secret ?? null;
+  if ("executorUrl" in patch) {
+    execUrl = patch.executorUrl || null;
+    if (execUrl && !execSecret) execSecret = crypto.randomBytes(24).toString("hex");
+  }
   const pads = "launchpads" in patch
     ? (Array.isArray(patch.launchpads) ? JSON.stringify(patch.launchpads.filter((l) => LAUNCHPADS.includes(l))) : null)
     : raw.launchpads ?? null;
-  db.prepare("UPDATE copy_settings SET appetite=?, bankroll_sol=?, auto=?, categories=?, launchpads=?, webhook_url=?, updated_at=? WHERE floor_no=?")
-    .run(appetite, bankroll, auto, cats, pads, hook, Date.now(), floorNo);
+  db.prepare("UPDATE copy_settings SET appetite=?, bankroll_sol=?, auto=?, categories=?, launchpads=?, webhook_url=?, executor_url=?, executor_secret=?, updated_at=? WHERE floor_no=?")
+    .run(appetite, bankroll, auto, cats, pads, hook, execUrl, execSecret, Date.now(), floorNo);
   return settingsFor(floorNo);
 }
 

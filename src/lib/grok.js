@@ -1,0 +1,157 @@
+/**
+ * GROK — the xAI client, for the two jobs Grok is genuinely best at here:
+ *
+ *   1. THE X READ. Grok's x_search tool reads X natively — the one evidence
+ *      source this desk could never reach: real cashtag velocity, whether
+ *      distinct pre-existing voices or one pasted script carry a story, which
+ *      event fired a naming race. One read per shortlisted candidate.
+ *   2. THE TENANT'S MD BRAIN. A floor may hire Grok as its Managing Director:
+ *      the PM seat of THAT floor's runs thinks on grok-4.6 instead of Claude.
+ *      Every guard rail around the seat — screen, Pinocchio gate, red team,
+ *      compliance, the no-keys wall — is ours and does not move.
+ *
+ * Everything here fails OPEN and quiet: no XAI_API_KEY, a changed response
+ * shape, a refusal to emit JSON — all read as "no signal", never as a block.
+ * Spend is metered into the same llm_spend ledger as every other seat, so the
+ * daily brake sees Grok dollars too.
+ */
+import db from "./store.js";
+import { spend } from "./llm.js";
+import { emit } from "./bus.js";
+
+const BASE = process.env.XAI_BASE_URL || "https://api.x.ai/v1";
+export const GROK_MODEL = process.env.DESK_MODEL_GROK || "grok-4.6";
+export const hasGrok = () => !!process.env.XAI_API_KEY;
+
+// $/M tokens (grok-4.6 list) + a flat estimate per x_search tool invocation.
+const PRICE = { in: 2, out: 6, perSearch: 0.005 };
+
+function meterGrok(seat, usage, searches = 0) {
+  const i = usage?.input_tokens ?? usage?.prompt_tokens ?? 0;
+  const o = usage?.output_tokens ?? usage?.completion_tokens ?? 0;
+  const usd = (i / 1e6) * PRICE.in + (o / 1e6) * PRICE.out + searches * PRICE.perSearch;
+  spend.usd += usd; spend.calls += 1; spend.inTok += i; spend.outTok += o;
+  try {
+    db.prepare("INSERT INTO llm_spend (seat,model,effort,in_tok,out_tok,cached_tok,usd,ts) VALUES (?,?,?,?,?,?,?,?)")
+      .run(seat, GROK_MODEL, null, i, o, 0, usd, Date.now());
+  } catch {}
+}
+
+/** Pull the first JSON object out of model text, tolerant of fences and prose. */
+export function parseLoose(text) {
+  if (!text) return null;
+  const cleaned = String(text).replace(/```(?:json)?/g, "");
+  const start = cleaned.indexOf("{");
+  if (start === -1) return null;
+  // walk to the matching close brace rather than trusting lastIndexOf
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    if (esc) { esc = false; continue; }
+    if (ch === "\\") { esc = true; continue; }
+    if (ch === '"') inStr = !inStr;
+    if (inStr) continue;
+    if (ch === "{") depth++;
+    if (ch === "}" && --depth === 0) {
+      try { return JSON.parse(cleaned.slice(start, i + 1)); } catch { return null; }
+    }
+  }
+  return null;
+}
+
+/** The text of a /v1/responses reply, wherever this month's shape put it. */
+function responseText(r) {
+  if (typeof r?.output_text === "string" && r.output_text) return r.output_text;
+  const parts = [];
+  for (const item of r?.output ?? []) {
+    for (const c of item?.content ?? []) {
+      if (typeof c?.text === "string") parts.push(c.text);
+    }
+  }
+  if (parts.length) return parts.join("\n");
+  return r?.choices?.[0]?.message?.content ?? null;
+}
+
+async function xai(path, body, timeoutMs = 90000) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${process.env.XAI_API_KEY}` },
+      body: JSON.stringify(body),
+      signal: ctl.signal,
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) return { ok: false, error: `xai ${res.status}: ${JSON.stringify(data?.error ?? data).slice(0, 200)}` };
+    return { ok: true, data };
+  } catch (e) {
+    return { ok: false, error: String(e.message || e) };
+  } finally { clearTimeout(t); }
+}
+
+/**
+ * A structured Grok call: same contract as ask() — you get the parsed object —
+ * but via prompt-described JSON, parsed defensively. `validate` (a zod schema)
+ * gets the final say; a shape Grok cannot hold is an error the CALLER handles,
+ * usually by falling back to the Claude seat.
+ */
+export async function grokAsk({ seat, system, prompt, shape, validate, maxTokens = 8000 }) {
+  if (!hasGrok()) return { ok: false, error: "XAI_API_KEY not set" };
+  const r = await xai("/chat/completions", {
+    model: GROK_MODEL,
+    max_tokens: maxTokens,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: system + `\n\nAnswer with ONLY a JSON object of exactly this shape:\n${shape}` },
+      { role: "user", content: prompt },
+    ],
+  });
+  if (!r.ok) return r;
+  meterGrok(seat, r.data?.usage);
+  const obj = parseLoose(r.data?.choices?.[0]?.message?.content);
+  if (!obj) return { ok: false, error: "grok returned no parseable JSON" };
+  if (validate) {
+    const v = validate.safeParse(obj);
+    if (!v.success) return { ok: false, error: "grok JSON failed validation: " + v.error.issues?.[0]?.message };
+    return { ok: true, out: v.data };
+  }
+  return { ok: true, out: obj };
+}
+
+/**
+ * THE X READ — one live look at X for one token, through Grok's native search.
+ * Returns deterministic-shaped evidence for the bundle; the seats do the
+ * judging. Fails open: no key, no signal, no drama.
+ */
+export async function grokXRead({ symbol, mint, hook = "" }) {
+  if (!hasGrok()) return { ok: false, error: "no key" };
+  const from = new Date(Date.now() - 7 * 86400e3).toISOString().slice(0, 10);
+  const r = await xai("/responses", {
+    model: GROK_MODEL,
+    tools: [{ type: "x_search", from_date: from }],
+    input: [{
+      role: "user",
+      content:
+        `Search X for the Solana token "${symbol}" (contract ${mint}). ${hook ? "Context: " + hook + ". " : ""}` +
+        `Assess the ATTENTION, not the price. Then answer with ONLY a JSON object:\n` +
+        `{"mentions_level":"none|low|building|hot",` +
+        `"velocity":"rising|flat|fading",` +
+        `"distinct_voices":<true if several PRE-EXISTING accounts discuss it in their own words, false if one script is pasted everywhere>,` +
+        `"kol_posts":[{"handle":"...","gist":"..."}] (max 3, only genuinely notable accounts),` +
+        `"lore_origin":"the traceable origin post/moment/person, or null",` +
+        `"paid_or_botted_signs":<true|false>,` +
+        `"verdict":"organic|mixed|manufactured|no_signal",` +
+        `"summary":"two sentences a portfolio manager can use"}`,
+    }],
+  }, 120000);
+  if (!r.ok) return r;
+  // tool invocations are billed per call; count what the response reports, floor 1
+  const searches = Math.max(1, (r.data?.output ?? []).filter((o) => /search/i.test(o?.type ?? "")).length);
+  meterGrok("XRead", r.data?.usage, searches);
+  const obj = parseLoose(responseText(r.data));
+  if (!obj) return { ok: false, error: "x-read returned no parseable JSON" };
+  const citations = (r.data?.citations ?? []).slice(0, 8);
+  emit("seat:verdict", { seat: "XRead", symbol, detail: `${obj.verdict ?? "?"} · ${obj.mentions_level ?? "?"} attention, ${obj.velocity ?? "?"}` });
+  return { ok: true, read: obj, citations };
+}

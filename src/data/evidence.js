@@ -3,6 +3,7 @@ import * as jup from "./jupiter.js";
 import * as sol from "./solana.js";
 import { cfg, MINTS } from "../config.js";
 import * as snapshots from "./snapshots.js";
+import { grokXRead, hasGrok } from "../lib/grok.js";
 import { emit } from "../lib/bus.js";
 import { whaleFeed } from "../identity.js";
 import * as pf from "./pumpfun.js";
@@ -60,6 +61,17 @@ export async function gather(mint, hook = "") {
     if (deployer && !deployer.ok) deployer = { note: deployer.note ?? "deployer unknown" };
   }
 
+  // THE X READ — Grok's native X search, the one evidence source we could
+  // never reach before: is the attention real, rising, and carried by distinct
+  // voices? Skipped on monitor ticks (prices, not biographies) and without a
+  // key. LLM-shaped, so it rides as evidence for the seats — never a screen.
+  let xRead = null;
+  if (hook !== "monitor" && hasGrok()) {
+    const xr = await grokXRead({ symbol: best?.baseSymbol ?? mint.slice(0, 6), mint, hook }).catch(() => null);
+    if (xr?.ok) xRead = { ...xr.read, citations: xr.citations };
+    else if (xr) xRead = { error: xr.error };
+  }
+
   const vol24 = best?.volume?.h24 ?? null;
   // Depth must be measured across ALL venues, not the single deepest pair. A token
   // trading on 30 pools looks fraudulently thin if you only price the biggest one.
@@ -100,7 +112,7 @@ export async function gather(mint, hook = "") {
 
   return {
     ok: true,
-    promotion, callouts, deployer, marketRegime, crosscheck,
+    promotion, callouts, deployer, marketRegime, crosscheck, xRead,
     mint,
     hook,
     symbol: best?.baseSymbol ?? "?",

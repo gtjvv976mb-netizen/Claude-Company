@@ -45,6 +45,8 @@ CREATE INDEX IF NOT EXISTS idx_runs_floor ON runs(floor_no, id DESC);
 // 'grind' = it hunts on its own clock for as long as the credit lasts.
 ensureColumn("room_settings", "mode", "TEXT NOT NULL DEFAULT 'break'");
 ensureColumn("room_settings", "grind_hours", "REAL NOT NULL DEFAULT 4");
+// Which brain manages this floor: Claude (default) or Grok, per the owner.
+ensureColumn("room_settings", "md_brain", "TEXT NOT NULL DEFAULT 'claude'");
 
 export function settings(floorNo) {
   let s = db.prepare("SELECT * FROM room_settings WHERE floor_no=?").get(floorNo);
@@ -63,11 +65,12 @@ export function saveSettings(floorNo, patch) {
     equity_usd: Math.max(0, Number(patch.equityUsd ?? cur.equity_usd)),
     watchlist: JSON.stringify((patch.watchlist ?? cur.watchlist).slice(0, 25)),
     mode: patch.mode === "grind" || patch.mode === "break" ? patch.mode : cur.mode,
+    md_brain: patch.mdBrain === "grok" || patch.mdBrain === "claude" ? patch.mdBrain : cur.md_brain,
     grind_hours: Math.min(24, Math.max(1, Number(patch.grindHours ?? cur.grind_hours))),
   };
-  db.prepare(`UPDATE room_settings SET desk_name=?, risk_pct=?, equity_usd=?, watchlist=?, mode=?, grind_hours=?, updated_at=?
+  db.prepare(`UPDATE room_settings SET desk_name=?, risk_pct=?, equity_usd=?, watchlist=?, mode=?, grind_hours=?, md_brain=?, updated_at=?
               WHERE floor_no=?`)
-    .run(next.desk_name, next.risk_pct, next.equity_usd, next.watchlist, next.mode, next.grind_hours, Date.now(), floorNo);
+    .run(next.desk_name, next.risk_pct, next.equity_usd, next.watchlist, next.mode, next.grind_hours, next.md_brain, Date.now(), floorNo);
   if (patch.mode) emit("room:mode", { floor: floorNo, mode: next.mode });
   return settings(floorNo);
 }
@@ -129,7 +132,10 @@ export async function requestRun({ floorNo, wallet, mint }) {
   // Fire and forget: the room watches the event stream rather than holding the request open.
   (async () => {
     try {
-      const res = await runFor(floorNo, () => workup(`floor${floorNo}-${runId}`, mint, "tenant request"));
+      const brain = settings(floorNo).md_brain === "grok" ? "grok" : undefined;
+      const res = await runFor(floorNo, () => workup(`floor${floorNo}-${runId}`, mint,
+        brain ? "tenant request \u00b7 MD thinking on Grok" : "tenant request",
+        brain ? { pmProvider: brain } : {}));
       db.prepare("UPDATE runs SET symbol=?, outcome=?, detail=?, finished_at=? WHERE id=?")
         .run(res?.symbol ?? null, res?.outcome ?? "done", res?.detail ?? null, Date.now(), runId);
 

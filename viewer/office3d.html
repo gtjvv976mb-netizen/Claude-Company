@@ -3871,6 +3871,25 @@ function renderRoom() {
   });
   panel.append(shift, shiftNote);
 
+  // ── who manages this floor: Claude or Grok ──
+  panel.appendChild(mk("div", "dp-h", "Your Managing Director's brain"));
+  const curBrain = ROOM.settings?.md_brain === "grok" ? "grok" : "claude";
+  const brainRow = mk("div", "dp-row");
+  const bClaude = mk("button", "dp-btn" + (curBrain === "claude" ? "" : " ghost"), "Claude");
+  const bGrok = mk("button", "dp-btn" + (curBrain === "grok" ? "" : " ghost"), "Grok");
+  const setBrain = async (b) => {
+    bClaude.disabled = bGrok.disabled = true;
+    await api(`/api/floor/${FLOOR}/settings`, { method: "POST", body: JSON.stringify({ mdBrain: b }) });
+    loadRoom();
+  };
+  bClaude.addEventListener("click", () => setBrain("claude"));
+  bGrok.addEventListener("click", () => setBrain("grok"));
+  brainRow.append(bClaude, bGrok);
+  panel.appendChild(brainRow);
+  panel.appendChild(mk("p", "dp-note", curBrain === "grok"
+    ? "Your MD thinks on Grok (xAI) — X-native instincts, same rails: the screen, the red team, compliance and the no-keys wall are unchanged. If Grok can't hold the format, the Claude seat answers instead."
+    : "Your MD thinks on Claude. Switch to Grok for an X-native manager — every safety rail stays the same either way."));
+
   // ── research a token ──
   panel.appendChild(mk("div", "dp-h", "Put the team on a token"));
   const row = mk("div", "dp-row");
@@ -4402,6 +4421,22 @@ function buildControls(settings) {
   box.appendChild(hook);
   box.appendChild(mk("div", "dp-note", "Exit calls are pushed here too, so you hear them with the tab closed. Discord, Telegram and Slack only."));
 
+  box.appendChild(mk("div", "dp-h", "Your executor (auto-trading)"));
+  const exec_ = document.createElement("input");
+  exec_.className = "dp-in"; exec_.type = "url";
+  exec_.placeholder = "https://your-bot.example.com/hook (optional)";
+  exec_.value = (settings.executor_url && settings.executor_url !== "(set)") ? settings.executor_url : (settings.executor_url === "(set)" ? "" : "");
+  exec_.setAttribute("aria-label", "Executor webhook URL");
+  box.appendChild(exec_);
+  const execNote = mk("div", "dp-note",
+    "Point YOUR OWN trading bot here and it can auto-trade this floor's calls: every entry and exit POSTs as JSON, signed with the secret below (header x-cc-signature = HMAC-SHA256 of the raw body). The desk never holds your keys — your bot signs with its own.");
+  box.appendChild(execNote);
+  if (settings.executor_secret) {
+    const sec = mk("div", "bud-addr");
+    sec.textContent = "signing secret: " + settings.executor_secret;
+    box.appendChild(sec);
+  }
+
   const save = mk("button", "dp-btn", "Save settings");
   save.type = "button";
   const msg = mk("div", "dp-note");
@@ -4410,7 +4445,8 @@ function buildControls(settings) {
     const launchpads = [...pads.querySelectorAll("input:checked")].map((i) => i.value);
     const { status, body } = await call_api(`/api/floor/${FLOOR_N}/copy`, { method: "POST",
       body: JSON.stringify({ appetite: sel.value, bankrollSol: Number(bank.value), launchpads,
-                             webhookUrl: hook.value.trim() || null }) });
+                             webhookUrl: hook.value.trim() || null,
+                             executorUrl: exec_.value.trim() || null }) });
     msg.textContent = status === 200 ? "Saved. Future calls use these settings." : (body.error || "could not save");
     save.disabled = false; save.textContent = "Save settings";
     if (status === 200) setTimeout(loadCalls, 700);

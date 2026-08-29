@@ -48,7 +48,7 @@ export async function buildUniverse() {
  * The full workup for one token. Returns a record regardless of outcome — a kill is
  * a result the desk wants written down, not a silent drop.
  */
-export async function workup(cycle, mint, hook = "") {
+export async function workup(cycle, mint, hook = "", opts = {}) {
   // Both spenders — the penthouse cycle and a tenant's floor run — pass through here,
   // so this is where the daily cap bites. Before the free stages, deliberately: a
   // workup that cannot afford its model stages should not pretend to start.
@@ -128,7 +128,7 @@ export async function workup(cycle, mint, hook = "") {
   store.recordVerdict(cycle, mint, ev.symbol, "risk", { score: risk.position_size_usd, confidence: risk.confidence, ...risk });
   emit("seat:verdict", { seat: "Risk", mint, symbol: ev.symbol, detail: `$${risk.position_size_usd}` });
 
-  const pm = await runPM(ev, analysts, redteam, risk, weighted);
+  const pm = await runPM(ev, analysts, redteam, risk, weighted, opts);
   store.recordVerdict(cycle, mint, ev.symbol, "pm", { verdict: pm.decision, score: pm.conviction, ...pm });
   emit("seat:verdict", { seat: "PM", mint, symbol: ev.symbol, detail: pm.decision, score: pm.conviction });
 

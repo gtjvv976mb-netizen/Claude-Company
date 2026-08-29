@@ -34,6 +34,8 @@ services:
       - key: TREASURY_OWNER
         sync: false             # your PUBLIC address; leasing stays closed until set
       - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: XAI_API_KEY
         sync: false             # required for the agents to actually run
       - key: SOLANA_RPC
         sync: false             # a Helius/Triton URL; the public RPC is rate-limited

@@ -1,4 +1,5 @@
 import db, { ensureColumn } from "./lib/store.js";
+import crypto from "node:crypto";
 import { emit } from "./lib/bus.js";
 import "./calls.js";
 
@@ -30,6 +31,11 @@ CREATE TABLE IF NOT EXISTS alerts (
 CREATE INDEX IF NOT EXISTS idx_alerts_floor ON alerts(floor_no, id DESC);
 `);
 ensureColumn("copy_settings", "webhook_url", "TEXT");
+// The executor lane: a tenant may point THEIR OWN trading bot at our calls.
+// We post signed JSON; their machine verifies the HMAC and does what it likes
+// with its own keys. The desk still signs nothing and custodies nothing.
+ensureColumn("copy_settings", "executor_url", "TEXT");
+ensureColumn("copy_settings", "executor_secret", "TEXT");
 
 /**
  * Where a tenant may be pinged. Restricted on purpose: an arbitrary user-supplied URL that
@@ -37,6 +43,35 @@ ensureColumn("copy_settings", "webhook_url", "TEXT");
  * people actually use are accepted.
  */
 const WEBHOOK_HOSTS = ["discord.com", "discordapp.com", "api.telegram.org", "hooks.slack.com"];
+
+/** An executor endpoint: any public https host, never anything that smells internal. */
+export function validExecutorUrl(url) {
+  if (!url) return { ok: true, url: null };
+  let u;
+  try { u = new URL(url); } catch { return { ok: false, error: "not a URL" }; }
+  if (u.protocol !== "https:") return { ok: false, error: "must be https" };
+  const h = u.hostname.toLowerCase();
+  if (h === "localhost" || h.endsWith(".local") || h.endsWith(".internal") || h.endsWith(".lan")
+      || /^\d+\.\d+\.\d+\.\d+$/.test(h) || h.includes(":"))
+    return { ok: false, error: "must be a public hostname, not an address" };
+  return { ok: true, url: u.toString() };
+}
+
+/** Fire one signed event at a floor's executor. Best effort; never blocks an exit. */
+export async function pushExecutor(floorNo, event) {
+  const row = db.prepare("SELECT executor_url, executor_secret FROM copy_settings WHERE floor_no=?").get(floorNo);
+  if (!row?.executor_url || !row?.executor_secret) return false;
+  const body = JSON.stringify({ v: 1, ts: Date.now(), floor: floorNo, ...event });
+  const sig = crypto.createHmac("sha256", row.executor_secret).update(body).digest("hex");
+  try {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 6000);
+    await fetch(row.executor_url, { method: "POST",
+      headers: { "content-type": "application/json", "x-cc-signature": sig }, body, signal: ctl.signal });
+    clearTimeout(t);
+    return true;
+  } catch { return false; }
+}
 
 export function validWebhook(url) {
   if (!url) return { ok: true, url: null };            // clearing it is valid
@@ -114,6 +149,10 @@ export async function announceEntry(call) {
     const fresh = raise({ floorNo: r.floor_no, callId: call.id, kind: "entry",
       urgency: "normal", title, body, mint: call.mint });
     if (fresh && r.webhook_url) push(r.webhook_url, title, body).catch(() => {});
+    if (fresh) pushExecutor(r.floor_no, { type: "entry", call: { id: call.id, mint: call.mint,
+      symbol: call.symbol, side: "buy", entry_ref: call.entry_ref, stop: call.stop,
+      target: call.target, size_sol: r.size_sol ?? null, thesis: call.thesis,
+      invalidation: call.invalidation } }).catch(() => {});
     if (fresh) sent++;
   }
   return { floors: rows.length, alerted: sent };
@@ -139,6 +178,9 @@ export async function announceExit(call, exit) {
     const fresh = raise({ floorNo: r.floor_no, callId: call.id, kind: "exit",
       urgency: exit.urgency === "unconditional" ? "urgent" : "normal", title, body, mint: call.mint });
     if (fresh && r.webhook_url) await push(r.webhook_url, title, body);
+    if (fresh) pushExecutor(r.floor_no, { type: "exit", call: { id: call.id, mint: call.mint,
+      symbol: call.symbol, side: "sell", code: exit.code, urgency: exit.urgency,
+      detail: exit.detail } }).catch(() => {});
     if (fresh) sent++;
   }
   return { floors: rows.length, alerted: sent };

@@ -352,7 +352,14 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           if (what === "feed" && req.method === "GET") {
             if (floorPrivate(floorNo)) return json(403, { private: true,
               error: "this floor's live desk is private to its tenant" });
-            return json(200, { feed: copy.feedFor(floorNo), settings: copy.settingsFor(floorNo),
+            // A guest pass buys the CALL SHEET, not the tenant's credentials:
+            // webhook URLs and the executor signing secret are the owner's only.
+            const isOwner = !!me && leasing.leaseFor(floorNo)?.wallet === me;
+            const st = copy.settingsFor(floorNo);
+            const settings = isOwner ? st
+              : { ...st, webhook_url: st.webhook_url ? "(set)" : null,
+                  executor_url: st.executor_url ? "(set)" : null, executor_secret: null };
+            return json(200, { feed: copy.feedFor(floorNo), settings,
                                appetites: copy.APPETITES, rent: leasing.rentStatus(floorNo),
                                record: perf.recordFor(floorNo) });
           }
@@ -365,6 +372,11 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               const v = alerts.validWebhook(body.webhookUrl || null);
               if (!v.ok) return json(400, { error: `webhook: ${v.error}` });
               body.webhookUrl = v.url;
+            }
+            if (body && "executorUrl" in body) {
+              const v = alerts.validExecutorUrl(body.executorUrl || null);
+              if (!v.ok) return json(400, { error: `executor: ${v.error}` });
+              body.executorUrl = v.url;
             }
             return json(200, copy.saveSettings(floorNo, body || {}));
           }
