@@ -86,7 +86,7 @@ export async function writeOrderSlip(cycle, { ev, ceo, pm, risk, ticket }) {
   const L = [];
   L.push(`# Order slip — ${ev.symbol} · ${ceo.ruling}`);
   L.push(`\n\`${ev.mint}\`\n`);
-  L.push(`> **Unsigned. Nothing has been executed.** Claude Co cannot sign or send.`);
+  L.push(`> **Unsigned. Nothing has been executed.** Claude Company cannot sign or send.`);
   L.push(`> To act on this, open the GMGN link below and place it yourself.\n`);
   L.push(`## The CEO's ruling\n`);
   L.push(`**${ceo.one_line}**\n`);
@@ -130,7 +130,7 @@ export async function writeOrderSlip(cycle, { ev, ceo, pm, risk, ticket }) {
     L.push(`\n_No transaction was prepared: ${tx.error}._`);
   }
 
-  L.push(`\n---\n_Claude Co · ${new Date().toISOString()} · research and order preparation only._`);
+  L.push(`\n---\n_Claude Company · ${new Date().toISOString()} · research and order preparation only._`);
   fs.writeFileSync(file, L.join("\n"));
 
   const rel = path.relative(ROOT, file);

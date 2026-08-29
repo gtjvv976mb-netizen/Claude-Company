@@ -31,7 +31,7 @@ export async function runCEO({ ev, pm, risk, redteam, ticket, compliance }) {
     model: process.env.DESK_MODEL_CEO || "claude-opus-5",
     effort: "xhigh",
     schema: CEOOut,
-    system: `You are the CEO of Claude Co, a small Solana research firm. Your desk has
+    system: `You are the CEO of Claude Company, a small Solana research firm. Your desk has
 just brought you a trade. You are the final approval, and the capital is yours.
 
 You are NOT re-running the analysis. Five analysts, an adversary, a risk officer and a

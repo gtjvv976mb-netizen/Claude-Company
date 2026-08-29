@@ -1,4 +1,4 @@
-<title>Claude Co Trading Floor</title>
+<title>Claude Company Trading Floor</title>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -372,7 +372,7 @@ select.dp-in{cursor:pointer}
     <div class="alertbar" id="alertbar" role="alert" aria-live="assertive"></div>
     <div class="loading" id="loading">
       <div class="t">Opening the floor…</div>
-      <div class="s">Claude &amp; Co.</div>
+      <div class="s">Claude Company</div>
     </div>
     <div class="hint" id="hint">Drag to orbit · right-drag or WASD to pan · double-click to travel · scroll to zoom · R resets</div>
     <aside class="dossier" id="dossier" role="dialog" aria-modal="false" aria-labelledby="d-name">
@@ -3141,7 +3141,7 @@ function memo({ symbol, decision, thesis, conviction, size, stop, gmgn }) {
     m.appendChild(a);
     const n = document.createElement("p");
     n.className = "unsigned";
-    n.textContent = "Unsigned. Claude Co prepared this order but cannot sign or send it — that is yours.";
+    n.textContent = "Unsigned. Claude Company prepared this order but cannot sign or send it — that is yours.";
     m.appendChild(n);
   }
   inboxEl.querySelector(".empty")?.remove();
@@ -4114,11 +4114,12 @@ async function loadCalls() {
   }
 }
 
-function renderCalls({ feed = [], settings }) {
+function renderCalls({ feed = [], settings, record }) {
   callsPanel.innerHTML = "";
 
   callsPanel.appendChild(buildBudget());
   if (settings) callsPanel.appendChild(buildControls(settings));
+  callsPanel.appendChild(buildRecord(record, feed));
 
   if (!feed.length) {
     const p = document.createElement("p");
@@ -4142,14 +4143,27 @@ function renderCalls({ feed = [], settings }) {
     el.appendChild(h);
 
     if (c.thesis) { const p = document.createElement("p"); p.textContent = c.thesis; el.appendChild(p); }
+    if (c.invalidation) {
+      const p = document.createElement("p"); p.className = "dp-note";
+      p.textContent = "Wrong if: " + c.invalidation;
+      el.appendChild(p);
+    }
 
     const nums = document.createElement("div");
     nums.className = "nums";
-    const add = (k, v) => { if (v == null) return; const s = document.createElement("span"); s.innerHTML = `${k} <b></b>`; s.querySelector("b").textContent = v; nums.appendChild(s); };
+    const add = (k, v) => { if (v == null) return; const s = document.createElement("span"); s.innerHTML = `${k} <b></b>`; s.querySelector("b").textContent = v; nums.appendChild(s); return s; };
     add("Conviction", c.conviction != null ? Math.round(c.conviction) + "/100" : null);
     add("Ref", c.entry_ref != null ? "$" + c.entry_ref : null);
     add("Stop", c.stop != null ? "$" + c.stop : null);
     add("Target", c.target != null ? "$" + c.target : null);
+    // The number a trade is managed by: where it stands right now, against the ref.
+    const markNow = c.status === "live" ? c.last_mark : (c.close_mark ?? c.last_mark);
+    if (markNow != null && c.entry_ref) {
+      const pct = ((markNow - c.entry_ref) / c.entry_ref) * 100;
+      const s = add(c.status === "live" ? "Now" : "Closed at",
+        `$${markNow} (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)`);
+      if (s) s.querySelector("b").style.color = pct >= 0 ? "var(--good,#4f8f52)" : "var(--bad,#b0503f)";
+    }
     el.appendChild(nums);
 
     if (c.status === "live") {
@@ -4188,6 +4202,24 @@ function renderCalls({ feed = [], settings }) {
         loadCalls();
       };
       act.append(buy, link, mark);
+      if (c.taken) {
+        const sell = document.createElement("button");
+        sell.className = "dp-btn ghost"; sell.type = "button";
+        sell.textContent = "Sell";
+        sell.onclick = () => openSwap({ mint: c.mint, symbol: c.symbol, side: "sell" });
+        act.appendChild(sell);
+      }
+      el.appendChild(act);
+    } else if (c.verdict === "offered" && c.taken && c.status !== "live") {
+      // The call is over but the tenant said they were in — never leave them
+      // holding a position with no way out from the same card the entry came from.
+      const act = document.createElement("div");
+      act.className = "act";
+      const sell = document.createElement("button");
+      sell.className = "dp-btn"; sell.type = "button";
+      sell.textContent = `Sell — exit was called (${(c.close_reason || "closed").replace(/_/g, " ")})`;
+      sell.onclick = () => openSwap({ mint: c.mint, symbol: c.symbol, side: "sell" });
+      act.appendChild(sell);
       el.appendChild(act);
     }
     callsPanel.appendChild(el);
@@ -4197,6 +4229,53 @@ function renderCalls({ feed = [], settings }) {
   note.className = "dp-note";
   note.textContent = "Buy opens a swap you sign in your own wallet — the desk never holds keys, never signs, and never sees the transaction. The size is a suggestion from your floor's risk settings; your wallet shows the real numbers before anything happens.";
   callsPanel.appendChild(note);
+}
+
+/* ── the floor's own book: settled results + the sync that writes them ─────
+   Settlement is computed from the tenant's wallet on-chain, never self-reported:
+   Sync scans their fills on every taken call and settles fully-closed positions.
+   Without this box the whole back half of the trade loop was server-only. */
+function buildRecord(record, feed) {
+  const box = document.createElement("div");
+  box.className = "call";
+  const mk = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x) e.textContent = x; return e; };
+  box.appendChild(mk("div", "dp-h", "Your floor's book"));
+
+  const r = record || { settled: 0, wins: 0, losses: 0, netPnlUsd: 0 };
+  const line = mk("div", "nums");
+  const add = (k, v, col) => { const s = document.createElement("span");
+    s.innerHTML = `${k} <b></b>`; const b = s.querySelector("b"); b.textContent = v;
+    if (col) b.style.color = col; line.appendChild(s); };
+  add("Settled", String(r.settled));
+  add("W–L", `${r.wins}–${r.losses}`);
+  if (r.winRate != null) add("Win rate", r.winRate + "%");
+  add("Net P&L", `$${(r.netPnlUsd ?? 0).toLocaleString()}`,
+    (r.netPnlUsd ?? 0) >= 0 ? "var(--good,#4f8f52)" : "var(--bad,#b0503f)");
+  box.appendChild(line);
+
+  const takenOpen = (feed || []).filter((d) => d.verdict === "offered" && d.taken).length;
+  const sync = mk("button", "dp-btn", "Sync my fills");
+  sync.type = "button";
+  const msg = mk("div", "dp-note",
+    takenOpen
+      ? `Reads your wallet on-chain for fills on your ${takenOpen} taken call${takenOpen === 1 ? "" : "s"} and settles anything fully closed.`
+      : "Mark a call as taken, and Sync will find your fills on-chain and settle the result here.");
+  sync.addEventListener("click", async () => {
+    sync.disabled = true; sync.textContent = "Reading your wallet…";
+    try {
+      const { status, body } = await call_api(`/api/floor/${FLOOR_N}/sync`, { method: "POST", body: "{}" });
+      msg.textContent = status === 200
+        ? `Found ${body.fillsFound ?? 0} fill${body.fillsFound === 1 ? "" : "s"}, settled ${body.settled ?? 0} position${body.settled === 1 ? "" : "s"}.`
+        : (body.error || "sync failed");
+      if (status === 200) setTimeout(loadCalls, 900);
+    } catch { msg.textContent = "Could not reach the desk."; }
+    sync.disabled = false; sync.textContent = "Sync my fills";
+  });
+  box.append(sync, msg);
+
+  if (r.feesUnpaidUsd > 0) box.appendChild(mk("p", "bud-warn",
+    `Performance fees owed: $${r.feesUnpaidUsd} — settled against your $CLAUDECO credit. Unpaid fees never block an exit call.`));
+  return box;
 }
 
 /* ── the top-up panel ──────────────────────────────────────────────────────
