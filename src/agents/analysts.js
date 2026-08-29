@@ -72,6 +72,13 @@ KILL if the position cannot be exited at an acceptable cost.`,
 
 Your job is to distinguish organic participation from wash trading and insider churn.
 
+PAID ATTENTION: the evidence bundle's "promotion" field says whether this token BOUGHT
+its reach (DexScreener boosts/ads) and when it last paid. Boosted attention is not
+demand — treat volume arriving alongside a paid boost as manufactured until the flow
+itself proves otherwise. The "callouts" field lists our own recorded whale callouts
+for this mint: distinct buyers taking size is flow evidence; one wallet echoed by
+bots is not.
+
 Tells you should reason about explicitly:
 - volume/liquidity ratio: a pool turning over its entire depth many times a day with few
   unique participants is usually bots trading with themselves.
@@ -153,6 +160,13 @@ You may search the web. Use it to establish:
   the desk is early, on time, or already exit liquidity.
 - Whether there is a genuine catalyst with a date, or only vibes.
 - Any history of the team, prior projects, or prior failures.
+- FOR OLD COINS (the revival mandate): is attention RE-igniting — new posts by notable,
+  pre-existing accounts in their own words, fresh community activity after a quiet
+  spell, an emerging trend this coin genuinely fits? A famous person posting it or a
+  notable wallet buying is one INPUT — it can raise attention-realness, but it is
+  never the thesis by itself, and "insiders are back" is a warning as often as a signal.
+- The bundle's "promotion" field says if this token PAYS for its reach. A boosted coin
+  claiming organic virality is lying about the one thing you are here to check.
 
 Discipline:
 - Distinguish "I read this on the project's own site" from "an independent source reports".

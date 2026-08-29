@@ -3,6 +3,7 @@ import * as jup from "./jupiter.js";
 import * as sol from "./solana.js";
 import { cfg, MINTS } from "../config.js";
 import { emit } from "../lib/bus.js";
+import { whaleFeed } from "../identity.js";
 
 /**
  * Everything the desk knows about one token, fetched deterministically.
@@ -34,6 +35,18 @@ export async function gather(mint, hook = "") {
   const jp = await jup.price([mint]);
   const jupPrice = jp?.[mint] ?? null;
 
+  // The two questions every memecoin call must answer about its attention:
+  // is it PAID FOR (DexScreener boosts/ads — bought reach, not organic demand),
+  // and was it CALLED OUT (our own recorded whale callouts for this mint).
+  const promo = await ds.paidOrders(mint);
+  const approved = promo.orders.filter((o) => o.status === "approved");
+  const promotion = {
+    boosted: approved.length > 0,
+    paidOrders: approved.length,
+    lastPaidAt: approved.reduce((m, o) => Math.max(m, o.paidAt ?? 0), 0) || null,
+  };
+  const callouts = whaleFeed({ limit: 200 }).filter((w) => w.mint === mint).slice(0, 5);
+
   const vol24 = best?.volume?.h24 ?? null;
   // Depth must be measured across ALL venues, not the single deepest pair. A token
   // trading on 30 pools looks fraudulently thin if you only price the biggest one.
@@ -42,6 +55,7 @@ export async function gather(mint, hook = "") {
 
   return {
     ok: true,
+    promotion, callouts,
     mint,
     hook,
     symbol: best?.baseSymbol ?? "?",

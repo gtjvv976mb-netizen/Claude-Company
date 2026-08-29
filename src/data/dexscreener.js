@@ -11,6 +11,19 @@ export async function boosted() {
     .map((t) => ({ mint: t.tokenAddress, hook: "paid boost", blurb: t.description || "" }));
 }
 
+/** Every promotion this token PAID for — boosts, ads — from the official orders
+ * endpoint. The sweep uses paid attention to find coins; the analysts use this
+ * to discount it: bought reach is not organic demand, and the buyer of a call
+ * deserves to know which kind they are looking at. */
+export async function paidOrders(mint) {
+  const r = await getJson(`${BASE}/orders/v1/solana/${mint}`, { label: "dexscreener/orders" });
+  if (!r.ok) return { ok: false, orders: [] };
+  const orders = (r.data?.orders ?? r.data ?? []).map((o) => ({
+    type: o.type, status: o.status, paidAt: o.paymentTimestamp ?? null,
+  }));
+  return { ok: true, orders };
+}
+
 /** Freshly listed token profiles. */
 export async function profiles() {
   const r = await getJson(`${BASE}/token-profiles/latest/v1`, { label: "dexscreener/profiles" });

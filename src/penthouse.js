@@ -35,6 +35,14 @@ export const TOP_N = Number(process.env.PENTHOUSE_TOP_N || 5);
  * liquidity. So a big h1 move is penalised, while sustained h6 strength on rising
  * volume is rewarded.
  */
+/* THE DOCTRINE. 99% of memecoins dump inside a day; the desk's whole business
+ * is the other 1%, which comes in exactly two shapes:
+ *   Job 1 — NEW coins whose ignition is real: true lore, real X attention,
+ *           honest holders, unpaid reach, a chart not already vertical.
+ *   Job 2 — OLD coins with the strongest revival: re-igniting on an emerging
+ *           trend, notable people posting, fresh notable buying on an aged tape.
+ * Everything below scores toward one of those two shapes; everything the seats
+ * do afterwards is deciding whether the shape is genuine. */
 export function rank(c) {
   const p = c.pair;
   if (!p) return { score: 0, why: ["no pair data"] };
@@ -94,6 +102,18 @@ export function rank(c) {
       s -= 15; why.push("young without ignition");
     }
   } else if (age < 1.5) { s -= 20; why.push("too new even for the sniper path"); }
+
+  /* THE REVIVAL PATH — the desk's second job. Of the coins that matter, some are
+   * new and igniting; the rest are OLD coins coming back: dumped, flatlined, and
+   * now re-igniting on a real trend — or never having left their highs at all.
+   * The signature is the same ignition read on an aged tape: buyers accelerating
+   * hard against their own recent pace, on a coin old enough to have died once. */
+  if (age >= 24 * 14) {
+    if (buyAccel >= 3 && buysH1 >= 40 && h1 > 0 && h1 <= 25) {
+      s += 25; why.push(`revival: ${buysH1} buys this hour on a ${Math.round(age / 24)}d-old coin, ${buyAccel.toFixed(1)}x its pace`);
+      if (h6 > 10 && h24 > 0) { s += 8; why.push("the comeback is holding, not spiking"); }
+    }
+  }
   // The ranker could reward youth and nothing else, so a coin that had actually survived
   // scored worse than one that had not been tested. Durability is evidence too.
   if (age > 24 * 90 && liq > 750_000) { s += 14; why.push("survived long enough to have a base rate"); }
