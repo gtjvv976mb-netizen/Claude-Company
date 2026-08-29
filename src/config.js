@@ -89,7 +89,7 @@ export const cfg = {
   // The desk stops paying, not the process: past this 24h spend, cycles skip their
   // model stages and say so on the tape. Monitoring (prices, exits) costs nothing
   // and keeps running.
-  dailyBudgetUsd: Number(process.env.DESK_DAILY_BUDGET_USD || 10),
+  dailyBudgetUsd: Number(process.env.DESK_DAILY_BUDGET_USD || 25),
 };
 
 /** The RPC URL embeds an API key. Never print it raw — mask it wherever it is shown. */

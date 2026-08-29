@@ -93,6 +93,40 @@ function dbOwedWallets() {
     .map((r) => r.wallet);
 }
 
+/**
+ * THE GRIND — tenant teams that hunt on their own clock. A grinding floor gets
+ * an automatic research run every grind_hours: target = the best-ranked coin in
+ * the current sweep that the floor has not judged in 24h. Paid like any tenant
+ * run ($CLAUDECO, free runs first), refunded on no_data, capped at 6 a day.
+ * requestRun itself enforces busy/credit, so this scheduler only picks targets.
+ */
+function startGrind() {
+  const tick = async () => {
+    try {
+      const { grindingFloors, floorJudgedRecently, requestRun, isBusy } = await import("./rooms.js");
+      const floors = grindingFloors();
+      const due = floors.filter((f) => !isBusy(f.floor_no) && (f.runs_24h ?? 0) < 6 &&
+        (!f.last_run_at || Date.now() - f.last_run_at > f.grind_hours * 3600e3));
+      if (!due.length) return;
+      const { sweep } = await import("./market.js");
+      const { rank } = await import("./penthouse.js");
+      const universe = await sweep();
+      const ranked = universe.map((c) => ({ c, r: rank(c) })).sort((a, b) => b.r.score - a.r.score);
+      for (const f of due) {
+        const pick = ranked.find((x) => x.r.score > 20 && !floorJudgedRecently(f.floor_no, x.c.mint));
+        if (!pick) continue;
+        const res = await requestRun({ floorNo: f.floor_no, wallet: f.wallet, mint: pick.c.mint });
+        console.log(`[grind] floor ${f.floor_no} -> ${pick.c.pair?.baseSymbol ?? pick.c.mint.slice(0, 6)}` +
+          (res.ok ? ` (run ${res.runId}${res.free ? ", free" : ""})` : ` refused: ${res.error}`));
+      }
+    } catch (e) { console.log(`[grind] ${e.message}`); }
+  };
+  const mins = Number(process.env.GRIND_CHECK_MINS || 20);
+  setInterval(tick, mins * 60000);
+  setTimeout(tick, 60000);
+  console.log(`[grind] tenant auto-runs checked every ${mins}m`);
+}
+
 function startPenthouse() {
   const cycleMins = Number(process.env.PENTHOUSE_CYCLE_MINS || 360);   // 4x a day
   const monitorMins = Number(process.env.PENTHOUSE_MONITOR_MINS || 10);
@@ -185,6 +219,7 @@ async function main() {
       startBooks();            // rent + fill sync, always
       startWorld();            // the server runs the office; clients only watch
       startMonitoring();       // exit checks are a DUTY: they run with no key and no research
+      if (process.env.ANTHROPIC_API_KEY) startGrind();   // tenant teams in grind mode
       startPenthouse();        // the house team's schedule
       console.log(`${C.b}Trading floor live at ${url}${C.x}  (Ctrl-C to close)`);
       narrate();

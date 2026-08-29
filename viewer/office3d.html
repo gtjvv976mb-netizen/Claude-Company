@@ -3855,13 +3855,29 @@ function renderRoom() {
 
   const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
 
+  // ── the team's shift: take a break, or grind ──
+  panel.appendChild(mk("div", "dp-h", "Your team's shift"));
+  const grinding = ROOM.settings?.mode === "grind";
+  const shift = mk("button", "dp-btn", grinding ? "\u2615 Take a break" : "\u2692 Let's grind");
+  const shiftNote = mk("p", "dp-note", grinding
+    ? `GRINDING \u2014 your team hunts the market's best-ranked coin every ${ROOM.settings.grind_hours}h on its own (max 6 runs/day), charged like any run: free runs first, auto-refund when there was nothing to study.`
+    : "ON A BREAK \u2014 your team works only when you say. Flip to grind and they hunt the best-ranked coin on their own clock, for as long as your credit lasts.");
+  shift.addEventListener("click", async () => {
+    shift.disabled = true; shift.textContent = "Switching shift\u2026";
+    const { status, body } = await api(`/api/floor/${FLOOR}/settings`, { method: "POST",
+      body: JSON.stringify({ mode: grinding ? "break" : "grind" }) });
+    if (status !== 200) { shiftNote.textContent = body?.error || "could not switch"; shift.disabled = false; }
+    loadRoom();
+  });
+  panel.append(shift, shiftNote);
+
   // ── research a token ──
   panel.appendChild(mk("div", "dp-h", "Put the team on a token"));
   const row = mk("div", "dp-row");
   const input = mk("input", "dp-in");
   input.placeholder = "Paste a Solana mint address";
   input.setAttribute("aria-label", "Mint address to research");
-  const go = mk("button", "dp-btn", ROOM.busy ? "Working…" : "Research");
+  const go = mk("button", "dp-btn", ROOM.busy ? "Working…" : "Run 1 cycle");
   go.disabled = ROOM.busy;
   row.append(input, go);
   panel.appendChild(row);
@@ -3869,7 +3885,7 @@ function renderRoom() {
   const cost = ROOM.freeRunsLeft > 0
     ? `${ROOM.freeRunsLeft} research run${ROOM.freeRunsLeft === 1 ? "" : "s"} included with your lease.`
     : `Each run costs ${ROOM.runPriceTokens.toLocaleString()} $CLAUDECO.`;
-  panel.appendChild(mk("p", "dp-note", cost + " Fourteen agents work the token end to end; you get a brief and an unsigned ticket."));
+  panel.appendChild(mk("p", "dp-note", cost + " Sixteen agents work the token end to end; you get a brief and an unsigned ticket."));
 
   const bal = mk("div", "dp-bal");
   bal.textContent = `Building credit: ${fmtTok(ROOM.balanceBaseUnits, ROOM.decimals)} $CLAUDECO`;
@@ -3890,7 +3906,7 @@ function renderRoom() {
       input.value = "";
     } else {
       msg.textContent = body.error || "could not start";
-      go.disabled = false; go.textContent = "Research";
+      go.disabled = false; go.textContent = "Run 1 cycle";
     }
     setTimeout(loadRoom, 800);
   });

@@ -26,7 +26,7 @@ import * as store from "./lib/store.js";
 
 export const WORKUPS_PER_CYCLE = Number(process.env.PENTHOUSE_WORKUPS || 3);
 /** Hard ceiling per cycle. Without it one bad night empties the account. */
-export const CYCLE_BUDGET_USD = Number(process.env.PENTHOUSE_CYCLE_BUDGET_USD || 8);
+export const CYCLE_BUDGET_USD = Number(process.env.PENTHOUSE_CYCLE_BUDGET_USD || 10);
 export const TOP_N = Number(process.env.PENTHOUSE_TOP_N || 5);
 
 /**

@@ -1,4 +1,4 @@
-import db from "./lib/store.js";
+import db, { ensureColumn } from "./lib/store.js";
 import { runFor, emit } from "./lib/bus.js";
 import { leaseFor, leaseOf, balanceOf, DECIMALS } from "./leasing.js";
 import { workup } from "./desk.js";
@@ -41,6 +41,10 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 CREATE INDEX IF NOT EXISTS idx_runs_floor ON runs(floor_no, id DESC);
 `);
+// Take a break / let's grind: 'break' = the team works only when asked;
+// 'grind' = it hunts on its own clock for as long as the credit lasts.
+ensureColumn("room_settings", "mode", "TEXT NOT NULL DEFAULT 'break'");
+ensureColumn("room_settings", "grind_hours", "REAL NOT NULL DEFAULT 4");
 
 export function settings(floorNo) {
   let s = db.prepare("SELECT * FROM room_settings WHERE floor_no=?").get(floorNo);
@@ -58,12 +62,29 @@ export function saveSettings(floorNo, patch) {
     risk_pct: Math.min(10, Math.max(0.1, Number(patch.riskPct ?? cur.risk_pct))),
     equity_usd: Math.max(0, Number(patch.equityUsd ?? cur.equity_usd)),
     watchlist: JSON.stringify((patch.watchlist ?? cur.watchlist).slice(0, 25)),
+    mode: patch.mode === "grind" || patch.mode === "break" ? patch.mode : cur.mode,
+    grind_hours: Math.min(24, Math.max(1, Number(patch.grindHours ?? cur.grind_hours))),
   };
-  db.prepare(`UPDATE room_settings SET desk_name=?, risk_pct=?, equity_usd=?, watchlist=?, updated_at=?
+  db.prepare(`UPDATE room_settings SET desk_name=?, risk_pct=?, equity_usd=?, watchlist=?, mode=?, grind_hours=?, updated_at=?
               WHERE floor_no=?`)
-    .run(next.desk_name, next.risk_pct, next.equity_usd, next.watchlist, Date.now(), floorNo);
+    .run(next.desk_name, next.risk_pct, next.equity_usd, next.watchlist, next.mode, next.grind_hours, Date.now(), floorNo);
+  if (patch.mode) emit("room:mode", { floor: floorNo, mode: next.mode });
   return settings(floorNo);
 }
+
+/** Floors currently grinding, with what they need for the auto-run decision. */
+export function grindingFloors() {
+  return db.prepare(`SELECT rs.floor_no, rs.grind_hours, l.wallet,
+      (SELECT MAX(started_at) FROM runs r WHERE r.floor_no = rs.floor_no) AS last_run_at,
+      (SELECT COUNT(*) FROM runs r2 WHERE r2.floor_no = rs.floor_no AND r2.started_at > ?) AS runs_24h
+    FROM room_settings rs JOIN leases l ON l.floor_no = rs.floor_no
+    WHERE rs.mode = 'grind'`).all(Date.now() - 86400e3);
+}
+
+/** Has this floor already researched this mint recently? Grinding must not re-buy the question. */
+export const floorJudgedRecently = (floorNo, mint, withinMs = 24 * 3600e3) =>
+  !!db.prepare("SELECT 1 FROM runs WHERE floor_no=? AND mint=? AND started_at > ? LIMIT 1")
+    .get(floorNo, mint, Date.now() - withinMs);
 
 export const runsFor = (floorNo, limit = 25) =>
   db.prepare("SELECT * FROM runs WHERE floor_no=? ORDER BY id DESC LIMIT ?").all(floorNo, limit);
