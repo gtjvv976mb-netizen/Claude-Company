@@ -4,7 +4,7 @@ import http from "node:http";
    here), plus whatever wallet is written on the floor's own deed. */
 const HQ_OWNER_LIST = [
   ...(process.env.HQ_OWNER || "").split(",").map((w) => w.trim()).filter(Boolean),
-  "CmY2ZXVPVG2gbAHeVWHw7PQrAKtTcrWsq2raaWgg8YJ9",   // the dev wallet (floor 1, "Dev") — standing owner
+  "3J57tqAJqRmSBn1ZYDu9JpMMyTfBHdcGGwECiPQeiji3",   // the dev wallet — standing owner (owner-stated)
 ];
 import fs from "node:fs";
 import path from "node:path";
