@@ -570,6 +570,35 @@ export async function monitorCalls() {
           flags: (ev.mintAccount?.flags ?? []).map((f) => f.flag ?? f),
           flagsReadable: !ev.mintAccount?.error,
         };
+        /* ── SEA OTTER'S DECAY ────────────────────────────────────────────
+           A thesis is not true forever just because price has not hit the stop.
+           Every pass re-runs the deterministic screen: if the coin STILL clears
+           the floor it was admitted on, the thesis is re-verified and its clock
+           resets. If it stops clearing — liquidity gone, exit gone roachy, a new
+           flag — the confidence decays from the last verification, and once it
+           has halved the position leaves as STALE. That is an exit no stop would
+           ever have produced, on a coin quietly rotting under a flat price. */
+        try {
+          const sc = screen(ev);
+          if (sc.pass) {
+            db.prepare("UPDATE calls SET last_verified_at=? WHERE id=?").run(Date.now(), call.id);
+          } else {
+            const since = call.last_verified_at ?? call.opened_at ?? Date.now();
+            const hours = (Date.now() - since) / 3600e3;
+            const halfLife = Number(process.env.THESIS_HALFLIFE_HOURS || 12);
+            const confidence = Math.pow(0.5, hours / halfLife);      // 1 -> 0.5 -> 0.25
+            noteEvent(call.id, "thesis_decay",
+              `unverified ${hours.toFixed(1)}h · confidence ${(confidence * 100).toFixed(0)}% · ${sc.fails.map((f) => f.code).join(",")}`);
+            if (confidence < 0.5) {
+              closeCall(call.id, "thesis_stale", now.mark);
+              emit("call:exit", { callId: call.id, symbol: call.symbol, code: "thesis_stale", mark: now.mark });
+              announceExit(call, { code: "thesis_stale", urgency: "normal",
+                detail: `the thesis has not re-verified for ${hours.toFixed(0)}h — it no longer clears the screen it was admitted on (${sc.fails.map((f) => f.code).join(", ")})` }).catch(() => {});
+              continue;
+            }
+          }
+        } catch { /* an unreadable screen never ages a thesis */ }
+
         const exit = evaluateExit(call, now);
         if (exit.fire) {
           closeCall(call.id, exit.code, now.mark);

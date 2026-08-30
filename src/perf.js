@@ -308,13 +308,44 @@ export function recordFor(floorNo) {
 }
 
 /** The house record across every floor — computed from chain data, not self-reported. */
+/**
+ * Wilson score interval for a binomial proportion — the honest bounds on a hit
+ * rate from a small sample. A raw 7/10 reads as 70%, but its Wilson lower bound
+ * is about 40%: on ten trades you cannot distinguish a good desk from a lucky
+ * one. Reporting the point estimate alone is how a run of luck gets sold as an
+ * edge, so the record carries the interval and a claim gate beside it.
+ */
+export function wilson(wins, n, z = 1.96) {
+  if (!n) return { low: null, high: null };
+  const p = wins / n, z2 = z * z;
+  const denom = 1 + z2 / n;
+  const centre = p + z2 / (2 * n);
+  const spread = z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n);
+  return {
+    low: Math.max(0, (centre - spread) / denom),
+    high: Math.min(1, (centre + spread) / denom),
+  };
+}
+
 export function houseRecord() {
   const rows = db.prepare("SELECT pnl_usd FROM results").all();
   const wins = rows.filter((r) => r.pnl_usd > 0).length;
+  const n = rows.length;
+  const w = wilson(wins, n);
+  const pct = (x) => (x == null ? null : Math.round(x * 100));
   return {
-    settled: rows.length, wins, losses: rows.length - wins,
-    winRate: rows.length ? Math.round((wins / rows.length) * 100) : null,
+    settled: n, wins, losses: n - wins,
+    winRate: n ? Math.round((wins / n) * 100) : null,
     netPnlUsd: Number(rows.reduce((a, r) => a + r.pnl_usd, 0).toFixed(2)),
+    // The bounds, and the one line that matters: may this desk claim an edge at
+    // all? Only if the interval's TOP is still above a coin flip does the sample
+    // rule out "lucky". Below that we say so, in the record itself.
+    hitRateLow: pct(w.low), hitRateHigh: pct(w.high),
+    edgeClaimable: w.high != null && w.high >= 0.5 && n >= 12,
+    edgeNote: !n ? "no settled trades — no edge may be claimed"
+      : n < 12 ? `only ${n} settled — too few to distinguish skill from luck`
+      : w.high < 0.5 ? `hit rate could be as low as ${pct(w.low)}% — no edge demonstrated`
+      : `hit rate is between ${pct(w.low)}% and ${pct(w.high)}% at 95% confidence`,
   };
 }
 

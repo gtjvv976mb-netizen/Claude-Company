@@ -57,6 +57,8 @@ CREATE INDEX IF NOT EXISTS idx_call_events ON call_events(call_id, id DESC);
 
 ensureColumn("calls", "launchpad", "TEXT");
 ensureColumn("calls", "image_url", "TEXT");
+// Sea Otter: when the thesis last cleared the screen it was admitted on.
+ensureColumn("calls", "last_verified_at", "INTEGER");
 
 export function openCall(c) {
   // Every pump.fun-origin call carries the one invalidation the research pass
@@ -68,13 +70,14 @@ export function openCall(c) {
   try {
     const info = db.prepare(`
       INSERT INTO calls (mint,symbol,category,launchpad,image_url,conviction,entry_ref,entry_lo,entry_hi,stop,target,
-                         thesis,invalidation,flags_at_call,liq_at_call,rt_loss_at_call,opened_at,report_file)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+                         thesis,invalidation,flags_at_call,liq_at_call,rt_loss_at_call,opened_at,report_file,last_verified_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       c.mint, c.symbol ?? null, c.category ?? null, c.launchpad ?? null, c.imageUrl ?? null, c.conviction ?? null,
       c.entryRef ?? null, c.entryLo ?? null, c.entryHi ?? null, c.stop ?? null, c.target ?? null,
       c.thesis ?? null, c.invalidation ?? null,
       c.flags == null ? null : JSON.stringify(c.flags), c.liqUsd ?? null, c.rtLossPct ?? null,
-      Date.now(), c.reportFile ?? null);
+      Date.now(), c.reportFile ?? null,
+      Date.now());          // last_verified_at — clearing the gauntlet IS the first verification
     const call = getCall(info.lastInsertRowid);
     emit("call:open", { callId: call.id, mint: call.mint, symbol: call.symbol, category: call.category, launchpad: call.launchpad });
     return call;
