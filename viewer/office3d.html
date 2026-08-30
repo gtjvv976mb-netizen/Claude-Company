@@ -5149,6 +5149,245 @@ function buildControls(settings) {
       "Prefer your own machine? The same poller runs locally — see the README at /executor/. Either way: fund the burner it shows you with only what you'll risk, then flip it live."));
   }
 
+  /* ── RUN IT HERE: the whole bot, in this tab, in two clicks ───────────────
+     The VPS route is correct but it asks a lot: a server, a terminal, systemd.
+     This runs the SAME risk engine and the same Jupiter swaps right here, with a
+     burner key generated in this browser that never leaves it. Same trust model
+     as the self-hosted poller — your machine, your key — minus the machine.
+
+     The honest trade: a browser tab is not a server. It only trades while this
+     page is open, so the stop is only watched while you are here. That is stated
+     in the UI, not buried, and the VPS path remains for anyone who wants 24/7. */
+  box.appendChild(mk("div", "dp-h", "Run the bot here (easiest)"));
+  const botNote = mk("div", "dp-note",
+    "No server, no terminal. A burner wallet is created in THIS browser and never leaves it — we never see the key. It trades your floor's calls with the same risk engine as the installed bot. It only runs while this tab is open, so use it to try the bot live in small size; move to the one-command VPS install below for 24/7.");
+  box.appendChild(botNote);
+
+  const botBox = mk("div", "bud-addr");
+  botBox.style.cssText = "font-size:11px;line-height:1.7";
+  box.appendChild(botBox);
+  const botRow = mk("div", "dp-row");
+  box.appendChild(botRow);
+  const botLog = mk("div", "bud-addr");
+  botLog.style.cssText = "white-space:pre-wrap;font-size:10.5px;line-height:1.6;max-height:150px;overflow:auto;display:none";
+  box.appendChild(botLog);
+
+  const BOT_KEY = `cc_bot_${FLOOR_N}`;
+  // The Calls panel is rebuilt from scratch on every refresh. If the bot's timer
+  // and log lived in that closure, a refresh would orphan a RUNNING loop while
+  // the UI showed "stopped" — and the next click would start a second bot buying
+  // in parallel. One singleton on window, reattached by each render.
+  const BOT = (window.__ccBot ||= { timer: null, busy: false, lines: [] });
+  const say = (m) => {
+    BOT.lines.unshift(`${new Date().toLocaleTimeString()}  ${m}`);
+    BOT.lines = BOT.lines.slice(0, 60);
+    botLog.style.display = "block";
+    botLog.textContent = BOT.lines.join("\n");
+  };
+  if (BOT.lines.length) { botLog.style.display = "block"; botLog.textContent = BOT.lines.join("\n"); }
+  let W3 = null;
+  const web3 = () => W3 ? Promise.resolve(W3) : new Promise((res, rej) => {
+    if (window.solanaWeb3) return res(W3 = window.solanaWeb3);
+    const sc = document.createElement("script");
+    sc.src = "https://unpkg.com/@solana/web3.js@1.95.8/lib/index.iife.min.js";
+    sc.onload = () => window.solanaWeb3 ? res(W3 = window.solanaWeb3) : rej(new Error("web3 failed to load"));
+    sc.onerror = () => rej(new Error("web3 failed to load"));
+    document.head.appendChild(sc);
+  });
+
+  const loadBot = () => { try { return JSON.parse(localStorage.getItem(BOT_KEY) || "null"); } catch { return null; } };
+  const saveBot = (b) => localStorage.setItem(BOT_KEY, JSON.stringify(b));
+
+  const RPC_URL = "https://api.mainnet-beta.solana.com";
+
+  async function botKeypair() {
+    const W = await web3();
+    const b = loadBot();
+    if (!b) return null;
+    return W.Keypair.fromSecretKey(new Uint8Array(b.sk));
+  }
+
+  async function renderBot() {
+    const b = loadBot();
+    botRow.innerHTML = "";
+    if (!b) {
+      botBox.textContent = "No bot wallet yet.";
+      const create = mk("button", "dp-btn", "1. Create my bot wallet");
+      create.type = "button";
+      create.onclick = async () => {
+        create.disabled = true; create.textContent = "Creating…";
+        try {
+          const W = await web3();
+          const kp = W.Keypair.generate();
+          saveBot({ sk: Array.from(kp.secretKey), pk: kp.publicKey.toBase58(),
+                    live: false, cursor: 0, positions: {}, primed: false });
+          say("bot wallet created — it lives only in this browser");
+          renderBot();
+        } catch (e) { botBox.textContent = "could not create: " + e.message; create.disabled = false; create.textContent = "1. Create my bot wallet"; }
+      };
+      botRow.appendChild(create);
+      return;
+    }
+
+    let bal = null;
+    try {
+      const W = await web3();
+      const conn = new W.Connection(RPC_URL, "confirmed");
+      bal = (await conn.getBalance(new W.PublicKey(b.pk))) / 1e9;
+    } catch {}
+    const open = Object.keys(b.positions || {}).length;
+    botBox.textContent =
+      `wallet   ${b.pk}\n` +
+      `balance  ${bal == null ? "—" : bal.toFixed(4) + " SOL"}` +
+      `${bal != null && bal < 0.02 ? "   ← fund this address to trade" : ""}\n` +
+      `status   ${BOT.timer ? (b.live ? "TRADING LIVE" : "running · DRY RUN") : "stopped"}   ·   open positions ${open}`;
+
+    const copy = mk("button", "dp-btn ghost", "Copy address");
+    copy.type = "button";
+    copy.onclick = () => { navigator.clipboard?.writeText(b.pk); copy.textContent = "Copied ✓"; setTimeout(() => copy.textContent = "Copy address", 1200); };
+
+    const startStop = mk("button", "dp-btn", BOT.timer ? "Stop the bot" : "2. Start the bot");
+    startStop.type = "button";
+    startStop.onclick = () => { BOT.timer ? stopBot() : startBot(); };
+
+    const liveToggle = mk("button", "dp-btn ghost", b.live ? "Switch to DRY RUN" : "Go live (real trades)");
+    liveToggle.type = "button";
+    liveToggle.onclick = () => {
+      const cur = loadBot();
+      if (!cur.live && !confirm("Go live?\n\nThe bot will spend REAL SOL from this burner wallet on your floor's calls, up to your caps. Only continue with money you are willing to lose entirely.")) return;
+      cur.live = !cur.live; saveBot(cur);
+      say(cur.live ? "LIVE — real trades from now on" : "back to dry run");
+      renderBot();
+    };
+
+    const outBtn = mk("button", "dp-btn ghost", "Withdraw all SOL");
+    outBtn.type = "button";
+    outBtn.onclick = () => withdrawBot();
+
+    const keyBtn = mk("button", "dp-btn ghost", "Show secret key");
+    keyBtn.type = "button";
+    keyBtn.onclick = () => {
+      const cur = loadBot();
+      if (!confirm("Reveal the burner's secret key?\n\nAnyone with it controls this wallet. Save it somewhere safe so you can recover the funds if you clear this browser.")) return;
+      say("SECRET KEY (save it, then clear this log): [" + cur.sk.join(",") + "]");
+    };
+
+    botRow.append(copy, startStop, liveToggle, outBtn, keyBtn);
+  }
+
+  async function withdrawBot() {
+    const b = loadBot(); if (!b) return;
+    const dest = window.__wallet || prompt("Send the SOL to which address?");
+    if (!dest) return;
+    try {
+      const W = await web3();
+      const kp = await botKeypair();
+      const conn = new W.Connection(RPC_URL, "confirmed");
+      const bal = await conn.getBalance(kp.publicKey);
+      const lamports = bal - 5000;
+      if (lamports <= 0) return say("nothing to withdraw");
+      const tx = new W.Transaction().add(W.SystemProgram.transfer({
+        fromPubkey: kp.publicKey, toPubkey: new W.PublicKey(dest), lamports }));
+      tx.feePayer = kp.publicKey;
+      tx.recentBlockhash = (await conn.getLatestBlockhash("confirmed")).blockhash;
+      tx.sign(kp);
+      const sig = await conn.sendRawTransaction(tx.serialize());
+      say(`withdrew ${(lamports / 1e9).toFixed(4)} SOL to ${dest.slice(0, 6)}… — ${sig.slice(0, 16)}…`);
+      renderBot();
+    } catch (e) { say("withdraw failed: " + e.message); }
+  }
+
+  async function botTick() {
+    if (BOT.busy) return;                      // never let two ticks overlap
+    BOT.busy = true;
+    try {
+      const S = await import("/executor/strategy.mjs");
+      const W = await web3();
+      const b = loadBot(); if (!b) return;
+      const kp = await botKeypair();
+      const conn = new W.Connection(RPC_URL, "confirmed");
+      const cfg = { ...S.DEFAULTS };
+      const WSOL = "So11111111111111111111111111111111111111112";
+
+      const quote = async (i, o, amt) => {
+        const r = await fetch(`https://quote-api.jup.ag/v6/quote?inputMint=${i}&outputMint=${o}&amount=${amt}&slippageBps=300`);
+        const q = await r.json();
+        if (!q?.outAmount) throw new Error("no route"); return q;
+      };
+      const doSwap = async (q) => {
+        const r = await fetch("https://quote-api.jup.ag/v6/swap", { method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ quoteResponse: q, userPublicKey: kp.publicKey.toBase58(),
+            wrapAndUnwrapSol: true, prioritizationFeeLamports: 200000, dynamicComputeUnitLimit: true }) });
+        const sj = await r.json();
+        if (!sj?.swapTransaction) throw new Error("no swap tx");
+        const tx = W.VersionedTransaction.deserialize(Uint8Array.from(atob(sj.swapTransaction), (c) => c.charCodeAt(0)));
+        tx.sign([kp]);
+        const sig = await conn.sendRawTransaction(tx.serialize(), { maxRetries: 3 });
+        const bh = await conn.getLatestBlockhash("confirmed");
+        const st = await conn.confirmTransaction({ signature: sig, ...bh }, "confirmed");
+        if (st?.value?.err) throw new Error("swap failed on-chain");
+        return sig;
+      };
+
+      // 1. new calls from the desk
+      const res = await call_api(`/api/floor/${FLOOR_N}/feed`);
+      const feed = (res.body?.feed || []).filter((c) => c.status === "live" && c.verdict === "offered");
+      for (const c of feed) {
+        if (b.positions[c.mint]) continue;
+        if (!c.entry_ref || !c.stop) continue;
+        const st = { ...S.freshState(0), openCount: Object.keys(b.positions).length,
+                     deployedTodaySol: b.deployedToday || 0, realizedTodaySol: b.realizedToday || 0,
+                     spendableSol: Infinity };
+        const plan = S.planEntry({ call: { ...c, stop: c.stop, target: c.target, size_sol: c.size_sol }, cfg, state: st });
+        if (plan.action !== "buy") { say(`skip ${c.symbol}: ${plan.reason}`); continue; }
+        if (!b.live) { say(`WOULD BUY ${c.symbol} — ${plan.sol} SOL (dry run)`); b.positions[c.mint] = { dry: true, symbol: c.symbol }; saveBot(b); continue; }
+        say(`buying ${c.symbol} — ${plan.sol} SOL…`);
+        const q = await quote(WSOL, c.mint, Math.round(plan.sol * 1e9));
+        const sig = await doSwap(q);
+        const pos = S.openPosition({ call: { ...c, stop: c.stop / c.entry_ref, target: c.target ? c.target / c.entry_ref : null },
+                                     sol: plan.sol, fillPrice: 1, cfg });
+        pos.qtyRaw = String(q.outAmount); pos.paidSol = plan.sol; pos.symbol = c.symbol; pos.mint = c.mint;
+        b.positions[c.mint] = pos; b.deployedToday = (b.deployedToday || 0) + plan.sol;
+        saveBot(b);
+        say(`BOUGHT ${c.symbol} — ${sig.slice(0, 16)}…`);
+      }
+
+      // 2. risk pass on what we hold
+      for (const [mint, pos] of Object.entries(b.positions)) {
+        if (pos.dry) continue;
+        let mark = null;
+        try { const q = await quote(mint, WSOL, pos.qtyRaw); mark = (Number(q.outAmount) / 1e9) / (pos.paidSol || 1); } catch {}
+        const gone = feed.every((c) => c.mint !== mint);
+        const d = S.stepPosition({ pos, mark, deskExit: gone ? { code: "desk exit" } : null, cfg });
+        if (d.action === "sell") {
+          if (!b.live) { say(`WOULD SELL ${pos.symbol} — ${d.reason} (dry run)`); delete b.positions[mint]; saveBot(b); continue; }
+          say(`selling ${pos.symbol} — ${d.reason}…`);
+          const q = await quote(mint, WSOL, pos.qtyRaw);
+          const sig = await doSwap(q);
+          const net = Number(q.outAmount) / 1e9 - (pos.paidSol || 0);
+          b.realizedToday = (b.realizedToday || 0) + net;
+          delete b.positions[mint]; saveBot(b);
+          say(`SOLD ${pos.symbol} ${net >= 0 ? "+" : ""}${net.toFixed(4)} SOL — ${sig.slice(0, 16)}…`);
+        } else { saveBot(b); }
+      }
+      renderBot();
+    } catch (e) { say("tick error: " + e.message); }
+    finally { BOT.busy = false; }
+  }
+
+  function startBot() {
+    if (BOT.timer) return;                     // idempotent: never two loops
+    say("bot started — keep this tab open");
+    BOT.tick = botTick;                        // the newest closure owns the loop
+    botTick();
+    BOT.timer = setInterval(() => BOT.tick(), 20000);
+    renderBot();
+  }
+  function stopBot() { clearInterval(BOT.timer); BOT.timer = null; say("bot stopped"); renderBot(); }
+  if (BOT.timer) BOT.tick = botTick;           // a re-render adopts the running bot
+  renderBot();
+
   /* ── PAPER TEST: try the bot without a wallet, a terminal, or a cent ──────
      This imports executor/strategy.mjs — the EXACT module the real bot trades
      with, dependency-free precisely so it can also run here — and drives it over
