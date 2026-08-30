@@ -50,6 +50,10 @@ body{
   -webkit-font-smoothing:antialiased; overflow:hidden;
 }
 
+.backchip{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  padding:4px 9px;border-radius:6px;border:1px solid var(--panel-line);color:var(--ink-soft);
+  text-decoration:none;white-space:nowrap}
+.backchip:hover{color:var(--ink);background:var(--panel-line)}
 .topbar{
   position:relative; z-index:5;
   display:flex; align-items:baseline; gap:16px; flex-wrap:nowrap;
@@ -449,7 +453,8 @@ select.dp-in{cursor:pointer}
 })();
 </script>
 <div class="topbar">
-  <div class="firm">Claude <em>Company</em></div>
+  <a class="firm" href="/" style="text-decoration:none;color:inherit" title="Back to the homepage">Claude <em>Company</em></a>
+  <a class="backchip" href="/tower" title="Back to the building">← Tower</a>
   <div class="tag" id="s-floortag">The Aye-Team · The House Desk</div>
   <div class="spacer"></div>
   <div class="topstats">
@@ -488,7 +493,7 @@ select.dp-in{cursor:pointer}
   <div class="dock" role="tablist" aria-label="Floor panels">
     <button class="dtab" id="tab-tape" role="tab" aria-selected="false">Tape<span class="dot" id="tape-dot"></span></button>
     <button class="dtab" id="tab-inbox" role="tab" aria-selected="false">Big M</button>
-    <button class="dtab" id="tab-calls" role="tab" aria-selected="false">Calls</button>
+    <button class="dtab" id="tab-calls" role="tab" aria-selected="false">Team</button>
     <button class="dtab" id="tab-desk" role="tab" aria-selected="false">Desk</button>
     <button class="dtab" id="tab-crew" role="tab" aria-selected="false">Crew</button>
     <button class="dtab" id="tab-whales" role="tab" aria-selected="false">Whales<span class="dot" id="whale-dot"></span></button>
@@ -4598,7 +4603,7 @@ const tapeEl2 = document.getElementById("tape");
 
 const RAIL = document.getElementById("rail");
 const RAIL_TITLE = document.getElementById("rail-title");
-const PANE_TITLE = { tape: "The Tape", inbox: "Big M", desk: "My Desk", calls: "Live Calls", crew: "The Aye-Team",
+const PANE_TITLE = { tape: "The Tape", inbox: "Big M", desk: "My Desk", calls: "The Trading Team", crew: "The Aye-Team",
   whales: "Whale Callouts", stats: "The Building's Books", ranks: "The Leaderboard", ledger: "The Record Book" };
 const PANE_TABS = { tape: "tab-tape", inbox: "tab-inbox", desk: "tab-desk", calls: "tab-calls", crew: "tab-crew",
   whales: "tab-whales", stats: "tab-stats", ranks: "tab-ranks", ledger: "tab-ledger" };
@@ -4718,139 +4723,32 @@ function renderRoom() {
 
   const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
 
-  // ── the team's shift: take a break, or grind ──
-  panel.appendChild(mk("div", "dp-h", "Your team's shift"));
-  const grinding = ROOM.settings?.mode === "grind";
-  const shift = mk("button", "dp-btn", grinding ? "\u2615 Take a break" : "\u2692 Let's grind");
-  const shiftNote = mk("p", "dp-note", grinding
-    ? `GRINDING \u2014 your team hunts the market's best-ranked coin every ${ROOM.settings.grind_hours}h on its own (max 6 runs/day), charged like any run: free runs first, auto-refund when there was nothing to study.`
-    : "ON A BREAK \u2014 your team works only when you say. Flip to grind and they hunt the best-ranked coin on their own clock, for as long as your credit lasts.");
-  shift.addEventListener("click", async () => {
-    shift.disabled = true; shift.textContent = "Switching shift\u2026";
-    const { status, body } = await api(`/api/floor/${FLOOR}/settings`, { method: "POST",
-      body: JSON.stringify({ mode: grinding ? "break" : "grind" }) });
-    if (status !== 200) { shiftNote.textContent = body?.error || "could not switch"; shift.disabled = false; }
-    loadRoom();
-  });
-  panel.append(shift, shiftNote);
+  // The team controls live on the TEAM tab now (renderTeamInto below); the
+  // Desk is the room — the watch board, the names on the doors, the credit.
 
-  // ── how often the team grinds (real: the grind scheduler reads grind_hours) ──
-  const cadRow = mk("div", "dp-row");
-  cadRow.append(mk("span", "dp-note", "Hunt every"));
-  const cad = mk("select", "dp-in");
-  for (const h of [1, 2, 3, 4, 6, 8, 12, 24]) {
-    const o = document.createElement("option"); o.value = h; o.textContent = h + "h";
-    if (Number(ROOM.settings?.grind_hours) === h) o.selected = true;
-    cad.appendChild(o);
-  }
-  cad.setAttribute("aria-label", "Grind cadence in hours");
-  cad.addEventListener("change", async () => {
-    cad.disabled = true;
-    await api(`/api/floor/${FLOOR}/settings`, { method: "POST", body: JSON.stringify({ grindHours: Number(cad.value) }) });
-    cad.disabled = false; loadRoom();
-  });
-  cadRow.append(cad, mk("span", "dp-note", "when grinding (max 6 runs/day)"));
-  panel.appendChild(cadRow);
-
-  // ── who manages this floor: Claude or Grok ──
-  panel.appendChild(mk("div", "dp-h", "Your Managing Director's brain"));
-  const curBrain = ROOM.settings?.md_brain === "grok" ? "grok" : "claude";
-  const brainRow = mk("div", "dp-row");
-  const bClaude = mk("button", "dp-btn" + (curBrain === "claude" ? "" : " ghost"), "Claude");
-  const bGrok = mk("button", "dp-btn" + (curBrain === "grok" ? "" : " ghost"), "Grok");
-  const setBrain = async (b) => {
-    bClaude.disabled = bGrok.disabled = true;
-    await api(`/api/floor/${FLOOR}/settings`, { method: "POST", body: JSON.stringify({ mdBrain: b }) });
-    window.pollBossBoard?.();          // the boss's room retakes its colours at once
-    loadRoom();
-  };
-  bClaude.addEventListener("click", () => setBrain("claude"));
-  bGrok.addEventListener("click", () => setBrain("grok"));
-  brainRow.append(bClaude, bGrok);
-  panel.appendChild(brainRow);
-  panel.appendChild(mk("p", "dp-note", curBrain === "grok"
-    ? "Your MD thinks on Grok (xAI) — X-native instincts, same rails: the screen, the red team, compliance and the no-keys wall are unchanged. If Grok can't hold the format, the Claude seat answers instead."
-    : "Your MD thinks on Claude. Switch to Grok for an X-native manager — every safety rail stays the same either way."));
-
-  // ── research a token ──
-  panel.appendChild(mk("div", "dp-h", "Put the team on a token"));
-  const row = mk("div", "dp-row");
-  const input = mk("input", "dp-in");
-  input.placeholder = "Paste a Solana mint address";
-  input.setAttribute("aria-label", "Mint address to research");
-  const go = mk("button", "dp-btn", ROOM.busy ? "Working…" : "Run 1 cycle");
-  go.disabled = ROOM.busy;
-  row.append(input, go);
-  panel.appendChild(row);
-
-  const cost = ROOM.freeRunsLeft > 0
-    ? `${ROOM.freeRunsLeft} research run${ROOM.freeRunsLeft === 1 ? "" : "s"} included with your lease.`
-    : `Each run costs ${ROOM.runPriceTokens.toLocaleString()} $CLAUDECO.`;
-  panel.appendChild(mk("p", "dp-note", cost + " Sixteen agents work the token end to end; you get a brief and an unsigned ticket."));
-
-  const bal = mk("div", "dp-bal");
-  bal.textContent = `Building credit: ${fmtTok(ROOM.balanceBaseUnits, ROOM.decimals)} $CLAUDECO`;
-  panel.appendChild(bal);
-
-  const msg = mk("p", "dp-note");
-  panel.appendChild(msg);
-
-  go.addEventListener("click", async () => {
-    const mint = input.value.trim();
-    if (!mint) return;
-    go.disabled = true; go.textContent = "Starting…";
-    const { status, body } = await api(`/api/floor/${FLOOR}/run`, { method: "POST", body: JSON.stringify({ mint }) });
-    if (status === 200) {
-      msg.textContent = body.free ? "Started — using an included run." : `Started — charged ${ROOM.runPriceTokens.toLocaleString()} $CLAUDECO.`;
-      startProgress();
-      showPane("tape");
-      input.value = "";
-    } else {
-      msg.textContent = body.error || "could not start";
-      go.disabled = false; go.textContent = "Run 1 cycle";
-    }
-    setTimeout(loadRoom, 800);
-  });
-
-  // ── standing watchlist: coins the team researches FIRST each grind cycle
-  //    (real: the grind scheduler reads this list and pins it ahead of the
-  //    open-market sweep). ──
-  panel.appendChild(mk("div", "dp-h", "Your watchlist"));
+  // ── the watch board: the desk's armed tripwires, checked every five minutes ──
+  panel.appendChild(mk("div", "dp-h", "The watch board"));
   panel.appendChild(mk("p", "dp-note",
-    "Pin coins your team checks before anything else on each grind cycle. Up to 25."));
-  const pins = Array.isArray(ROOM.settings?.watchlist) ? ROOM.settings.watchlist.slice() : [];
-  const pinWrap = mk("div", "dp-pins");
-  const savePins = async (next) => {
-    await api(`/api/floor/${FLOOR}/settings`, { method: "POST", body: JSON.stringify({ watchlist: next }) });
-    loadRoom();
-  };
-  const renderPins = () => {
-    pinWrap.innerHTML = "";
-    if (!pins.length) { pinWrap.appendChild(mk("p", "dp-note", "No pinned coins — the team hunts the open market.")); }
-    for (const m of pins) {
-      const chip = mk("div", "dp-chip");
-      chip.append(mk("span", null, m.slice(0, 4) + "…" + m.slice(-4)));
-      const x = mk("button", "dp-x", "✕"); x.setAttribute("aria-label", "Remove " + m);
-      x.addEventListener("click", () => { const i = pins.indexOf(m); if (i >= 0) pins.splice(i, 1); renderPins(); savePins(pins); });
-      chip.appendChild(x); pinWrap.appendChild(chip);
-    }
-  };
-  renderPins();
-  panel.appendChild(pinWrap);
-  const pinRow = mk("div", "dp-row");
-  const pinIn = mk("input", "dp-in");
-  pinIn.placeholder = "Paste a Solana mint to pin";
-  pinIn.setAttribute("aria-label", "Mint address to pin");
-  const pinAdd = mk("button", "dp-btn ghost", "Pin");
-  pinAdd.addEventListener("click", () => {
-    const m = pinIn.value.trim();
-    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(m)) { pinIn.setAttribute("aria-invalid", "true"); return; }
-    if (pins.includes(m)) { pinIn.value = ""; return; }
-    if (pins.length >= 25) return;
-    pins.push(m); pinIn.value = ""; pinIn.removeAttribute("aria-invalid"); renderPins(); savePins(pins);
-  });
-  pinRow.append(pinIn, pinAdd);
-  panel.appendChild(pinRow);
+    "Armed tripwires — coins the desk is stalking, each with the machine-checked rules that would wake it. Re-checked every five minutes."));
+  const watchBox = mk("div");
+  watchBox.style.cssText = "display:flex;flex-direction:column;gap:8px";
+  panel.appendChild(watchBox);
+  if (window.__renderWatchInto) {
+    window.__renderWatchInto(watchBox).then(() => watchBox.querySelector(".dp-h")?.remove());
+  } else watchBox.appendChild(mk("p", "dp-note", "Open the Team tab once, then revisit — the board loads with it."));
+
+  // ── building credit: what this floor can spend ──
+  panel.appendChild(mk("div", "dp-h", "Building credit"));
+  const cred = mk("div", "dp-bal");
+  cred.textContent = `${fmtTok(ROOM.balanceBaseUnits, ROOM.decimals)} $CLAUDECO`;
+  panel.appendChild(cred);
+  const credNote = ROOM.freeRunsLeft > 0
+    ? `${ROOM.freeRunsLeft} included research run${ROOM.freeRunsLeft === 1 ? "" : "s"} left, then ${ROOM.runPriceTokens.toLocaleString()} $CLAUDECO per run. Credit also pays the rent.`
+    : `Runs cost ${ROOM.runPriceTokens.toLocaleString()} $CLAUDECO each; credit also pays the rent.`;
+  panel.appendChild(mk("p", "dp-note", credNote));
+  const topup = mk("a", "dp-btn ghost", "Top up in the tower");
+  topup.href = "/tower"; topup.style.textAlign = "center"; topup.style.textDecoration = "none";
+  panel.appendChild(topup);
 
   // ── Naming is a one-time cosmetic act, not a daily control: it folds away so
   //    the controls that change behaviour stay unburied. ──
@@ -4928,6 +4826,176 @@ function renderRoom() {
     panel.appendChild(row);
   }
 }
+
+/* ═══ THE TRADING TEAM'S CONTROLS — the Team tab's front page ══════════════
+   Shift (break/grind), hunt cadence, the MD's brain, put-them-on-a-token, and
+   the pinned hunt addresses. This used to be scattered on the Desk; the Team
+   tab renders it into its own box via window.__renderTeamInto. Fetches fresh
+   floor state each call and re-renders itself after every change. */
+async function renderTeamInto(el) {
+  const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
+  const refresh = () => renderTeamInto(el);
+  el.innerHTML = "";
+  if (FLOOR == null) { el.appendChild(mk("p", "locked", "No floor in this address.")); return; }
+  let R;
+  try {
+    const { status, body } = await api(`/api/floor/${FLOOR}`);
+    if (status !== 200) throw new Error(body?.error || `the desk answered ${status}`);
+    R = body;
+  } catch (e) {
+    el.appendChild(mk("p", "locked", `Could not reach the desk. ${String(e.message || e)}`));
+    const retry = mk("button", "dp-btn", "Try again"); retry.onclick = refresh; el.appendChild(retry);
+    return;
+  }
+  if (!R.lease) {
+    el.appendChild(mk("p", "locked", `Floor ${FLOOR} is vacant. Lease it in the tower to put a team in this room.`));
+    const a = mk("a", "dp-btn", "Go to the tower"); a.href = "/tower";
+    a.style.textAlign = "center"; a.style.textDecoration = "none";
+    el.appendChild(a); return;
+  }
+  if (!R.isMine) {
+    el.appendChild(mk("p", "locked", "This team works for the floor's tenant. Lease a floor to direct one of your own."));
+    return;
+  }
+  const ROOM = R;                                  // the moved code reads ROOM
+  const loadRoom = refresh;                        // and refreshes through us
+  // ── the team's shift: take a break, or grind ──
+  el.appendChild(mk("div", "dp-h", "Your team's shift"));
+  const grinding = ROOM.settings?.mode === "grind";
+  const shift = mk("button", "dp-btn", grinding ? "\u2615 Take a break" : "\u2692 Let's grind");
+  const shiftNote = mk("p", "dp-note", grinding
+    ? `GRINDING \u2014 your team hunts the market's best-ranked coin every ${ROOM.settings.grind_hours}h on its own (max 6 runs/day), charged like any run: free runs first, auto-refund when there was nothing to study.`
+    : "ON A BREAK \u2014 your team works only when you say. Flip to grind and they hunt the best-ranked coin on their own clock, for as long as your credit lasts.");
+  shift.addEventListener("click", async () => {
+    shift.disabled = true; shift.textContent = "Switching shift\u2026";
+    const { status, body } = await api(`/api/floor/${FLOOR}/settings`, { method: "POST",
+      body: JSON.stringify({ mode: grinding ? "break" : "grind" }) });
+    if (status !== 200) { shiftNote.textContent = body?.error || "could not switch"; shift.disabled = false; }
+    loadRoom();
+  });
+  el.append(shift, shiftNote);
+
+  // ── how often the team grinds (real: the grind scheduler reads grind_hours) ──
+  const cadRow = mk("div", "dp-row");
+  cadRow.append(mk("span", "dp-note", "Hunt every"));
+  const cad = mk("select", "dp-in");
+  for (const h of [1, 2, 3, 4, 6, 8, 12, 24]) {
+    const o = document.createElement("option"); o.value = h; o.textContent = h + "h";
+    if (Number(ROOM.settings?.grind_hours) === h) o.selected = true;
+    cad.appendChild(o);
+  }
+  cad.setAttribute("aria-label", "Grind cadence in hours");
+  cad.addEventListener("change", async () => {
+    cad.disabled = true;
+    await api(`/api/floor/${FLOOR}/settings`, { method: "POST", body: JSON.stringify({ grindHours: Number(cad.value) }) });
+    cad.disabled = false; loadRoom();
+  });
+  cadRow.append(cad, mk("span", "dp-note", "when grinding (max 6 runs/day)"));
+  el.appendChild(cadRow);
+
+  // ── who manages this floor: Claude or Grok ──
+  el.appendChild(mk("div", "dp-h", "Your Managing Director's brain"));
+  const curBrain = ROOM.settings?.md_brain === "grok" ? "grok" : "claude";
+  const brainRow = mk("div", "dp-row");
+  const bClaude = mk("button", "dp-btn" + (curBrain === "claude" ? "" : " ghost"), "Claude");
+  const bGrok = mk("button", "dp-btn" + (curBrain === "grok" ? "" : " ghost"), "Grok");
+  const setBrain = async (b) => {
+    bClaude.disabled = bGrok.disabled = true;
+    await api(`/api/floor/${FLOOR}/settings`, { method: "POST", body: JSON.stringify({ mdBrain: b }) });
+    window.pollBossBoard?.();          // the boss's room retakes its colours at once
+    loadRoom();
+  };
+  bClaude.addEventListener("click", () => setBrain("claude"));
+  bGrok.addEventListener("click", () => setBrain("grok"));
+  brainRow.append(bClaude, bGrok);
+  el.appendChild(brainRow);
+  el.appendChild(mk("p", "dp-note", curBrain === "grok"
+    ? "Your MD thinks on Grok (xAI) — X-native instincts, same rails: the screen, the red team, compliance and the no-keys wall are unchanged. If Grok can't hold the format, the Claude seat answers instead."
+    : "Your MD thinks on Claude. Switch to Grok for an X-native manager — every safety rail stays the same either way."));
+
+  // ── research a token ──
+  el.appendChild(mk("div", "dp-h", "Put the team on a token"));
+  const row = mk("div", "dp-row");
+  const input = mk("input", "dp-in");
+  input.placeholder = "Paste a Solana mint address";
+  input.setAttribute("aria-label", "Mint address to research");
+  const go = mk("button", "dp-btn", ROOM.busy ? "Working…" : "Run 1 cycle");
+  go.disabled = ROOM.busy;
+  row.append(input, go);
+  el.appendChild(row);
+
+  const cost = ROOM.freeRunsLeft > 0
+    ? `${ROOM.freeRunsLeft} research run${ROOM.freeRunsLeft === 1 ? "" : "s"} included with your lease.`
+    : `Each run costs ${ROOM.runPriceTokens.toLocaleString()} $CLAUDECO.`;
+  el.appendChild(mk("p", "dp-note", cost + " Sixteen agents work the token end to end; you get a brief and an unsigned ticket."));
+
+  const bal = mk("div", "dp-bal");
+  bal.textContent = `Building credit: ${fmtTok(ROOM.balanceBaseUnits, ROOM.decimals)} $CLAUDECO`;
+  el.appendChild(bal);
+
+  const msg = mk("p", "dp-note");
+  el.appendChild(msg);
+
+  go.addEventListener("click", async () => {
+    const mint = input.value.trim();
+    if (!mint) return;
+    go.disabled = true; go.textContent = "Starting…";
+    const { status, body } = await api(`/api/floor/${FLOOR}/run`, { method: "POST", body: JSON.stringify({ mint }) });
+    if (status === 200) {
+      msg.textContent = body.free ? "Started — using an included run." : `Started — charged ${ROOM.runPriceTokens.toLocaleString()} $CLAUDECO.`;
+      startProgress();
+      showPane("tape");
+      input.value = "";
+    } else {
+      msg.textContent = body.error || "could not start";
+      go.disabled = false; go.textContent = "Run 1 cycle";
+    }
+    setTimeout(loadRoom, 800);
+  });
+
+  // ── standing watchlist: coins the team researches FIRST each grind cycle
+  //    (real: the grind scheduler reads this list and pins it ahead of the
+  //    open-market sweep). ──
+  el.appendChild(mk("div", "dp-h", "Your watchlist"));
+  el.appendChild(mk("p", "dp-note",
+    "Pin coins your team checks before anything else on each grind cycle. Up to 25."));
+  const pins = Array.isArray(ROOM.settings?.watchlist) ? ROOM.settings.watchlist.slice() : [];
+  const pinWrap = mk("div", "dp-pins");
+  const savePins = async (next) => {
+    await api(`/api/floor/${FLOOR}/settings`, { method: "POST", body: JSON.stringify({ watchlist: next }) });
+    loadRoom();
+  };
+  const renderPins = () => {
+    pinWrap.innerHTML = "";
+    if (!pins.length) { pinWrap.appendChild(mk("p", "dp-note", "No pinned coins — the team hunts the open market.")); }
+    for (const m of pins) {
+      const chip = mk("div", "dp-chip");
+      chip.append(mk("span", null, m.slice(0, 4) + "…" + m.slice(-4)));
+      const x = mk("button", "dp-x", "✕"); x.setAttribute("aria-label", "Remove " + m);
+      x.addEventListener("click", () => { const i = pins.indexOf(m); if (i >= 0) pins.splice(i, 1); renderPins(); savePins(pins); });
+      chip.appendChild(x); pinWrap.appendChild(chip);
+    }
+  };
+  renderPins();
+  el.appendChild(pinWrap);
+  const pinRow = mk("div", "dp-row");
+  const pinIn = mk("input", "dp-in");
+  pinIn.placeholder = "Paste a Solana mint to pin";
+  pinIn.setAttribute("aria-label", "Mint address to pin");
+  const pinAdd = mk("button", "dp-btn ghost", "Pin");
+  pinAdd.addEventListener("click", () => {
+    const m = pinIn.value.trim();
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(m)) { pinIn.setAttribute("aria-invalid", "true"); return; }
+    if (pins.includes(m)) { pinIn.value = ""; return; }
+    if (pins.length >= 25) return;
+    pins.push(m); pinIn.value = ""; pinIn.removeAttribute("aria-invalid"); renderPins(); savePins(pins);
+  });
+  pinRow.append(pinIn, pinAdd);
+  el.appendChild(pinRow);
+
+
+}
+window.__renderTeamInto = renderTeamInto;
 
 /* ── live progress: a five-minute wait needs to show its working ─────────── */
 const SEATS = ["Screener","Forensics","Liquidity","Flow","Technical","Narrative","Red Team","Risk","PM","Execution","Compliance","CEO"];
@@ -5059,6 +5127,8 @@ async function openSwap({ mint, symbol, sol, side = "buy" }) {
   });
 }
 
+window.__renderWatchInto = (el) => loadWatchboard(el);
+
 async function loadCalls() {
   if (FLOOR_N == null) { callsPanel.innerHTML = `<p class="locked">No floor in this address.</p>`; return; }
   if (!callsPanel.children.length) callsPanel.innerHTML = `<p class="locked">Loading the sheet…</p>`;
@@ -5091,7 +5161,13 @@ function renderCalls({ feed = [], settings, record }) {
      tripwires, kills, settings — folds into labelled drawers that carry their
      own counts, so nothing is lost and nothing shouts. */
 
-  // 1. ACT — the bot, first thing on the tab.
+  // 1. THE TEAM — how you manage it: shift, cadence, brain, token, pinned hunts.
+  const teamBox = document.createElement("div");
+  teamBox.style.cssText = "display:flex;flex-direction:column;gap:11px";
+  callsPanel.appendChild(teamBox);
+  window.__renderTeamInto?.(teamBox);
+
+  // 2. ACT — the bot that trades what the team calls.
   if (settings) callsPanel.appendChild(buildBotCard(settings));
 
   // 2. SCORE — the whole book compressed to one readable line.
@@ -5103,18 +5179,12 @@ function renderCalls({ feed = [], settings, record }) {
   callsPanel.appendChild(feedWrap);
 
   // 4. THE REST — folded, each drawer counting what is inside it.
-  const watch = foldSection("Watch board \u2014 armed tripwires");
   const kill  = foldSection("Killed \u2014 the trades that did not happen");
-  callsPanel.append(watch.wrap, kill.wrap);
+  callsPanel.append(kill.wrap);
   // These two endpoints are tenant-gated and answer 403 to anyone else. An empty
   // body therefore means "not yours to see" as often as it means "none" — so the
   // label must not claim "nothing armed" when the truth is "refused".
-  loadWatchboard(watch.body).then((ok) => {
-    const n = watch.body.querySelectorAll(".watchrow").length;
-    watch.label.textContent = n ? `Watch board \u2014 ${n} armed tripwire${n === 1 ? "" : "s"}`
-      : ok === false ? "Watch board \u2014 tenants only" : "Watch board \u2014 nothing armed";
-    watch.body.querySelector(".dp-h")?.remove();          // the fold label already says it
-  });
+  // The watch board lives on the Desk tab now — the room shows what the desk stalks.
   loadKilled(kill.body).then((ok) => {
     const n = kill.body.querySelectorAll(".killrow").length;
     kill.label.textContent = n ? `Killed \u2014 ${n} shown`
