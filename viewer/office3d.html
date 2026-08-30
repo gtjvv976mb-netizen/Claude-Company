@@ -637,6 +637,15 @@ function panCamera(dxPx, dyPx) {
 }
 
 function followFigure(seatId) {
+  // WALL-ST-E is not on the staff roster, but he walks the floor like one —
+  // the camera follows him by the same handle everybody else uses.
+  if (seatId === "__bot") {
+    if (!window.__botGroup) return false;
+    followSeat = seatId; glide = null;
+    if (camWorldWidth > 20) { camWorldWidth = 20; resize(); }
+    updateHint();
+    return true;
+  }
   if (!workers[seatId]) return false;
   followSeat = seatId; glide = null;
   if (camWorldWidth > 20) { camWorldWidth = 20; resize(); }
@@ -3801,6 +3810,7 @@ window.__turntableBot = async (frames = 96, port = 4972) => {
   }
   return "captured " + frames;
 };
+window.__botGroup = botFig.g;
 window.__bot = () => ({ x: +botFig.g.position.x.toFixed(2), z: +botFig.g.position.z.toFixed(2), mode: botState.mode, want: botState.wantRoam });
 const BOT_STOPS = [[0, 8.8], [-6.3, 6.2], [4.4, 8.4], [10.6, 4.2], [0.6, 2.2], [-9.5, 5.6], [8.6, 1.4], [-2.5, 10.6]];
 const botState = { mode: "sleep", legs: null, li: 0, pauseT: 0, wantRoam: false, goingHome: false };
@@ -3927,6 +3937,15 @@ function openDossier(seatId) {
   });
   dBodyEl.appendChild(fBtn);
 
+  if (seatId === "__bot") {
+    const mBtn = document.createElement("button");
+    mBtn.className = "dp-btn ghost";
+    mBtn.style.marginTop = "6px";
+    mBtn.textContent = "\u2699 Manage him in the Team tab";
+    mBtn.onclick = () => { closeDossier(); document.getElementById("tab-calls")?.click(); };
+    dBodyEl.appendChild(mBtn);
+  }
+
   dossierEl.classList.add("on");
   dossierEl.dataset.seat = seatId;
 }
@@ -3965,7 +3984,6 @@ function pickSeat(clientX, clientY) {
     // opening a card there would fight the camera the player was just using.
     if (moved > 5 || e.button !== 0) return;
     const seat = pickSeat(e.clientX, e.clientY);
-    if (seat === "__bot") { document.getElementById("tab-calls")?.click(); return; }
     if (seat) openDossier(seat);
     else if (dossierEl.classList.contains("on")) closeDossier();
   });
@@ -4082,7 +4100,9 @@ function frame() {
   for (const id in workers) workers[id].update(dt, elapsed);
   // The pivot travels: glued to a followed figure, or easing toward a
   // double-clicked point. Manual pan clears both, so they never fight.
-  const want = followSeat && workers[followSeat] ? workers[followSeat].g.position : glide;
+  const followed = followSeat === "__bot" ? window.__botGroup
+    : (followSeat && workers[followSeat] ? workers[followSeat].g : null);
+  const want = followed ? followed.position : glide;
   if (want) {
     const ease = Math.min(1, dt * 6);
     camTarget.x += (want.x - camTarget.x) * ease;
@@ -4399,7 +4419,7 @@ for (const s of STAFF) {
   sp.append(i, document.createTextNode("WALL-ST-E"));
   sp.style.cursor = "pointer";
   sp.title = "Your autotrader — click to manage him";
-  sp.onclick = () => document.getElementById("tab-calls")?.click();
+  sp.onclick = () => openDossier("__bot");
   legendEl.appendChild(sp);
 }
 
@@ -4438,10 +4458,24 @@ async function paintCrewPortraits() {
       scene.children.forEach((c) => { wasVisible.set(c, c.visible); if (!c.isLight) c.visible = (c === sub.g); });
       scene.background = null; scene.fog = null;
       sub.g.visible = true;
-      const sprites = [];
-      sub.g.traverse((o) => { if (o.isSprite && o.visible) { o.visible = false; sprites.push(o); } });
       const sleeping = sub.bot && botState.mode === "sleep";
       if (sub.bot) botPose(false);                          // he poses awake for his portrait
+      // The rig is captured live, and at a desk that means SEATED — knees up,
+      // hips dropped, which reads as a man folded into a box when it turns.
+      // Stand him for the shot: clear the blend and re-pose once, then put the
+      // real values back before the floor draws again.
+      const w = !sub.bot && workers[sub.id];
+      let wasSeat = 0, wasWant = false, wasY = 0;
+      if (w) {
+        wasSeat = w.seated; wasWant = w.wantSeated; wasY = w.g.position.y;
+        w.seated = 0; w.wantSeated = false;
+        w.update(0.016, 0);                                 // settle the standing pose
+        w.g.position.y = w.baseY;
+      }
+      // Hide the sprites AFTER the pose update — update() turns the nameplate
+      // back on, and two tiles shipped with a floating name across the figure.
+      const sprites = [];
+      sub.g.traverse((o) => { if (o.isSprite && o.visible) { o.visible = false; sprites.push(o); } });
       const p = sub.g.position;
       const strip = document.createElement("canvas");
       strip.width = FW * FR; strip.height = FH;
@@ -4465,6 +4499,7 @@ async function paintCrewPortraits() {
         tile.classList.add("turn");
       }
       sprites.forEach((o) => (o.visible = true));
+      if (w) { w.seated = wasSeat; w.wantSeated = wasWant; w.g.position.y = wasY; w.update(0.016, 0); }
       if (sleeping) botPose(true);
       // let the floor draw between agents — but never stall on a throttled
       // rAF (a background tab suspends it, and the strips would never finish)
