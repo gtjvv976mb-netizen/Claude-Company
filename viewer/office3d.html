@@ -2360,9 +2360,25 @@ function drawBossBoard() {
   const net = bossData.net;
   row("net p&l", net == null ? "\u2014" : (net >= 0 ? "+$" : "\u2212$") + Math.abs(net).toLocaleString(undefined, { maximumFractionDigits: 0 }),
     152, net == null ? dim : net >= 0 ? "#b9e3b6" : "#f0b2a2");
-  row("record", bossData.settled ? `${bossData.wins}W \u2013 ${bossData.losses}L` : "no settles yet", 242);
-  row("building rank", bossData.rank ? `#${bossData.rank} of ${bossData.of}` : "unranked", 332);
-  chalkText(x, "every number from the public books \u00b7 live", 32, 412, 26, dim, "left", 500);
+  row("record", bossData.settled ? `${bossData.wins}W \u2013 ${bossData.losses}L` : "no settles yet", 232);
+  row("building rank", bossData.rank ? `#${bossData.rank} of ${bossData.of}` : "unranked", 312);
+
+  // The live book, chalked under the record: what is on the sheet right now,
+  // what this floor is actually holding, and how much of that is memecoin. The
+  // boss's wall used to carry only settled history, which said nothing about
+  // what was open at this minute.
+  const st = window.__liveBook;
+  if (st) {
+    chalkText(x, "live", 32, 372, 30, dim, "left", 500);
+    const bits = [
+      `${st.liveCalls} on the sheet`,
+      `${st.taken} held`,
+      st.memecoins ? `${st.memecoins} memecoin` : null,
+      st.exposureSol ? `${st.exposureSol.toFixed(2)} SOL out` : null,
+    ].filter(Boolean).join("  \u00b7  ");
+    chalkText(x, bits, W - 32, 372, 30, chalk, "right", 500);
+  }
+  chalkText(x, "every number from the public books \u00b7 live", 32, 418, 24, dim, "left", 500);
   bossBoard.tex.needsUpdate = true;
 }
 // chalk needs its font: redraw once Caveat actually arrives
@@ -2973,7 +2989,7 @@ function drawGrokBoard() {
     // Even with nothing held, the wall carries the floor's live numbers: what is
     // on the sheet, what is actually held, how much of it is memecoin, and the
     // exposure that decides how hard to breathe.
-    const st = grokBook.stats || {};
+    const st = window.__liveBook || {};
     const rows = [
       ["LIVE CALLS", st.liveCalls != null ? String(st.liveCalls) : "\u2014"],
       ["OFFERED TO THIS FLOOR", st.open != null ? String(st.open) : "\u2014"],
@@ -3084,7 +3100,7 @@ window.__grokBoardUpdate = (feed = []) => {
   });
   // The counts he keeps on the wall: what is live, what is actually held, and
   // how much of it is memecoin — the number that decides how hard to breathe.
-  grokBook.stats = {
+  window.__liveBook = {
     liveCalls: live.length,
     open: open.length,
     taken: open.filter((c) => c.taken).length,
@@ -3094,6 +3110,7 @@ window.__grokBoardUpdate = (feed = []) => {
   };
   drawGrokBoard();
   drawGrokTickets();
+  drawBossBoard();          // the boss's wall carries the same live book
 };
 drawGrokBoard();
 
