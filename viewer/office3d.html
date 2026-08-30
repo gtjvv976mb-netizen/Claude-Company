@@ -1154,9 +1154,9 @@ function buildPlant(at) {
   const X = 9.8, Z = 9.6;
 
   // tiled floor patch marks the room off without a wall boxing the camera out
-  const tile = new THREE.Mesh(new THREE.PlaneGeometry(8.6, 6.6),
+  const tile = new THREE.Mesh(new THREE.PlaneGeometry(8.6, 6.2),
     new THREE.MeshStandardMaterial({ color: 0xd7cfb4, roughness: 0.9 }));
-  tile.rotation.x = -Math.PI / 2; tile.position.set(X, 0.02, Z);
+  tile.rotation.x = -Math.PI / 2; tile.position.set(X, 0.02, Z - 0.2);
   tile.receiveShadow = true; g.add(tile);
 
   // Real walls now: a solid base with glass above, so it reads as a ROOM and the
@@ -1179,32 +1179,32 @@ function buildPlant(at) {
   // WEST wall (z 7.6–9.6), opening onto the central walkway; the east end stays open.
   wallSeg(8.8, 0.28, X, Z - 3.3);             // south wall, the full run
   wallSeg(0.28, 1.4, X - 4.3, 6.9);           // west wall, north of the doorway
-  wallSeg(0.28, 3.4, X - 4.3, 11.3);          // west wall, south of the doorway
+  wallSeg(0.28, 2.9, X - 4.3, 11.05);          // west wall, south of the doorway
   // doorway posts, so the gap reads as a door and not a builder's mistake
   box(g, [0.2, 2.3, 0.14], [X - 4.3, 1.15, 7.6], TIMBER, 0.6);
   box(g, [0.2, 2.3, 0.14], [X - 4.3, 1.15, 9.6], TIMBER, 0.6);
   // the big furniture is solid too — nobody walks through a fridge
-  solidRect(X, Z + 2.9, 7.4, 0.78);           // counter
-  solidRect(X + 3.2, Z + 2.85, 0.95, 0.85);   // fridge
+  solidRect(X, Z + 2.35, 7.4, 0.78);           // counter
+  solidRect(X + 3.2, Z + 2.3, 0.95, 0.85);   // fridge
 
   // counter along the back with a splashback
-  box(g, [7.4, 0.9, 0.7], [X, 0.45, Z + 2.9], P.timberDark);
-  box(g, [7.4, 0.08, 0.8], [X, 0.94, Z + 2.9], P.pathStone);
-  box(g, [7.4, 1.0, 0.1], [X, 1.4, Z + 3.28], 0xbfd3d6, 0.7);
+  box(g, [7.4, 0.9, 0.7], [X, 0.45, Z + 2.35], P.timberDark);
+  box(g, [7.4, 0.08, 0.8], [X, 0.94, Z + 2.35], P.pathStone);
+  box(g, [7.4, 1.0, 0.1], [X, 1.4, Z + 2.73], 0xbfd3d6, 0.7);
 
   // coffee machine, mugs, a fruit bowl, a stack of cups
-  box(g, [0.5, 0.55, 0.42], [X - 2.6, 1.26, Z + 2.9], DARK);
-  box(g, [0.34, 0.12, 0.3], [X - 2.6, 0.99, Z + 2.75], P.metal);
-  for (let i = 0; i < 4; i++) cyl(g, 0.055, 0.11, [X - 1.9 + i * 0.2, 1.03, Z + 2.8], P.cream, 8);
-  cyl(g, 0.26, 0.12, [X + 0.5, 1.04, Z + 2.9], P.cream, 12);
+  box(g, [0.5, 0.55, 0.42], [X - 2.6, 1.26, Z + 2.35], DARK);
+  box(g, [0.34, 0.12, 0.3], [X - 2.6, 0.99, Z + 2.2], P.metal);
+  for (let i = 0; i < 4; i++) cyl(g, 0.055, 0.11, [X - 1.9 + i * 0.2, 1.03, Z + 2.25], P.cream, 8);
+  cyl(g, 0.26, 0.12, [X + 0.5, 1.04, Z + 2.35], P.cream, 12);
   for (const [dx, dz, c] of [[0.42, 2.86, 0xd9534f], [0.62, 2.94, 0xe0ad3d], [0.5, 3.02, 0x7ab85a]])
     cyl(g, 0.09, 0.16, [X + dx, 1.14, Z + dz], c, 8);
-  box(g, [0.34, 0.5, 0.34], [X + 1.6, 1.24, Z + 2.9], P.cream, 0.9);      // snack boxes
-  box(g, [0.3, 0.4, 0.3], [X + 2.1, 1.19, Z + 2.9], P.terracotta, 0.9);
+  box(g, [0.34, 0.5, 0.34], [X + 1.6, 1.24, Z + 2.35], P.cream, 0.9);      // snack boxes
+  box(g, [0.3, 0.4, 0.3], [X + 2.1, 1.19, Z + 2.35], P.terracotta, 0.9);
 
   // fridge
-  box(g, [0.9, 1.9, 0.8], [X + 3.2, 0.95, Z + 2.85], 0xe4e9ea, 0.5);
-  box(g, [0.06, 0.5, 0.06], [X + 2.72, 1.35, Z + 2.45], P.metal, 0.4, 0.4);
+  box(g, [0.9, 1.9, 0.8], [X + 3.2, 0.95, Z + 2.3], 0xe4e9ea, 0.5);
+  box(g, [0.06, 0.5, 0.06], [X + 2.72, 1.35, Z + 1.9], P.metal, 0.4, 0.4);
 
   // a round table and three stools
   cyl(g, 0.09, 0.72, [X - 0.3, 0.36, Z - 1.3], STEEL, 10);
@@ -2932,7 +2932,7 @@ drawGrokBoard();
 {
   // signage lives here because makeSprite depends on labelCache, declared above
   const snackSign = makeSprite("Snack Room", 0.72, { bg: "#5f3e29", accent: "#e0ad3d" });
-  snackSign.position.set(SPOTS.snackBar[0] - 1.0, 2.15, SPOTS.snackBar[1] - 3.7);
+  snackSign.position.set(SPOTS.snackBar[0] - 1.0, 2.8, SPOTS.snackBar[1] - 3.7);
   scene.add(snackSign);
 }
 
@@ -3272,18 +3272,18 @@ const FITOUT = [
     ["box", [0.16, 0.16, 0.16], [-5.18, 0.08, 12.18], 0xf0e4c7],  // crumpled sheet that missed
   ] },
   // snake_plant — A snake plant standing in the water-cooler corner: six stiff upright blades of different
-  { at: [10.9, 6.35], foot: [10.4, 5.85, 11.4, 6.85], parts: [
-    ["box", [0.78, 0.62, 0.78], [10.9, 0.31, 6.35], 0xbf623c],  // square terracotta pot
-    ["box", [0.9, 0.12, 0.9], [10.9, 0.66, 6.35], 0xdf7655],  // pot rim
-    ["box", [0.7, 0.08, 0.7], [10.9, 0.7, 6.35], 0x5f3e29],  // soil
-    ["box", [0.16, 1.4, 0.26], [10.9, 1.42, 6.35], 0x66a348],  // tall centre blade
-    ["box", [0.14, 1.1, 0.24], [10.68, 1.27, 6.27], 0x267f82],  // blade
-    ["box", [0.14, 1.24, 0.22], [11.1, 1.34, 6.47], 0x66a348],  // blade
-    ["box", [0.24, 0.92, 0.14], [10.98, 1.18, 6.11], 0x66a348],  // short blade
-    ["box", [0.22, 1.02, 0.14], [10.8, 1.23, 6.59], 0x267f82],  // blade
-    ["box", [0.13, 0.78, 0.2], [10.62, 1.11, 6.51], 0x66a348],  // short blade
-    ["box", [0.17, 0.14, 0.27], [10.9, 2.05, 6.35], 0xe0ad3d],  // yellow tip capping the tall blade
-    ["box", [0.15, 0.14, 0.23], [11.1, 1.89, 6.47], 0xe0ad3d],  // yellow tip capping a blade
+  { at: [12.6, 5.55], foot: [12.1, 5.05, 13.1, 6.05], parts: [
+    ["box", [0.78, 0.62, 0.78], [12.6, 0.31, 5.55], 0xbf623c],  // square terracotta pot
+    ["box", [0.9, 0.12, 0.9], [12.6, 0.66, 5.55], 0xdf7655],  // pot rim
+    ["box", [0.7, 0.08, 0.7], [12.6, 0.7, 5.55], 0x5f3e29],  // soil
+    ["box", [0.16, 1.4, 0.26], [12.6, 1.42, 5.55], 0x66a348],  // tall centre blade
+    ["box", [0.14, 1.1, 0.24], [12.38, 1.27, 5.47], 0x267f82],  // blade
+    ["box", [0.14, 1.24, 0.22], [12.8, 1.34, 5.67], 0x66a348],  // blade
+    ["box", [0.24, 0.92, 0.14], [12.68, 1.18, 5.31], 0x66a348],  // short blade
+    ["box", [0.22, 1.02, 0.14], [12.5, 1.23, 5.79], 0x267f82],  // blade
+    ["box", [0.13, 0.78, 0.2], [12.32, 1.11, 5.71], 0x66a348],  // short blade
+    ["box", [0.17, 0.14, 0.27], [12.6, 2.05, 5.55], 0xe0ad3d],  // yellow tip capping the tall blade
+    ["box", [0.15, 0.14, 0.23], [12.8, 1.89, 5.67], 0xe0ad3d],  // yellow tip capping a blade
   ] },
   // fern_planter — A broad low fern, flat layers of foliage spreading sideways out of a wide cream planter 
   { at: [-12.25, 11.5], foot: [-13, 10.75, -11.5, 12.25], parts: [
@@ -4144,7 +4144,7 @@ const inSnackRoom = new Set();
    back window. Driven by the same world director as everything else, so every
    viewer watches the same person burn the same popcorn at the same moment. */
 const AMBIENT_SPOTS = {
-  fridge:  [12.9, 11.5],                     // in front of the snack-room fridge
+  fridge:  [12.9, 10.85],                    // in front of the snack-room fridge
   kitchen: [0.6, 11.3],                      // the kitchenette counter run
   sofaL:   [5.89, 5.1], sofaR: [7.31, 5.1],  // the lounge cushions
   meetA:   [-1.1, 2.55], meetB: [1.1, 4.25], // across the meeting table
@@ -4183,7 +4183,7 @@ async function ambientRun(e) {
   if (kind === "fridge") {
     a.run(async () => {
       await a.moveTo(...AMBIENT_SPOTS.fridge);
-      a.faceTowards(13.0, 12.45);
+      a.faceTowards(13.0, 11.9);
       puff(a, "🥪"); a.eat(true);
       a.say(AMBIENT_TALK.fridge[li % AMBIENT_TALK.fridge.length], 3000);
       await pause(3200); a.eat(false);
