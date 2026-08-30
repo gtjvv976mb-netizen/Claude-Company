@@ -97,7 +97,13 @@ export function settingsFor(floorNo) {
 export function saveSettings(floorNo, patch) {
   const cur = settingsFor(floorNo);
   const appetite = APPETITES[patch.appetite] ? patch.appetite : cur.appetite;
-  const bankroll = Math.max(0, Math.min(100_000, Number(patch.bankrollSol ?? cur.bankroll_sol)));
+  // NaN survives both clamps and binds as NULL into a NOT NULL column, throwing away
+  // the ENTIRE settings save; and a bankroll of 0 sizes every call to nothing, muting
+  // the floor with no explanation. Fall back to the stored value in both cases.
+  const bankRaw = Number(patch.bankrollSol ?? cur.bankroll_sol);
+  const bankroll = Number.isFinite(bankRaw) && bankRaw > 0
+    ? Math.min(100_000, bankRaw)
+    : (Number(cur.bankroll_sol) > 0 ? Number(cur.bankroll_sol) : 5);
   const auto = patch.auto == null ? (cur.auto ? 1 : 0) : (patch.auto ? 1 : 0);
   // The column is an EXPLICIT override and nothing else. The first version wrote the
   // previous appetite's list back whenever the appetite changed, so switching to
@@ -122,8 +128,12 @@ export function saveSettings(floorNo, patch) {
     execUrl = patch.executorUrl || null;
     if (execUrl && !execSecret) execSecret = crypto.randomBytes(24).toString("hex");
   }
+  // Same empty-selection footgun the categories column already guards against: an
+  // empty allow-list is stored literally and the floor never receives another call.
+  // Empty means "no preference" (every pad), never "no pads".
+  const padList = Array.isArray(patch.launchpads) ? patch.launchpads.filter((l) => LAUNCHPADS.includes(l)) : null;
   const pads = "launchpads" in patch
-    ? (Array.isArray(patch.launchpads) ? JSON.stringify(patch.launchpads.filter((l) => LAUNCHPADS.includes(l))) : null)
+    ? (padList && padList.length ? JSON.stringify(padList) : null)
     : raw.launchpads ?? null;
   // The liquidity floor: a coin whose book at call-time is thinner than this is
   // skipped for this floor. 0 / null = no floor. Omitted key keeps the stored value.

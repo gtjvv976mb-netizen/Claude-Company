@@ -167,13 +167,21 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             try { return cryptoTimingEqual(auth, secret); } catch { return false; }
           })();
           if (!okAuth) return json(401, { error: "bad or missing executor secret" });
-          const after = Number(url.searchParams.get("after") || 0);
+          // A malformed cursor must not bind as NaN — SQLite compares everything to
+          // NULL as false, so the bot would poll a permanently empty feed at HTTP 200
+          // and silently never trade again.
+          const rawAfter = Number(url.searchParams.get("after") || 0);
+          const after = Number.isFinite(rawAfter) && rawAfter >= 0 ? Math.floor(rawAfter) : 0;
           const rows = db.prepare(`
             SELECT a.id, a.kind, a.mint, a.urgency, a.created_at,
-                   c.symbol, c.entry_ref, c.stop, c.target, c.close_reason,
+                   c.symbol, c.entry_ref, c.stop, c.target, c.close_reason, c.status,
                    (SELECT size_sol FROM deliveries d WHERE d.call_id=a.call_id AND d.floor_no=a.floor_no) AS size_sol
             FROM alerts a LEFT JOIN calls c ON c.id=a.call_id
             WHERE a.floor_no=? AND a.id > ? AND a.kind IN ('entry','exit')
+              -- Never hand a bot an ENTRY for a call that has already closed. After any
+              -- downtime the backlog would otherwise become instructions to market-buy
+              -- coins the desk has already exited.
+              AND NOT (a.kind = 'entry' AND c.status = 'closed')
             ORDER BY a.id LIMIT 50`).all(floorNo, after);
           return json(200, { cluster: "mainnet-beta", events: rows.map((r) => ({
             id: r.id, type: r.kind, mint: r.mint, symbol: r.symbol,

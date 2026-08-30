@@ -42,6 +42,8 @@ const EXECUTE = process.env.EXECUTE === "1";
 const SLIPPAGE_BPS = Number(process.env.SLIPPAGE_BPS || 300);
 const POLL_MS = Number(process.env.POLL_MS || 15000);
 const FEE_RESERVE = Number(process.env.FEE_RESERVE_SOL || 0.01);
+const PRIORITY_FEE = Number(process.env.PRIORITY_FEE_LAMPORTS || 200000);
+const MAX_CALL_AGE_MS = Number(process.env.MAX_CALL_AGE_MIN || 45) * 60000;
 const RPC = process.env.SOLANA_RPC || "https://api.mainnet-beta.solana.com";
 const WSOL = "So11111111111111111111111111111111111111112";
 const STATE_FILE = process.env.STATE_FILE || "./.cc-state.json";
@@ -67,7 +69,7 @@ const conn = new Connection(RPC, "confirmed");
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
 /* ── persisted state: cursor, positions, daily counters ───────────────────── */
-let S = { cursor: 0, positions: {}, state: freshState(Date.now()) };
+let S = { cursor: 0, positions: {}, state: freshState(Date.now()), primed: false };
 try { S = { ...S, ...JSON.parse(fs.readFileSync(STATE_FILE, "utf8")) }; } catch {}
 S.state = { ...freshState(Date.now()), ...(S.state || {}) };
 const save = () => { try { fs.writeFileSync(STATE_FILE, JSON.stringify(S, null, 2)); } catch (e) { log("state save failed:", e.message); } };
@@ -84,12 +86,24 @@ async function quote(inputMint, outputMint, amountRaw) {
 }
 async function swap(q) {
   const r = await fetch(`${JUP}/swap`, { method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ quoteResponse: q, userPublicKey: kp.publicKey.toBase58(), wrapAndUnwrapSol: true }) });
+    body: JSON.stringify({ quoteResponse: q, userPublicKey: kp.publicKey.toBase58(), wrapAndUnwrapSol: true,
+      // Without a priority fee a swap frequently never lands under congestion —
+      // and an exit that never lands is a position you still own.
+      prioritizationFeeLamports: PRIORITY_FEE, dynamicComputeUnitLimit: true }) });
   const s = await r.json();
   if (!s?.swapTransaction) throw new Error("no swap tx");
   const tx = VersionedTransaction.deserialize(Buffer.from(s.swapTransaction, "base64"));
   tx.sign([kp]);
-  return conn.sendRawTransaction(tx.serialize(), { maxRetries: 3 });
+  const sig = await conn.sendRawTransaction(tx.serialize(), { maxRetries: 3 });
+  // sendRawTransaction returns as soon as the RPC ACCEPTS the bytes — it says
+  // nothing about whether the swap succeeded. A slippage breach lands on-chain as
+  // a FAILED transaction and still yields a signature, so logging "BOUGHT" here
+  // (and charging the daily cap) would report trades that never happened.
+  const bh = await conn.getLatestBlockhash("confirmed");
+  const st = await conn.confirmTransaction(
+    { signature: sig, blockhash: bh.blockhash, lastValidBlockHeight: bh.lastValidBlockHeight }, "confirmed");
+  if (st?.value?.err) throw new Error(`swap failed on-chain: ${JSON.stringify(st.value.err)}`);
+  return sig;
 }
 async function heldRaw(mint) {
   const r = await conn.getParsedTokenAccountsByOwner(kp.publicKey, { mint: new PublicKey(mint) });
@@ -102,6 +116,12 @@ async function solBalance() {
 /* ── entries ──────────────────────────────────────────────────────────────── */
 async function onEntry(ev) {
   if (S.positions[ev.mint]) return log(`SKIP ${ev.symbol}: already holding`);
+  // A backlog is not a trading opportunity. After downtime the feed replays every
+  // entry since the cursor, and market-buying a call published hours ago means
+  // buying a move that already happened — or a coin that is already dead.
+  const age = Date.now() - (ev.ts || 0);
+  if (ev.ts && age > MAX_CALL_AGE_MS)
+    return log(`SKIP ${ev.symbol}: call is ${Math.round(age / 60000)}m old (max ${MAX_CALL_AGE_MS / 60000}m)`);
   rollDay(S.state, Date.now());
   S.state.openCount = openList().length;
   S.state.spendableSol = EXECUTE ? Math.max(0, (await solBalance()) - FEE_RESERVE) : Infinity;
@@ -133,7 +153,18 @@ async function onEntry(ev) {
 async function sellAll(pos, why, fraction = 1) {
   const held = EXECUTE ? await heldRaw(pos.mint) : BigInt(pos.qtyRaw || 0);
   const amt = fraction >= 1 ? held : (held * BigInt(Math.round(fraction * 1e6))) / 1000000n;
-  if (amt <= 0n) { delete S.positions[pos.mint]; save(); return log(`  nothing held in ${pos.symbol}`); }
+  if (amt <= 0n) {
+    // Do NOT drop the position here. "Balance reads zero" is not the same as "we
+    // own nothing": the buy may be a slot away from confirmation, or the RPC may
+    // be flaky. Dropping it would remove the bag from the stop/trail engine and
+    // leave a real position unmanaged and unsellable. Keep it and retry next tick;
+    // only retire it once the chain has repeatedly said empty.
+    pos.emptyReads = (pos.emptyReads || 0) + 1;
+    if (pos.emptyReads >= 3) { delete S.positions[pos.mint]; log(`  ${pos.symbol}: empty on 3 reads — retiring`); }
+    save();
+    return log(`  nothing held in ${pos.symbol} (read ${pos.emptyReads}/3) — keeping the position`);
+  }
+  pos.emptyReads = 0;
   log(`EXIT ${pos.symbol} — ${why}`);
   if (!EXECUTE) { if (fraction >= 1) delete S.positions[pos.mint]; save(); return log("  DRY RUN"); }
 
@@ -171,13 +202,30 @@ async function manageOpen() {
 }
 
 /* ── the loop ─────────────────────────────────────────────────────────────── */
+let ticking = false;
 async function tick() {
+  // A slow tick (confirmations, many positions) must not overlap the next one:
+  // the second would re-fetch from the stale cursor and buy the same call twice.
+  if (ticking) return;
+  ticking = true;
   try {
     const r = await fetch(`${API}/api/floor/${FLOOR}/executor/feed?after=${S.cursor}`,
       { headers: { authorization: "Bearer " + SECRET } });
     if (r.status === 401) return log("auth rejected — check CC_SECRET / CC_FLOOR");
     if (r.ok) {
       const { events = [] } = await r.json();
+      // FIRST RUN: adopt the latest id and trade forward from here. Starting at 0
+      // would replay the floor's entire call history and market-buy long-dead coins.
+      if (!S.primed) {
+        S.primed = true;
+        if (events.length) {
+          S.cursor = Math.max(S.cursor, ...events.map((e) => e.id));
+          log(`primed at cursor ${S.cursor} — ${events.length} historic event(s) skipped, trading forward only`);
+          save();
+          return;
+        }
+        save();
+      }
       for (const ev of events) {
         try {
           if (ev.type === "entry") await onEntry(ev);
@@ -192,7 +240,9 @@ async function tick() {
       }
     }
   } catch (e) { log("poll error:", e.message); }
-  await manageOpen();                    // always run risk, even if the feed failed
+  try { await manageOpen(); }            // always run risk, even if the feed failed
+  catch (e) { log("manage error:", e.message); }
+  finally { ticking = false; }
 }
 
 log(`poller up — floor ${FLOOR} — wallet ${kp.publicKey.toBase58()} — ${EXECUTE ? "LIVE" : "DRY RUN"}`);

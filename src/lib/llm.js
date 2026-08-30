@@ -70,7 +70,7 @@ export function spendSince(sinceMs) {
   return { ...row, usd: Number(row.usd.toFixed(4)) };
 }
 
-const SHARED_RULES = `
+export const SHARED_RULES = `
 You are a specialist on an automated Solana research desk called Claude Company ("Claude Co").
 You hold exactly one seat. Do that seat's job and no other seat's job.
 

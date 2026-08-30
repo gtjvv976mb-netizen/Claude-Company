@@ -6,6 +6,7 @@ import { broadcast } from "./copy.js";
 import { announceExit } from "./alerts.js";
 import { listFloors } from "./tower.js";
 import { emit, runFor } from "./lib/bus.js";
+import db from "./lib/store.js";
 import { spend, OutOfCredit, spendSince } from "./lib/llm.js";
 import * as jup from "./data/jupiter.js";
 import { callouts, whaleScore } from "./whales.js";
@@ -275,12 +276,22 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
       emit("call:withheld", { mint: p.rec.mint, reason: `spike-shaped entry: +${m5}% in 5m — copiers would be the exit` });
       continue;
     }
+    // A stop of 0 is documented to the model as "0 if not applicable" and passes
+    // every downstream gate, publishing a call whose stop can NEVER trigger — an
+    // unmanageable position for anyone copying it, and one the executor refuses
+    // outright. Never publish a call without a real stop under it.
+    const stopPrice = Number(p.rec.ticket?.stop_price);
+    if (!(stopPrice > 0)) {
+      emit("call:rejected", { mint: p.rec.mint, symbol: p.rec.symbol ?? ev.symbol,
+        reason: "ticket has no usable stop price" });
+      continue;
+    }
     const call = openCall({
       mint: p.rec.mint, symbol: p.rec.symbol ?? ev.symbol, category: p.category, launchpad: p.launchpad,
       conviction: p.conviction,
       imageUrl: ev.pair?.imageUrl ?? null,
       entryRef: ev.pair?.priceUsd ?? null,
-      stop: p.rec.ticket?.stop_price ?? null,
+      stop: stopPrice,
       target: p.rec.ticket?.take_profit?.[0]?.price ?? null,
       thesis: p.rec.pm?.thesis ?? null,
       invalidation: p.rec.pm?.invalidation ?? null,
@@ -534,7 +545,23 @@ export async function monitorCalls() {
       // would otherwise block exit evaluation for every OLDER live call, forever.
       try {
         const ev = await gather(call.mint, "monitor");
-        if (ev.error) { noteEvent(call.id, "check_failed", ev.error); continue; }
+        if (ev.error) {
+          // The most dangerous case in the whole monitor: a token that has rugged or
+          // been delisted stops returning data, so `continue` would leave the call
+          // open forever — precisely when the holder most needs to be told to leave.
+          // Persistent unreadability IS the signal.
+          noteEvent(call.id, "check_failed", ev.error);
+          const misses = (db.prepare(
+            "SELECT COUNT(*) n FROM call_events WHERE call_id=? AND kind='check_failed' AND ts > ?")
+            .get(call.id, Date.now() - 6 * 3600e3)?.n) ?? 0;
+          if (misses >= 4) {
+            closeCall(call.id, "went_dark", null);
+            emit("call:exit", { callId: call.id, symbol: call.symbol, code: "went_dark", mark: null });
+            announceExit(call, { code: "went_dark", urgency: "urgent",
+              detail: "the token stopped returning market data — treat as gone and exit" }).catch(() => {});
+          }
+          continue;
+        }
 
         const now = {
           mark: ev.pair?.priceUsd ?? null,

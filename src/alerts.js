@@ -177,7 +177,10 @@ export async function announceExit(call, exit) {
   for (const r of rows) {
     const fresh = raise({ floorNo: r.floor_no, callId: call.id, kind: "exit",
       urgency: exit.urgency === "unconditional" ? "urgent" : "normal", title, body, mint: call.mint });
-    if (fresh && r.webhook_url) await push(r.webhook_url, title, body);
+    // Fire and forget. Awaiting here let ONE hung webhook burn its full timeout and
+    // hold up every later floor's exit alert — and the executor feed row that tells
+    // a bot to sell. Nobody's exit may wait on someone else's Discord.
+    if (fresh && r.webhook_url) push(r.webhook_url, title, body).catch(() => {});
     if (fresh) pushExecutor(r.floor_no, { type: "exit", call: { id: call.id, mint: call.mint,
       symbol: call.symbol, side: "sell", code: exit.code, urgency: exit.urgency,
       detail: exit.detail } }).catch(() => {});

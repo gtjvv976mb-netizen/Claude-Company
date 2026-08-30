@@ -192,9 +192,14 @@ export async function runPM(ev, analysts, redteam, risk, weightedScore, opts = {
   // hold the schema falls back to the Claude seat rather than break the run.
   if (opts.pmProvider === "grok") {
     const { grokAsk } = await import("../lib/grok.js");
+    // The charter and the evidence rules are prepended to EVERY Claude seat by ask().
+    // Grok reached the model without them, so the one seat that decides whether to
+    // publish was the only seat not bound by "the bundle is the only source of
+    // numeric fact" and "never substitute a plausible-looking figure".
+    const { SHARED_RULES } = await import("../lib/llm.js");
     const g = await grokAsk({
       seat: "PM(grok)",
-      system: PM_SYSTEM,
+      system: SHARED_RULES + "\n\n" + PM_SYSTEM,
       prompt: pmPrompt(ev, analysts, redteam, risk, weightedScore),
       shape: `{"decision":"PROPOSE|WATCH|PASS","conviction":0-100,"thesis":"...","invalidation":"...",` +
         `"time_horizon":"...","how_red_team_was_answered":"...","key_disagreement":"...",` +

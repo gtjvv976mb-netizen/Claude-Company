@@ -139,11 +139,22 @@ export async function requestRun({ floorNo, wallet, mint }) {
       db.prepare("UPDATE runs SET symbol=?, outcome=?, detail=?, finished_at=? WHERE id=?")
         .run(res?.symbol ?? null, res?.outcome ?? "done", res?.detail ?? null, Date.now(), runId);
 
-      // Nothing was asked of a model, so nothing should have been charged.
-      if (!useFree && (res?.outcome === "no_data")) {
-        db.prepare("INSERT INTO credits (signature,dest_account,wallet,base_units,seen_at) VALUES (?,?,?,?,?)")
-          .run(`refund:${runId}`, "refund", wallet, paid.toString(), Date.now());
-        emit("run:refunded", { floor: floorNo, runId, reason: res.outcome });
+      // Nothing was asked of a model, so nothing should have been charged — and a
+      // FREE run must not be burned either. `screened_out` never reaches a seat any
+      // more than `no_data` does; charging 250k $CLAUDECO (or silently spending an
+      // included run) for work that never happened is money for nothing.
+      const nothingStudied = res?.outcome === "no_data" || res?.outcome === "screened_out";
+      if (nothingStudied) {
+        if (useFree) {
+          // Give the included run back by retiring the row from the free-run count.
+          db.prepare("UPDATE runs SET free_run=0, outcome=? WHERE id=?")
+            .run(res?.outcome ?? "no_data", runId);
+          emit("run:refunded", { floor: floorNo, runId, reason: res?.outcome, free: true });
+        } else {
+          db.prepare("INSERT INTO credits (signature,dest_account,wallet,base_units,seen_at) VALUES (?,?,?,?,?)")
+            .run(`refund:${runId}`, "refund", wallet, paid.toString(), Date.now());
+          emit("run:refunded", { floor: floorNo, runId, reason: res?.outcome });
+        }
       }
     } catch (e) {
       db.prepare("UPDATE runs SET outcome='error', detail=?, finished_at=? WHERE id=?")
