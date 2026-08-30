@@ -715,10 +715,15 @@ window.__step = (ms) => {
   for (let i = 0; i < ms / 50; i++) {
     elapsed += dt;
     for (const id in workers) workers[id].update(dt, elapsed);
+    separateFigures(dt);              // the frame loop runs this too — so must the stepper
   }
   return "stepped " + ms + "ms";
 };
 window.__hasPath = (seat) => { const w = workers[seat]; return w ? !!w.path : null; };
+window.__place = (seat, x, z) => { const w = workers[seat]; if (!w) return "no seat";
+  w.g.position.set(x, w.g.position.y, z); w.x = x; w.z = z; return "placed"; };
+window.__gap = (a, b) => { const p = workers[a]?.g.position, q = workers[b]?.g.position;
+  return p && q ? +Math.hypot(p.x - q.x, p.z - q.z).toFixed(3) : null; };
 window.__go = (seat, x, z) => { const w = workers[seat]; if (!w) return "no seat";
   w.moveTo(x, z); return "moving"; };
 window.__path = (seat, x, z) => { const w = workers[seat];
@@ -1156,6 +1161,9 @@ function buildPlant(at) {
     box(ar, [0.12, 0.42, 0.30], [-1.30 + (i % 11) * 0.26, shelf, 0], spines[i % spines.length], 0.9);
   }
 
+  // the meeting table is furniture, not fog — walk around it
+  solidRect(SPOTS.meeting[0], SPOTS.meeting[1], 2.6, 1.5);
+
   // meeting rug
   const rug = new THREE.Mesh(new THREE.CircleGeometry(3.0, 32),
     new THREE.MeshStandardMaterial({ color: P.teal, roughness: 0.95, transparent: true, opacity: 0.34 }));
@@ -1275,6 +1283,14 @@ function buildPlant(at) {
   // side sills
   box(g, [0.4, 0.45, Z1 - Z0], [X0, DAIS_Y + 0.22, (Z0 + Z1) / 2], P.wall, 0.88);
   box(g, [0.4, 0.45, Z1 - Z0], [X1, DAIS_Y + 0.22, (Z0 + Z1) / 2], P.wall, 0.88);
+
+  // The suite was never on the nav grid: agents walked through its glass, its
+  // sills and the dais itself. The two front wings are solid (the 2.6-wide
+  // doorway between them stays open), as are the side sills and the desk block.
+  solidRect((X0 + (-1.3)) / 2, Z1, Math.abs(-1.3 - X0), 0.4);
+  solidRect((X1 + 1.3) / 2, Z1, Math.abs(X1 - 1.3), 0.4);
+  solidRect(X0, (Z0 + Z1) / 2, 0.5, Z1 - Z0);
+  solidRect(X1, (Z0 + Z1) / 2, 0.5, Z1 - Z0);
 
   // the threshold staff stop at
   const line = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.08),
@@ -4059,6 +4075,7 @@ function frame() {
     if (!followSeat && Math.hypot(want.x - camTarget.x, want.z - camTarget.z) < 0.04) glide = null;
     placeCamera();
   }
+  separateFigures(dt);
   botTick(dt, elapsed);
   if (window.__grokZzz && window.__grokZzz.visible) {
     const z = window.__grokZzz;
@@ -4409,6 +4426,42 @@ async function paintCrewPortraits() {
   }
 }
 setTimeout(paintCrewPortraits, 2500);      // after the floor has settled
+
+/* ── nobody stands inside anybody ──────────────────────────────────────────
+   Pathing keeps agents out of furniture, but two of them could still occupy
+   the same square — at a snack seat, at a desk, crossing the walkway — and the
+   figures visibly overlapped. This is the cheap classic: each pair closer than
+   a body-width pushes apart along the line between them, half the correction
+   each, capped so a shove can never fling anyone across the room. Seated and
+   walking figures are all treated the same; the path itself is untouched, so a
+   nudged walker simply resumes toward its next leg. */
+const BODY_R = 0.46;                        // one body's radius on the floor
+function separateFigures(dt) {
+  const list = [];
+  for (const id in workers) { const w = workers[id]; if (w?.g?.visible) list.push(w); }
+  if (botFig?.g?.visible && botState.mode === "roam") list.push({ g: botFig.g, __bot: true });
+  // Correct the AUTHORITATIVE coordinates (a Worker rewrites g.position from
+  // its own this.x/this.z every update, so nudging the mesh alone is erased).
+  const px = (w) => (w.__bot ? w.g.position.x : w.x);
+  const pz = (w) => (w.__bot ? w.g.position.z : w.z);
+  const move = (w, x, z) => {
+    if (w.__bot) { w.g.position.x = x; w.g.position.z = z; return; }
+    w.x = x; w.z = z; w.g.position.x = x; w.g.position.z = z;
+  };
+  for (let i = 0; i < list.length; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      const A = list[i], B = list[j];
+      let dx = px(B) - px(A), dz = pz(B) - pz(A);
+      let d = Math.hypot(dx, dz);
+      if (d >= BODY_R * 2) continue;
+      if (d < 1e-4) { dx = 0.01; dz = 0; d = 0.01; }              // exact overlap: break the tie
+      const push = Math.min((BODY_R * 2 - d) * 0.5, dt * 1.4);    // gentle, capped
+      dx /= d; dz /= d;
+      move(A, px(A) - dx * push, pz(A) - dz * push);
+      move(B, px(B) + dx * push, pz(B) + dz * push);
+    }
+  }
+}
 
 /* ── a puff of paper over someone's head ──────────────────────────────────── */
 function puff(worker, text) {
