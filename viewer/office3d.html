@@ -448,7 +448,7 @@ select.dp-in{cursor:pointer}
 .legend{padding:11px 13px; display:grid; grid-template-columns:repeat(auto-fill,minmax(74px,1fr)); gap:10px 8px}
 .legend span{display:flex; flex-direction:column; align-items:center; gap:4px; font-size:9.5px; line-height:1.25;
   text-align:center; color:var(--ink-soft)}
-.legend i{width:56px;height:56px;border-radius:9px; display:block; background-size:cover; background-position:center;
+.legend i{width:56px;height:64px;border-radius:9px; display:block; background-size:contain; background-repeat:no-repeat; background-position:center;
   border:1px solid var(--card-line,#3a4b50)}
 .note{padding:0 13px 13px; font-size:11.5px; color:var(--ink-faint); border-top:1px solid var(--panel-line); line-height:1.5}
 </style>
@@ -4173,18 +4173,25 @@ for (const s of STAFF) {
    sprite sheet to regenerate and no chance of the crew list drifting from the
    floor. Done on a SEPARATE offscreen renderer with preserveDrawingBuffer, so
    the main canvas keeps its faster context; built once, then disposed. */
+window.__redoPortraits = () => { paintCrewPortraits.done = false; return paintCrewPortraits(); };
 async function paintCrewPortraits() {
   if (paintCrewPortraits.done) return;
   paintCrewPortraits.done = true;
   const R = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
-  R.setSize(128, 128, false);
+  R.setSize(72, 128, false);                     // portrait aspect — a person, not a plaza
   R.outputColorSpace = THREE.SRGBColorSpace;
   R.toneMapping = THREE.AgXToneMapping;
-  R.toneMappingExposure = 1.25;
-  const cam = new THREE.OrthographicCamera(-0.62, 0.62, 0.62, -0.62, -100, 200);
+  R.toneMappingExposure = 1.6;                   // tiles sit on a dark card; lift them
+  // ±1.05 holds the WHOLE figure (rig tops out ~1.9 high) — the old ±0.62 was a
+  // head-and-shoulders crop that read as "part of a model" in the card.
+  const cam = new THREE.OrthographicCamera(-0.647, 0.647, 1.15, -1.15, -100, 200);
 
   const wasVisible = new Map();
   scene.children.forEach((c) => wasVisible.set(c, c.visible));
+  // the scene background painted every pixel of the "alpha" canvas — portraits
+  // must render the figure alone on transparency
+  const wasBg = scene.background, wasFog = scene.fog;
+  scene.background = null; scene.fog = null;
   try {
     for (const spec of STAFF) {
       const w = workers[spec.id];
@@ -4194,8 +4201,8 @@ async function paintCrewPortraits() {
       const sprites = [];
       w.g.traverse((o) => { if (o.isSprite && o.visible) { o.visible = false; sprites.push(o); } });
       const p = w.g.position;
-      cam.position.set(p.x + 0.9, p.y + 1.62, p.z + 2.2);   // three-quarter, head-and-shoulders
-      cam.lookAt(p.x, p.y + 1.32, p.z);
+      cam.position.set(p.x + 1.15, p.y + 1.55, p.z + 2.6);  // three-quarter, full figure
+      cam.lookAt(p.x, p.y + 1.02, p.z);
       cam.updateProjectionMatrix();
       R.render(scene, cam);
       const url = R.domElement.toDataURL("image/png");
@@ -4208,6 +4215,7 @@ async function paintCrewPortraits() {
     console.warn("crew portraits unavailable:", e.message);  // colours remain
   } finally {
     scene.children.forEach((c) => { if (wasVisible.has(c)) c.visible = wasVisible.get(c); });
+    scene.background = wasBg; scene.fog = wasFog;
     R.dispose();
   }
 }
