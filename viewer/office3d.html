@@ -3994,18 +3994,10 @@ async function loadChronicle(before) {
       const f = fmtTape(e);
       if (f) frag.appendChild(tapeRow(f[0], f[1], f[2], e.ts));
     }
-    // The boss's desk keeps its paperwork: on first load, rebuild BIG C's memo
-    // pile from the same chronicle slice, oldest first so the newest sits on top.
-    if (!before && !window.__inboxFilled) {
-      window.__inboxFilled = true;
-      for (const e of events.filter((x) => x.type === "token:end")) {
-        try {
-          memo({ symbol: e.symbol || (e.mint ? e.mint.slice(0, 6) : "?"), decision: e.outcome,
-            thesis: e.thesis || e.detail || "Filed to the journal.",
-            conviction: e.conviction ?? null, size: e.size ?? null, stop: e.stop ?? null, gmgn: null });
-        } catch {}
-      }
-    }
+    // BIG C's memo pile fills through its own full-history loader (below),
+    // which pages the chronicle by type until the very first decision. The old
+    // one-shot fill from this slice showed only the newest 250 events' worth.
+    if (!before && !window.__inboxFilled) { window.__inboxFilled = true; loadInboxHistory(); }
     if (chronDone) {
       const start = tapeRow("Floor", "— the start of the record —", "hi", events[0]?.ts);
       frag.insertBefore(start, frag.firstChild);
@@ -4023,7 +4015,59 @@ tapeEl.addEventListener("scroll", () => {
   if (tapeEl.scrollTop < 40 && oldestChron) loadChronicle(oldestChron);
 });
 
-function memo({ symbol, decision, thesis, conviction, size, stop, gmgn }) {
+/* ── BIG C's FULL RECORD ────────────────────────────────────────────────────
+   Every decision ever taken on this floor, paged out of the chronicle 250 at a
+   time (the server keeps 200k events — the recording was never the problem,
+   the pile just refused to read past its first page). Newest on top; scrolling
+   to the bottom pulls the next page until the start of the record. */
+let inboxOldest = 0, inboxDone = false, inboxBusy = false;
+async function loadInboxHistory() {
+  if (inboxBusy || inboxDone) return;
+  inboxBusy = true;
+  try {
+    const base = window.__API_BASE__ || "";
+    const q = new URLSearchParams({ limit: "250", type: "token:end" });
+    const fp = location.pathname.match(/\/floor\/(\d+)/) || location.search.match(/[?&]floor=(\d+)/);
+    if (fp) q.set("floor", fp[1]);
+    if (inboxOldest) q.set("before", String(inboxOldest));
+    const tk = (() => { try { return localStorage.getItem("cc_token"); } catch { return null; } })();
+    const r = await fetch(`${base}/api/chronicle?${q}`,
+      tk ? { headers: { authorization: "Bearer " + tk } } : undefined);
+    if (r.status === 403) { inboxDone = true; return; }
+    const { events = [] } = await r.json();
+    if (!events.length || events[0].id == null) {
+      inboxDone = true;
+      const end = document.createElement("p");
+      end.className = "dp-note"; end.style.textAlign = "center";
+      end.textContent = "— the start of the record —";
+      inboxEl.appendChild(end);
+      return;
+    }
+    inboxOldest = events[0].id;
+    if (events.length < 250) inboxDone = true;
+    for (const e of events.slice().reverse()) {          // newest first, appended below
+      try {
+        inboxEl.appendChild(memoNode({
+          symbol: e.symbol || (e.mint ? e.mint.slice(0, 6) : "?"), decision: e.outcome,
+          thesis: e.thesis || e.detail || "Filed to the journal.",
+          conviction: e.conviction ?? null, size: e.size ?? null, stop: e.stop ?? null, gmgn: null }));
+      } catch {}
+    }
+    inboxEl.querySelector(".empty")?.remove();
+    if (inboxDone) {
+      const end = document.createElement("p");
+      end.className = "dp-note"; end.style.textAlign = "center";
+      end.textContent = "— the start of the record —";
+      inboxEl.appendChild(end);
+    }
+  } catch {}
+  finally { inboxBusy = false; }
+}
+inboxEl.addEventListener("scroll", () => {
+  if (inboxEl.scrollHeight - inboxEl.scrollTop - inboxEl.clientHeight < 80) loadInboxHistory();
+});
+
+function memoNode({ symbol, decision, thesis, conviction, size, stop, gmgn }) {
   const m = document.createElement("div");
   m.className = "memo";
   m.innerHTML = `<header><span class="sym"></span><span class="verdict v-${decision}"></span></header><p class="th"></p><div class="kv"></div>`;
@@ -4050,10 +4094,16 @@ function memo({ symbol, decision, thesis, conviction, size, stop, gmgn }) {
     n.textContent = "Unsigned. Claude Company prepared this order but cannot sign or send it — that is yours.";
     m.appendChild(n);
   }
+  return m;
+}
+
+function memo(spec) {
+  const m = memoNode(spec);
+  const decision = spec.decision;
   inboxEl.querySelector(".empty")?.remove();
   inboxEl.prepend(m);
   if (decision === "APPROVED" || decision === "PROPOSE") approvedCount++;
-  paintInboxSummary(sym);
+  paintInboxSummary(spec.symbol);
 }
 
 /* BIG C's desk was a raw stack of memos with no way to read it at a glance.
