@@ -145,6 +145,22 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
       });
 
       try {
+        /* One fixed, cheap RPC read for the one-signature buy: the public
+           mainnet RPC 403s browsers, so the page gets its blockhash here,
+           through the server's own RPC. Nothing user-controlled reaches the
+           RPC; 5s memo-cache keeps a click-storm at one upstream call. */
+        if (url.pathname === "/api/pay/blockhash") {
+          const now = Date.now();
+          if (!globalThis.__bh || now - globalThis.__bh.at > 5000) {
+            const { readRpc } = await import("./lib/http.js");
+            const { cfg: cfg3 } = await import("./config.js");
+            const r = await readRpc(cfg3.rpc, "getLatestBlockhash", [{ commitment: "confirmed" }]);
+            if (!r.ok) return json(502, { error: "rpc unavailable" });
+            globalThis.__bh = { at: now, blockhash: r.data?.value?.blockhash };
+          }
+          return json(200, { blockhash: globalThis.__bh.blockhash });
+        }
+
         if (url.pathname === "/api/lease/config") {
           // One-signature leasing: the client builds the SPL transfer itself,
           // so it needs the treasury's token account and the mint's program.

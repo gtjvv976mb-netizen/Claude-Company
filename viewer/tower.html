@@ -937,8 +937,12 @@ async function payTreasury(amountBaseUnits, onStep) {
     [owner.toBytes(), tokenProgram.toBytes(), mint.toBytes()], ATA_PROGRAM);
 
   onStep("Preparing the transfer\u2026");
-  const conn = new W3.Connection("https://api.mainnet-beta.solana.com", "confirmed");
-  const { blockhash } = await conn.getLatestBlockhash("confirmed");
+  // The wallet submits the transaction through its own infrastructure; the
+  // only chain read the page needs is a fresh blockhash, served by our API
+  // (the public RPC 403s browsers).
+  const { status: bhs, body: bh } = await api("/api/pay/blockhash");
+  if (bhs !== 200 || !bh?.blockhash) throw new Error("could not fetch a blockhash — try again in a moment");
+  const blockhash = bh.blockhash;
 
   // TransferChecked, hand-encoded: [12][amount u64 LE][decimals u8]
   const data = new Uint8Array(10);
