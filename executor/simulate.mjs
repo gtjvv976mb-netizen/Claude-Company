@@ -63,7 +63,7 @@ function deskExitStep(path, stop, target, lag) {
 
 function runOne({ managed, calls, rand, cfg, deskLag }) {
   const state = freshState(0);
-  let realized = 0, wins = 0, losses = 0, stopped = 0, scaled = 0;
+  let realized = 0, wins = 0, losses = 0, stopped = 0, scaled = 0, taken = 0, skippedByCaps = 0;
   let peak = 0, equity = 0, maxDD = 0;
 
   for (let n = 0; n < calls; n++) {
@@ -73,9 +73,15 @@ function runOne({ managed, calls, rand, cfg, deskLag }) {
     const target = entry * 1.9;                // and its target
     const call = { mint: "m" + n, symbol: "C" + n, size_sol: cfg.maxSolPerTrade, stop, target, ts: n };
 
-    rollDay(state, n, 1e9);                    // one long day: brakes stay in force
+    // Calls arrive over TIME. Feeding the engine a fake never-rolling day meant the
+    // 0.5 SOL daily deploy cap filled after 10 trades and silently skipped the rest
+    // of the run — the sample was a tenth of what the header claimed. Space calls
+    // CALL_GAP_H apart and roll the day properly.
+    const now = n * CALL_GAP_H * 3600e3;
+    rollDay(state, now, 86400e3);
     const plan = planEntry({ call, cfg, state });
-    if (plan.action !== "buy") continue;
+    if (plan.action !== "buy") { skippedByCaps++; continue; }
+    taken++;
 
     state.deployedTodaySol += plan.sol;
     state.openCount++;
@@ -113,7 +119,7 @@ function runOne({ managed, calls, rand, cfg, deskLag }) {
     peak = Math.max(peak, equity);
     maxDD = Math.min(maxDD, equity - peak);
   }
-  return { realized, wins, losses, stopped, scaled, maxDD };
+  return { realized, wins, losses, stopped, scaled, maxDD, taken, skippedByCaps };
 }
 
 const arg = (k, d) => {
@@ -126,6 +132,7 @@ const TRIALS = arg("trials", 400), CALLS = arg("calls", 60);
 // codebase probes this on every candidate for a reason — it is brutal, and a
 // simulation that ignores it will show a profit on a strategy that has none.
 const COST = arg("cost", 0.06);
+const CALL_GAP_H = arg("gaph", 8);   // hours between calls (3/day at 8h)
 const WINRATE = arg("winrate", 0.28), SEED = arg("seed", 7), DESK_LAG = arg("desklag", 6);
 const cfg = { ...DEFAULTS, _winrate: WINRATE };
 
@@ -138,6 +145,8 @@ const agg = (rows) => {
     p10: s[Math.floor(s.length * 0.1)], p90: s[Math.floor(s.length * 0.9)],
     profitableRuns: rows.filter((r) => r.realized > 0).length / rows.length,
     worstDD: Math.min(...rows.map((r) => r.maxDD)),
+    avgTaken: rows.reduce((a, r) => a + r.taken, 0) / rows.length,
+    avgSkipped: rows.reduce((a, r) => a + r.skippedByCaps, 0) / rows.length,
     avgStops: rows.reduce((a, r) => a + r.stopped, 0) / rows.length,
     avgScales: rows.reduce((a, r) => a + r.scaled, 0) / rows.length,
   };
@@ -161,6 +170,7 @@ console.log(`  10th pct (bad run)          ${f(N.p10).padEnd(22)}${f(M.p10)}`);
 console.log(`  90th pct (good run)         ${f(N.p90).padEnd(22)}${f(M.p90)}`);
 console.log(`  runs that made money        ${pct(N.profitableRuns).padEnd(22)}${pct(M.profitableRuns)}`);
 console.log(`  worst drawdown (SOL)        ${N.worstDD.toFixed(3).padEnd(22)}${M.worstDD.toFixed(3)}`);
+console.log(`  trades taken / skipped      ${(N.avgTaken.toFixed(1)+" / "+N.avgSkipped.toFixed(1)).padEnd(22)}${M.avgTaken.toFixed(1)} / ${M.avgSkipped.toFixed(1)}`);
 console.log(`  avg stops / scale-outs      ${"—".padEnd(22)}${M.avgStops.toFixed(1)} / ${M.avgScales.toFixed(1)}`);
 console.log(`\n  Risk engine delta: ${f(M.meanSol - N.meanSol)} SOL mean, ` +
   `drawdown ${(M.worstDD - N.worstDD >= 0 ? "reduced " : "worsened ")}by ${Math.abs(M.worstDD - N.worstDD).toFixed(3)} SOL\n`);

@@ -705,6 +705,21 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
     else if (url.pathname === "/tower") page = "tower.html";
     else if (/^\/floor\/\d+$/.test(url.pathname)) page = "office3d.html";
     else if (url.pathname === "/buy") page = "buy.html";
+    // The executor's own files, served read-only. The floor page imports
+    // strategy.mjs directly so its paper test runs the REAL risk engine, and the
+    // one-command installer curls poller.mjs — both resolve from the built site
+    // in production, so serve them here too or local drifts from live.
+    if (url.pathname.startsWith("/executor/")) {
+      const name = path.basename(url.pathname);
+      const ef = path.join(ROOT, "executor", name);
+      if (!ef.startsWith(path.join(ROOT, "executor") + path.sep) || !fs.existsSync(ef) || !fs.statSync(ef).isFile()) {
+        res.writeHead(404); res.end("not found"); return;
+      }
+      res.writeHead(200, { "content-type": name.endsWith(".mjs") ? "text/javascript; charset=utf-8" : "text/plain; charset=utf-8" });
+      res.end(fs.readFileSync(ef));
+      return;
+    }
+
     const file = path.join(ROOT, "viewer", page);
     if (!file.startsWith(path.join(ROOT, "viewer")) || !fs.existsSync(file)) {
       res.writeHead(404); res.end("not found"); return;

@@ -5149,6 +5149,98 @@ function buildControls(settings) {
       "Prefer your own machine? The same poller runs locally — see the README at /executor/. Either way: fund the burner it shows you with only what you'll risk, then flip it live."));
   }
 
+  /* ── PAPER TEST: try the bot without a wallet, a terminal, or a cent ──────
+     This imports executor/strategy.mjs — the EXACT module the real bot trades
+     with, dependency-free precisely so it can also run here — and drives it over
+     fat-tailed synthetic price paths with real round-trip costs charged. What you
+     see is the engine's own decisions, not a mock of them. */
+  box.appendChild(mk("div", "dp-h", "Test the bot on paper"));
+  box.appendChild(mk("div", "dp-note",
+    "Runs the real risk engine (the same file the bot ships with) over simulated memecoin price paths, with 6% round-trip costs charged. No wallet, no install, no money. Use it to see how the stop, the trail and the daily brakes behave before you fund anything."));
+  const paperRow = mk("div", "dp-row");
+  const wrSel = document.createElement("select");
+  wrSel.className = "dp-in"; wrSel.setAttribute("aria-label", "Assumed desk win rate");
+  for (const [v, t] of [[0.15, "Pessimistic — 15% hit rate"], [0.25, "Break-even — 25%"], [0.35, "Good desk — 35%"], [0.50, "Optimistic — 50%"]]) {
+    const o = document.createElement("option"); o.value = v; o.textContent = t;
+    if (v === 0.25) o.selected = true; wrSel.appendChild(o);
+  }
+  const runPaper = mk("button", "dp-btn ghost", "Run 200 paper trades");
+  runPaper.type = "button";
+  paperRow.append(wrSel, runPaper);
+  box.appendChild(paperRow);
+  const paperOut = mk("div", "bud-addr");
+  paperOut.style.cssText = "white-space:pre-wrap;font-size:11px;line-height:1.6;display:none";
+  box.appendChild(paperOut);
+
+  runPaper.addEventListener("click", async () => {
+    runPaper.disabled = true; runPaper.textContent = "Trading…";
+    paperOut.style.display = "block";
+    paperOut.textContent = "loading the engine…";
+    try {
+      const S = await import("/executor/strategy.mjs");
+      const winrate = Number(wrSel.value), COST = 0.06, CALLS = 200;
+      let seed = 12345;
+      const rand = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
+      const path = () => {
+        const u = rand();
+        let end;
+        if (u < 0.34) end = 0.05 + rand() * 0.25;
+        else if (u < 1 - winrate) end = 0.45 + rand() * 0.45;
+        else if (u < 1 - winrate * 0.22) end = 1.15 + rand() * 1.1;
+        else end = 2.5 + rand() * 9;
+        const drift = Math.log(end) / 240, vol = 0.055 + rand() * 0.05, p = [1];
+        for (let i = 1; i <= 240; i++) {
+          const z = Math.sqrt(-2 * Math.log(rand() || 1e-9)) * Math.cos(2 * Math.PI * rand());
+          p.push(Math.max(1e-6, p[i - 1] * Math.exp(drift + vol * z)));
+        }
+        return p;
+      };
+      const cfg = { ...S.DEFAULTS };
+      const st = S.freshState(0);
+      let pnl = 0, taken = 0, stops = 0, trails = 0, deskExits = 0, wins = 0, skipped = 0;
+      let peak = 0, eq = 0, dd = 0;
+      for (let n = 0; n < CALLS; n++) {
+        const pth = path(), stop = 0.62, target = 1.9;
+        const call = { mint: "m" + n, symbol: "C" + n, size_sol: cfg.maxSolPerTrade, stop, target, ts: n };
+        S.rollDay(st, n * 8 * 3600e3, 86400e3);   // calls arrive ~3/day, so the caps roll
+        const plan = S.planEntry({ call, cfg, state: st });
+        if (plan.action !== "buy") { skipped++; continue; }
+        taken++; st.deployedTodaySol += plan.sol; st.openCount++;
+        const pos = S.openPosition({ call, sol: plan.sol, fillPrice: 1, cfg });
+        const deskAt = (() => { for (let i = 1; i < pth.length; i++) if (pth[i] <= stop || pth[i] >= target) return Math.min(pth.length - 1, i + 40); return pth.length - 1; })();
+        let qty = pos.qty, gross = 0, done = false;
+        for (let i = 1; i < pth.length && !done; i++) {
+          const d = S.stepPosition({ pos, mark: pth[i], deskExit: i >= deskAt ? { code: "desk" } : null, cfg });
+          if (d.action === "sell") {
+            gross += qty * pth[i]; qty = 0; done = true;
+            if (d.reason === "stop loss") stops++;
+            else if (d.reason === "trailing stop") trails++;
+            else deskExits++;
+          }
+        }
+        if (qty > 0) gross += qty * pth[pth.length - 1];
+        gross *= (1 - COST);
+        const net = gross - plan.sol * (1 + COST);
+        pnl += net; st.realizedTodaySol += net; st.openCount--;
+        if (net >= 0) wins++;
+        eq += net; peak = Math.max(peak, eq); dd = Math.min(dd, eq - peak);
+      }
+      const sign = (v) => (v >= 0 ? "+" : "") + v.toFixed(4);
+      paperOut.textContent =
+        `${CALLS} calls at a ${(winrate * 100).toFixed(0)}% hit rate, ${cfg.maxSolPerTrade} SOL each, 6% round-trip cost\n` +
+        `\n  taken ${taken}   skipped by caps ${skipped}   winners ${wins} (${((wins / Math.max(1, taken)) * 100).toFixed(0)}%)` +
+        `\n  closed by:  stop ${stops}   trailing stop ${trails}   desk exit ${deskExits}` +
+        `\n\n  NET  ${sign(pnl)} SOL        worst drawdown ${dd.toFixed(4)} SOL\n` +
+        `\n${pnl >= 0
+          ? "In this run the engine came out ahead — but that is THIS assumed hit rate, not a forecast."
+          : "In this run the engine LOST money. At a low hit rate, costs eat the edge no matter how good the risk management is."}` +
+        `\nThe desk has published no calls yet, so its real hit rate is unknown. Try the pessimistic setting too.`;
+    } catch (e) {
+      paperOut.textContent = "could not load the engine: " + e.message;
+    }
+    runPaper.disabled = false; runPaper.textContent = "Run 200 paper trades";
+  });
+
   const save = mk("button", "dp-btn", "Save settings");
   save.type = "button";
   const msg = mk("div", "dp-note");
