@@ -1293,6 +1293,32 @@ function buildBodyGeometry(specs) {
   return out;
 }
 
+// Which mind runs THIS floor's desk — set from md_brain and reread when the boss
+// is (re)built, so the avatar on the dais matches who is actually managing.
+let bossBrain = "claude";
+
+/** Grok's mark: a stark crossed slash (an X), void-dark at the hub. The boss wears
+ *  this instead of Claude's spark when the desk runs on Grok — legible across the
+ *  room as "a different mind is in the corner office." */
+function buildGrokMark(radius, thickness, colour, emissive = 1.0) {
+  const g = new THREE.Group();
+  const m = new THREE.MeshStandardMaterial({
+    color: colour, roughness: 0.4, metalness: 0.15,
+    emissive: new THREE.Color(colour), emissiveIntensity: emissive,
+  });
+  for (const a of [Math.PI / 4, -Math.PI / 4]) {         // two crossed bars = an X
+    const bar = new THREE.Mesh(BOX, m);
+    bar.scale.set(radius * 2, thickness, thickness * 0.7);
+    bar.rotation.z = a;
+    g.add(bar);
+  }
+  const hub = new THREE.Mesh(new THREE.SphereGeometry(thickness * 1.05, 10, 8),
+    new THREE.MeshStandardMaterial({ color: 0x0d0d0f, roughness: 0.5,
+      emissive: new THREE.Color(colour), emissiveIntensity: emissive * 0.5 }));
+  g.add(hub);
+  return g;
+}
+
 /** Claude's mark: a radial spark. The CEO wears it instead of a face. */
 function buildSpark(radius, rays, thickness, colour, emissive = 0.55) {
   const g = new THREE.Group();
@@ -1948,9 +1974,13 @@ function buildAvatar(spec, index) {
   }
 
   const claude = !!spec.claude;
+  const grokBoss = claude && bossBrain === "grok";      // the boss, on a Grok desk
   const pal = claude
-    ? { skin: P.claude, head: 0xf5efe4, hair: P.claude, eye: P.claude, shirt: P.claude,
-        trousers: 0xb85f42, apron: P.claude, boots: 0x7d3f2c }
+    ? (grokBoss
+        ? { skin: 0x17181a, head: 0x0d0d0f, hair: 0x0d0d0f, eye: 0xfafafa, shirt: 0x0d0d0f,
+            trousers: 0x1b1c1e, apron: 0x0d0d0f, boots: 0x090a0b }
+        : { skin: P.claude, head: 0xf5efe4, hair: P.claude, eye: P.claude, shirt: P.claude,
+            trousers: 0xb85f42, apron: P.claude, boots: 0x7d3f2c })
     : { skin: SKINS[index % SKINS.length], hair: HAIRS[(index * 3 + 1) % HAIRS.length],
         eye: 0x2a2320, shirt: SHIRTS[index % SHIRTS.length],
         trousers: TROUSERS[(index * 2) % TROUSERS.length],
@@ -1998,15 +2028,19 @@ function buildAvatar(spec, index) {
 
   let spark = null, built_halo = null;
   if (claude) {
-    // Claude's mark, worn where a face would be. The rig faces +X, and the spark is
-    // built in the XY plane, so it must be turned a quarter turn about Y or it presents
+    // The boss's mark, worn where a face would be — Claude's coral spark, or, when
+    // the desk runs on Grok, Grok's white slash. The rig faces +X and the mark is
+    // built in the XY plane, so it is turned a quarter turn about Y or it presents
     // edge-on and reads as a spike rather than a mark.
-    spark = buildSpark(0.17, 11, 0.030, P.claude, 1.25);
+    const markC = grokBoss ? 0xf5f5f5 : P.claude;
+    spark = grokBoss ? buildGrokMark(0.17, 0.036, markC, 1.15)
+                     : buildSpark(0.17, 11, 0.030, P.claude, 1.25);
     spark.rotation.y = -Math.PI / 2;
     spark.position.set(0.158, 0.16, 0);
     joints.Head.add(spark);
     // a second, larger mark floating above — the one you can see across the room
-    const halo = buildSpark(0.26, 11, 0.042, P.claude, 1.0);
+    const halo = grokBoss ? buildGrokMark(0.26, 0.05, markC, 0.95)
+                          : buildSpark(0.26, 11, 0.042, P.claude, 1.0);
     halo.rotation.y = -Math.PI / 2;
     halo.position.set(0.02, 0.52, 0);
     joints.Head.add(halo);
@@ -2162,6 +2196,13 @@ function applyBrainRoom(brain) {
   const L = BRAIN_LOOKS[brain] ?? BRAIN_LOOKS.claude;
   bossBoard.frame.material.color.set(L.frame);
   bossBoard.rug.material.color.set(L.rug);
+  // Rebuild the boss avatar so the dais shows who runs the desk — Claude's spark or
+  // Grok's slash. rebuildWorker + workers are declared further down but this only
+  // runs from the async poll, long after the scene is built.
+  if (brain !== bossBrain && typeof rebuildWorker === "function" && workers && workers.CEO) {
+    bossBrain = brain;
+    rebuildWorker("CEO");
+  }
 }
 drawBossBoard();
 
@@ -2225,8 +2266,10 @@ class Worker {
     this.faceTowards(this.deskAt.x, this.deskAt.z);
     scene.add(this.g);
 
+    const bossGrok = spec.claude && bossBrain === "grok";
     this.nameSprite = makeSprite(spec.name || spec.id, spec.claude ? 1.15 : 0.92,
-      spec.claude ? { bg: "#8a3f22", accent: "#f0c9a0" } : undefined);
+      bossGrok ? { bg: "#0d0d0f", accent: "#cfd2d6" }
+               : spec.claude ? { bg: "#8a3f22", accent: "#f0c9a0" } : undefined);
     this.nameSprite.position.set(0, 2.28, 0);
     this.nameSprite.visible = true;
     this.g.add(this.nameSprite);
@@ -3034,6 +3077,7 @@ STAFF.forEach((spec, i) => {
   w.g.add(hit);
   PICKABLE.push(hit);
 });
+window.__workers = workers;   // debug hook, same idiom as __bossBoard / __figure
 
 /** Tear one worker out of the scene and build them again from their (edited) spec.
  * Used exactly once so far: the boss. On the house floor the corner office is BIG M;
@@ -3064,10 +3108,15 @@ window.applyIdentity = (identity) => {
   const spec = STAFF.find((x) => x.id === "CEO");
   const name = (identity.mdName || "MANAGING DIRECTOR").toUpperCase();
   const costume = identity.costume || null;
-  if (spec.name === name && (spec.costume || null) === costume) return;   // nothing changed
+  // The boss wears the DESK'S BRAIN mark — Claude's spark or Grok's slash — unless
+  // the tenant has dressed their MD in a custom costume, which is a persona and takes
+  // the marked face's place. (Before, any leased floor dropped the mark outright, so
+  // a Grok desk had no way to show it ran on Grok.)
+  const wantsMark = !costume;
+  if (spec.name === name && (spec.costume || null) === costume && spec.claude === wantsMark) return;
   spec.name = name;
   spec.role = "Managing Director";
-  spec.claude = false;                    // the spark belongs to the penthouse
+  spec.claude = wantsMark;
   spec.costume = costume;
   rebuildWorker("CEO");
 };
