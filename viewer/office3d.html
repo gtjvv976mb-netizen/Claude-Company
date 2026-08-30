@@ -2324,13 +2324,27 @@ const bossBoard = (() => {
   window.__drawBrainRug = (brain) => {
     const x = rugC.getContext("2d"), S = 512, c = S / 2;
     if (brain === "grok") {
-      // the broken X, white on charcoal
+      // the Grok mark: a ring cut by a long tapered slash, white on charcoal
       x.fillStyle = "#121316"; x.fillRect(0, 0, S, S);
-      x.strokeStyle = "#f2f2f4"; x.lineCap = "butt"; x.lineWidth = 46;
-      const seg = (a, b, d, e) => { x.beginPath(); x.moveTo(a, b); x.lineTo(d, e); x.stroke(); };
-      seg(168, 380, 380, 122);          // the long beam
-      seg(132, 122, 246, 262);          // upper crossing beam…
-      seg(300, 328, 380, 380);          // …finishing past the gap
+      x.strokeStyle = "#f2f2f4"; x.lineWidth = 34;
+      x.beginPath(); x.arc(c, c, 108, 0, Math.PI * 2); x.stroke();
+      // the slash: a blade from lower-left tip to upper-right tip, fat in the
+      // middle, pointed at both ends — drawn over a bg-colour channel so the
+      // ring breaks cleanly around it, like the mark itself.
+      const blade = (w, color) => {
+        const ax = 58, ay = 454, bx = 454, by = 58;          // the two tips
+        const dx = bx - ax, dy = by - ay, L = Math.hypot(dx, dy);
+        const px = -dy / L, py = dx / L;                     // unit perpendicular
+        const p = (t, off) => [ax + dx * t + px * off, ay + dy * t + py * off];
+        x.fillStyle = color;
+        x.beginPath();
+        x.moveTo(ax, ay);
+        x.lineTo(...p(0.30, w)); x.lineTo(...p(0.70, w)); x.lineTo(bx, by);
+        x.lineTo(...p(0.70, -w)); x.lineTo(...p(0.30, -w));
+        x.closePath(); x.fill();
+      };
+      blade(44, "#121316");                                  // the channel breaks the ring
+      blade(24, "#f2f2f4");                                  // the blade itself
     } else {
       // the Claude spark: coral rays on cream
       x.fillStyle = "#f4ecd8"; x.fillRect(0, 0, S, S);
