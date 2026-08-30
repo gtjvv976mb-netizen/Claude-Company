@@ -670,6 +670,9 @@ applyShift3D();
 /* Nav diagnostics: how much of the floor is blocked, and what route a given walk
    actually takes. A path that is one straight leg through a desk looks identical
    to a correct one from the outside, so this prints the legs. */
+window.__solids = (n = 10) => SOLID.slice(-n);
+window.__pathXY = (sx, sz, tx, tz) => JSON.stringify(navPath(sx, sz, tx, tz));
+window.__cellAt = (x, z) => ({ col: navCol(x), row: navRow(z), blocked: !!NAV.blocked[navRow(z) * NAV.cols + navCol(x)] });
 window.__nav = (fromSeat, toSpot) => {
   const blocked = NAV.blocked ? NAV.blocked.reduce((a, v) => a + v, 0) : 0;
   const out = { solids: SOLID.length, cells: NAV.cols * NAV.rows, blocked,
@@ -1127,9 +1130,33 @@ function buildPlant(at) {
   tile.rotation.x = -Math.PI / 2; tile.position.set(X, 0.02, Z);
   tile.receiveShadow = true; g.add(tile);
 
-  // half-height divider, so it reads as a room but never blocks the isometric view
-  box(g, [8.8, 0.5, 0.28], [X, 0.25, Z - 3.3], P.wall, 0.88);
-  box(g, [0.28, 0.5, 6.8], [X - 4.3, 0.25, Z], P.wall, 0.88);
+  // Real walls now: a solid base with glass above, so it reads as a ROOM and the
+  // isometric camera still sees in — and every segment registers its footprint,
+  // because the old half-kerbs were ghosts the whole floor walked straight through.
+  // One doorway on the south side (x 5.9–8.1) is the way in; the east end is open.
+  const wallGlass = new THREE.MeshPhysicalMaterial({
+    color: P.glassAqua, transmission: 0.4, transparent: true, opacity: 0.38, roughness: 0.15 });
+  const wallSeg = (w, d, cx, cz) => {
+    box(g, [w, 0.9, d], [cx, 0.45, cz], P.wall, 0.88);
+    box(g, [w + 0.04, 0.06, d + 0.04], [cx, 0.93, cz], TIMBER, 0.6);   // timber cap
+    const pane = new THREE.Mesh(BOX, wallGlass);
+    pane.scale.set(Math.max(w * 0.98, 0.2), 1.35, Math.max(d * 0.7, 0.12));
+    pane.position.set(cx, 1.64, cz);
+    g.add(pane);
+    solidRect(cx, cz, Math.max(w, 0.3), Math.max(d, 0.3));
+  };
+  // The south wall runs unbroken — the lounge sofa backs onto it from outside,
+  // which is exactly why the door could never live there. The doorway is in the
+  // WEST wall (z 7.6–9.6), opening onto the central walkway; the east end stays open.
+  wallSeg(8.8, 0.28, X, Z - 3.3);             // south wall, the full run
+  wallSeg(0.28, 1.4, X - 4.3, 6.9);           // west wall, north of the doorway
+  wallSeg(0.28, 3.4, X - 4.3, 11.3);          // west wall, south of the doorway
+  // doorway posts, so the gap reads as a door and not a builder's mistake
+  box(g, [0.2, 2.3, 0.14], [X - 4.3, 1.15, 7.6], TIMBER, 0.6);
+  box(g, [0.2, 2.3, 0.14], [X - 4.3, 1.15, 9.6], TIMBER, 0.6);
+  // the big furniture is solid too — nobody walks through a fridge
+  solidRect(X, Z + 2.9, 7.4, 0.78);           // counter
+  solidRect(X + 3.2, Z + 2.85, 0.95, 0.85);   // fridge
 
   // counter along the back with a splashback
   box(g, [7.4, 0.9, 0.7], [X, 0.45, Z + 2.9], P.timberDark);
@@ -2742,6 +2769,12 @@ const grokBoard = (() => {
   frame.position.set(O.cx, GROX_DAIS + 2.0, O.z0 + 0.24);
   grokOffice.add(mesh, frame);
 
+  // ── nobody walks through this room either: the whole footprint is solid on
+  //    the nav grid. On Claude floors it is an invisible exclusion zone in a
+  //    dead corner; on Grok floors it is his walls. He never leaves, so the
+  //    interior being unreachable to walkers is the point, not a bug.
+  solidRect(O.cx, zc, W, D);
+
   // ── the ticket rail: one tile per open trade, stood up on the desk
   const tickets = new THREE.Group();
   tickets.position.set(O.cx, GROX_DAIS + 0.78, -10.8);
@@ -3834,6 +3867,7 @@ const HANDLERS = {
   // Ambient events are cosmetic: a hidden tab drops them rather than queueing a
   // burst of stale office life for when the viewer returns. The chronicle has them.
   "world:snack": (e) => { if (!document.hidden) snackBreak(e.a, e.b, e.ti); },
+  "world:ambient": (e) => { if (!document.hidden) ambientRun(e); },
   "world:paper": (e) => {
     if (document.hidden) return;
     const a = who(e.a), h = who(e.b);
@@ -4075,6 +4109,123 @@ const VISIT_TALK = [
 
 const inSnackRoom = new Set();
 
+/* ═══ AMBIENT LIFE — the office living between trades ═══════════════════════
+   The desks are the job; these are the people. Fridge raids, something on the
+   kitchenette hob, the sofa, the meeting table, the cooler, a long look out the
+   back window. Driven by the same world director as everything else, so every
+   viewer watches the same person burn the same popcorn at the same moment. */
+const AMBIENT_SPOTS = {
+  fridge:  [12.9, 11.5],                     // in front of the snack-room fridge
+  kitchen: [0.6, 11.3],                      // the kitchenette counter run
+  sofaL:   [5.89, 5.1], sofaR: [7.31, 5.1],  // the lounge cushions
+  meetA:   [-1.1, 2.55], meetB: [1.1, 4.25], // across the meeting table
+  window:  [13.2, -11.2],                    // the back glazing, east of Grox
+};
+const AMBIENT_TALK = {
+  fridge: ["Whose yoghurt is this? Asking for me.", "The good snacks go by ten. Noted at nine fifty.",
+           "Labelled my sandwich this time. Legally.", "One espresso. Two. Fine, three."],
+  cook: ["Reheating yesterday's thesis.", "Who burned popcorn during a red-team pass. WHO.",
+         "The pan is the only thing here holding a position.", "Chef's special: noodles, market hours."],
+  sofa: [["Five minutes. The tape will keep.", "The tape never keeps."],
+         ["I liked the coin. The screen didn't.", "The screen is why you still get paid."],
+         ["This cushion has survived three cycles.", "Better record than most coins."],
+         ["If the next one rugs I'm napping here.", "You already do."]],
+  meeting: [["Walk me through the kill list.", "Short version: everything lied."],
+            ["Odds the watchlist trips today?", "Two of seven look alive."],
+            ["We should chart this properly.", "We should close something first."],
+            ["The naming race had four losers.", "And one winner. Noted."]],
+  cooler: [["Water's free. Alpha isn't.", "Putting that on a mug."],
+           ["The fresh lane found something.", "The screen will eat it by lunch."],
+           ["Seen the odometer today?", "Not before coffee. Never before coffee."],
+           ["New watch armed on the board.", "Fifth this week. Rules are rules."]],
+  window: ["The chain doesn't blink. Neither do I.", "Somewhere out there a deployer is lying.",
+           "Nice day for a settlement.", "Watching the mempool go by."],
+};
+
+async function ambientRun(e) {
+  const kind = e.kind, li = e.li ?? 0;
+  const a = who(e.a);
+  if (!a || a.typing || a.doc.visible || a.path || inSnackRoom.has(a.id)) return;
+  const b = e.b ? who(e.b) : null;
+  if (e.b && (!b || b.typing || b.doc.visible || b.path || inSnackRoom.has(b.id))) return;
+  inSnackRoom.add(a.id); if (b) inSnackRoom.add(b.id);
+  const done = (p) => { inSnackRoom.delete(p.id); };
+
+  if (kind === "fridge") {
+    a.run(async () => {
+      await a.moveTo(...AMBIENT_SPOTS.fridge);
+      a.faceTowards(13.0, 12.45);
+      puff(a, "🥪"); a.eat(true);
+      a.say(AMBIENT_TALK.fridge[li % AMBIENT_TALK.fridge.length], 3000);
+      await pause(3200); a.eat(false);
+      await a.goHome(); done(a);
+    });
+  } else if (kind === "cook") {
+    a.run(async () => {
+      await a.moveTo(...AMBIENT_SPOTS.kitchen);
+      a.faceTowards(0.6, 12.2);
+      puff(a, "🍳");
+      a.say(AMBIENT_TALK.cook[li % AMBIENT_TALK.cook.length], 3200);
+      await pause(3600);
+      await a.goHome(); done(a);
+    });
+  } else if (kind === "sofa" && b) {
+    const script = AMBIENT_TALK.sofa[li % AMBIENT_TALK.sofa.length];
+    a.run(async () => {
+      await a.moveTo(...AMBIENT_SPOTS.sofaL);
+      a.faceTowards(6.6, 3.8); a.wantSeated = true;
+      a.say(script[0], 3600); await pause(4200);
+      await a.goHome(); done(a);
+    });
+    b.run(async () => {
+      await pause(700);
+      await b.moveTo(...AMBIENT_SPOTS.sofaR);
+      b.faceTowards(6.6, 3.8); b.wantSeated = true;
+      await pause(2400); b.say(script[1], 3200); await pause(3400);
+      await b.goHome(); done(b);
+    });
+  } else if (kind === "meeting" && b) {
+    const script = AMBIENT_TALK.meeting[li % AMBIENT_TALK.meeting.length];
+    a.run(async () => {
+      await a.moveTo(...AMBIENT_SPOTS.meetA);
+      a.faceTowards(...AMBIENT_SPOTS.meetB); a.carry(true);
+      a.say(script[0], 3200); await pause(4400);
+      a.carry(false); await a.goHome(); done(a);
+    });
+    b.run(async () => {
+      await pause(600);
+      await b.moveTo(...AMBIENT_SPOTS.meetB);
+      b.faceTowards(...AMBIENT_SPOTS.meetA);
+      await pause(2600); b.say(script[1], 3200); await pause(3200);
+      await b.goHome(); done(b);
+    });
+  } else if (kind === "cooler" && b) {
+    const script = AMBIENT_TALK.cooler[li % AMBIENT_TALK.cooler.length];
+    a.run(async () => {
+      await a.moveTo(SPOTS.cooler[0] - 0.7, SPOTS.cooler[1] + 0.3);
+      puff(a, "🥤"); a.faceTowards(SPOTS.cooler[0] + 0.7, SPOTS.cooler[1] + 0.3);
+      a.say(script[0], 3000); await pause(4000);
+      await a.goHome(); done(a);
+    });
+    b.run(async () => {
+      await pause(800);
+      await b.moveTo(SPOTS.cooler[0] + 0.7, SPOTS.cooler[1] + 0.3);
+      b.faceTowards(SPOTS.cooler[0] - 0.7, SPOTS.cooler[1] + 0.3);
+      await pause(2200); b.say(script[1], 3000); await pause(3000);
+      await b.goHome(); done(b);
+    });
+  } else if (kind === "window") {
+    a.run(async () => {
+      await a.moveTo(...AMBIENT_SPOTS.window);
+      a.faceTowards(13.2, -12.5);
+      a.say(AMBIENT_TALK.window[li % AMBIENT_TALK.window.length], 3400);
+      await pause(4200);
+      await a.goHome(); done(a);
+    });
+  } else { done(a); if (b) done(b); }
+}
+window.__ambient = (kind, aId, bId, li) => ambientRun({ kind, a: aId, b: bId, li: li ?? 0 });
+
 /** Send two agents for a snack and let them actually talk to each other. */
 function snackBreak(aId, bId, ti) {
   // With arguments this plays the server's casting — same pair, same argument, on
@@ -4126,7 +4277,18 @@ setInterval(() => {
   // While the server runs the world, the local dice stay in the drawer — every
   // viewer must see the same office. Demo mode (no desk process) keeps them.
   if (window.__worldLive) return;
-  if (Math.random() < 0.5) { snackBreak(); return; }
+  if (Math.random() < 0.30) {
+    const kinds = ["fridge", "cook", "sofa", "meeting", "cooler", "window"];
+    const kind = kinds[Math.floor(Math.random() * kinds.length)];
+    const pool = STAFF.filter((x) => !x.claude && !x.grok);
+    const a = pool[Math.floor(Math.random() * pool.length)];
+    let b = pool[Math.floor(Math.random() * pool.length)];
+    if (b === a) b = pool[(pool.indexOf(a) + 2) % pool.length];
+    ambientRun({ kind, a: a.id, b: ["sofa", "meeting", "cooler"].includes(kind) ? b.id : null,
+                 li: Math.floor(Math.random() * 4) });
+    return;
+  }
+  if (Math.random() < 0.4) { snackBreak(); return; }
   const roam = STAFF.filter((s) => !s.claude && !s.grok);   // the CEO and the AD keep their rooms
   const spec = roam[Math.floor(Math.random() * roam.length)];
   const p = workers[spec.id];
@@ -5221,9 +5383,9 @@ function buildBotCard(settings) {
      The honest trade: a browser tab is not a server. It only trades while this
      page is open, so the stop is only watched while you are here. That is stated
      in the UI, not buried, and the VPS path remains for anyone who wants 24/7. */
-  box.appendChild(mk("div", "dp-h", "Run the bot here (easiest)"));
+  // One sentence, not a paragraph: the checklist below explains itself as it goes.
   const botNote = mk("div", "dp-note",
-    "No server, no terminal. A burner wallet is created in THIS browser and never leaves it — we never see the key. It trades your floor's calls with the same risk engine as the installed bot. It only runs while this tab is open, so use it to try the bot live in small size; move to the one-command VPS install below for 24/7.");
+    "Let the AI trade for you. A burner wallet is made in this browser and never leaves it — we never see the key.");
   box.appendChild(botNote);
 
   const botBox = mk("div", "bud-addr");
@@ -5270,12 +5432,91 @@ function buildBotCard(settings) {
     return W.Keypair.fromSecretKey(new Uint8Array(b.sk));
   }
 
+  /* ── THE START CHECKLIST ───────────────────────────────────────────────────
+     Once a wallet existed the old panel showed FIVE buttons at once — copy,
+     start, go live, withdraw, show key — with nothing saying which to press.
+     And the team's on/off switch lived on a different tab entirely, so the two
+     halves of "make this thing work" were never in the same place.
+
+     Now it is a checklist that always renders exactly ONE next action, in
+     order, with everything already done ticked off and everything not yet
+     relevant greyed. Managing controls only appear once there is something to
+     manage. */
   async function renderBot() {
     const b = loadBot();
     botRow.innerHTML = "";
+    botBox.innerHTML = "";
+
+    // Read the team's shift here so the fix is one click away, in this panel,
+    // rather than "now go find the Desk tab".
+    let working = null;
+    try {
+      const { status, body } = await call_api(`/api/floor/${FLOOR_N}`);
+      if (status === 200) working = body?.settings?.mode === "grind";
+    } catch {}
+
+    let bal = null;
+    if (b) {
+      try {
+        const W = await web3();
+        const conn = new W.Connection(RPC_URL, "confirmed");
+        bal = (await conn.getBalance(new W.PublicKey(b.pk))) / 1e9;
+      } catch {}
+    }
+
+    const funded  = bal != null && bal >= 0.012;
+    const running = !!BOT.timer;
+    const live    = !!b?.live;
+    const steps = [
+      { done: !!b,      label: "Create your bot wallet",  hint: b ? `${b.pk.slice(0,6)}…${b.pk.slice(-4)} — the key lives in this browser only` : "One click. The key never leaves this browser." },
+      { done: funded,   label: "Put some SOL in it",      hint: b ? (bal == null ? "checking balance…" : `${bal.toFixed(4)} SOL — send only what you'd risk losing`) : "" },
+      { done: running,  label: "Start it (practice mode)", hint: running ? (live ? "running — TRADING LIVE" : "running — practice, spending nothing") : "It shows what it WOULD trade, spending nothing." },
+      { done: live,     label: "Go live when you trust it", hint: live ? "trading for real, inside your caps" : "Optional. Practice as long as you like first." },
+    ];
+    const stepNo = steps.findIndex((s) => !s.done);
+    const allDone = stepNo === -1;
+
+    const head = mk("div", "dp-h", allDone ? "Your bot is live ✓" : `Start your bot — step ${stepNo + 1} of 4`);
+    botBox.appendChild(head);
+
+    for (let i = 0; i < steps.length; i++) {
+      const s = steps[i];
+      const isNow = i === stepNo;
+      const row = mk("div");
+      row.style.cssText = "display:flex;gap:9px;align-items:flex-start;padding:5px 0;" +
+        (s.done || isNow ? "" : "opacity:.42");
+      const tick = mk("span", null, s.done ? "✓" : isNow ? "▸" : "○");
+      tick.style.cssText = "font-family:'JetBrains Mono',monospace;font-size:13px;width:14px;flex:none;" +
+        (s.done ? "color:var(--good,#4f8f52)" : isNow ? "color:var(--amber,#e0ad3d)" : "opacity:.6");
+      const txt = mk("div");
+      const t = mk("div", null, `${i + 1}. ${s.label}`);
+      t.style.cssText = "font-size:12.5px;" + (isNow ? "font-weight:800" : s.done ? "" : "");
+      txt.appendChild(t);
+      if (s.hint) { const h = mk("div", "dp-note", s.hint); h.style.fontSize = "11.5px"; txt.appendChild(h); }
+      row.append(tick, txt);
+      botBox.appendChild(row);
+    }
+
+    // If the team is not working, no calls will ever arrive — say so here and
+    // fix it here, instead of sending the reader to another tab.
+    if (working === false) {
+      const warn = mk("div", "dp-note",
+        "⚠️ Your team is on a break, so no calls will come. The bot needs them working.");
+      warn.style.cssText = "margin-top:8px;color:var(--amber,#e0ad3d)";
+      const go = mk("button", "dp-btn ghost", "Put my team to work");
+      go.type = "button";
+      go.onclick = async () => {
+        go.disabled = true; go.textContent = "Starting the shift…";
+        await call_api(`/api/floor/${FLOOR_N}/settings`, { method: "POST", body: JSON.stringify({ mode: "grind" }) });
+        renderBot();
+      };
+      botBox.appendChild(warn);
+      botRow.appendChild(go);
+    }
+
+    // ── exactly one primary action, matching the current step ──
     if (!b) {
-      botBox.textContent = "No bot wallet yet.";
-      const create = mk("button", "dp-btn", "1. Create my bot wallet");
+      const create = mk("button", "dp-btn", "Create my bot wallet");
       create.type = "button";
       create.onclick = async () => {
         create.disabled = true; create.textContent = "Creating…";
@@ -5286,56 +5527,62 @@ function buildBotCard(settings) {
                     live: false, cursor: 0, positions: {}, primed: false });
           say("bot wallet created — it lives only in this browser");
           renderBot();
-        } catch (e) { botBox.textContent = "could not create: " + e.message; create.disabled = false; create.textContent = "1. Create my bot wallet"; }
+        } catch (e) {
+          botBox.appendChild(mk("div", "dp-note", "could not create: " + e.message));
+          create.disabled = false; create.textContent = "Create my bot wallet";
+        }
       };
       botRow.appendChild(create);
-      return;
+    } else if (!funded) {
+      const addr = mk("div", "bud-addr", b.pk);
+      addr.style.cssText = "font-size:11px;word-break:break-all;margin-top:8px";
+      botBox.appendChild(addr);
+      const copy = mk("button", "dp-btn", "Copy the address to fund");
+      copy.type = "button";
+      copy.onclick = () => { navigator.clipboard?.writeText(b.pk); copy.textContent = "Copied ✓"; setTimeout(() => (copy.textContent = "Copy the address to fund"), 1400); };
+      const recheck = mk("button", "dp-btn ghost", "I've sent it — check");
+      recheck.type = "button";
+      recheck.onclick = () => { recheck.textContent = "Checking…"; renderBot(); };
+      botRow.append(copy, recheck);
+    } else if (!running) {
+      const start = mk("button", "dp-btn", "Start the bot");
+      start.type = "button";
+      start.onclick = () => startBot();
+      botRow.appendChild(start);
+    } else if (!live) {
+      const goLive = mk("button", "dp-btn", "Go live — trade for real");
+      goLive.type = "button";
+      goLive.onclick = () => {
+        if (!confirm("Go live?\n\nThe bot will spend REAL SOL from this burner wallet on your floor's calls, up to your caps. Only continue with money you are willing to lose entirely.")) return;
+        const cur = loadBot(); cur.live = true; saveBot(cur);
+        say("LIVE — real trades from now on");
+        renderBot();
+      };
+      botRow.appendChild(goLive);
     }
 
-    let bal = null;
-    try {
-      const W = await web3();
-      const conn = new W.Connection(RPC_URL, "confirmed");
-      bal = (await conn.getBalance(new W.PublicKey(b.pk))) / 1e9;
-    } catch {}
-    const open = Object.keys(b.positions || {}).length;
-    botBox.textContent =
-      `wallet   ${b.pk}\n` +
-      `balance  ${bal == null ? "—" : bal.toFixed(4) + " SOL"}` +
-      `${bal != null && bal < 0.02 ? "   ← fund this address to trade" : ""}\n` +
-      `status   ${BOT.timer ? (b.live ? "TRADING LIVE" : "running · DRY RUN") : "stopped"}   ·   open positions ${open}`;
-
-    const copy = mk("button", "dp-btn ghost", "Copy address");
-    copy.type = "button";
-    copy.onclick = () => { navigator.clipboard?.writeText(b.pk); copy.textContent = "Copied ✓"; setTimeout(() => copy.textContent = "Copy address", 1200); };
-
-    const startStop = mk("button", "dp-btn", BOT.timer ? "Stop the bot" : "2. Start the bot");
-    startStop.type = "button";
-    startStop.onclick = () => { BOT.timer ? stopBot() : startBot(); };
-
-    const liveToggle = mk("button", "dp-btn ghost", b.live ? "Switch to DRY RUN" : "Go live (real trades)");
-    liveToggle.type = "button";
-    liveToggle.onclick = () => {
-      const cur = loadBot();
-      if (!cur.live && !confirm("Go live?\n\nThe bot will spend REAL SOL from this burner wallet on your floor's calls, up to your caps. Only continue with money you are willing to lose entirely.")) return;
-      cur.live = !cur.live; saveBot(cur);
-      say(cur.live ? "LIVE — real trades from now on" : "back to dry run");
-      renderBot();
-    };
-
-    const outBtn = mk("button", "dp-btn ghost", "Withdraw all SOL");
-    outBtn.type = "button";
-    outBtn.onclick = () => withdrawBot();
-
-    const keyBtn = mk("button", "dp-btn ghost", "Show secret key");
-    keyBtn.type = "button";
-    keyBtn.onclick = () => {
-      const cur = loadBot();
-      if (!confirm("Reveal the burner's secret key?\n\nAnyone with it controls this wallet. Save it somewhere safe so you can recover the funds if you clear this browser.")) return;
-      say("SECRET KEY (save it, then clear this log): [" + cur.sk.join(",") + "]");
-    };
-
-    botRow.append(copy, startStop, liveToggle, outBtn, keyBtn);
+    // ── managing controls, only once there is something to manage ──
+    if (b) {
+      const manage = foldSection("Manage this wallet");
+      const mkBtn = (label, fn, cls = "dp-btn ghost") => {
+        const x = mk("button", cls, label); x.type = "button"; x.onclick = fn; return x;
+      };
+      const row2 = mk("div", "dp-row");
+      if (running) row2.appendChild(mkBtn("Stop the bot", () => stopBot()));
+      if (live) row2.appendChild(mkBtn("Back to practice mode", () => {
+        const cur = loadBot(); cur.live = false; saveBot(cur); say("back to practice"); renderBot();
+      }));
+      row2.appendChild(mkBtn("Copy address", () => navigator.clipboard?.writeText(b.pk)));
+      row2.appendChild(mkBtn("Withdraw all SOL", () => withdrawBot()));
+      row2.appendChild(mkBtn("Show secret key", () => {
+        if (!confirm("Reveal the burner's secret key?\n\nAnyone with it controls this wallet. Save it somewhere safe so you can recover the funds if you clear this browser.")) return;
+        say("SECRET KEY (save it, then clear this log): [" + loadBot().sk.join(",") + "]");
+      }));
+      manage.body.appendChild(row2);
+      manage.body.appendChild(mk("div", "dp-note",
+        `Open positions: ${Object.keys(b.positions || {}).length}. The bot only runs while this tab is open — see the one-command VPS install below for 24/7.`));
+      botBox.appendChild(manage.wrap);
+    }
   }
 
   async function withdrawBot() {
