@@ -2974,13 +2974,13 @@ const grokBoard = (() => {
   frame.position.set(O.cx, GROX_DAIS + 2.0, O.z0 + 0.24);
   grokOffice.add(mesh, frame);
 
-  // ── WALL-ST-E's DEN, front-left corner: back panel and two side stubs bake
-  //    into the nav grid (before buildNav); his parking spot between them stays
-  //    walkable so he can roll out. The den itself is built later, beside the
-  //    pick system the figure needs.
-  solidRect(-14.5, 12.2, 1.9, 0.45);
-  solidRect(-15.35, 11.6, 0.25, 1.5);
-  solidRect(-13.65, 11.6, 0.25, 1.5);
+  // ── WALL-ST-E's junk adobe, WEST of the boss's suite (Grox mirrors it east):
+  //    back rampart and two trash-cube stacks bake into the nav grid (before
+  //    buildNav); his parking spot between them stays walkable so he can roll
+  //    out. The adobe itself is built later, beside the pick system it needs.
+  solidRect(-8.0, -12.1, 2.0, 0.5);
+  solidRect(-8.95, -11.5, 0.55, 1.7);
+  solidRect(-7.05, -11.5, 0.55, 1.7);
 
   // ── nobody walks through this room either: the whole footprint is solid on
   //    the nav grid. On Claude floors it is an invisible exclusion zone in a
@@ -3660,7 +3660,7 @@ function rebuildWorker(seatId) {
    (practice or live) he powers up and roams the floor on the same nav grid as
    everyone else, lamp amber on paper, green when the trades are real. Clicking
    him opens the Team tab, where he is managed. */
-const BOT_DEN = { x: -14.5, z: 11.5 };
+const BOT_DEN = { x: -8.0, z: -11.3 };
 const botFig = (() => {
   const m = (c, r = 0.6, e = null, ei = 0) => new THREE.MeshStandardMaterial({
     color: c, roughness: r, ...(e ? { emissive: new THREE.Color(e), emissiveIntensity: ei } : {}) });
@@ -3669,55 +3669,78 @@ const botFig = (() => {
     b.castShadow = renderer.shadowMap.enabled; parent.add(b); return b;
   };
 
-  // ── the den: timber back, side stubs, his shelf of collected things, a dock
+  // ── THE JUNK ADOBE, beside the boss's suite: a corrugated rampart against
+  //    the back wall and two ramparts of compacted trash cubes — the ones he
+  //    makes — with his trinket shelf and charging dock inside. Opening south.
   const den = new THREE.Group();
-  den.position.set(BOT_DEN.x, 0, BOT_DEN.z);
-  bx(den, 1.9, 2.0, 0.16, 0, 1.0, 0.72, m(0x5f3e29, 0.85));         // back panel
-  bx(den, 0.22, 1.5, 1.35, -0.85, 0.75, 0.12, m(0x5f3e29, 0.85));   // side stubs
-  bx(den, 0.22, 1.5, 1.35, 0.85, 0.75, 0.12, m(0x5f3e29, 0.85));
-  bx(den, 1.5, 0.07, 0.34, 0, 1.45, 0.5, m(0xa96934, 0.7));         // the shelf
-  for (const [dx, c] of [[-0.5, 0xd9534f], [-0.22, 0xe0ad3d], [0.06, 0x7ab85a], [0.34, 0x76858a], [0.58, 0xd7758f]])
-    bx(den, 0.14, 0.14, 0.14, dx, 1.55, 0.5, m(c, 0.8));            // the collection
-  bx(den, 0.9, 0.05, 0.9, 0, 0.025, -0.1, m(0x2a2c30, 0.9));        // dock plate
-  const dockLight = bx(den, 0.08, 0.04, 0.08, 0.55, 0.06, -0.45, m(0x267f82, 0.4, 0x267f82, 0.8));
+  den.position.set(BOT_DEN.x, 0, -11.5);
+  bx(den, 2.0, 1.9, 0.14, 0, 0.95, -0.62, m(0x6e5a3a, 0.9));         // corrugated back
+  for (let i = 0; i < 5; i++)                                         // ribs on the panel
+    bx(den, 0.06, 1.8, 0.05, -0.8 + i * 0.4, 0.95, -0.55, m(0x57462c, 0.9));
+  const CUBES = [0x7a6a4c, 0x6b5d45, 0x84775b, 0x5d5240, 0x8a7350, 0x74655a];
+  for (const sx of [-0.95, 0.95]) {                                   // the cube stacks
+    let y = 0.19;
+    for (let r = 0; r < 3; r++) {
+      const n = 3 - (r > 1 ? 1 : 0);
+      for (let k = 0; k < n; k++) {
+        const c = bx(den, 0.36, 0.36, 0.36, sx + (Math.sin(r * 3 + k * 5) * 0.05),
+          y, -0.45 + k * 0.42 + (r % 2) * 0.1, m(CUBES[(r * 3 + k) % CUBES.length], 0.95));
+        c.rotation.y = Math.sin(r * 7 + k * 3) * 0.12;
+      }
+      y += 0.37;
+    }
+  }
+  bx(den, 1.4, 0.06, 0.3, 0, 1.42, -0.42, m(0xa96934, 0.7));          // the trinket shelf
+  for (const [dx, c] of [[-0.45, 0xd9534f], [-0.18, 0xe0ad3d], [0.09, 0x7ab85a], [0.36, 0x76858a], [0.56, 0xd7758f]])
+    bx(den, 0.13, 0.13, 0.13, dx, 1.51, -0.42, m(c, 0.8));            // the collection
+  bx(den, 0.9, 0.05, 0.9, 0, 0.025, 0.25, m(0x2a2c30, 0.9));         // dock plate
+  const dockLight = bx(den, 0.08, 0.04, 0.08, 0.52, 0.06, 0.6, m(0x267f82, 0.4, 0x267f82, 0.8));
   scene.add(den);
 
-  // ── the robot himself
+  // ── the robot, properly WALL-E now: rust-yellow compactor body on dark
+  //    treads, binocular eyes on a slim neck, weathered panel lines.
   const g = new THREE.Group();
   g.position.set(BOT_DEN.x, 0, BOT_DEN.z);
-  g.rotation.y = Math.PI;                                            // parked facing his shelf, like his namesake
-  bx(g, 0.52, 0.18, 0.36, 0, 0.09, 0, m(0x2a2c30, 0.8));            // treads
-  bx(g, 0.4, 0.5, 0.3, 0, 0.52, 0, m(0x76858a, 0.5));               // torso
-  bx(g, 0.3, 0.16, 0.02, 0, 0.56, -0.16, m(0x132528, 0.4, 0x267f82, 0.5)); // chest panel
-  bx(g, 0.1, 0.34, 0.1, -0.28, 0.5, 0, m(0x5b6a70, 0.6));           // arms
-  bx(g, 0.1, 0.34, 0.1, 0.28, 0.5, 0, m(0x5b6a70, 0.6));
-  const head = new THREE.Group(); head.position.set(0, 0.95, 0); g.add(head);
-  bx(head, 0.34, 0.26, 0.26, 0, 0, 0, m(0x1b1c1e, 0.45));           // head
-  const eyeL = bx(head, 0.07, 0.07, 0.02, -0.08, 0.02, -0.14, m(0x0d0d0f, 0.3, 0x4ec9a5, 0.9));
-  const eyeR = bx(head, 0.07, 0.07, 0.02, 0.08, 0.02, -0.14, m(0x0d0d0f, 0.3, 0x4ec9a5, 0.9));
-  bx(g, 0.03, 0.22, 0.03, 0, 1.19, 0, m(0x5b6a70, 0.5));            // antenna
-  const lamp = bx(g, 0.1, 0.1, 0.1, 0, 1.34, 0, m(0x70828a, 0.4, 0x70828a, 0.8));
-  const plate = makeSprite("WALL-ST-E", 0.62, { bg: "#132528", accent: "#4ec9a5" });
-  plate.position.set(0, 1.86, 0);
+  g.rotation.y = Math.PI;                                             // parked facing his shelf
+  const YELLOW = 0xc79a33, RUST = 0x8f6d22, TREAD = 0x2b2b28, METAL = 0x8b8f93;
+  bx(g, 0.16, 0.3, 0.5, -0.22, 0.15, 0, m(TREAD, 0.85));              // left tread
+  bx(g, 0.16, 0.3, 0.5, 0.22, 0.15, 0, m(TREAD, 0.85));               // right tread
+  bx(g, 0.12, 0.08, 0.4, -0.22, 0.32, 0, m(0x4a4a44, 0.7));           // tread fenders
+  bx(g, 0.12, 0.08, 0.4, 0.22, 0.32, 0, m(0x4a4a44, 0.7));
+  bx(g, 0.44, 0.42, 0.4, 0, 0.52, 0, m(YELLOW, 0.75));                // compactor body
+  bx(g, 0.46, 0.05, 0.42, 0, 0.31, 0, m(RUST, 0.8));                  // weathered base line
+  bx(g, 0.34, 0.2, 0.02, 0, 0.5, -0.21, m(RUST, 0.8));                // front hatch
+  bx(g, 0.1, 0.05, 0.03, 0, 0.66, -0.215, m(0xd9534f, 0.6));          // the little red button
+  bx(g, 0.12, 0.3, 0.12, -0.3, 0.55, 0, m(YELLOW, 0.75));             // arms
+  bx(g, 0.12, 0.3, 0.12, 0.3, 0.55, 0, m(YELLOW, 0.75));
+  bx(g, 0.1, 0.06, 0.14, -0.3, 0.38, -0.05, m(METAL, 0.5));           // gripper hands
+  bx(g, 0.1, 0.06, 0.14, 0.3, 0.38, -0.05, m(METAL, 0.5));
+  bx(g, 0.08, 0.22, 0.08, 0, 0.82, 0.04, m(0x4a4a44, 0.6));           // the slim neck
+  const head = new THREE.Group(); head.position.set(0, 1.0, 0); g.add(head);
+  bx(head, 0.15, 0.16, 0.3, -0.09, 0, -0.02, m(METAL, 0.5));          // binocular eye housings
+  bx(head, 0.15, 0.16, 0.3, 0.09, 0, -0.02, m(METAL, 0.5));
+  const eyeL = bx(head, 0.11, 0.11, 0.02, -0.09, 0, -0.18, m(0x101214, 0.3, 0x9fd8cf, 0.8));
+  const eyeR = bx(head, 0.11, 0.11, 0.02, 0.09, 0, -0.18, m(0x101214, 0.3, 0x9fd8cf, 0.8));
+  bx(g, 0.025, 0.2, 0.025, 0.18, 1.18, 0.06, m(0x4a4a44, 0.5));       // antenna, off to one side
+  const lamp = bx(g, 0.09, 0.09, 0.09, 0.18, 1.31, 0.06, m(0x70828a, 0.4, 0x70828a, 0.8));
+  const plate = makeSprite("WALL-ST-E", 0.62, { bg: "#3a3222", accent: "#c79a33" });
+  plate.position.set(0, 1.78, 0);
   g.add(plate);
   const hit = new THREE.Mesh(BOX, new THREE.MeshBasicMaterial({ visible: false }));
-  hit.scale.set(0.9, 1.7, 0.9); hit.position.set(0, 0.85, 0);
+  hit.scale.set(0.9, 1.6, 0.9); hit.position.set(0, 0.8, 0);
   hit.userData.seat = "__bot";
   g.add(hit); PICKABLE.push(hit);
   scene.add(g);
   return { g, head, eyeL, eyeR, lamp, dockLight };
 })();
 
-/* His day: SLEEP in the den until the viewer's bot runs; then ROAM the floor's
-   own nav grid — wander, pause, look around — until the bot stops, then roll
-   home and power down. One tiny state machine, ticked from the frame loop. */
 window.__bot = () => ({ x: +botFig.g.position.x.toFixed(2), z: +botFig.g.position.z.toFixed(2), mode: botState.mode, want: botState.wantRoam });
 const BOT_STOPS = [[0, 8.8], [-6.3, 6.2], [4.4, 8.4], [10.6, 4.2], [0.6, 2.2], [-9.5, 5.6], [8.6, 1.4], [-2.5, 10.6]];
 const botState = { mode: "sleep", legs: null, li: 0, pauseT: 0, wantRoam: false, goingHome: false };
 function botPose(asleep) {
-  botFig.head.rotation.x = asleep ? 0.5 : 0;
-  botFig.eyeL.material.emissiveIntensity = asleep ? 0 : 0.9;
-  botFig.eyeR.material.emissiveIntensity = asleep ? 0 : 0.9;
+  botFig.head.rotation.x = asleep ? 0.55 : 0;      // binoculars droop when he powers down
+  botFig.eyeL.material.emissiveIntensity = asleep ? 0 : 0.8;
+  botFig.eyeR.material.emissiveIntensity = asleep ? 0 : 0.8;
   if (asleep) { botFig.lamp.material.color.set(0x70828a); botFig.lamp.material.emissive.set(0x3a4448); }
 }
 botPose(true);
