@@ -2115,7 +2115,10 @@ function buildAvatar(spec, index) {
         trousers: TROUSERS[(index * 2) % TROUSERS.length],
         apron: spec.apron ?? P.leaf, boots: BOOTS[index % BOOTS.length] };
 
-  const fig = FIGURE[spec.id] || {};
+  // FIGURE is keyed by SEAT, but the CEO's entry is Claw'd himself — a whole
+  // costume, not a palette. A tenant's Managing Director must not inherit it, so
+  // the mascot's parts are gated on the flag rather than on the seat id.
+  const fig = (spec.id === "CEO" && !spec.mascot) ? {} : (FIGURE[spec.id] || {});
   Object.assign(pal, fig.pal || {});
   if (spec.costume && COSTUME_PAL[spec.costume]) Object.assign(pal, COSTUME_PAL[spec.costume]);
 
@@ -3531,10 +3534,16 @@ window.applyIdentity = (identity) => {
   // costume (a persona, which takes the marked face's place). Grok never wears the
   // corner office — he is his own agent, in his own room.
   const wantsMark = !costume;
-  if (spec.name === name && (spec.costume || null) === costume && spec.claude === wantsMark) return;
+  if (spec.name === name && (spec.costume || null) === costume
+      && spec.claude === wantsMark && spec.mascot === false) return;
   spec.name = name;
   spec.role = "Managing Director";
   spec.claude = wantsMark;
+  // CLAW'D IS THE HOUSE, NOT THE TENANT. The mascot body is BIG C's own — a
+  // leased floor's Managing Director is that tenant's person, under their name
+  // and in their costume. Leaving the flag set gave every floor a coral mascot
+  // head wearing someone else's costume palette: a hybrid of two identities.
+  spec.mascot = false;
   spec.costume = costume;
   rebuildWorker("CEO");
 };
