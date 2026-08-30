@@ -144,7 +144,7 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
 
   // --- Stage 10: the unsigned ticket, only if proposing. ---
   let ticket = null;
-  if (pm.decision === "PROPOSE" && risk.position_size_usd > 0 && redteam.verdict !== "refuted") {
+  if (pm.decision === "PROPOSE" && risk.position_size_usd > 0) {
     ticket = await runExecution(ev, pm, risk);
     emit("seat:verdict", { seat: "Execution", mint, symbol: ev.symbol, detail: "ticket drafted" });
   }

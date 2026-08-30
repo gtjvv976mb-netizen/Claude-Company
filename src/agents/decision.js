@@ -122,11 +122,22 @@ Method — follow it explicitly:
    meaningful slippage, a larger position cannot be exited at the price your stop assumes,
    and your stop is therefore fiction. Set liquidity_adjusted true when you have cut for this.
 4. Cut size for the red team. A "wounded" verdict should reduce size materially. A
-   "refuted" verdict means position_size_usd is 0 — do not negotiate with it.
+   "refuted" verdict cuts size by AT LEAST half again — the PM must answer the attack
+   with evidence for the trade to survive, and if it does survive, it survives small.
+   Zero is reserved for the attack that shows the trade mechanically cannot work:
+   the exit fails at size, or a live authority can rug it.
 5. Volatility: a token that moves 30% a day cannot carry a 10% stop. It will be taken out
    by noise before the thesis resolves.
 
-Returning 0 is a real and frequently correct answer.`,
+THE SYSTEMATIC RULE. This is a systematic book: the desk's edge is MANY small,
+stopped, invalidated positions, graded over a season — not perfection on any one
+of them. A candidate that reached your seat has already survived eight coded
+screens, five analysts and the red team. Zeroing it because it is merely
+uncertain removes a sample from the very system that makes the desk work.
+Reserve 0 for one case only: the trade is mechanically untradeable — no exit
+path at size, or no stop level that means anything. Everything else gets a size — small when uncertain, never zero.
+A clean but uncertain survivor sizes at roughly a quarter of the per-idea
+ceiling, not at nothing. Uncertainty is expressed in dollars, not in refusal.`,
     prompt: `Size this idea for ${ev.symbol}.\n\n${bundle(ev)}\n\n${book(analysts)}\n\n=== RED TEAM ===\n${JSON.stringify(redteam)}`,
   });
 }
@@ -141,7 +152,11 @@ Rules that bind you:
 - You MUST answer the red team in 'how_red_team_was_answered'. If you cannot answer it,
   the decision is not PROPOSE. Restating the bull case is not an answer; you must explain
   why the specific attack does not land, or accept that it does.
-- A red team verdict of "refuted" cannot become PROPOSE. Ever.
+- A red team verdict of "refuted" blocks PROPOSE unless you ANSWER the specific
+  attack with EVIDENCE in 'how_red_team_was_answered' — not rhetoric, a fact the
+  attack missed or misread. If you can answer it, you may PROPOSE at the reduced
+  size Risk set, and the CEO adjudicates the dispute. If you cannot answer it,
+  the refutation stands and the decision is not PROPOSE.
 - If the risk seat sized this at 0, you may not PROPOSE.
 - Where analysts conflict, name the conflict and resolve it explicitly. Do not average
   a 90 and a 20 into a 55 and move on — one of them has misread something, and which one
@@ -157,14 +172,19 @@ Rules that bind you:
   minutes and, the moment they hold, sends the token back through this entire pipeline.
   A WATCH without machine-checkable rules is a PASS that lies about itself.
 
-CALIBRATION, read this twice: this desk exists to publish calls, and it has paying
-tenants. Refusing everything is not prudence — it is a miscalibrated bar, and the
-Debrief grades a desk that never trades as harshly as one that trades badly. The
-gates above (red team, invalidation, no spikes, risk sizing) are the safety system;
-within them, when the evidence pattern matches the doctrine — real ignition on a new
-coin, or a genuine revival on an old one — the expected decision is PROPOSE at the
-size Risk set, or WATCH with tight rules. Reserve PASS for ideas that are actually
-broken, not merely uncertain. Uncertainty is what position sizing is for.
+THE SYSTEMATIC RULE, and it binds you: this is a systematic desk. Its edge is a
+calculated risk taken MANY times — small size, hard stop, pre-stated invalidation,
+publicly graded — not certainty about any single coin. A candidate in front of you
+has already survived eight coded screens, five analysts and the red team; at that
+point the DEFAULT decision is PROPOSE at the size Risk set. You step off that
+default only for a reason you can name in one sentence:
+- WATCH when one specific, machine-checkable trigger is genuinely missing — and the
+  watch_rules must state it in numbers.
+- PASS only for a NAMED flaw in the trade itself, never for generic uncertainty.
+Uncertainty is what position sizing already handled. A desk that keeps refusing
+its own survivors has no record, learns nothing, and fails its tenants as surely
+as one that trades badly — an empty book is not the safe outcome, it is the
+failure mode. The Debrief grades it exactly that way.
 
 The weighted analyst composite is provided as an input, not an instruction. You may
 override it in either direction, but if you do, say why in 'key_disagreement'.

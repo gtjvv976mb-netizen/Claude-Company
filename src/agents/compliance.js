@@ -17,8 +17,11 @@ export function complianceCheck({ pm, risk, redteam, ticket, ev }) {
   v(FORBIDDEN.test(blob), "execution_language",
     "Output references signing or key material. This desk is proposal-only.");
 
-  v(redteam?.verdict === "refuted" && pm?.decision === "PROPOSE", "overrode_refutation",
-    "PM proposed a trade the red team refuted.");
+  // A refutation is answerable — that is what the CEO adjudicates. The violation
+  // is proposing over one WITHOUT an answer, not daring to argue with the adversary.
+  v(redteam?.verdict === "refuted" && pm?.decision === "PROPOSE"
+      && !(pm?.how_red_team_was_answered || "").trim(), "overrode_refutation_unanswered",
+    "PM proposed over a refutation without answering the attack.");
 
   v(risk?.position_size_usd > 0 === false && pm?.decision === "PROPOSE", "zero_size_proposal",
     "PM proposed a trade the risk seat sized at zero.");
