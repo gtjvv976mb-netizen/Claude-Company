@@ -1,0 +1,9 @@
+{
+  "name": "claudeco-executor",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Self-hosted executor for Claude Company floor calls: your wallet, your caps, their research.",
+  "scripts": { "start": "node executor.mjs" },
+  "dependencies": { "@solana/web3.js": "^1.95.8" }
+}
