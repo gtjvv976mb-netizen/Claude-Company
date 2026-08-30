@@ -3534,16 +3534,17 @@ window.applyIdentity = (identity) => {
   // costume (a persona, which takes the marked face's place). Grok never wears the
   // corner office — he is his own agent, in his own room.
   const wantsMark = !costume;
+  // CLAW'D IS THE DEFAULT FACE OF A CLAUDE DESK, on every floor — the boss of a
+  // leased floor is still a Claude mind, so he wears the Claude mascot under the
+  // tenant's own name. The one exception is a tenant who picked a COSTUME: that
+  // is a deliberate persona and it wins, mascot and marked face both.
+  const wantsMascot = !costume;
   if (spec.name === name && (spec.costume || null) === costume
-      && spec.claude === wantsMark && spec.mascot === false) return;
+      && spec.claude === wantsMark && spec.mascot === wantsMascot) return;
   spec.name = name;
   spec.role = "Managing Director";
   spec.claude = wantsMark;
-  // CLAW'D IS THE HOUSE, NOT THE TENANT. The mascot body is BIG C's own — a
-  // leased floor's Managing Director is that tenant's person, under their name
-  // and in their costume. Leaving the flag set gave every floor a coral mascot
-  // head wearing someone else's costume palette: a hybrid of two identities.
-  spec.mascot = false;
+  spec.mascot = wantsMascot;
   spec.costume = costume;
   rebuildWorker("CEO");
 };
