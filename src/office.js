@@ -17,6 +17,7 @@ import * as auth from "./auth.js";
 import * as leasing from "./leasing.js";
 import * as rooms from "./rooms.js";
 import * as calls from "./calls.js";
+import * as mandate from "./mandate.js";
 import * as copy from "./copy.js";
 import * as perf from "./perf.js";
 import * as alerts from "./alerts.js";
@@ -383,6 +384,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           // The odometer: the receipts of the research machine, counted from its
           // own permanent record — never estimated, never decorative.
           const q = (sql) => { try { return db.prepare(sql).get()?.n ?? 0; } catch { return 0; } };
+          const rows = (sql) => { try { return db.prepare(sql).all(); } catch { return []; } };
           return json(200, {
             building: {
               floorsTotal: 50,
@@ -403,6 +405,35 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               killsByCode: q("SELECT COUNT(*) n FROM verdicts WHERE killed=1"),
               watchesOpened: q("SELECT COUNT(*) n FROM watchlist"),
               lessonsLearned: q("SELECT COUNT(*) n FROM lessons"),
+            },
+            /* THE SCREEN AS THE RUNNING PROCESS ACTUALLY HAS IT.
+             * Every one of these is env-overridable, so editing the default in
+             * config.js changes nothing if the deploy sets the variable. Publishing
+             * the EFFECTIVE value is the difference between believing a threshold
+             * changed and knowing it did. */
+            screen: {
+              minLiquidityUsd: cfg.screen.minLiquidityUsd,
+              minVolume24hUsd: cfg.screen.minVolume24hUsd,
+              minTxns24h: cfg.screen.minTxns24h,
+              minPairAgeHours: cfg.screen.minPairAgeHours,
+              maxVolToLiqRatio: cfg.screen.maxVolToLiqRatio,
+              maxFdvToLiqRatio: cfg.screen.maxFdvToLiqRatio,
+              exitProbeSizeUsd: cfg.targetSizeUsd,
+              maxRoundTripPct: cfg.maxRoundTripSlippagePct,
+              oneCallAtATime: mandate.SEQUENTIAL,
+              maxLiveCalls: mandate.MAX_LIVE_CALLS,
+            },
+            /* WHERE THE DESK ACTUALLY LANDS. "144 kills, 0 calls" says the gate held,
+             * but not WHICH seat held it — and under the mandate that distinction is
+             * the whole product. A PASS is the team naming a flaw in the trade; a HOLD
+             * is only the team wanting more certainty, and the mandate ranks the second
+             * rather than obeying it. Without this breakdown there was no way to tell
+             * whether the desk was refusing on facts or on nerves. */
+            decisions: {
+              pm: rows("SELECT verdict, COUNT(*) n FROM verdicts WHERE seat='pm' AND verdict IS NOT NULL GROUP BY verdict ORDER BY n DESC"),
+              ceo: rows("SELECT verdict, COUNT(*) n FROM verdicts WHERE seat='ceo' AND verdict IS NOT NULL GROUP BY verdict ORDER BY n DESC"),
+              redteam: rows("SELECT verdict, COUNT(*) n FROM verdicts WHERE seat='redteam' AND verdict IS NOT NULL GROUP BY verdict ORDER BY n DESC"),
+              screenKills: rows("SELECT reason, COUNT(*) n FROM verdicts WHERE seat='Screener' AND killed=1 GROUP BY reason ORDER BY n DESC LIMIT 6"),
             },
             floors,
           });

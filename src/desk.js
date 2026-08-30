@@ -142,11 +142,19 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
     })).catch(() => {});
   }
 
-  // --- Stage 10: the unsigned ticket, only if proposing. ---
+  // --- Stage 10: the unsigned ticket. ---
+  // Normally drafted only for a proposal. Under the mandate (one cycle, one trade)
+  // the cycle ranks its contenders and publishes the best, so a WATCH may end up
+  // being the call — and a call without a stop authored by the execution seat is
+  // unpublishable and unmanageable. `alwaysTicket` buys that stop for anything the
+  // PM did not actively pass on; a PASS still gets no ticket, because the mandate
+  // never trades a coin the team named a flaw in.
+  const wantTicket = pm.decision === "PROPOSE" || (opts.alwaysTicket && pm.decision === "WATCH");
   let ticket = null;
-  if (pm.decision === "PROPOSE" && risk.position_size_usd > 0) {
+  if (wantTicket && risk.position_size_usd > 0) {
     ticket = await runExecution(ev, pm, risk);
-    emit("seat:verdict", { seat: "Execution", mint, symbol: ev.symbol, detail: "ticket drafted" });
+    emit("seat:verdict", { seat: "Execution", mint, symbol: ev.symbol,
+      detail: pm.decision === "PROPOSE" ? "ticket drafted" : "contingency ticket drafted (watch)" });
   }
 
   // --- Stage 11: compliance veto (code, not model). ---

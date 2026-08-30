@@ -25,11 +25,35 @@ export const cfg = {
   equityUsd: num("DESK_EQUITY_USD", 10000),
   maxRiskPct: num("DESK_MAX_RISK_PCT", 1.0),
   maxCandidates: num("DESK_MAX_CANDIDATES", 8),
-  targetSizeUsd: num("DESK_TARGET_SIZE_USD", 500),
+  /* THE SIZE THE EXIT PROBE MEASURES AT — and it must resemble the size actually
+   * traded, or the desk vetoes coins on a cost nobody pays. This was $500, chosen
+   * against the $10,000 notional book above. The executor that trades these calls
+   * sizes at 2% of a sub-1-SOL wallet: about $3.40, with a hard cap near $10. So
+   * the screen was rejecting coins on the round-trip cost of a position ~150x
+   * larger than any that gets placed.
+   *
+   * $200 keeps the check meaningful rather than merely passing it: it still asks
+   * whether MANY tenants copying one call could all get out, which is the reason
+   * to probe above your own clip size at all — while no longer failing a coin over
+   * an order nobody sends. At the $25,000 liquidity floor below this round-trips
+   * at ~3.2%, comfortably inside the 8% ceiling. */
+  targetSizeUsd: num("DESK_TARGET_SIZE_USD", 200),
 
   // Deterministic screen floors. These kill before any token is spent.
   screen: {
-    minLiquidityUsd: num("DESK_MIN_LIQUIDITY_USD", 75000),
+    /* MEASURED, not chosen. Sweeping 301 live coins and moving this floor alone:
+     *   $75,000 -> 53 survivors      $30,000 -> 67
+     *   $50,000 -> 61                $25,000 -> 68
+     *   $40,000 -> 66                $20,000 -> 68   (no further gain)
+     * The curve is flat below $25k — every coin the market has to offer is already
+     * admitted there, so going lower buys literally nothing and only takes on pools
+     * a single wallet can drain. $25,000 is where the gains stop, which is why it
+     * is the floor rather than a rounder, braver-sounding number.
+     *
+     * Note this is DEPTH, not market cap: a $1m-market-cap coin is a claim about
+     * price x supply, while liquidity is the money actually in the pool to sell
+     * into. They are routinely an order of magnitude apart. */
+    minLiquidityUsd: num("DESK_MIN_LIQUIDITY_USD", 25000),
     // 24h here quietly strangled the sniper lane: the free screen killed every
     // coin the ignition path is FOR. The research's floor is one hour past
     // migration (rugs express inside the first hour); 1.5h keeps a margin.

@@ -3930,6 +3930,18 @@ function fmtTape(e) {
     case "cycle:end":       return ["Floor", `Cycle closed — ${e.count ?? 0} calls, $${e.spendUsd ?? 0}${e.stopped ? " (" + e.stopped + ")" : ""}`, "hi"];
     case "cycle:halted":    return ["Floor", `Cycle halted — ${e.reason}`, "bad"];
     case "cycle:budget":    return ["Floor", `Budget: $${e.usedUsd} of $${e.capUsd}`, "warn"];
+    /* THE MANDATE'S OWN TAPE. Under one-trade-at-a-time the desk is idle for most
+     * of the day BY DESIGN — it is holding a position, not broken. An idle desk that
+     * says nothing is indistinguishable from a dead one, so it narrates the wait. */
+    case "cycle:holding":   return ["Floor", `Holding ${e.symbol || short(e.mint)}${e.heldHours != null ? ` — ${e.heldHours}h in` : ""}. The next cycle starts when it closes.`, "hi"];
+    case "cycle:hunting":   return ["Scout", `Still hunting this cycle's call — ${e.symbol || ""} (${e.hunted} interviewed)`.trim()];
+    case "cycle:hunt_dry":  return ["Floor", `No call this cycle: ${e.hunted} coins interviewed, none cleared safety`, "warn"];
+    case "cohort:ranked":   return ["Floor", e.winner
+                                    ? `Cohort of ${e.studied}: ${e.winner.symbol} takes the seat — ${e.winner.why}`
+                                    : `Cohort of ${e.studied}: nothing eligible`, e.winner ? "good" : "warn"];
+    case "cohort:declined": return ["Floor", `${e.symbol || short(e.mint)} out — ${e.reason}`, e.safety ? "bad" : "warn"];
+    case "call:published":  return ["Desk", `CALL: ${e.symbol} — ${e.why}`, "good"];
+    case "call:withheld":   return ["Desk", `withheld ${e.symbol || short(e.mint)} — ${e.reason}`, e.safety ? "bad" : "warn"];
     case "scout:universe":  return ["Scout", `${e.total} names in, ${e.fresh} fresh`];
     case "scout:shortlist": return ["Scout", `Shortlist: ${e.count} for full workup`, "hi"];
     case "scout:skip":      return ["Scout", `skip ${short(e.mint)} — ${e.reason}`, "warn"];

@@ -33,7 +33,17 @@ export function complianceCheck({ pm, risk, redteam, ticket, ev }) {
   v(risk?.position_size_usd > cfg.equityUsd, "size_exceeds_equity",
     `position_size_usd=${risk?.position_size_usd} exceeds book equity ${cfg.equityUsd}.`);
 
-  if (pm?.decision === "PROPOSE" && ticket) {
+  /* EVERY ticket is audited, not only a proposal's.
+   *
+   * These checks were gated on `pm.decision === "PROPOSE"` — correct while a ticket
+   * only ever existed for a proposal. Under the mandate the execution seat also drafts
+   * a contingency ticket for a WATCH, because the cycle may rank that WATCH into being
+   * the call and a call needs a stop. Left gated, such a ticket would reach publication
+   * with NONE of this validated: not the edge-versus-cost floor, not the stop sitting
+   * below the entry zone, not the take-profit legs summing under 100%, not the ticket
+   * stop agreeing with the risk seat's. The decision-shaped checks above stay tied to
+   * PROPOSE; ticket ARITHMETIC is true or false regardless of the verdict behind it. */
+  if (ticket) {
     const px = ev?.pair?.priceUsd;
 
     // The Hummingbot lesson, from their own honestly-published live run (-1.54%

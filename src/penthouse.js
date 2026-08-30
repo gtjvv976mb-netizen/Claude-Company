@@ -14,6 +14,7 @@ import { recordWhaleCallout } from "./identity.js";
 import { regime } from "./data/regime.js";
 import { cfg } from "./config.js";
 import * as store from "./lib/store.js";
+import { eligibility, contenderScore, pickOne, bookState, SEQUENTIAL, MAX_LIVE_CALLS } from "./mandate.js";
 
 /**
  * THE PENTHOUSE CYCLE — the house team's working day.
@@ -172,6 +173,22 @@ export function selectShortlist(scored, workups) {
 
 export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TOP_N } = {}) {
   const cycle = new Date().toISOString().replace(/[:.]/g, "-");
+
+  /* ONE TRADE AT A TIME. The mandate is "one cycle, one trade, run to completion" —
+   * so while a call is live the desk does not go shopping. This sits above every
+   * paid stage deliberately: the sequencing rule and the money brake are the same
+   * lever here, and a cycle that cannot publish must not be allowed to spend. */
+  const book = bookState();
+  if (book.full) {
+    emit("cycle:holding", { cycle, live: book.live,
+      symbol: book.holding?.symbol, mint: book.holding?.mint,
+      heldHours: book.holding ? Number(((Date.now() - book.holding.opened_at) / 3.6e6).toFixed(1)) : null,
+      note: "a call is still working — the next cycle starts when it closes" });
+    return { cycle, skipped: "position_open", live: book.live, opened: 0, workedUp: 0,
+      holding: book.holding ? { id: book.holding.id, symbol: book.holding.symbol, mint: book.holding.mint,
+        openedAt: book.holding.opened_at } : null, costUsd: 0 };
+  }
+
   const startSpend = spend.usd;
   emit("cycle:start", { cycle, desk: "penthouse" });
 
@@ -232,7 +249,7 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
     const hook = `house scan · ${c.category}${c.launchpad ? ` · ${c.launchpad}` : ""}`;
     let rec;
     try {
-      rec = await runFor(null, () => workup(cycle, c.mint, hook));
+      rec = await runFor(null, () => workup(cycle, c.mint, hook, { alwaysTicket: SEQUENTIAL }));
     } catch (e) {
       // Out of credit is terminal: the remaining candidates cannot be worked up either,
       // and the cycle should end with what it has rather than crash the process.
@@ -246,63 +263,36 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
     }
     if (!rec || rec.outcome === "no_data") continue;
     workedUp++;                       // paid for, whatever the verdict turned out to be
-    if (rec.finalDecision === "APPROVED") {
-      picks.push({ rec, category: c.category, launchpad: c.launchpad,
-        conviction: rec.pm?.conviction ?? rec.conviction ?? null });
-    }
+    // THE COHORT. Every workup that got a verdict is a candidate, not only the ones
+    // the CEO waved through — the mandate ranks the cohort and publishes its best.
+    // Which of them are actually eligible is `eligibility()`'s job, and it refuses
+    // every safety failure before conviction is even consulted.
+    picks.push({ rec, category: c.category, launchpad: c.launchpad,
+      conviction: rec.pm?.conviction ?? rec.conviction ?? null });
   }
 
-  // 5. The CEO's approvals become the sheet, best conviction first.
-  picks.sort((a, b) => (b.conviction ?? 0) - (a.conviction ?? 0));
-  const floors = listFloors().filter((f) => f.state === "owned").map((f) => f.n);
+  /* 5. THE COHORT PICK — of everything studied, publish the single best one.
+   *
+   * This replaced an absolute bar that produced 144 kills and zero calls across 177
+   * workups. The bar is not lowered on SAFETY: eligibility() refuses every screened,
+   * killed, vetoed, unexitable, stopless or refuted candidate first, and refuses the
+   * team's own PASS on top of that. What changed is that a lack of CONVICTION — the
+   * CEO holding, the PM wanting one more trigger — now ranks rather than blocks. */
   const opened = [];
+  const { winner, judged } = pickOne(picks);
+  for (const j of judged) {
+    if (j.eligibility.eligible) continue;
+    emit("cohort:declined", { mint: j.rec?.mint, symbol: j.rec?.symbol,
+      safety: j.eligibility.safety, reason: j.eligibility.reason });
+  }
+  emit("cohort:ranked", { studied: judged.length,
+    eligible: judged.filter((j) => j.eligibility.eligible).length,
+    winner: winner ? { symbol: winner.rec?.symbol, tier: winner.eligibility.tier,
+      why: winner.eligibility.reason } : null });
 
-  for (const p of picks.slice(0, topN)) {
-    const ev = p.rec.ev ?? {};
-    // Publication hygiene, from the research's two cheapest A/B-grade rules:
-    // a call without a pre-stated invalidation is unpublishable (it cannot be
-    // graded), and a spike-shaped entry — vertical in the last five minutes —
-    // is the signal-group pattern where the copier is the exit liquidity.
-    if (!p.rec.pm?.invalidation) {
-      emit("call:withheld", { mint: p.rec.mint, reason: "no pre-stated invalidation" });
-      continue;
-    }
-    if (wx.regime === "risk_off" && p.category === "established") {
-      emit("call:withheld", { mint: p.rec.mint, reason: `MURDOCK: not flying weather — SOL ${wx.solRet25d}% / BTC ${wx.btcRet25d}% over 25d` });
-      continue;
-    }
-    const m5 = ev.pair?.priceChange?.m5 ?? 0;
-    if (m5 > 20) {
-      emit("call:withheld", { mint: p.rec.mint, reason: `spike-shaped entry: +${m5}% in 5m — copiers would be the exit` });
-      continue;
-    }
-    // A stop of 0 is documented to the model as "0 if not applicable" and passes
-    // every downstream gate, publishing a call whose stop can NEVER trigger — an
-    // unmanageable position for anyone copying it, and one the executor refuses
-    // outright. Never publish a call without a real stop under it.
-    const stopPrice = Number(p.rec.ticket?.stop_price);
-    if (!(stopPrice > 0)) {
-      emit("call:rejected", { mint: p.rec.mint, symbol: p.rec.symbol ?? ev.symbol,
-        reason: "ticket has no usable stop price" });
-      continue;
-    }
-    const call = openCall({
-      mint: p.rec.mint, symbol: p.rec.symbol ?? ev.symbol, category: p.category, launchpad: p.launchpad,
-      conviction: p.conviction,
-      imageUrl: ev.pair?.imageUrl ?? null,
-      entryRef: ev.pair?.priceUsd ?? null,
-      stop: stopPrice,
-      target: p.rec.ticket?.take_profit?.[0]?.price ?? null,
-      thesis: p.rec.pm?.thesis ?? null,
-      invalidation: p.rec.pm?.invalidation ?? null,
-      flags: ev.mintAccount?.error ? null : (ev.mintAccount?.flags ?? []).map((f) => f.flag ?? f),
-      liqUsd: ev.pairs?.totalLiquidityUsd ?? ev.pair?.liquidityUsd ?? null,
-      rtLossPct: ev.exitProbe?.roundTripLossPct ?? null,
-      reportFile: p.rec.reportFile ?? null,
-    });
-    if (!call) continue;
-    opened.push(call);
-    if (floors.length) broadcast(call.id, floors);
+  if (winner) {
+    const pub = publishCall(winner.rec, { category: winner.category, launchpad: winner.launchpad, wx });
+    if (pub.callId) opened.push({ id: pub.callId, symbol: winner.rec?.symbol });
   }
 
   /* THE MANDATE — every cycle ends in a call. Not by lowering the bar: by
@@ -324,7 +314,8 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
       let rec;
       try {
         rec = await runFor(null, () => workup(cycle,
-          c.mint, `the mandate · hunting for this cycle's call · ${c.category}${c.launchpad ? ` · ${c.launchpad}` : ""}`));
+          c.mint, `the mandate · hunting for this cycle's call · ${c.category}${c.launchpad ? ` · ${c.launchpad}` : ""}`,
+          { alwaysTicket: SEQUENTIAL }));
       } catch (e) {
         if (e instanceof OutOfCredit) {
           stopped = e.constructor.name === "BudgetExhausted" ? "daily budget reached mid-hunt" : "out of credit mid-hunt";
@@ -336,13 +327,12 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
       }
       if (!rec || rec.outcome === "no_data") continue;
       workedUp++;
-      if (rec.finalDecision === "APPROVED") {
-        const pub = publishApproved(rec, { category: c.category, launchpad: c.launchpad });
-        if (pub.callId) opened.push({ id: pub.callId });
-      }
+      const pub = publishCall(rec, { category: c.category, launchpad: c.launchpad, wx });
+      if (pub.callId) opened.push({ id: pub.callId, symbol: rec.symbol });
     }
     if (!opened.length && !stopped)
-      emit("cycle:hunt_dry", { hunted, note: "the ranked market offered no coin that survived the gauntlet" });
+      emit("cycle:hunt_dry", { hunted, note: "the ranked market offered no coin that cleared the SAFETY gauntlet — " +
+        "the mandate ranks conviction, it never overrides a measured fact, so a market of honeypots ends in no call" });
   }
 
   const cost = spend.usd - startSpend;
@@ -362,27 +352,51 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
  * shows real ignition does it earn a full workup — one per scan, the budget
  * brake underneath as always. Early is a schedule, not a speed. */
 /**
- * The one road from an APPROVED workup to a live, broadcast call. Both hunting
- * lanes (fresh ignition, watch promotion) publish through here so the gates —
- * pre-stated invalidation, no spike-shaped entries — can never drift apart.
+ * THE ONE ROAD from a workup to a live, broadcast call. Every lane — the cohort pick,
+ * the mandate hunt, fresh ignition, watch promotion — publishes through here, so the
+ * gates can never drift apart between them.
+ *
+ * Two things are enforced here and nowhere else, because here is the only place they
+ * cannot be bypassed:
+ *
+ *   THE BOOK GATE. One live call at a time. Four lanes run on four different timers;
+ *   without a check at the single choke point, two of them firing a minute apart would
+ *   quietly put the desk two positions deep and break the mandate the owner asked for.
+ *
+ *   ELIGIBILITY. Which is where safety lives — screened, killed, vetoed, unexitable,
+ *   stopless, refuted and PASSed candidates are refused by mandate.js before conviction
+ *   is consulted at all. The mandate lowered the CONVICTION bar; it did not touch this.
  */
-function publishApproved(rec, { category = null, launchpad: pad = null } = {}) {
-  if (rec?.finalDecision !== "APPROVED") return { outcome: rec?.outcome ?? rec?.finalDecision };
+function publishCall(rec, { category = null, launchpad: pad = null, wx = null } = {}) {
+  const e = eligibility(rec);
+  if (!e.eligible) {
+    emit("call:withheld", { mint: rec?.mint, symbol: rec?.symbol,
+      safety: e.safety, reason: e.reason });
+    return { outcome: e.safety ? "unsafe" : "declined", reason: e.reason };
+  }
+
+  // MURDOCK's weather veto. Not in eligibility() because it is a fact about the
+  // MARKET rather than about the token, and only the cycle knows the weather.
+  if (wx?.regime === "risk_off" && category === "established") {
+    emit("call:withheld", { mint: rec.mint,
+      reason: `MURDOCK: not flying weather — SOL ${wx.solRet25d}% / BTC ${wx.btcRet25d}% over 25d` });
+    return { outcome: "withheld", reason: "risk_off" };
+  }
+
+  const book = bookState();
+  if (book.full) {
+    emit("call:withheld", { mint: rec.mint, symbol: rec.symbol,
+      reason: `already holding ${book.holding?.symbol ?? "a position"} — one call at a time` });
+    return { outcome: "book_full", reason: "position_open" };
+  }
+
   const ev = rec.ev ?? {};
-  if (!rec.pm?.invalidation) {
-    emit("call:withheld", { mint: rec.mint, reason: "no pre-stated invalidation" });
-    return { outcome: "withheld" };
-  }
-  if ((ev.pair?.priceChange?.m5 ?? 0) > 20) {
-    emit("call:withheld", { mint: rec.mint, reason: "spike-shaped entry" });
-    return { outcome: "withheld" };
-  }
   const call = openCall({
     mint: rec.mint, symbol: rec.symbol ?? ev.symbol, category, launchpad: pad,
     conviction: rec.pm?.conviction ?? null,
     imageUrl: ev.pair?.imageUrl ?? null,
     entryRef: ev.pair?.priceUsd ?? null,
-    stop: rec.ticket?.stop_price ?? null,
+    stop: Number(rec.ticket?.stop_price),
     target: rec.ticket?.take_profit?.[0]?.price ?? null,
     thesis: rec.pm?.thesis ?? null,
     invalidation: rec.pm?.invalidation ?? null,
@@ -392,9 +406,15 @@ function publishApproved(rec, { category = null, launchpad: pad = null } = {}) {
     reportFile: rec.reportFile ?? null,
   });
   if (call) {
+    // The record shows HOW FAR DOWN the desk reached for this one. A tier-4 call is
+    // an approval; a tier-1 call is the mandate taking the cohort's best available
+    // when nothing was approved. Both are legitimate, and they are not the same
+    // thing, so the difference goes on the call rather than into a footnote.
+    noteEvent(call.id, "mandate", `${e.reason} (tier ${e.tier})`, call.entry_ref);
     const floors = listFloors().filter((f) => f.state === "owned").map((f) => f.n);
     if (floors.length) broadcast(call.id, floors);
-    return { outcome: "published", callId: call.id };
+    emit("call:published", { callId: call.id, symbol: call.symbol, tier: e.tier, why: e.reason });
+    return { outcome: "published", callId: call.id, tier: e.tier };
   }
   return { outcome: "open_failed" };
 }
@@ -408,6 +428,10 @@ function publishApproved(rec, { category = null, launchpad: pad = null } = {}) {
 let promoteBusy = false;
 export async function promoteWatches() {
   if (promoteBusy) return { skipped: "busy" };
+  // One trade at a time: a promotion cannot open a second position, so it must not
+  // pay for a workup it could never publish either.
+  const book0 = bookState();
+  if (book0.full) return { skipped: "position_open", holding: book0.holding?.symbol ?? null };
   promoteBusy = true;
   try {
     const { checkWatchlist } = await import("./watchlist.js");
@@ -418,14 +442,15 @@ export async function promoteWatches() {
 
     const hook = `watch promoted \u00b7 ${w.symbol ?? w.mint.slice(0, 6)} \u00b7 rules held: ` +
       Object.entries(w.rules).filter(([, v]) => v != null).map(([k, v]) => `${k}=${v}`).join(", ");
-    const rec = await runFor(null, () => workup(new Date().toISOString().replace(/[:.]/g, "-"), w.mint, hook));
+    const rec = await runFor(null, () => workup(new Date().toISOString().replace(/[:.]/g, "-"), w.mint, hook,
+      { alwaysTicket: SEQUENTIAL }));
 
     let category = null, pad = null;
     try {
       const c = { mint: w.mint, pair: rec?.ev?.pair };
       category = classify(c).category; pad = launchpad(c);
     } catch {}
-    const pub = publishApproved(rec, { category, launchpad: pad });
+    const pub = publishCall(rec, { category, launchpad: pad });
     return { checked, promoted: promoted.length, workedUp: 1, outcome: pub.outcome };
   } catch (e) {
     if (e instanceof OutOfCredit) return { halted: e.message };
@@ -476,6 +501,10 @@ export function namingRaces(universe) {
 let freshBusy = false;
 export async function freshScan({ minScore = 45 } = {}) {
   if (freshBusy) return { skipped: "busy" };
+  // Same rule as every other lane: while a call is working, the fresh lane does not
+  // buy a workup it has no seat to publish into.
+  const book0 = bookState();
+  if (book0.full) return { skipped: "position_open", holding: book0.holding?.symbol ?? null };
   freshBusy = true;
   try {
     const universe = await sweep();
@@ -520,8 +549,9 @@ export async function freshScan({ minScore = 45 } = {}) {
       (top.race ? ` \u00b7 WINNING A NAMING RACE: ${top.race.size} fresh launches share "${top.race.theme}" \u2014 ` +
         `establish which X event fired this race and whether THIS is the canonical token for it; ` +
         `the race pays one winner and the rest go to zero` : "");
-    const rec = await runFor(null, () => workup(new Date().toISOString().replace(/[:.]/g, "-"), top.mint, hook));
-    const pub = publishApproved(rec, { category: top.category, launchpad: top.launchpad });
+    const rec = await runFor(null, () => workup(new Date().toISOString().replace(/[:.]/g, "-"), top.mint, hook,
+      { alwaysTicket: SEQUENTIAL }));
+    const pub = publishCall(rec, { category: top.category, launchpad: top.launchpad });
     return { young: young.length, workedUp: 1, outcome: pub.outcome ?? rec?.outcome ?? rec?.finalDecision };
   } catch (e) {
     if (e instanceof OutOfCredit) return { halted: e.message };
