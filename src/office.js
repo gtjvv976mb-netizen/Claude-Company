@@ -517,6 +517,46 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           return json(200, { watches: out });
         }
 
+        /* ── whale CALLOUTS: pump.fun's on-site calls on the coins whales sized into ──
+           A callout is a wallet posting a thesis on the coin's own page; the site
+           tracks the multiple since. An author whose wallet is among the pool's
+           recent big buyers is a WHALE (ranked by dollars taken); the rest rank
+           by their tracked multiple. Cached 2 minutes — this fans out to
+           pump.fun and the RPC. */
+        if (url.pathname === "/api/whales/callouts" && !insider())
+          return json(403, { error: "whale callouts are insider data — lease a floor" });
+        if (url.pathname === "/api/whales/callouts") {
+          const now = Date.now();
+          if (globalThis.__whaleCallouts && now - globalThis.__whaleCallouts.at < 120e3)
+            return json(200, globalThis.__whaleCallouts.body);
+          const feed = identity.whaleFeed({ launchpad: "pump.fun", limit: 40 });
+          const seen = new Set();
+          const mints = feed.filter((w) => w.mint && !seen.has(w.mint) && seen.add(w.mint)).slice(0, 3);
+          const pf = await import("./data/pumpfun.js");
+          const { callouts: liveWhales } = await import("./whales.js");
+          const out = [];
+          for (const m of mints) {
+            const [thread, flow] = await Promise.all([
+              pf.callouts(m.mint, 20).catch(() => ({ ok: false, callouts: [] })),
+              liveWhales(m.mint, { scan: 16 }).catch(() => null),
+            ]);
+            if (!thread.ok) continue;
+            const buyers = new Map();
+            for (const t of flow?.trades ?? [])
+              if (t.side === "buy" && t.wallet) buyers.set(t.wallet, (buyers.get(t.wallet) ?? 0) + (t.usd ?? 0));
+            const quotes = thread.callouts.map((q) => ({ ...q, whaleUsd: buyers.get(q.user) ?? 0 }));
+            const whales = quotes.filter((q) => q.whaleUsd > 0)
+              .sort((x, y) => y.whaleUsd - x.whaleUsd).slice(0, 3);
+            const chatter = quotes.filter((q) => q.whaleUsd === 0)
+              .sort((x, y) => (y.multiple ?? 0) - (x.multiple ?? 0)).slice(0, 3);
+            if (whales.length + chatter.length === 0) continue;
+            out.push({ mint: m.mint, symbol: m.symbol, netUsd: m.net_usd ?? null, whales, chatter });
+          }
+          const body2 = { coins: out };
+          globalThis.__whaleCallouts = { at: now, body: body2 };
+          return json(200, body2);
+        }
+
         // Whale callouts for one mint, read live off the pool.
         const whaleMatch = url.pathname.match(/^\/api\/whales\/([1-9A-HJ-NP-Za-km-z]{32,44})$/);
         if (whaleMatch) return json(200, await callouts(whaleMatch[1], { scan: 24 }));

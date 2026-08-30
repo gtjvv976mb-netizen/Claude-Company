@@ -5159,7 +5159,7 @@ window.load_whales = async () => {
   const el = document.getElementById("whalespanel");
   el.innerHTML = "";
   const h = document.createElement("p"); h.className = "dp-note";
-  h.textContent = "What the whales are SAYING. Thread posts on pump.fun by the very wallets the desk just watched take size — quotes first, flow below.";
+  h.textContent = "What the whales are SAYING. Pump.fun callouts on the coins whales just sized into — tap a quote to open the callout itself. Flow below.";
   el.appendChild(h);
   try {
     const [co, fe] = await Promise.all([
@@ -5184,25 +5184,33 @@ window.load_whales = async () => {
         head.appendChild(net);
       }
       card.appendChild(head);
-      (c.whales || []).forEach((q, i) => {
-        const row = document.createElement("div");
-        row.style.cssText = "margin-top:6px;font-size:12.5px;line-height:1.45";
+      // Every quote is a LINK to the callout's own page on pump.fun.
+      const quoteRow = (q, label, dim) => {
+        const row = document.createElement("a");
+        row.href = q.url || `https://pump.fun/coin/${c.mint}`;
+        row.target = "_blank"; row.rel = "noopener";
+        row.style.cssText = `display:block;margin-top:6px;font-size:${dim ? 12 : 12.5}px;line-height:1.45;` +
+          `color:inherit;text-decoration:none;${dim ? "opacity:.78;" : ""}cursor:pointer`;
+        row.onmouseenter = () => { row.style.textDecoration = "underline"; };
+        row.onmouseleave = () => { row.style.textDecoration = "none"; };
         const who = document.createElement("b");
-        who.textContent = `🐋 Whale #${i + 1}`;
-        const bought = document.createElement("span");
-        bought.className = "faint";
-        bought.textContent = ` · bought ${money(q.whaleUsd)} · `;
+        who.textContent = label;
+        const meta = document.createElement("span");
+        meta.className = "faint";
+        const bits = [];
+        if (q.whaleUsd > 0) bits.push(`bought ${money(q.whaleUsd)}`);
+        if (q.username) bits.push("@" + q.username);
+        if (q.multiple != null && q.multiple >= 2) bits.push(`${q.multiple >= 10 ? Math.round(q.multiple) : q.multiple.toFixed(1)}× since`);
+        meta.textContent = bits.length ? ` · ${bits.join(" · ")} · ` : " · ";
         const words = document.createElement("span");
         words.textContent = `“${q.text}”`;
-        row.append(who, bought, words);
+        const out = document.createElement("span");
+        out.className = "faint"; out.textContent = " ↗";
+        row.append(who, meta, words, out);
         card.appendChild(row);
-      });
-      for (const q of c.chatter || []) {
-        const row = document.createElement("div");
-        row.style.cssText = "margin-top:5px;font-size:12px;line-height:1.4;opacity:.78";
-        row.textContent = `💬 ${q.username || (q.user || "").slice(0, 4) || "anon"} — “${q.text}”`;
-        card.appendChild(row);
-      }
+      };
+      (c.whales || []).forEach((q, i) => quoteRow(q, `🐋 Whale #${i + 1}`, false));
+      (c.chatter || []).forEach((q) => quoteRow(q, "💬 callout", true));
       el.appendChild(card);
     }
     if (!coins.length) {

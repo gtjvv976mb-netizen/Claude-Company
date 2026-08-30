@@ -56,3 +56,27 @@ export async function deployerProfile(mint) {
     truncated: r.data.length >= 50,
   };
 }
+
+/** The coin's CALLOUTS — pump.fun's on-site calls: a wallet posts a thesis on
+ * a coin and the site tracks the multiple since. /callout/top/{mint} is the
+ * route the live site itself uses (measured from its bundles, 2026-08-30);
+ * /replies/{mint} is gone. Best-effort: any surprise reads as an empty thread. */
+export async function callouts(mint, limit = 20) {
+  const r = await getJson(`${BASE}/callout/top/${mint}?limit=${Math.min(50, limit)}`,
+    { label: "pumpfun/callouts", timeoutMs: 8000 });
+  const rows = Array.isArray(r.data?.callouts) ? r.data.callouts : [];
+  if (!r.ok || !rows.length) return { ok: false, callouts: [] };
+  return {
+    ok: true,
+    callouts: rows.map((x) => ({
+      id: x.calloutId ?? null,
+      user: x.userId ?? null,                                 // the caller's wallet
+      username: x.username ?? x.xUsername ?? null,
+      verified: !!x.isVerified,
+      text: String(x.thesis ?? "").slice(0, 240),
+      multiple: Number.isFinite(x.multiple) ? x.multiple : null,
+      ts: x.createdAt ?? null,
+      url: x.calloutId ? `https://pump.fun/callouts/${mint}/${x.calloutId}` : `https://pump.fun/coin/${mint}`,
+    })).filter((x) => x.text && x.user),
+  };
+}
