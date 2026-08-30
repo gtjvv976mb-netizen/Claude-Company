@@ -191,12 +191,23 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               -- coins the desk has already exited.
               AND NOT (a.kind = 'entry' AND c.status = 'closed')
             ORDER BY a.id LIMIT 50`).all(floorNo, after);
-          return json(200, { cluster: "mainnet-beta", events: rows.map((r) => ({
-            id: r.id, type: r.kind, mint: r.mint, symbol: r.symbol,
-            side: r.kind === "entry" ? "buy" : "sell",
-            size_sol: r.size_sol ?? null, entry_ref: r.entry_ref, stop: r.stop, target: r.target,
-            code: r.close_reason ?? null, urgency: r.urgency, ts: r.created_at,
-          })) });
+          /* THE FLOOR'S OWN RULES RIDE WITH THE CALL.
+           * The bot must not have to be reconfigured when a tenant changes their mind
+           * in the UI: the take-profit multiple travels on every event, so a floor
+           * switching from "sell at 2x" to "ride to 10x" takes effect on the next
+           * poll rather than on the next redeploy of somebody's VPS. 0 means auto —
+           * the bot then honours the desk's own authored target. */
+          const fs = copy.settingsFor(floorNo);
+          return json(200, { cluster: "mainnet-beta",
+            rules: { take_profit_x: fs.take_profit_x ?? 0, fixed_sol: fs.fixed_sol ?? 0,
+                     mcap_tier: fs.mcap_tier ?? "any" },
+            events: rows.map((r) => ({
+              id: r.id, type: r.kind, mint: r.mint, symbol: r.symbol,
+              side: r.kind === "entry" ? "buy" : "sell",
+              size_sol: r.size_sol ?? null, entry_ref: r.entry_ref, stop: r.stop, target: r.target,
+              take_profit_x: fs.take_profit_x ?? 0,
+              code: r.close_reason ?? null, urgency: r.urgency, ts: r.created_at,
+            })) });
         }
 
         /* ── THE BOT'S RPC LANE ───────────────────────────────────────────────

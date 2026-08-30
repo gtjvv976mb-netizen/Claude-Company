@@ -80,6 +80,33 @@ ensureColumn("copy_settings", "launchpads", "TEXT");
 ensureColumn("copy_settings", "min_liq_usd", "REAL");   // per-floor liquidity floor; null = no floor
 ensureColumn("deliveries", "size_sol", "REAL", "size_usd");
 
+/* THE THREE DIALS A TENANT OWNS.
+ *
+ * Everything above decides WHICH calls reach a floor. These decide what the floor
+ * DOES with one, and each has an explicit auto mode where the desk decides instead —
+ * because the honest default for someone who has never watched this run is not a
+ * number they had to invent, it is "let the team choose and show me what it chose".
+ *
+ *   take_profit_x  0 = auto (the execution seat's authored target), else a hard
+ *                  multiple: 2 sells at a double, 10 rides for a ten-bagger.
+ *   fixed_sol      0 = auto (Kelly sizing on the record), else the same size every
+ *                  trade. Overrides how MUCH, never WHETHER.
+ *   mcap_tier      which end of the market this floor wants: micro, low, mid, any.
+ *
+ * A tenant who sets nothing gets auto on all three, which is exactly the desk's own
+ * behaviour — so the dials add choice without changing the default experience. */
+ensureColumn("copy_settings", "take_profit_x", "REAL NOT NULL DEFAULT 0");
+ensureColumn("copy_settings", "fixed_sol", "REAL NOT NULL DEFAULT 0");
+ensureColumn("copy_settings", "mcap_tier", "TEXT NOT NULL DEFAULT 'any'");
+
+/** The market-cap sleeves a floor can subscribe to. Bounds in USD. */
+export const MCAP_TIERS = {
+  micro: { lo: 0, hi: 500_000, note: "under $500k — the sharpest moves and the sharpest rugs" },
+  low:   { lo: 500_000, hi: 3_000_000, note: "$500k-$3m — room to re-rate with a tape to read" },
+  mid:   { lo: 3_000_000, hi: 30_000_000, note: "$3m-$30m — slower, needs real money to move" },
+  any:   { lo: 0, hi: Infinity, note: "every sleeve the desk calls" },
+};
+
 export function settingsFor(floorNo) {
   let s = db.prepare("SELECT * FROM copy_settings WHERE floor_no=?").get(floorNo);
   if (!s) {
@@ -156,8 +183,23 @@ export function saveSettings(floorNo, patch) {
   const minLiq = "minLiqUsd" in patch
     ? (patch.minLiqUsd == null ? null : Math.max(0, Math.min(50_000_000, Number(patch.minLiqUsd) || 0)) || null)
     : cur.min_liq_usd ?? null;
-  db.prepare("UPDATE copy_settings SET appetite=?, bankroll_sol=?, auto=?, categories=?, launchpads=?, min_liq_usd=?, webhook_url=?, executor_url=?, executor_secret=?, updated_at=? WHERE floor_no=?")
-    .run(appetite, bankroll, auto, cats, pads, minLiq, hook, execUrl, execSecret, Date.now(), floorNo);
+  /* THE TENANT'S THREE DIALS. Each accepts 0 / "auto" meaning "the desk decides",
+   * which is the default — a number someone had to invent before ever watching this
+   * run is worse than the team's own judgement. Clamped, because a take-profit of
+   * 0.5x is an instruction to sell at a 50% loss and a 900 SOL "fixed fund" on a
+   * 5 SOL bankroll is a typo, not a strategy. */
+  const takeProfitX = "takeProfitX" in patch
+    ? (patch.takeProfitX == null || patch.takeProfitX === "auto" ? 0
+       : Math.min(100, Math.max(1.05, Number(patch.takeProfitX) || 0)))
+    : (cur.take_profit_x ?? 0);
+  const fixedSol = "fixedSol" in patch
+    ? (patch.fixedSol == null || patch.fixedSol === "auto" ? 0
+       : Math.min(bankroll, Math.max(0, Number(patch.fixedSol) || 0)))
+    : (cur.fixed_sol ?? 0);
+  const mcapTier = "mcapTier" in patch && MCAP_TIERS[patch.mcapTier] ? patch.mcapTier : (cur.mcap_tier ?? "any");
+
+  db.prepare("UPDATE copy_settings SET appetite=?, bankroll_sol=?, auto=?, categories=?, launchpads=?, min_liq_usd=?, webhook_url=?, executor_url=?, executor_secret=?, take_profit_x=?, fixed_sol=?, mcap_tier=?, updated_at=? WHERE floor_no=?")
+    .run(appetite, bankroll, auto, cats, pads, minLiq, hook, execUrl, execSecret, takeProfitX, fixedSol, mcapTier, Date.now(), floorNo);
   return settingsFor(floorNo);
 }
 
@@ -195,6 +237,15 @@ export function decide(floorNo, call) {
     return { verdict: "skipped",
       reason: `liquidity $${Math.round(call.liq_at_call).toLocaleString()} is under this floor's floor of $${Math.round(s.min_liq_usd).toLocaleString()}` };
 
+  /* THE SLEEVE THIS FLOOR ASKED FOR. An unknown market cap is never filtered out —
+   * the same rule the screen follows for unreadable numbers, because "we could not
+   * measure it" must not quietly become "it qualified". */
+  const tier = MCAP_TIERS[s.mcap_tier] ?? MCAP_TIERS.any;
+  const mcap = call.mcap_at_call;
+  if (s.mcap_tier !== "any" && mcap != null && (mcap < tier.lo || mcap >= tier.hi))
+    return { verdict: "skipped",
+      reason: `$${Math.round(mcap).toLocaleString()} cap is outside this floor's ${s.mcap_tier} sleeve (${tier.note})` };
+
   if (call.conviction != null && call.conviction < s.preset.minConviction)
     return { verdict: "skipped", reason: `conviction ${Math.round(call.conviction)} is under this floor's bar of ${s.preset.minConviction}` };
 
@@ -202,13 +253,20 @@ export function decide(floorNo, call) {
   if (open >= s.preset.maxOpen)
     return { verdict: "skipped", reason: `already holding ${open} of a maximum ${s.preset.maxOpen}` };
 
-  // Size from the floor's own bankroll, scaled by category and by conviction.
+  /* SIZE. Two ways, and the tenant picks: a FIXED fund — the same SOL on every trade,
+   * which makes a young record legible because every outcome is comparable — or auto,
+   * where the desk sizes from the floor's bankroll, the category's risk and the call's
+   * own conviction. Fixed overrides how MUCH; it never overrides the refusals above. */
   const convScale = call.conviction != null ? Math.min(1, Math.max(0.4, call.conviction / 100)) : 0.6;
-  const sizeSol = Number((s.bankroll_sol * (s.preset.riskPctPerTrade / 100) * risk.sizeMultiplier * convScale).toFixed(4));
+  const autoSize = s.bankroll_sol * (s.preset.riskPctPerTrade / 100) * risk.sizeMultiplier * convScale;
+  const fixed = Number(s.fixed_sol) > 0 ? Number(s.fixed_sol) : null;
+  const sizeSol = Number((fixed ?? autoSize).toFixed(4));
   if (sizeSol < 0.001) return { verdict: "skipped", reason: "the sized position rounds to nothing on this bankroll" };
 
-  return { verdict: "offered", sizeSol,
-    reason: `${s.appetite} · ${risk.sizeMultiplier}x for ${call.category} · conviction ${Math.round(call.conviction ?? 0)}` };
+  const how = fixed
+    ? `fixed ${fixed} SOL a trade`
+    : `${s.appetite} · ${risk.sizeMultiplier}x for ${call.category} · conviction ${Math.round(call.conviction ?? 0)}`;
+  return { verdict: "offered", sizeSol, reason: how };
 }
 
 /** Broadcast one call to every leased floor. Deterministic, so this is free. */

@@ -59,6 +59,10 @@ ensureColumn("calls", "launchpad", "TEXT");
 ensureColumn("calls", "image_url", "TEXT");
 // Sea Otter: when the thesis last cleared the screen it was admitted on.
 ensureColumn("calls", "last_verified_at", "INTEGER");
+// The market cap AT THE CALL, so a tenant's sleeve filter (micro / low / mid) has a
+// number to compare against. Without it every floor sees every call regardless of the
+// end of the market it asked for.
+ensureColumn("calls", "mcap_at_call", "REAL");
 
 export function openCall(c) {
   // Every pump.fun-origin call carries the one invalidation the research pass
@@ -70,12 +74,12 @@ export function openCall(c) {
   try {
     const info = db.prepare(`
       INSERT INTO calls (mint,symbol,category,launchpad,image_url,conviction,entry_ref,entry_lo,entry_hi,stop,target,
-                         thesis,invalidation,flags_at_call,liq_at_call,rt_loss_at_call,opened_at,report_file,last_verified_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+                         thesis,invalidation,flags_at_call,liq_at_call,rt_loss_at_call,mcap_at_call,opened_at,report_file,last_verified_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       c.mint, c.symbol ?? null, c.category ?? null, c.launchpad ?? null, c.imageUrl ?? null, c.conviction ?? null,
       c.entryRef ?? null, c.entryLo ?? null, c.entryHi ?? null, c.stop ?? null, c.target ?? null,
       c.thesis ?? null, c.invalidation ?? null,
-      c.flags == null ? null : JSON.stringify(c.flags), c.liqUsd ?? null, c.rtLossPct ?? null,
+      c.flags == null ? null : JSON.stringify(c.flags), c.liqUsd ?? null, c.rtLossPct ?? null, c.mcapUsd ?? null,
       Date.now(), c.reportFile ?? null,
       Date.now());          // last_verified_at — clearing the gauntlet IS the first verification
     const call = getCall(info.lastInsertRowid);

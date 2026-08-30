@@ -424,6 +424,8 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
     flags: ev.mintAccount?.error ? null : (ev.mintAccount?.flags ?? []).map((f) => f.flag ?? f),
     liqUsd: ev.pairs?.totalLiquidityUsd ?? ev.pair?.liquidityUsd ?? null,
     rtLossPct: ev.exitProbe?.roundTripLossPct ?? null,
+    // Stored so a tenant's micro / low / mid sleeve filter has a number to test.
+    mcapUsd: ev.pair?.marketCap ?? ev.pair?.fdv ?? null,
     reportFile: rec.reportFile ?? null,
   });
   if (call) {

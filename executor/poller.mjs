@@ -138,10 +138,19 @@ async function onEntry(ev) {
   S.state.losses = S.losses ?? 0;
   S.state.bookHeat = openList().reduce((a, p) => a + (p.riskF || 0), 0);
 
-  const plan = planEntry({ call: ev, cfg: CFG, state: S.state });
+  /* THE FLOOR'S OWN RULE, AS OF THIS POLL.
+   *
+   * take_profit_x rides on the event rather than living in this process's env, so a
+   * tenant switching "sell at 2x" to "ride to 10x" in the UI takes effect on the next
+   * poll instead of on the next redeploy of their VPS. 0 means auto — fall back to
+   * whatever this bot is configured with, and ultimately to the desk's own target. */
+  const tpx = Number(ev.take_profit_x) > 0 ? Number(ev.take_profit_x) : CFG.takeProfitX;
+  const perCall = { ...CFG, takeProfitX: tpx };
+  const plan = planEntry({ call: ev, cfg: perCall, state: S.state });
   if (plan.action !== "buy") return log(`SKIP ${ev.symbol}: ${plan.reason}`);
 
-  log(`ENTRY ${ev.symbol} — ${plan.sol} SOL | stop ${ev.stop} target ${ev.target}`);
+  log(`ENTRY ${ev.symbol} — ${plan.sol} SOL | stop ${ev.stop} target ${ev.target}` +
+      (tpx > 0 ? ` | sell at ${tpx}x` : " | riding the desk's target"));
   if (!EXECUTE) return log("  DRY RUN");
 
   const q = await quote(WSOL, ev.mint, Math.round(plan.sol * LAMPORTS));
@@ -151,12 +160,16 @@ async function onEntry(ev) {
   const pos = openPosition({
     call: { ...ev, stop: ev.entry_ref ? ev.stop / ev.entry_ref : 0.62,
             target: ev.entry_ref && ev.target ? ev.target / ev.entry_ref : null },
-    sol: plan.sol, fillPrice: 1, cfg: CFG,
+    sol: plan.sol, fillPrice: 1, cfg: perCall,
   });
   pos.qtyRaw = String(q.outAmount);
   pos.paidSol = plan.sol;
   pos.riskF = plan.f ?? null;              // this name's share of book heat
   pos.openedAtMs = Date.now();
+  /* The rule IN FORCE WHEN THIS OPENED, remembered on the position. A trade should be
+   * closed by the rule it was entered under: someone changing their mind at 1.9x must
+   * not retroactively rewrite a position already on its way to a double. */
+  pos.takeProfitX = tpx;
   S.positions[ev.mint] = pos;
   S.state.deployedTodaySol += plan.sol;
   save();
@@ -209,7 +222,9 @@ async function manageOpen() {
         // value now, against value paid — an executable mark, not a mid price
         if (q) mark = (Number(q.outAmount) / LAMPORTS) / (pos.paidSol || 1);
       }
-      const d = stepPosition({ pos, mark, deskExit: null, cfg: CFG });
+      // Judged by the rule it was opened under, not whatever the UI says right now.
+      const d = stepPosition({ pos, mark, deskExit: null,
+        cfg: pos.takeProfitX != null ? { ...CFG, takeProfitX: pos.takeProfitX } : CFG });
       if (d.action === "sell") await sellAll(pos, d.reason);
       else if (d.action === "sell_part") await sellAll(pos, d.reason, d.fraction);
       else save();                       // persist trail/stop ratchets
