@@ -433,6 +433,18 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               pm: rows("SELECT verdict, COUNT(*) n FROM verdicts WHERE seat='pm' AND verdict IS NOT NULL GROUP BY verdict ORDER BY n DESC"),
               ceo: rows("SELECT verdict, COUNT(*) n FROM verdicts WHERE seat='ceo' AND verdict IS NOT NULL GROUP BY verdict ORDER BY n DESC"),
               redteam: rows("SELECT verdict, COUNT(*) n FROM verdicts WHERE seat='redteam' AND verdict IS NOT NULL GROUP BY verdict ORDER BY n DESC"),
+              /* THE CROSS-TAB THAT DECIDES WHETHER THE MANDATE IS ENOUGH.
+               * A WATCH is tradeable under the mandate — unless the red team refuted
+               * it and the PM never answered, which the mandate treats as a fact
+               * rather than a view. So the only number that predicts whether the desk
+               * can now publish is WATCH paired with a NON-refuted red team. Counting
+               * PM verdicts and red-team verdicts separately cannot show that; they
+               * have to be joined per coin. */
+              pmVsRedteam: rows(`SELECT p.verdict pm, r.verdict redteam, COUNT(*) n
+                FROM verdicts p JOIN verdicts r
+                  ON p.cycle = r.cycle AND p.mint = r.mint AND r.seat = 'redteam'
+                WHERE p.seat = 'pm' AND p.verdict IS NOT NULL
+                GROUP BY p.verdict, r.verdict ORDER BY n DESC`),
               screenKills: rows("SELECT reason, COUNT(*) n FROM verdicts WHERE seat='Screener' AND killed=1 GROUP BY reason ORDER BY n DESC LIMIT 6"),
             },
             floors,
