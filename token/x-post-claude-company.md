@@ -147,7 +147,7 @@ Three jokes stacked on one word.
 *John Wick.* Came out of retirement over a pencil. Writes the route, the slices, the stop, the targets.
 🚫 The ticket is **unsigned by construction.** The desk holds no keys.
 
-**🎩 BIG M** — CEO
+**🎩 BIG C** — CEO
 *M, Bond's boss.* Authorises everything, has never once been in the field.
 🚫 A yes authorises a ticket, not a trade. He can approve; he cannot sign.
 

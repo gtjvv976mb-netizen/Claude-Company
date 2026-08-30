@@ -492,7 +492,7 @@ select.dp-in{cursor:pointer}
   </div>
   <div class="dock" role="tablist" aria-label="Floor panels">
     <button class="dtab" id="tab-tape" role="tab" aria-selected="false">Tape<span class="dot" id="tape-dot"></span></button>
-    <button class="dtab" id="tab-inbox" role="tab" aria-selected="false">Big M</button>
+    <button class="dtab" id="tab-inbox" role="tab" aria-selected="false">Big C</button>
     <button class="dtab" id="tab-calls" role="tab" aria-selected="false">Team</button>
     <button class="dtab" id="tab-desk" role="tab" aria-selected="false">Desk</button>
     <button class="dtab" id="tab-crew" role="tab" aria-selected="false">Crew</button>
@@ -853,7 +853,7 @@ scene.add(room);
 const DAIS_Y = 0.35;                              // the executive suite is raised
 
 const STAFF = [
-  { id:"CEO",        name:"BIG M",        role:"Signs off on the op", desk:[0,-9.6],    stand:[0,-11.0],    y:DAIS_Y, claude:true },
+  { id:"CEO",        name:"BIG C",        role:"Signs off on the op", desk:[0,-9.6],    stand:[0,-11.0],    y:DAIS_Y, claude:true, mascot:true },
   { id:"Scout",      name:"AUSTIN POWERZ",    role:"Sweeps the field, baby",        desk:[-15.4,-6.5],stand:[-13.8,-6.5], apron:0x8d6cae },
   { id:"Screener",   name:"MAXWELL SMORT",       role:"Missed it by that much", desk:[-15.4,-1.0],stand:[-13.8,-1.0], apron:0x5c7d8a },
   { id:"Compliance", name:"JUDGE DREAD",        role:"I am the law",          desk:[-15.4,4.5], stand:[-13.8,4.5],  apron:0x8d9298 },
@@ -1448,6 +1448,31 @@ const COSTUME_PAL = {
    Centres are in world REST space, same convention as BODY: the figure stands
    ~1.8 tall, the head cube sits at y=1.62, +X is the face, +Z is its left.      */
 const FIGURE = {
+  /* BIG C — "Claw'd", the Claude mascot, in a suit. A wide coral slab of a head
+     with two black square eyes, an elongated coral body, coral arm nubs, and a
+     charcoal jacket over a white shirt and red tie. Width here is Z: the rig
+     faces +X, so the shirt and tie are thin slabs stood proud of the chest's
+     front face rather than colour painted on the torso. */
+  CEO: {
+    pal: { skin: 0xd97757, shirt: 0x232327, trousers: 0xd97757,
+           boots: 0xa8543a, apron: 0x232327, head: 0xd97757 },
+    drop: ["hair", "eye", "apron"],
+    body: [
+      ["Head", [0.32, 0.42, 0.58], [0, 1.68, 0], 0xd97757],            // the slab head, seated on the neck
+      ["Head", [0.038, 0.12, 0.12], [0.166, 1.73, 0.155], 0x121212],   // square eye, left
+      ["Head", [0.038, 0.12, 0.12], [0.166, 1.73, -0.155], 0x121212],  // square eye, right
+      ["Spine", [0.26, 0.34, 0.44], [0, 0.99, 0], 0xd97757],           // elongated coral body
+      ["UpperArmL", [0.15, 0.21, 0.15], [0, 1.21, 0.275], 0xd97757],   // coral arm nub, left
+      ["UpperArmR", [0.15, 0.21, 0.15], [0, 1.21, -0.275], 0xd97757],  // coral arm nub, right
+      ["Chest", [0.030, 0.23, 0.21], [0.137, 1.295, 0], 0xf6f4ef],     // shirt front
+      ["Chest", [0.034, 0.06, 0.080], [0.140, 1.400, 0.078], 0xf6f4ef],// collar, left
+      ["Chest", [0.034, 0.06, 0.080], [0.140, 1.400, -0.078], 0xf6f4ef],// collar, right
+      ["Chest", [0.030, 0.17, 0.056], [0.156, 1.285, 0], 0xb03a2e],    // tie
+      ["Spine", [0.030, 0.13, 0.048], [0.150, 1.13, 0], 0xb03a2e],     // tie tail
+      ["Chest", [0.034, 0.042, 0.068], [0.158, 1.388, 0], 0xc4452f],   // the knot
+    ],
+  },
+
   /* GROX MULDER — the mascot head sits on a proper business suit, per the art:
      charcoal-navy jacket, white shirt showing at the collar and placket, dark
      tie. The rig faces +X, so the shirt and tie are thin slabs stood proud of
@@ -2042,7 +2067,7 @@ const DOSSIER = {
     known: "Does not speak. Files everything.",
     note: "Keeps the record; renders no opinion. If a seat's reasoning is absent later, it was absent then.",
   },
-  CEO: {  // BIG M
+  CEO: {  // BIG C
     brief: "The authorising seat: nothing leaves the floor without a yes here.",
     detail: "Receives the PM's thesis, the size Risk set, the Red Team's verdict, the unsigned ticket and the Compliance result, and puts one question to them: do I authorise this. Only a proposal that already cleared Compliance ever reaches the door. A yes is an instruction to nobody — the desk is read-only and moves no funds.",
     method: "Claude. The authorising seat, not an analyst.",
@@ -2097,7 +2122,13 @@ function buildAvatar(spec, index) {
   const gone = new Set(claude || grok ? ["hair", "eye"] : (fig.drop || []));
   // GROX wears the mascot head — a white orb — so the default skull cube is
   // dropped too. It is keyed "skin" like the forearms, so it has to go by joint.
-  const parts = BODY.filter((b) => !gone.has(b[3]) && !(grok && b[0] === "Head" && b[3] === "skin"));
+  // A mascot replaces whole body parts, not just colours: BIG C loses the skull
+  // cube (he is a wide coral slab) and the jacket sleeves (his arms are coral
+  // nubs). Both are keyed like other parts, so they have to go by joint.
+  const isMascotPart = (b) => spec.mascot &&
+    ((b[0] === "Head" && b[3] === "skin") || (b[0].startsWith("UpperArm") && b[3] === "shirt"));
+  const parts = BODY.filter((b) => !gone.has(b[3])
+    && !(grok && b[0] === "Head" && b[3] === "skin") && !isMascotPart(b));
 
   const specs = parts.map(([joint, size, centre, key]) => {
     // The head cube shares the `skin` key with the forearms; the CEO needs them apart.
@@ -2168,7 +2199,7 @@ function buildAvatar(spec, index) {
     slot( 0.095, 0.030, 0.088, 0);                    // rig-left eye
     slot(-0.095, 0.030, 0.088, 0);                    // rig-right eye
     spark = orb;                                      // the head IS his mark
-  } else if (claude) {
+  } else if (claude && !spec.mascot) {
     // Claude's coral spark, worn where a face would be. The rig faces +X and the
     // mark is built in the XY plane, so it is turned a quarter turn about Y or it
     // presents edge-on and reads as a spike.
@@ -3466,7 +3497,7 @@ if (CAPTURE) window.__rig = { renderer, scene, camera };   // scripted turntable
 if (workers.GrokAD && workers.GrokAD.g) workers.GrokAD.g.visible = false;
 
 /** Tear one worker out of the scene and build them again from their (edited) spec.
- * Used exactly once so far: the boss. On the house floor the corner office is BIG M;
+ * Used exactly once so far: the boss. On the house floor the corner office is BIG C;
  * on a leased floor it is the tenant's Managing Director, in the tenant's costume,
  * under the tenant's name. */
 function rebuildWorker(seatId) {
@@ -3804,7 +3835,7 @@ async function loadChronicle(before) {
       const f = fmtTape(e);
       if (f) frag.appendChild(tapeRow(f[0], f[1], f[2], e.ts));
     }
-    // The boss's desk keeps its paperwork: on first load, rebuild BIG M's memo
+    // The boss's desk keeps its paperwork: on first load, rebuild BIG C's memo
     // pile from the same chronicle slice, oldest first so the newest sits on top.
     if (!before && !window.__inboxFilled) {
       window.__inboxFilled = true;
@@ -3866,7 +3897,7 @@ function memo({ symbol, decision, thesis, conviction, size, stop, gmgn }) {
   paintInboxSummary(sym);
 }
 
-/* BIG M's desk was a raw stack of memos with no way to read it at a glance.
+/* BIG C's desk was a raw stack of memos with no way to read it at a glance.
    One pinned line answers the two questions a tenant actually has: has anything
    been authorised, and what was the last thing to cross his desk. */
 let __inboxSeen = 0;
@@ -3894,7 +3925,7 @@ function paintInboxSummary(lastSym) {
     (lastSym ? ` \u00b7 latest: ${lastSym}` : "");
   bar.appendChild(rest);
 }
-inboxEl.innerHTML = `<p class="empty">Nothing on BIG M's desk yet.<br>Authorised orders land here.</p>`;
+inboxEl.innerHTML = `<p class="empty">Nothing on BIG C's desk yet.<br>Authorised orders land here.</p>`;
 
 document.getElementById("tab-tape").onclick = () => switchTab(true);
 document.getElementById("tab-inbox").onclick = () => switchTab(false);
@@ -4144,7 +4175,7 @@ const HANDLERS = {
           // else crosses into that office.
           await p.moveTo(SPOTS.ceoDoor[0], SPOTS.ceoDoor[1]);
           puff(p, "✉");
-          p.say("For BIG M.");
+          p.say("For BIG C.");
           p.carry(false);
           const ceo = who("CEO");
           ceo?.run(async () => {
@@ -4660,7 +4691,7 @@ const tapeEl2 = document.getElementById("tape");
 
 const RAIL = document.getElementById("rail");
 const RAIL_TITLE = document.getElementById("rail-title");
-const PANE_TITLE = { tape: "The Tape", inbox: "Big M", desk: "My Desk", calls: "The Trading Team", crew: "The Aye-Team",
+const PANE_TITLE = { tape: "The Tape", inbox: "Big C", desk: "My Desk", calls: "The Trading Team", crew: "The Aye-Team",
   whales: "Whale Callouts", stats: "The Building's Books", ranks: "The Leaderboard", ledger: "The Record Book" };
 const PANE_TABS = { tape: "tab-tape", inbox: "tab-inbox", desk: "tab-desk", calls: "tab-calls", crew: "tab-crew",
   whales: "tab-whales", stats: "tab-stats", ranks: "tab-ranks", ledger: "tab-ledger" };
