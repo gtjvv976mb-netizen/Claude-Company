@@ -125,6 +125,12 @@ async function onEntry(ev) {
   rollDay(S.state, Date.now());
   S.state.openCount = openList().length;
   S.state.spendableSol = EXECUTE ? Math.max(0, (await solBalance()) - FEE_RESERVE) : Infinity;
+  // Kelly needs an equity base, a closed sample, and the risk the book already
+  // carries. Equity is the wallet itself — the only honest number here.
+  S.state.equitySol = EXECUTE ? await solBalance() : (S.state.equitySol ?? CFG.dailySolCap);
+  S.state.wins = S.wins ?? 0;
+  S.state.losses = S.losses ?? 0;
+  S.state.bookHeat = openList().reduce((a, p) => a + (p.riskF || 0), 0);
 
   const plan = planEntry({ call: ev, cfg: CFG, state: S.state });
   if (plan.action !== "buy") return log(`SKIP ${ev.symbol}: ${plan.reason}`);
@@ -143,6 +149,8 @@ async function onEntry(ev) {
   });
   pos.qtyRaw = String(q.outAmount);
   pos.paidSol = plan.sol;
+  pos.riskF = plan.f ?? null;              // this name's share of book heat
+  pos.openedAtMs = Date.now();
   S.positions[ev.mint] = pos;
   S.state.deployedTodaySol += plan.sol;
   save();
@@ -174,6 +182,8 @@ async function sellAll(pos, why, fraction = 1) {
   if (fraction >= 1) {
     const net = outSol - (pos.paidSol || 0);
     S.state.realizedTodaySol += net;
+    // the closed sample Kelly reads next time
+    if (net >= 0) S.wins = (S.wins || 0) + 1; else S.losses = (S.losses || 0) + 1;
     delete S.positions[pos.mint];
     log(`  SOLD ${pos.symbol} for ${outSol.toFixed(4)} SOL (${net >= 0 ? "+" : ""}${net.toFixed(4)}) — https://solscan.io/tx/${sig}`);
   } else {

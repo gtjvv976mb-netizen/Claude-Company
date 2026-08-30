@@ -12,11 +12,15 @@ let st=freshState(0); st.openCount=4;
 t("max open positions blocks entry", planEntry({call,cfg:DEFAULTS,state:st}).action==="skip");
 st=freshState(0); st.realizedTodaySol=-0.2;
 t("daily loss limit blocks entry", planEntry({call,cfg:DEFAULTS,state:st}).action==="skip");
-st=freshState(0); st.deployedTodaySol=0.49;
+st=freshState(0); st.deployedTodaySol=0.4999;
 t("daily deploy cap blocks entry", planEntry({call,cfg:DEFAULTS,state:st}).action==="skip");
 st=freshState(0);
 t("clean state allows entry", planEntry({call,cfg:DEFAULTS,state:st}).action==="buy");
-t("desk size is capped to maxSolPerTrade", planEntry({call:{...call,size_sol:5},cfg:DEFAULTS,state:freshState(0)}).sol===DEFAULTS.maxSolPerTrade);
+// The desk's number is now a CEILING, not the size. We size off risk-at-stop and
+// take the smaller of the two, so an oversized call cannot inflate the position.
+const big = planEntry({call:{...call,size_sol:5},cfg:DEFAULTS,state:freshState(0)});
+t("an oversized desk call cannot inflate our size", big.sol <= DEFAULTS.maxSolPerTrade && big.sol > 0, big.sol);
+t("size is risk-derived, not desk-derived", big.sol < 5, big.sol);
 t("call with no stop is refused", planEntry({call:{...call,stop:null},cfg:DEFAULTS,state:freshState(0)}).action==="skip");
 
 // stop

@@ -10,7 +10,8 @@
     "test": "node test-strategy.mjs",
     "simulate": "node simulate.mjs",
     "tune": "node tune.mjs",
-    "test:install": "node test-install.mjs"
+    "test:install": "node test-install.mjs",
+    "test:sizing": "node test-sizing.mjs"
   },
   "dependencies": {
     "@solana/web3.js": "^1.95.8"
