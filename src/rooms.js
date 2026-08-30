@@ -142,6 +142,42 @@ export async function requestRun({ floorNo, wallet, mint }) {
       db.prepare("UPDATE runs SET symbol=?, outcome=?, detail=?, finished_at=? WHERE id=?")
         .run(res?.symbol ?? null, res?.outcome ?? "done", res?.detail ?? null, Date.now(), runId);
 
+      /* A VERDICT THE TENANT CAN ACT ON.
+       *
+       * This is where a paid run used to end: the outcome went into a journal row and
+       * stopped. So the desk could work a coin with all sixteen seats, have the PM
+       * propose it and the CEO approve it — which happened for the first time with
+       * AURA — and produce nothing anyone could trade. No call, no delivery, no bot
+       * execution. The tenant paid 250,000 $CLAUDECO for a conclusion with no exit
+       * from the database.
+       *
+       * A run that clears the same gauntlet a house call clears now becomes a call,
+       * delivered to THIS floor only. The mandate's book gate still applies, so it
+       * cannot open a second position while one is working, and every safety refusal
+       * in mandate.js applies unchanged — this is a new road to the publish step, not
+       * a way around it. */
+      try {
+        const { publishCall } = await import("./penthouse.js");
+        const { classify, launchpad } = await import("./market.js");
+        let category = null, pad = null;
+        try {
+          const c = { mint, pair: res?.ev?.pair };
+          category = classify(c).category; pad = launchpad(c);
+        } catch {}
+        const pub = publishCall(res, { category, launchpad: pad, toFloors: [floorNo] });
+        if (pub?.callId) {
+          db.prepare("UPDATE runs SET detail=? WHERE id=?")
+            .run(`${res?.detail ?? res?.finalDecision ?? "decided"} · published as call #${pub.callId}`, runId);
+          emit("run:published", { floor: floorNo, runId, callId: pub.callId, symbol: res?.symbol });
+        } else if (pub?.reason) {
+          emit("run:not_published", { floor: floorNo, runId, symbol: res?.symbol,
+            outcome: pub.outcome, reason: pub.reason });
+        }
+      } catch (e) {
+        // A publish failure must never lose the research the tenant paid for.
+        emit("run:publish_error", { floor: floorNo, runId, error: String(e?.message || e) });
+      }
+
       // Nothing was asked of a model, so nothing should have been charged — and a
       // FREE run must not be burned either. `screened_out` never reaches a seat any
       // more than `no_data` does; charging 250k $CLAUDECO (or silently spending an

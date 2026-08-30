@@ -367,7 +367,7 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
  *   stopless, refuted and PASSed candidates are refused by mandate.js before conviction
  *   is consulted at all. The mandate lowered the CONVICTION bar; it did not touch this.
  */
-function publishCall(rec, { category = null, launchpad: pad = null, wx = null } = {}) {
+export function publishCall(rec, { category = null, launchpad: pad = null, wx = null, toFloors = null } = {}) {
   const e = eligibility(rec);
   if (!e.eligible) {
     emit("call:withheld", { mint: rec?.mint, symbol: rec?.symbol,
@@ -423,7 +423,11 @@ function publishCall(rec, { category = null, launchpad: pad = null, wx = null } 
      * machine with their own wallet. The server gains no key and no custody by this —
      * it still only publishes rows. What changes is that the house eats its own
      * cooking, and its results land in the same graded record as everyone else's. */
-    const floors = listFloors()
+    /* `toFloors` narrows the audience to one desk. A tenant's OWN paid research run
+     * publishes through here, and the coin it approved is theirs — one floor spending
+     * 250,000 $CLAUDECO must not put every other floor into a position. Only the house
+     * lanes broadcast to the whole building. */
+    const floors = toFloors ?? listFloors()
       .filter((f) => f.state === "owned" || f.n === HQ_FLOOR)
       .map((f) => f.n);
     if (floors.length) broadcast(call.id, floors);
