@@ -3734,6 +3734,44 @@ const botFig = (() => {
   return { g, head, eyeL, eyeR, lamp, dockLight };
 })();
 
+/* Dev: capture a 360° turntable of WALL-ST-E, one JPEG per frame, POSTed to a
+   local catcher. Wakes him for the shot, restores his real state after. */
+window.__turntableBot = async (frames = 96, port = 4972) => {
+  const R = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  R.setSize(720, 900, false);
+  R.outputColorSpace = THREE.SRGBColorSpace;
+  R.toneMapping = THREE.AgXToneMapping;
+  R.toneMappingExposure = 1.5;
+  R.setClearColor(0x1d2b30, 1);
+  const cam = new THREE.PerspectiveCamera(33, 720 / 900, 0.1, 100);
+  const wasVis = new Map();
+  scene.children.forEach((c) => { wasVis.set(c, c.visible); if (!c.isLight) c.visible = (c === botFig.g); });
+  const wasBg = scene.background, wasFog = scene.fog;
+  scene.background = null; scene.fog = null;
+  const plateWas = [];
+  botFig.g.traverse((o) => { if (o.isSprite && o.visible) { o.visible = false; plateWas.push(o); } });
+  const sleepWas = botState.mode === "sleep";
+  botPose(false);
+  botFig.lamp.material.color.set(0x4ec9a5); botFig.lamp.material.emissive.set(0x4ec9a5);
+  const p = botFig.g.position;
+  try {
+    for (let i = 0; i < frames; i++) {
+      const a = (i / frames) * Math.PI * 2;
+      cam.position.set(p.x + Math.sin(a) * 2.7, 1.35, p.z + Math.cos(a) * 2.7);
+      cam.lookAt(p.x, 0.62, p.z);
+      R.render(scene, cam);
+      const url = R.domElement.toDataURL("image/jpeg", 0.92);
+      await fetch(`http://127.0.0.1:${port}/?seat=WALLSTE&n=${i}`, { method: "POST", body: url });
+    }
+  } finally {
+    scene.children.forEach((c) => { if (wasVis.has(c)) c.visible = wasVis.get(c); });
+    scene.background = wasBg; scene.fog = wasFog;
+    plateWas.forEach((o) => (o.visible = true));
+    if (sleepWas) botPose(true);
+    R.dispose();
+  }
+  return "captured " + frames;
+};
 window.__bot = () => ({ x: +botFig.g.position.x.toFixed(2), z: +botFig.g.position.z.toFixed(2), mode: botState.mode, want: botState.wantRoam });
 const BOT_STOPS = [[0, 8.8], [-6.3, 6.2], [4.4, 8.4], [10.6, 4.2], [0.6, 2.2], [-9.5, 5.6], [8.6, 1.4], [-2.5, 10.6]];
 const botState = { mode: "sleep", legs: null, li: 0, pauseT: 0, wantRoam: false, goingHome: false };
