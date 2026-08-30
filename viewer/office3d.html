@@ -2336,10 +2336,13 @@ class Worker {
     this.faceTowards(this.deskAt.x, this.deskAt.z);
     scene.add(this.g);
 
-    this.nameSprite = makeSprite(spec.name || spec.id, (spec.claude || spec.grok) ? 1.12 : 0.92,
+    // The boss's plate is the big one. Grox used to share it, but a long name at
+    // boss scale blanketed his whole avatar in that small office — he wears a
+    // smaller plate, floated higher, so the figure underneath actually shows.
+    this.nameSprite = makeSprite(spec.name || spec.id, spec.claude ? 1.12 : spec.grok ? 0.78 : 0.92,
       spec.grok ? { bg: "#0d0d0f", accent: "#cfd2d6" }
                 : spec.claude ? { bg: "#8a3f22", accent: "#f0c9a0" } : undefined);
-    this.nameSprite.position.set(0, 2.28, 0);
+    this.nameSprite.position.set(0, spec.grok ? 2.52 : 2.28, 0);
     this.nameSprite.visible = true;
     this.g.add(this.nameSprite);
 
@@ -5457,7 +5460,13 @@ function buildBotCard(settings) {
   const loadBot = () => { try { return JSON.parse(localStorage.getItem(BOT_KEY) || "null"); } catch { return null; } };
   const saveBot = (b) => localStorage.setItem(BOT_KEY, JSON.stringify(b));
 
-  const RPC_URL = "https://api.mainnet-beta.solana.com";
+  // NOT the public mainnet RPC: it answers 403 to browsers (and the usual
+  // alternates fail CORS), so a funded wallet read as "checking balance…"
+  // forever and a started bot could never have broadcast a trade. This goes
+  // through our own relay, which forwards a tight allowlist upstream. The
+  // signing still happens here, with a key the server never sees.
+  // web3.js will not accept a relative endpoint, so this is always absolute.
+  const RPC_URL = (window.__API_BASE__ || location.origin).replace(/\/$/, "") + "/api/bot/rpc";
 
   async function botKeypair() {
     const W = await web3();
