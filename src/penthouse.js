@@ -278,6 +278,7 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
     const call = openCall({
       mint: p.rec.mint, symbol: p.rec.symbol ?? ev.symbol, category: p.category, launchpad: p.launchpad,
       conviction: p.conviction,
+      imageUrl: ev.pair?.imageUrl ?? null,
       entryRef: ev.pair?.priceUsd ?? null,
       stop: p.rec.ticket?.stop_price ?? null,
       target: p.rec.ticket?.take_profit?.[0]?.price ?? null,
@@ -368,6 +369,7 @@ function publishApproved(rec, { category = null, launchpad: pad = null } = {}) {
   const call = openCall({
     mint: rec.mint, symbol: rec.symbol ?? ev.symbol, category, launchpad: pad,
     conviction: rec.pm?.conviction ?? null,
+    imageUrl: ev.pair?.imageUrl ?? null,
     entryRef: ev.pair?.priceUsd ?? null,
     stop: rec.ticket?.stop_price ?? null,
     target: rec.ticket?.take_profit?.[0]?.price ?? null,

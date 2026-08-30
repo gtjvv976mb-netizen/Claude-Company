@@ -62,6 +62,7 @@ export function shapePair(p) {
     volume: p.volume ?? {},
     txns: p.txns ?? {},
     priceChange: p.priceChange ?? {},
+    imageUrl: p.info?.imageUrl ?? null,
     socials: p.info?.socials ?? [],
     websites: p.info?.websites ?? [],
   };

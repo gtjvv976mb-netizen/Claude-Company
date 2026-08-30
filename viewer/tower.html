@@ -23,6 +23,10 @@
   --panel:#1b2b2f; --panel-line:#2d4247; --card:#22343a; --card-line:#354c51; --good:#7bbd80;
 }
 *{box-sizing:border-box} html,body{height:100%}
+:root[data-theme="light"] .topbar{background:#efe6cf;color:#22343a}
+:root[data-theme="light"] body{background:#e7ded9}
+:root[data-theme="light"] .home{color:#22343a;border-color:#c9bd9d}
+:root[data-theme="light"] .hint2, :root[data-theme="light"] .orbit-hint{color:#41504f;background:rgba(240,236,222,.7)}
 body{margin:0;background:var(--charcoal);color:var(--ink);
   font-family:Archivo,system-ui,sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}
 
@@ -98,6 +102,7 @@ button.home.on{background:var(--good,#4f8f52);color:#fff;border-color:transparen
   <div class="stat">Floors taken <b id="s-taken">—</b></div>
   <div class="stat">Available <b id="s-free">—</b></div>
   <button class="home" id="wbtn" type="button">Connect wallet</button>
+  <button class="home" id="shiftbtn" type="button" aria-label="Switch between day and night" style="min-width:38px">&#x263E;</button>
   <a class="home" href="/">Home</a>
 </div>
 
@@ -170,6 +175,26 @@ scene.add(sun, sun.target);
 const fill = new THREE.DirectionalLight(0x7c88d8, 0.5);
 fill.position.set(70, 52, -80);
 scene.add(fill);
+const hemi = scene.children.find((c) => c.isHemisphereLight);
+
+/* ── the shift: the same tower at dusk or on a clear morning ────────────── */
+function applyShift() {
+  const day = document.documentElement.dataset.theme === "light";
+  if (day) {
+    scene.background.set(0x9cc2dc); scene.fog.color.set(0xc3d9de);
+    if (hemi) { hemi.color.set(0xcfe2ee); hemi.groundColor.set(0x8e9a80); hemi.intensity = 1.0; }
+    sun.color.set(0xfff3d9); sun.intensity = 2.2; sun.position.set(-40, 110, 60);
+    fill.color.set(0xd7e4ec); fill.intensity = 0.35;
+    window.__litBake?.material.color.set(0x6f6f6f);   // day glass, not lamps
+  } else {
+    scene.background.set(0x1b1438); scene.fog.color.set(0x55306a);
+    if (hemi) { hemi.color.set(0x8a7ab8); hemi.groundColor.set(0x241a30); hemi.intensity = 0.85; }
+    sun.color.set(0xf7bf80); sun.intensity = 1.9; sun.position.set(-72, 38, 84);
+    fill.color.set(0x7c88d8); fill.intensity = 0.5;
+    window.__litBake?.material.color.set(0xffffff);
+  }
+}
+window.applyShift = applyShift;
 
 const ISO_ELEV = THREE.MathUtils.degToRad(35.264);
 const camera = new THREE.OrthographicCamera(-40, 40, 26, -26, 0.5, 600);
@@ -369,6 +394,7 @@ scene.add(bakeStatic(staticSpecs));
   mesh.material = new THREE.MeshBasicMaterial({ vertexColors: true });
   mesh.castShadow = false;
   scene.add(mesh);
+  window.__litBake = mesh;   // the shift dims every lit window through this one material
 })();
 
 /* ── people: the building is alive, so people go in and out of it ─────────── */
@@ -644,6 +670,23 @@ window.__tower = { THREE, renderer, scene, camera, floors,
                   shadows: renderer.shadowMap.enabled, selected }) };
 const clock = new THREE.Clock();
 let t = 0;
+(function shiftInit() {
+  let t = null;
+  try { t = localStorage.getItem("cc_theme"); } catch {}
+  document.documentElement.dataset.theme = t === "light" ? "light" : "dark";
+  applyShift();
+  const b = document.getElementById("shiftbtn");
+  if (!b) return;
+  const paint = () => { b.textContent = document.documentElement.dataset.theme === "light" ? "\u2600" : "\u263e"; };
+  b.addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("cc_theme", next); } catch {}
+    applyShift(); paint();
+  });
+  paint();
+})();
+
 function frame() {
   const dt = Math.min(0.05, clock.getDelta());
   t += dt;

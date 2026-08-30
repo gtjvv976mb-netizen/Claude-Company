@@ -51,6 +51,12 @@
   --dusk-soft:#e9dcbd;
   --dusk-amber:#eec27a;
   --dusk-bar:rgba(18,15,34,.94);
+  --hero-sky:linear-gradient(180deg,
+    #0f0c22 0%, #171233 17%, #241a44 33%, #37255a 47%,
+    #55306a 59%, #7c4071 69%, #a85672 77%, #cf7469 83%,
+    #ec9d6b 88%, #f7bf80 93%, #f3b978 100%);
+  --hero-horizon:linear-gradient(180deg,#251a2d 0%,#181120 38%,#0d0913 100%);
+  --hero-horizon-line:rgba(244,196,120,.28);
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
@@ -64,6 +70,24 @@
     --dusk-bar:rgba(14,12,28,.94);
   }
 }
+/* THE DAY SHIFT — chosen, never inferred: the same tower on a clear morning.
+   The dusk stays the default and the night; flipping the switch relights the
+   hero, re-inks its type, and lets the broadsheet below run in daylight. */
+:root[data-theme="light"]{
+  --dusk-ink:#233036; --dusk-soft:#48575a; --dusk-amber:#8a651c;
+  --dusk-bar:rgba(240,236,222,.95);
+  --hero-sky:linear-gradient(180deg,
+    #79aBd3 0%, #8db8d9 22%, #a9c9e0 44%, #c6dbe4 64%,
+    #e3e4d2 80%, #eee7cf 90%, #ecdfc0 100%);
+  --hero-horizon:linear-gradient(180deg,#d9d6c3 0%,#c6c4b0 55%,#b7b5a1 100%);
+  --hero-horizon-line:rgba(90,84,60,.28);
+}
+:root[data-theme="light"] .shade{display:none}
+:root[data-theme="light"] .hero-art svg{filter:saturate(.88) brightness(1.07)}
+:root[data-theme="light"] .hero::before{content:"";position:absolute;top:9%;right:15%;
+  width:78px;height:78px;border-radius:50%;z-index:1;
+  background:radial-gradient(circle,#fffdf2 0 36%,#f7dd94 58%,rgba(247,221,148,0) 72%)}
+
 :root[data-theme="dark"]{
   --bg:#131c1f; --bg-2:#1a2629; --card:#1d292d;
   --ink:#ece0c6; --ink-soft:#a9b7b3; --ink-faint:#8b9a96;
@@ -128,6 +152,9 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent-ink);outline
   transition:background .12s linear,color .12s linear}
 .pill:hover{background:var(--amber);border-color:var(--amber);color:#241a0d}
 .topnav a:focus-visible{outline-color:#f2c76e}
+.shiftbtn{font-size:15px;line-height:1;background:none;border:1px solid rgba(128,128,128,.35);
+  color:var(--dusk-ink);border-radius:50%;width:32px;height:32px;cursor:pointer;flex:none}
+.shiftbtn:hover{border-color:var(--dusk-amber)}
 .topnav.scrolled{position:fixed;background:var(--dusk-bar);
   border-bottom:1px solid rgba(238,194,122,.16);
   backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);
@@ -146,15 +173,12 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent-ink);outline
 /* ── 4 · the hero — the building at dusk ────────────────────────────── */
 .hero{position:relative;height:100vh;height:100svh;min-height:640px;overflow:hidden;
   color:var(--dusk-ink);
-  background:linear-gradient(180deg,
-    #0f0c22 0%, #171233 17%, #241a44 33%, #37255a 47%,
-    #55306a 59%, #7c4071 69%, #a85672 77%, #cf7469 83%,
-    #ec9d6b 88%, #f7bf80 93%, #f3b978 100%);
+  background:var(--hero-sky);
 }
 .hero::after{content:"";position:absolute;left:0;right:0;bottom:0;z-index:1;
   height:clamp(84px,13vh,150px);
-  background:linear-gradient(180deg,#251a2d 0%,#181120 38%,#0d0913 100%);
-  border-top:1px solid rgba(244,196,120,.28)}
+  background:var(--hero-horizon);
+  border-top:1px solid var(--hero-horizon-line)}
 .hero-art{position:absolute;bottom:0;right:clamp(10px,7vw,150px);z-index:2;
   height:min(88%,880px);aspect-ratio:720/1060}
 .hero-art svg{display:block;width:100%;height:100%}
@@ -415,11 +439,31 @@ footer a:hover{color:var(--ink);border-bottom-color:var(--accent)}
       <a href="#token">Token</a>
       <a href="/floor/50">Floor&nbsp;50</a>
     </nav>
+    <button class="shiftbtn" id="shiftbtn" type="button" aria-label="Switch between day and night" title="Switch the light">&#x263E;</button>
     <a class="pill" href="/tower">Lease a floor</a>
   </div>
 </header>
 
 <!-- ═══ the hero — Claude Tower at dusk ═══ -->
+<script>
+(function () {
+  let t = null;
+  try { t = localStorage.getItem("cc_theme"); } catch {}
+  if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+  addEventListener("DOMContentLoaded", () => {
+    const b = document.getElementById("shiftbtn");
+    if (!b) return;
+    const paint = () => { b.textContent = document.documentElement.dataset.theme === "light" ? "\u2600" : "\u263e"; };
+    b.addEventListener("click", () => {
+      const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+      document.documentElement.dataset.theme = next;
+      try { localStorage.setItem("cc_theme", next); } catch {}
+      paint();
+    });
+    paint();
+  });
+})();
+</script>
 <section class="hero" id="top" aria-label="Claude Tower at dusk">
   <div class="hero-art" aria-hidden="false">
     <svg id="towersvg" viewBox="0 0 720 1060" preserveAspectRatio="xMidYMax meet" role="img" focusable="false"

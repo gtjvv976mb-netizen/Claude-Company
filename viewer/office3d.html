@@ -272,6 +272,14 @@ body{
 .pulse .pnums{flex:none;white-space:nowrap}
 .pulse .pnums b{color:var(--warn);font-weight:600}
 @media(max-width:760px){.pulse{display:none}}
+.coinav{width:30px;height:30px;border-radius:50%;flex:none;overflow:hidden;display:inline-flex;
+  align-items:center;justify-content:center;background:var(--panel-line);color:var(--ink);
+  font-weight:700;font-size:14px;border:1px solid var(--card-line)}
+.coinav img{width:100%;height:100%;object-fit:cover;display:block}
+.cachip{align-self:flex-start;margin:-3px 0 0;font-family:"JetBrains Mono",ui-monospace,monospace;
+  font-size:10px;letter-spacing:.03em;color:var(--ink-faint);background:none;border:none;
+  padding:2px 0;cursor:pointer}
+.cachip:hover{color:var(--ink)}
 .watchrow,.killrow{display:flex;flex-direction:column;gap:5px;padding:10px 12px;border:1px solid var(--card-line);
   border-radius:4px;background:var(--card);font-size:12.5px}
 .watchrow .wr-top,.killrow .kr-top{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
@@ -582,6 +590,19 @@ window.__pan = panCamera;
 window.__follow = (seat) => followFigure(seat) ? "following " + seat : "no such seat";
 window.__resetView = resetView;
 
+/* The room itself follows the shift: after hours the sky beyond the sills
+   goes dusk and the light cools; by day it is the warm office it always was. */
+function applyShift3D() {
+  const day = document.documentElement.dataset.theme === "light";
+  if (day) {
+    scene.background.set(P.sky); scene.fog.color.set(0xcde9d6);
+  } else {
+    scene.background.set(0x152430); scene.fog.color.set(0x24333c);
+  }
+}
+window.applyShift3D = applyShift3D;
+applyShift3D();
+
 /* ── the shift switch: Night Shift ⇄ Day Shift ─────────────────────────── */
 (function shiftSwitch() {
   const btn = document.getElementById("shiftbtn");
@@ -596,6 +617,7 @@ window.__resetView = resetView;
     const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
     document.documentElement.dataset.theme = next;
     try { localStorage.setItem("cc_theme", next); } catch {}
+    applyShift3D();
     label();
   });
   label();
@@ -4274,6 +4296,15 @@ function renderCalls({ feed = [], settings, record }) {
     el.className = `call ${c.verdict}`;
 
     const h = document.createElement("header");
+    // the coin's face: its listed image, or a monogram when none was listed
+    const av = document.createElement("span");
+    av.className = "coinav";
+    if (c.image_url && /^https:\/\//.test(c.image_url)) {
+      const img = document.createElement("img");
+      img.src = c.image_url; img.alt = ""; img.loading = "lazy"; img.referrerPolicy = "no-referrer";
+      img.onerror = () => { img.remove(); av.textContent = (c.symbol || "?")[0].toUpperCase(); };
+      av.appendChild(img);
+    } else av.textContent = (c.symbol || "?")[0].toUpperCase();
     const sym = document.createElement("span"); sym.className = "sym"; sym.textContent = c.symbol || c.mint.slice(0, 6);
     const cat = document.createElement("span"); cat.className = `cat ${c.category}`; cat.textContent = c.category || "?";
     const st = document.createElement("span");
@@ -4283,8 +4314,19 @@ function renderCalls({ feed = [], settings, record }) {
     why2.className = "dp-btn ghost"; why2.type = "button"; why2.textContent = "Dossier";
     why2.style.marginLeft = "auto"; why2.style.fontSize = "9.5px"; why2.style.padding = "2px 8px";
     why2.onclick = () => openCallDossier(c.call_id);
-    h.append(sym, cat, st, why2);
+    h.append(av, sym, cat, st, why2);
     el.appendChild(h);
+
+    const ca = document.createElement("button");
+    ca.className = "cachip"; ca.type = "button";
+    ca.textContent = `CA ${c.mint.slice(0, 6)}\u2026${c.mint.slice(-6)} \u29c9`;
+    ca.title = "Copy the full contract address";
+    ca.addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(c.mint); ca.textContent = "CA copied \u2713"; }
+      catch { ca.textContent = c.mint; ca.style.userSelect = "all"; }
+      setTimeout(() => { ca.textContent = `CA ${c.mint.slice(0, 6)}\u2026${c.mint.slice(-6)} \u29c9`; }, 1400);
+    });
+    el.appendChild(ca);
 
     if (c.thesis) { const p = document.createElement("p"); p.textContent = c.thesis; el.appendChild(p); }
     if (c.invalidation) {
