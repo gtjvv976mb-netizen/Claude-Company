@@ -23,8 +23,15 @@ CREATE TABLE IF NOT EXISTS chronicle (
   type  TEXT NOT NULL,
   data  TEXT NOT NULL
 );
+-- Named _ts but keyed on id: every reader pages by id, so the name is a trap rather
+-- than a bug. Left in place because dropping it would rewrite the table on boot.
 CREATE INDEX IF NOT EXISTS idx_chronicle_ts ON chronicle(id DESC);
 CREATE INDEX IF NOT EXISTS idx_chronicle_floor ON chronicle(floor, id DESC);
+-- The diagnostics DO filter by (type, ts) — "why was nothing published", "how did
+-- cycles end". Measured on a full 200,000-row chronicle those queries cost 37ms
+-- scanning and 30ms with this index: worth having, but far too cheap to have been
+-- behind any outage, which is the claim it was briefly asked to support.
+CREATE INDEX IF NOT EXISTS idx_chronicle_type_ts ON chronicle(type, ts);
 `);
 
 const RING = [];
