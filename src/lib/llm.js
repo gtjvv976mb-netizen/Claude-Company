@@ -22,14 +22,43 @@ export class OutOfCredit extends Error {}
  * right thing, so the brake subclasses it rather than inventing a parallel path. */
 export class BudgetExhausted extends OutOfCredit {}
 
-/** Throws before any tokens are spent if the last 24h already cost the cap. */
-export function assertDailyBudget(capUsd) {
+/**
+ * THE RESERVE — the publishing lane cannot be starved by the scanning lanes.
+ *
+ * Measured on the live desk: 160 workups in a day, $20.15 of a $25 cap, and ZERO
+ * calls. The cause was not strictness — `call:withheld` never fired once, meaning the
+ * desk never reached its publish step at all. It was arithmetic. The fresh scan runs
+ * every 5 minutes (288 chances a day to spend) while the full cycle — the ONLY lane
+ * carrying the mandate hunt, and so the only lane that reliably publishes — runs four
+ * times. The scanner ate the day's budget before the publisher could open its mouth:
+ * 33 cycles ended on the budget and 24 halted outright, against 2 that genuinely
+ * found nothing in the market.
+ *
+ * So the cap becomes two caps. Opportunistic lanes (the fresh scan, watch promotion)
+ * may spend only up to their share; past that the money is RESERVED and only the
+ * cycle may draw on it. A tenant's own floor run is never throttled — they paid
+ * 250,000 $CLAUDECO for it, and taking payment for work we then refuse to do is not a
+ * budget policy, it is a broken promise.
+ */
+export const OPPORTUNISTIC_SHARE = Math.min(0.95, Math.max(0.1,
+  Number(process.env.DESK_OPPORTUNISTIC_SHARE || 0.55)));
+
+/** Lanes that yield to the reserve. Everything else spends to the full cap. */
+const OPPORTUNISTIC = new Set(["fresh", "promote"]);
+
+/** Throws before any tokens are spent if this lane's share of the last 24h is gone. */
+export function assertDailyBudget(capUsd, { lane = "cycle" } = {}) {
   if (!capUsd || capUsd <= 0) return;
   const spent = spendSince(Date.now() - 24 * 3600e3).usd;
-  if (spent >= capUsd) {
-    emit("cycle:budget", { usedUsd: spent, capUsd, window: "24h" });
-    throw new BudgetExhausted(
-      `daily budget spent: $${spent.toFixed(2)} of $${capUsd} in 24h — the desk pauses, monitoring continues`);
+  const yields = OPPORTUNISTIC.has(lane);
+  const laneCap = yields ? capUsd * OPPORTUNISTIC_SHARE : capUsd;
+  if (spent >= laneCap) {
+    emit("cycle:budget", { usedUsd: spent, capUsd, laneCap: Number(laneCap.toFixed(2)),
+      lane, reserved: yields, window: "24h" });
+    throw new BudgetExhausted(yields
+      ? `the ${lane} lane has spent its share ($${spent.toFixed(2)} of $${laneCap.toFixed(2)}) — ` +
+        `the rest of the $${capUsd} day is reserved for the cycle that publishes`
+      : `daily budget spent: $${spent.toFixed(2)} of $${capUsd} in 24h — the desk pauses, monitoring continues`);
   }
 }
 

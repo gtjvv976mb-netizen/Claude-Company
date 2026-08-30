@@ -135,7 +135,10 @@ export async function requestRun({ floorNo, wallet, mint }) {
       const brain = settings(floorNo).md_brain === "grok" ? "grok" : undefined;
       const res = await runFor(floorNo, () => workup(`floor${floorNo}-${runId}`, mint,
         brain ? "tenant request \u00b7 MD thinking on Grok" : "tenant request",
-        brain ? { pmProvider: brain } : {}));
+        // 'floor' is deliberately NOT an opportunistic lane: the tenant already paid
+        // 250,000 $CLAUDECO for this run, so it draws on the full daily cap. Throttling
+        // work someone has bought is not budgeting, it is keeping the money.
+        { lane: "floor", ...(brain ? { pmProvider: brain } : {}) }));
       db.prepare("UPDATE runs SET symbol=?, outcome=?, detail=?, finished_at=? WHERE id=?")
         .run(res?.symbol ?? null, res?.outcome ?? "done", res?.detail ?? null, Date.now(), runId);
 

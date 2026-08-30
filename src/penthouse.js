@@ -457,7 +457,7 @@ export async function promoteWatches() {
     const hook = `watch promoted \u00b7 ${w.symbol ?? w.mint.slice(0, 6)} \u00b7 rules held: ` +
       Object.entries(w.rules).filter(([, v]) => v != null).map(([k, v]) => `${k}=${v}`).join(", ");
     const rec = await runFor(null, () => workup(new Date().toISOString().replace(/[:.]/g, "-"), w.mint, hook,
-      { alwaysTicket: SEQUENTIAL }));
+      { alwaysTicket: SEQUENTIAL, lane: "promote" }));
 
     let category = null, pad = null;
     try {
@@ -564,7 +564,7 @@ export async function freshScan({ minScore = 45 } = {}) {
         `establish which X event fired this race and whether THIS is the canonical token for it; ` +
         `the race pays one winner and the rest go to zero` : "");
     const rec = await runFor(null, () => workup(new Date().toISOString().replace(/[:.]/g, "-"), top.mint, hook,
-      { alwaysTicket: SEQUENTIAL }));
+      { alwaysTicket: SEQUENTIAL, lane: "fresh" }));
     const pub = publishCall(rec, { category: top.category, launchpad: top.launchpad });
     return { young: young.length, workedUp: 1, outcome: pub.outcome ?? rec?.outcome ?? rec?.finalDecision };
   } catch (e) {

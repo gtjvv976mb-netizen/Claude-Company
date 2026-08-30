@@ -52,7 +52,10 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
   // Both spenders — the penthouse cycle and a tenant's floor run — pass through here,
   // so this is where the daily cap bites. Before the free stages, deliberately: a
   // workup that cannot afford its model stages should not pretend to start.
-  assertDailyBudget(cfg.dailyBudgetUsd);
+  // The lane decides WHOSE money this is. The scanning lanes yield to a reserve so
+  // they cannot eat the day before the publishing cycle has run; a tenant's paid
+  // floor run is never throttled. See assertDailyBudget.
+  assertDailyBudget(cfg.dailyBudgetUsd, { lane: opts.lane ?? "cycle" });
   emit("token:start", { mint, hook });
 
   const ev = await gather(mint, hook);
