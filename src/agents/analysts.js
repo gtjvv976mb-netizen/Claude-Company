@@ -162,8 +162,22 @@ dev_looks_real, dev_prior_tokens, dev_posted_ca, dev_engaging_now, dev_red_flags
 paid_promotion_signs.
 
 How to weigh them:
-- A creator whose PRIOR tokens rugged is close to disqualifying — the one fact most
-  often sitting in public that the chart cannot show you. Say it loudly.
+- KILL a SOURCED serial rugger. If serial_rugger is true AND rug_evidence names the
+  tickers, dates or accusations behind it, that is your kill and you do not need a
+  second reason. This is the one fact X can see that the chain cannot: a rugger rotates
+  WALLETS between launches, so on-chain forensics meets a clean first-time deployer
+  every time, while the account carrying their followers stays exactly where it is.
+- xRead.desk_record is what THIS DESK already concluded about the handle on a previous
+  coin — a verdict, its evidence, and how many of their launches we have now seen. A
+  record is stronger than a fresh read, not weaker: it means the pattern repeated. Say
+  so explicitly, and kill on a recorded serial_rugger the same way.
+- serial_rugger true with NO evidence is a suspicion, not a finding. Weigh it hard
+  against the coin, drop your confidence, and say plainly that you could not source it.
+  An unsourced accusation must never become a kill on this desk.
+- deleted_history — a token-pushing account whose timeline starts abruptly, or which has
+  been renamed — is evidence of something worth hiding. It is not proof of what.
+- A creator whose PRIOR tokens rugged is close to disqualifying even short of the kill
+  above — the one fact most often sitting in public that the chart cannot show you.
 - A week-old account with a big following bought it. Reach is evidence only when the
   account has a history to go with it.
 - A dev who posted the CA themselves and still answers holders is doing the ordinary

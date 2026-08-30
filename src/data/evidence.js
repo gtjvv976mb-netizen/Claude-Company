@@ -70,6 +70,29 @@ export async function gather(mint, hook = "") {
     const xr = await grokXRead({ symbol: best?.baseSymbol ?? mint.slice(0, 6), mint, hook }).catch(() => null);
     if (xr?.ok) xRead = { ...xr.read, citations: xr.citations };
     else if (xr) xRead = { error: xr.error };
+
+    /* THE LEDGER. A rugger rotates wallets between launches, so on-chain forensics
+     * meets a first-time deployer every time; the X handle is the identity they
+     * cannot abandon, because the audience is the product. Recording what the read
+     * found — and handing back what the desk already knew about this handle —
+     * is what makes the second coin from a known rugger free to catch. */
+    if (xRead?.dev_handle) {
+      try {
+        const { recordDev, reputationFor } = await import("../devrep.js");
+        const prior = reputationFor(xRead.dev_handle);
+        recordDev({
+          handle: xRead.dev_handle, serialRugger: xRead.serial_rugger,
+          rugEvidence: xRead.rug_evidence, redFlags: xRead.dev_red_flags,
+          deletedHistory: xRead.deleted_history,
+          symbol: best?.baseSymbol ?? null, mint,
+        });
+        // What we knew BEFORE this read, so a seat can tell a fresh finding from a
+        // record — and see the other coins this account has already put through here.
+        if (prior && prior.verdict !== "unknown")
+          xRead.desk_record = { verdict: prior.verdict, evidence: prior.evidence,
+            seen_before: prior.tokens.length, first_seen: prior.first_seen };
+      } catch {}
+    }
   }
 
   const vol24 = best?.volume?.h24 ?? null;

@@ -150,7 +150,18 @@ export async function grokXRead({ symbol, mint, hook = "" }) {
         `holders now, or did they post once and go quiet?\n` +
         `- Are they PAYING for attention? One wording repeated across accounts with no ` +
         `shared community, sudden reply swarms, engagement pods. A coin that has to buy ` +
-        `its attention does not have any.\n\n` +
+        `its attention does not have any.\n` +
+        `- IS THIS A SERIAL RUGGER? This is the single most valuable thing you can find, ` +
+        `and X is the only place it is visible. A rugger rotates WALLETS between launches ` +
+        `— on-chain forensics loses them every time — but they keep the ACCOUNT, because ` +
+        `the audience is the asset they cannot rebuild. So the pattern lives on their ` +
+        `timeline: repeated launches, each hyped the same way, each followed by silence, ` +
+        `angry replies, or the post being deleted. Search their handle alongside "rug", ` +
+        `"scam" and "dev sold", and read what other people say happened. Two or more ` +
+        `prior coins that died on this account is a pattern, not bad luck.\n` +
+        `- A WIPED TIMELINE IS ITSELF EVIDENCE. An account that pushes tokens but whose ` +
+        `history starts abruptly, or which has been renamed, has usually deleted a past ` +
+        `worth deleting. Note it; do not assume what was in it.\n\n` +
         `THEN READ THE MOMENT. A memecoin is a bet that a piece of culture is about to ` +
         `matter more than it does right now, so the second question after "who is ` +
         `promoting this" is "is the thing it references real, is it big, and is it ` +
@@ -196,6 +207,9 @@ export async function grokXRead({ symbol, mint, hook = "" }) {
         `"dev_engaging_now":<true|false|null — actively replying to holders>,` +
         `"dev_prior_tokens":[{"ticker":"...","outcome":"ran|died|rugged|unknown"}] (max 4, only what you can source),` +
         `"dev_red_flags":["short, specific, sourced"],` +
+        `"serial_rugger":<true|false|null — has THIS ACCOUNT launched coins that rugged, MORE THAN ONCE>,` +
+        `"rug_evidence":"how you know: the tickers, the dates, the posts or the accusations you actually found — or null",` +
+        `"deleted_history":<true|false|null — signs of wiped posts, a renamed handle, or a timeline that starts abruptly>,` +
         `"paid_promotion_signs":<true|false>,` +
         `"kol_posts":[{"handle":"...","gist":"..."}] (max 3, only genuinely notable accounts),` +
         `"lore_origin":"the traceable origin post/moment/person, or null",` +
