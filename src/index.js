@@ -196,7 +196,25 @@ function startPenthouse() {
   const MIN_RETRY_MS = Number(process.env.PENTHOUSE_MIN_RETRY_MINS || 20) * 60000;
   const sinceDone = Date.now() - getKv("last_cycle_done_at");
   const sinceStart = Date.now() - getKv("last_cycle_start_at");
-  if (sinceDone > (cycleMins / 2) * 60000 && sinceStart > MIN_RETRY_MS) {
+
+  /* THE SELF-HEAL. A stamp written by an earlier, buggier version of this same code
+   * cannot be told apart from an honest one — and the version that stamped every
+   * attempt, halts included, was live while cycles were halting on an exhausted
+   * budget. So the desk could carry a fake completion and skip its boot cycle for
+   * three hours on the strength of it, with no way to inspect the value remotely.
+   *
+   * A desk that has NEVER published a call is the one case where no stamp deserves
+   * belief: whatever it claims, nothing has come out the other end. Until the first
+   * call exists, boot on the retry guard alone. This stops applying by itself the
+   * moment the desk works, so it is a bootstrap, not a permanent override. */
+  const everPublished = (() => {
+    try { return db.prepare("SELECT COUNT(*) n FROM calls").get().n > 0; }
+    catch { return true; }   // table missing -> do not force; fail toward the stamp
+  })();
+  if (!everPublished && sinceStart > MIN_RETRY_MS) {
+    console.log(`[penthouse] boot cycle in 15s — the desk has never published a call, so no completion stamp is trusted`);
+    setTimeout(researchStamped, 15000);
+  } else if (sinceDone > (cycleMins / 2) * 60000 && sinceStart > MIN_RETRY_MS) {
     console.log(`[penthouse] boot cycle in 15s — no cycle has COMPLETED in ${Math.round(sinceDone / 60000)}m`);
     setTimeout(researchStamped, 15000);
   } else if (sinceStart <= MIN_RETRY_MS) {
