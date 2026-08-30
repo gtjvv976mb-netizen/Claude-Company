@@ -151,15 +151,48 @@ function startPenthouse() {
   // mandate hunting to exhaustion, every push could burn to the daily brake.
   // A restart now only fires the boot cycle if no cycle ran recently.
   db.exec("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)");
-  const lastCycleAt = Number(db.prepare("SELECT value FROM kv WHERE key='last_cycle_at'").get()?.value ?? 0);
+  const getKv = (k) => Number(db.prepare("SELECT value FROM kv WHERE key=?").get(k)?.value ?? 0);
+  const setKv = (k, v) => db.prepare(
+    "INSERT INTO kv (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    .run(k, String(v));
+
+  /* THE STAMP MUST RECORD COMPLETION, NOT INTENT.
+   *
+   * It used to be written BEFORE the cycle ran, to stop every deploy firing a paid
+   * cycle. But a cycle takes minutes and this process does not reliably live that
+   * long — Render restarts it on every deploy, and an idle instance is spun down and
+   * cold-started. So the sequence was: boot, stamp, start working, get killed. The
+   * next boot then read its own fresh stamp, concluded a cycle had just run, skipped
+   * the boot cycle, and fell back on a SIX-HOUR setInterval that a short-lived
+   * process never survives to fire.
+   *
+   * The desk therefore started cycles constantly and finished none: the live record
+   * showed 33 budget stops, 24 halts and no `cycle:end` for sixteen hours, while the
+   * scanning lane kept ticking over and calls stayed at zero. A stamp that records an
+   * intention rather than an outcome is indistinguishable from success, which is the
+   * same class of mistake as grading a trade by whether the order was sent.
+   *
+   * Now: `last_cycle_done_at` moves only when a cycle actually returns, so an
+   * interrupted cycle is correctly seen as never having happened and the next boot
+   * retries it. `last_cycle_start_at` survives as the anti-stampede guard on its own
+   * — a redeploy loop still cannot fire cycles back to back. A NEW key deliberately,
+   * so the old start-stamps left in production cannot be misread as completions. */
   const researchStamped = async () => {
-    db.prepare("INSERT INTO kv (key,value) VALUES ('last_cycle_at',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
-      .run(String(Date.now()));
-    await research();
+    setKv("last_cycle_start_at", Date.now());
+    try { await research(); }
+    finally { setKv("last_cycle_done_at", Date.now()); }
   };
-  const sinceLast = Date.now() - lastCycleAt;
-  if (sinceLast > (cycleMins / 2) * 60000) setTimeout(researchStamped, 15000);
-  else console.log(`[penthouse] boot cycle skipped — last cycle ${Math.round(sinceLast / 60000)}m ago`);
+  const MIN_RETRY_MS = Number(process.env.PENTHOUSE_MIN_RETRY_MINS || 20) * 60000;
+  const sinceDone = Date.now() - getKv("last_cycle_done_at");
+  const sinceStart = Date.now() - getKv("last_cycle_start_at");
+  if (sinceDone > (cycleMins / 2) * 60000 && sinceStart > MIN_RETRY_MS) {
+    console.log(`[penthouse] boot cycle in 15s — no cycle has COMPLETED in ${Math.round(sinceDone / 60000)}m`);
+    setTimeout(researchStamped, 15000);
+  } else if (sinceStart <= MIN_RETRY_MS) {
+    console.log(`[penthouse] boot cycle held — one started ${Math.round(sinceStart / 60000)}m ago, inside the ${MIN_RETRY_MS / 60000}m retry guard`);
+  } else {
+    console.log(`[penthouse] boot cycle skipped — last COMPLETED ${Math.round(sinceDone / 60000)}m ago`);
+  }
   setInterval(researchStamped, cycleMins * 60000);
 
   // The sniper lane: cheap, frequent, and only ever pays for ignition.
