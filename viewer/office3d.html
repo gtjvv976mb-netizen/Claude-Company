@@ -151,7 +151,7 @@ body{
    when it had nothing to say. It is a pop-up now: the dock is always there, the
    panel only when you ask for it. */
 .dock{
-  position:absolute; right:14px; top:14px; z-index:6; display:flex; gap:5px;
+  position:absolute; right:14px; top:14px; z-index:7; display:flex; gap:5px;
   padding:5px; border-radius:9px;
   background:var(--dock-bg); border:1px solid var(--panel-line);
   backdrop-filter:blur(7px); box-shadow:0 6px 18px var(--shadow);
@@ -329,7 +329,10 @@ body{
 .planbar .cur{position:absolute;top:-3px;width:3px;height:13px;background:var(--warn);border-radius:2px}
 .planbar-l{display:flex;justify-content:space-between;font-family:"JetBrains Mono",ui-monospace,monospace;
   font-size:9.5px;opacity:.75}
-.alertbar{position:absolute;left:0;right:0;top:0;z-index:6;display:none;flex-direction:column;gap:1px}
+/* Starts BELOW the tab dock (top 14px + ~38px tall) — at top:0 the dock floated
+   over the first alert row and hid it. The dock also outranks the stack so the
+   tabs stay clickable however many exits fire at once. */
+.alertbar{position:absolute;left:0;right:0;top:56px;z-index:6;display:none;flex-direction:column;gap:1px}
 .alertbar.on{display:flex}
 .alertrow{display:flex;align-items:center;gap:12px;padding:11px 16px;background:var(--warn,#c08a2e);
   color:#241c0c;font-size:13px;font-weight:600;box-shadow:0 6px 20px rgba(0,0,0,.28)}
