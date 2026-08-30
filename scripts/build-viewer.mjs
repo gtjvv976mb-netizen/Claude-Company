@@ -45,6 +45,13 @@ for (const a of ASSETS) {
 }
 fs.copyFileSync(path.join(ROOT, "token", "claudeco-64.png"), path.join(OUT, "assets", "favicon.png"));
 
+// The self-hosted executor, served static so the one-command install resolves.
+fs.mkdirSync(path.join(OUT, "executor"), { recursive: true });
+for (const f of ["poller.mjs", "install.sh", "executor.mjs", "README.md"]) {
+  const src = path.join(ROOT, "executor", f);
+  if (fs.existsSync(src)) fs.copyFileSync(src, path.join(OUT, "executor", f));
+}
+
 // GitHub Pages reads dist/CNAME to bind the custom domain.
 const cnameSrc = path.join(VIEWER, "CNAME");
 if (fs.existsSync(cnameSrc)) fs.copyFileSync(cnameSrc, path.join(OUT, "CNAME"));

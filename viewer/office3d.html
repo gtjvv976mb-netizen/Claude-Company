@@ -4781,6 +4781,28 @@ function buildControls(settings) {
     const sec = mk("div", "bud-addr");
     sec.textContent = "signing secret: " + settings.executor_secret;
     box.appendChild(sec);
+
+    // Connect-and-go: one command that stands the poller up on any Linux box
+    // (a $4/mo VPS, a Raspberry Pi) in ~60s, in DRY RUN, with this floor and
+    // secret already filled in. The tenant copies one line — no terminal skill.
+    box.appendChild(mk("div", "dp-h", "Turn it on — one command"));
+    box.appendChild(mk("div", "dp-note",
+      "Paste this into a fresh Ubuntu VPS (DigitalOcean/Hetzner ~$4/mo) or any Linux box. It installs the poller, makes a burner wallet, and starts it in DRY RUN — it prints the wallet to fund and how to go live. It runs 24/7 and survives reboots."));
+    const cmd = `curl -fsSL https://claudedotcompany.com/executor/install.sh | bash -s -- --secret ${settings.executor_secret} --floor ${FLOOR_N}`;
+    const box2 = mk("div", "bud-addr");
+    box2.style.cssText = "white-space:pre-wrap;word-break:break-all;font-size:10px;line-height:1.5";
+    box2.textContent = cmd;
+    box.appendChild(box2);
+    const copyBtn = mk("button", "dp-btn ghost", "Copy the command");
+    copyBtn.type = "button";
+    copyBtn.onclick = async () => {
+      try { await navigator.clipboard.writeText(cmd); copyBtn.textContent = "Copied ✓"; }
+      catch { box2.style.userSelect = "all"; copyBtn.textContent = "Select it above"; }
+      setTimeout(() => (copyBtn.textContent = "Copy the command"), 1500);
+    };
+    box.appendChild(copyBtn);
+    box.appendChild(mk("div", "dp-note",
+      "Prefer your own machine? The same poller runs locally — see the README at /executor/. Either way: fund the burner it shows you with only what you'll risk, then flip it live."));
   }
 
   const save = mk("button", "dp-btn", "Save settings");
