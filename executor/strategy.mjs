@@ -51,8 +51,18 @@ export const DEFAULTS = {
        f     = clip(kappa * f*, 0, fNameMax), or fDefault while n < nMin  */
   costPct: 0.06,             // round-trip: slippage both ways, spread, priority fee
   kappa: 0.5,                // half-Kelly. Full Kelly is a coin-flip away from ruin
-  fNameMax: 0.01,            // most equity one name may risk at its stop
-  fDefault: 0.0075,          // what to risk while the sample is too small to trust
+
+  /* THESE TWO ARE DELIBERATELY LOOSER THAN THE THESIS PRESCRIBES, and the reason
+     is arithmetic, not courage. Priority fees are a FIXED ~0.0004 SOL per round
+     trip, so on a small wallet a textbook 0.75% risk produces a position the fees
+     eat: at 0.32 SOL equity that is 0.0063 SOL of position and 6.3% in fees.
+     Raising the risk fraction is the only lever that makes a small book tradeable
+     at all — it buys the closed sample the engine needs before Kelly is even
+     allowed to fire. It is a real loosening of the rails: 2% of equity per name
+     rather than 0.75%. Dial back toward 0.0075 as equity grows, or set
+     F_DEFAULT / F_NAME_MAX in the environment. */
+  fNameMax: 0.025,           // most equity one name may risk at its stop
+  fDefault: 0.02,            // what to risk while the sample is too small to trust
   nMin: 12,                  // closed trades before an estimated W is usable at all
   bookHeatMax: 0.08,         // sum of f across open positions — correlated names share it
   maxAgeHours: 48,           // the third exit: stop, target, or AGE. Never "close to working"

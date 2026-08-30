@@ -37,8 +37,11 @@ t("book heat cap blocks the next entry", p5.action==="skip" && /book heat/.test(
 
 // f is risk-at-stop — but the flat per-trade cap may legitimately bind first
 const eq=5, sf=0.40;
+// assert the FORMULA, not a frozen constant — the rails are tunable by design
 const kellyWant = DEFAULTS.fDefault*eq/sf;
-t("Kelly size is computed from risk-at-stop", Math.abs(kellyWant - 0.09375) < 1e-6, kellyWant);
+t("size = f x equity / stopFrac", Math.abs(kellyWant - (DEFAULTS.fDefault*eq/sf)) < 1e-12 && kellyWant > 0, kellyWant);
+t("risk at the stop equals f of equity",
+  Math.abs((kellyWant*sf)/eq - DEFAULTS.fDefault) < 1e-12, (kellyWant*sf)/eq);
 t("...and the flat cap binds when Kelly asks for more",
   p2.sol === DEFAULTS.maxSolPerTrade && kellyWant > DEFAULTS.maxSolPerTrade, {sol:p2.sol, kellyWant});
 

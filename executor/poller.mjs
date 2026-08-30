@@ -56,6 +56,12 @@ const CFG = {
   dailyLossLimitSol: Number(process.env.DAILY_LOSS_LIMIT_SOL || DEFAULTS.dailyLossLimitSol),
   maxOpenPositions: Number(process.env.MAX_OPEN_POSITIONS || DEFAULTS.maxOpenPositions),
   trailPct: Number(process.env.TRAIL_PCT || DEFAULTS.trailPct),
+  // the sizing rails, tunable without a deploy so they can be tightened as the
+  // wallet grows and the sample arrives
+  fDefault: Number(process.env.F_DEFAULT || DEFAULTS.fDefault),
+  fNameMax: Number(process.env.F_NAME_MAX || DEFAULTS.fNameMax),
+  bookHeatMax: Number(process.env.BOOK_HEAT_MAX || DEFAULTS.bookHeatMax),
+  maxAgeHours: Number(process.env.MAX_AGE_HOURS || DEFAULTS.maxAgeHours),
   scaleOutPct: Number(process.env.SCALE_OUT_PCT ?? DEFAULTS.scaleOutPct),
 };
 
