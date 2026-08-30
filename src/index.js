@@ -145,7 +145,8 @@ function startPenthouse() {
   const research = async () => {
     try { const r = await runPenthouseCycle();
       console.log(`[penthouse] cycle: ${r.considered} seen, ${r.workedUp} worked up, ${r.opened} calls, $${r.costUsd}`);
-    } catch (e) { console.log(`[penthouse] cycle failed: ${e.message}`); }
+      return r;
+    } catch (e) { console.log(`[penthouse] cycle failed: ${e.message}`); return null; }
   };
   // The boot cycle made every DEPLOY a paid research run — and with the
   // mandate hunting to exhaustion, every push could burn to the daily brake.
@@ -177,10 +178,20 @@ function startPenthouse() {
    * retries it. `last_cycle_start_at` survives as the anti-stampede guard on its own
    * — a redeploy loop still cannot fire cycles back to back. A NEW key deliberately,
    * so the old start-stamps left in production cannot be misread as completions. */
+  /* AND "COMPLETION" MUST MEAN THE CYCLE ACTUALLY GOT TO WORK.
+   *
+   * The first version of this stamped in a `finally`, which reintroduced the same bug
+   * one level down: research() swallows its own errors, so a cycle that halted on an
+   * exhausted budget after zero workups still stamped itself done — and blocked the
+   * next boot for three hours on the strength of a failure. A halt is not a day's
+   * work. It counts as done only if it worked something up, published something, or
+   * legitimately had nothing to do because a position is already open. */
   const researchStamped = async () => {
     setKv("last_cycle_start_at", Date.now());
-    try { await research(); }
-    finally { setKv("last_cycle_done_at", Date.now()); }
+    const r = await research();
+    const didWork = !!r && ((r.workedUp ?? 0) > 0 || (r.opened ?? 0) > 0 || r.skipped === "position_open");
+    if (didWork) setKv("last_cycle_done_at", Date.now());
+    else console.log(`[penthouse] cycle did no work (${r?.stopped ?? "failed"}) — not stamping it as done, the next boot will retry`);
   };
   const MIN_RETRY_MS = Number(process.env.PENTHOUSE_MIN_RETRY_MINS || 20) * 60000;
   const sinceDone = Date.now() - getKv("last_cycle_done_at");

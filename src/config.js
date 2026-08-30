@@ -129,7 +129,18 @@ export const cfg = {
   // The desk stops paying, not the process: past this 24h spend, cycles skip their
   // model stages and say so on the tape. Monitoring (prices, exits) costs nothing
   // and keeps running.
-  dailyBudgetUsd: Number(process.env.DESK_DAILY_BUDGET_USD || 25),
+  /* Raised 25 -> 40 at the owner's request, to get a cycle through TONIGHT.
+   *
+   * Today's $25 was consumed by the 5-minute scanner before the lane reserve existed
+   * (163 workups, 138 of them killed at the screen), so every cycle since has started
+   * and halted with no money to work with. The reserve fixes this from tomorrow on
+   * its own — it is a rolling 24h window — but it cannot refund what is already
+   * spent, and the autotrader has never once been exercised on a real call.
+   *
+   * $40 buys roughly 140 workups at the measured $0.126 each. The per-cycle ceiling
+   * of $10 still bounds any single cycle, and the reserve still stops the scanner
+   * taking more than 55%, so this raises the ceiling without loosening either brake. */
+  dailyBudgetUsd: Number(process.env.DESK_DAILY_BUDGET_USD || 40),
 };
 
 /** The RPC URL embeds an API key. Never print it raw — mask it wherever it is shown. */
