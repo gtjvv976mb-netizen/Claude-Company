@@ -47,6 +47,52 @@ The building POSTs to it. Reachable via a Cloudflare tunnel
 (`cloudflared tunnel --url http://localhost:8787`) or a VPS, with the URL pasted into the
 executor panel. Same safety and caps; use this only if you'd rather receive pushes than poll.
 
+
+## The risk engine (why this is a bot, not a relay)
+
+Between the desk's entry and its exit, a naive relay is naked — if the desk's
+monitor is slow, or your box slept, or the token rugs in ninety seconds, nothing
+protects the position. The poller runs its own risk engine every poll:
+
+- **Hard stop**, checked every tick, on an *executable* Jupiter quote for the exact
+  size you hold (not a mid price) — the stop fires on what you could really sell for.
+- **Breakeven + trail**: the moment the call's target is touched, the stop lifts to
+  your entry (the trade can no longer lose), then ratchets up behind the high.
+- **The desk's exit always wins** and sells everything — it sees rugs and dead theses
+  the price hasn't shown yet.
+- **Daily loss limit** and **max open positions** — the two brakes that decide whether
+  a bot survives a bad week.
+- State is persisted, so a restart resumes managing open trades instead of orphaning them.
+
+### The parameters were tuned by simulation, not by feel
+
+`npm run tune` sweeps the settings over seeded, fat-tailed price paths. It found
+something counterintuitive and expensive: **every scale-out setting reduced mean P&L.**
+Memecoin returns are fat-tailed — the rare runners carry the entire edge — so selling
+half at target quietly destroys the thing you're being paid for. The shipped default is
+therefore *no scale-out* with a wide trail.
+
+Measured against a naive bot on identical call streams (300 runs x 60 calls):
+
+| desk win rate | naive mean | managed mean | naive bad-run (p10) | managed bad-run | naive drawdown | managed drawdown |
+|---|---|---|---|---|---|---|
+| 20% | +0.053 | **+0.056** | -0.155 | **-0.135** | -0.236 | **-0.187** |
+| 28% | +0.079 | **+0.080** | -0.151 | **-0.113** | -0.233 | **-0.187** |
+| 40% | +0.119 | +0.117 | -0.112 | **-0.090** | -0.207 | **-0.188** |
+
+Same expected return, materially smaller losses when things go wrong.
+
+**Read this honestly:** profit is a function of the *desk's call quality* (the win-rate
+column), not of this bot. No bot can promise a profit on memecoins, and anyone who tells
+you otherwise is selling something. What the engine does is make sure a real edge isn't
+destroyed by one bad night, and that a bad streak can't compound into a blown account.
+
+```bash
+npm test        # 15 risk-engine cases: stops, trails, caps, desk exits
+npm run simulate    # naive vs risk-managed on the same call stream
+npm run tune        # re-sweep the parameters yourself
+```
+
 ## Knobs (env vars)
 | var | default | meaning |
 |---|---|---|
@@ -56,6 +102,10 @@ executor panel. Same safety and caps; use this only if you'd rather receive push
 | `MAX_SOL_PER_TRADE` | `0.05` | ceiling per entry |
 | `DAILY_SOL_CAP` | `0.5` | ceiling per rolling 24h |
 | `SLIPPAGE_BPS` | `300` | 3% max slippage |
+| `DAILY_LOSS_LIMIT_SOL` | `0.15` | realized losses that stop new entries for the day |
+| `MAX_OPEN_POSITIONS` | `4` | most positions held at once |
+| `TRAIL_PCT` | `0.60` | trail this far under the high, once armed |
+| `SCALE_OUT_PCT` | `0` | sell this fraction at target (0 = ride the runners) |
 | `SOLANA_RPC` | public mainnet | use your own RPC for reliability |
 | `PORT` | `8787` | listen port |
 
