@@ -43,7 +43,7 @@ export async function rpc(endpoint, method, params, { timeoutMs = 12000 } = {}) 
 // Read-only RPC methods. Anything not on this list is refused before it is sent.
 const ALLOWED = new Set([
   "getAccountInfo", "getMultipleAccounts", "getTokenLargestAccounts",
-  "getTokenSupply", "getSignaturesForAddress", "getBalance", "getSlot",
+  "getTokenSupply", "getSignaturesForAddress", "getBalance", "getSlot", "getLatestBlockhash",
   "getTransaction", "getProgramAccounts",
   // the treasury scanner's reads
   "getTokenAccountsByOwner", "getTokenAccountBalance",
