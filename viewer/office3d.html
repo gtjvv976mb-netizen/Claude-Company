@@ -3708,6 +3708,36 @@ function memo({ symbol, decision, thesis, conviction, size, stop, gmgn }) {
   inboxEl.querySelector(".empty")?.remove();
   inboxEl.prepend(m);
   if (decision === "APPROVED" || decision === "PROPOSE") approvedCount++;
+  paintInboxSummary(sym);
+}
+
+/* BIG M's desk was a raw stack of memos with no way to read it at a glance.
+   One pinned line answers the two questions a tenant actually has: has anything
+   been authorised, and what was the last thing to cross his desk. */
+let __inboxSeen = 0;
+function paintInboxSummary(lastSym) {
+  __inboxSeen++;
+  let bar = document.getElementById("inbox-sum");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "inbox-sum";
+    bar.style.cssText = "position:sticky;top:0;z-index:2;padding:9px 12px;margin-bottom:9px;" +
+      "background:var(--panel,#22343a);border:1px solid var(--card-line,#3a4b50);border-radius:9px;" +
+      "font-size:12px;letter-spacing:.02em";
+    inboxEl.prepend(bar);
+  } else {
+    inboxEl.prepend(bar);
+  }
+  bar.innerHTML = "";
+  const b = document.createElement("b");
+  b.textContent = approvedCount ? `${approvedCount} authorised` : "Nothing authorised yet";
+  b.style.color = approvedCount ? "var(--good,#4f8f52)" : "var(--ink-faint,#9aa9a4)";
+  bar.appendChild(b);
+  const rest = document.createElement("span");
+  rest.style.cssText = "opacity:.75;margin-left:8px";
+  rest.textContent = `\u00b7 ${__inboxSeen} memo${__inboxSeen === 1 ? "" : "s"} on the desk` +
+    (lastSym ? ` \u00b7 latest: ${lastSym}` : "");
+  bar.appendChild(rest);
 }
 inboxEl.innerHTML = `<p class="empty">Nothing on BIG M's desk yet.<br>Authorised orders land here.</p>`;
 
@@ -4289,6 +4319,7 @@ const api = (p, opts = {}) => fetch(API_BASE + p, { ...opts,
 }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
 
 const panel = document.getElementById("deskpanel");
+window.__deskPanelEl = panel;
 const tabDesk = document.getElementById("tab-desk");
 const tabTape = document.getElementById("tab-tape");
 const tabInbox = document.getElementById("tab-inbox");
@@ -4396,6 +4427,7 @@ async function loadRoom() {
 }
 
 function renderRoom() {
+  let panel = window.__deskPanelEl;          // shadowed so sections can fold into drawers
   if (!ROOM) return;
   panel.innerHTML = "";
 
@@ -4550,7 +4582,12 @@ function renderRoom() {
   pinRow.append(pinIn, pinAdd);
   panel.appendChild(pinRow);
 
-  // ── the nameplate: what a tenant gets to call things ──
+  // ── Naming is a one-time cosmetic act, not a daily control: it folds away so
+  //    the controls that change behaviour stay unburied. ──
+  const nameFold = foldSection("Naming \u00b7 floor, MD, desk");
+  panel.appendChild(nameFold.wrap);
+  const panelReal = panel;
+  panel = nameFold.body;                  // everything below lands in the fold
   panel.appendChild(mk("div", "dp-h", "Nameplate"));
   const idNow = ROOM.identity || {};
   const fIn = mk("input", "dp-in");
@@ -4605,8 +4642,13 @@ function renderRoom() {
     setTimeout(() => { save.textContent = "Save name"; loadRoom(); }, 900);
   });
 
-  // ── journal ──
-  panel.appendChild(mk("div", "dp-h", "Your journal"));
+  // ── the journal: history, not a control. Its own drawer. ──
+  panel = panelReal;
+  const jrnFold = foldSection(ROOM.runs.length
+    ? `Your journal \u2014 ${ROOM.runs.length} run${ROOM.runs.length === 1 ? "" : "s"}`
+    : "Your journal \u2014 no research yet");
+  panelReal.appendChild(jrnFold.wrap);
+  panel = jrnFold.body;
   if (!ROOM.runs.length) panel.appendChild(mk("p", "dp-note", "No research yet. Put the team on a token above."));
   for (const r of ROOM.runs) {
     const row = mk("div", "runrow");
@@ -4771,32 +4813,44 @@ async function loadCalls() {
 function renderCalls({ feed = [], settings, record }) {
   callsPanel.innerHTML = "";
 
-  // What the tenant NEEDS leads: the book, the tripwires, the live sheet.
-  // The machinery (budget, copy settings, executor) folds into one drawer.
-  callsPanel.appendChild(buildRecord(record, feed));
+  /* ── ORDER OF ATTENTION ────────────────────────────────────────────────────
+     This tab used to open with a book, a watch board, a live sheet AND a kill
+     list, all expanded, with the bot buried under the lot. Four lists is not a
+     dashboard, it is a filing cabinet. Now: ACT first (the bot), then a one-line
+     score, then the calls themselves. Everything a tenant reads only sometimes —
+     tripwires, kills, settings — folds into labelled drawers that carry their
+     own counts, so nothing is lost and nothing shouts. */
 
-  // Ordered containers, so the async lanes always land where they belong:
-  // book → watch board → live sheet → killed → the settings drawer.
-  const watchWrap = document.createElement("div");
-  const feedWrap = document.createElement("div");
-  const killWrap = document.createElement("div");
-  feedWrap.style.cssText = watchWrap.style.cssText = killWrap.style.cssText = "display:flex;flex-direction:column;gap:11px";
-  callsPanel.append(watchWrap, feedWrap, killWrap);
-  loadWatchboard(watchWrap);
-  loadKilled(killWrap);
-
-  // The bot first: it is the reason most people are on this tab.
+  // 1. ACT — the bot, first thing on the tab.
   if (settings) callsPanel.appendChild(buildBotCard(settings));
 
-  const drawer = document.createElement("details");
-  drawer.className = "dp-drawer";
-  const sum = document.createElement("summary");
-  sum.textContent = "More: risk settings \u00b7 budget \u00b7 self-hosted executor";
-  sum.style.cssText = "cursor:pointer;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;padding:8px 2px;opacity:.8";
-  drawer.appendChild(sum);
-  drawer.appendChild(buildBudget());
-  if (settings) drawer.appendChild(buildControls(settings));
-  callsPanel.appendChild(drawer);
+  // 2. SCORE — the whole book compressed to one readable line.
+  callsPanel.appendChild(buildScoreline(record, feed));
+
+  // 3. THE CALLS — the reason to be here.
+  const feedWrap = document.createElement("div");
+  feedWrap.style.cssText = "display:flex;flex-direction:column;gap:11px";
+  callsPanel.appendChild(feedWrap);
+
+  // 4. THE REST — folded, each drawer counting what is inside it.
+  const watch = foldSection("Watch board \u2014 armed tripwires");
+  const kill  = foldSection("Killed \u2014 the trades that did not happen");
+  callsPanel.append(watch.wrap, kill.wrap);
+  loadWatchboard(watch.body).then(() => {
+    const n = watch.body.querySelectorAll(".watchrow").length;
+    watch.label.textContent = n ? `Watch board \u2014 ${n} armed tripwire${n === 1 ? "" : "s"}` : "Watch board \u2014 nothing armed";
+    watch.body.querySelector(".dp-h")?.remove();          // the fold label already says it
+  });
+  loadKilled(kill.body).then(() => {
+    const n = kill.body.querySelectorAll(".killrow").length;
+    kill.label.textContent = n ? `Killed \u2014 ${n} shown` : "Killed \u2014 nothing yet";
+    kill.body.querySelector(".dp-h")?.remove();
+  });
+
+  const more = foldSection("More: risk settings \u00b7 budget \u00b7 self-hosted executor");
+  more.body.appendChild(buildBudget());
+  if (settings) more.body.appendChild(buildControls(settings));
+  callsPanel.appendChild(more.wrap);
 
   if (!feed.length) {
     const p = document.createElement("p");
@@ -4960,6 +5014,92 @@ function renderCalls({ feed = [], settings, record }) {
    Settlement is computed from the tenant's wallet on-chain, never self-reported:
    Sync scans their fills on every taken call and settles fully-closed positions.
    Without this box the whole back half of the trade loop was server-only. */
+/* One line instead of a card: settled, W-L, net P&L, and how many calls are
+   waiting on you. The old version spent a full panel on a heading, four stats,
+   a button and two notes before the reader saw a single call. */
+/* A fold that does not trust <details>. In at least one shipping engine a closed
+   <details> still lays its children out at full height — verified with a plain,
+   unstyled control element — so every "collapsed" drawer was silently rendering
+   its whole contents. That is precisely how the bot ended up buried. This does
+   the hiding explicitly, which works everywhere. */
+function foldSection(label, { open = false } = {}) {
+  const wrap = document.createElement("div");
+  wrap.className = "fold";
+  const head = document.createElement("button");
+  head.type = "button";
+  head.className = "fold-h";
+  head.setAttribute("aria-expanded", String(open));
+  head.style.cssText = "display:flex;align-items:center;gap:8px;width:100%;text-align:left;cursor:pointer;" +
+    "background:none;border:0;color:inherit;font:inherit;font-size:10.5px;letter-spacing:.14em;" +
+    "text-transform:uppercase;padding:9px 2px;opacity:.85";
+  const caret = document.createElement("span");
+  caret.textContent = open ? "\u25be" : "\u25b8";
+  caret.style.cssText = "font-size:11px;opacity:.7";
+  const text = document.createElement("span");
+  text.textContent = label;
+  head.append(caret, text);
+  const body = document.createElement("div");
+  body.style.cssText = "display:" + (open ? "flex" : "none") + ";flex-direction:column;gap:11px;padding-bottom:6px";
+  head.addEventListener("click", () => {
+    const now = body.style.display === "none";
+    body.style.display = now ? "flex" : "none";
+    caret.textContent = now ? "\u25be" : "\u25b8";
+    head.setAttribute("aria-expanded", String(now));
+  });
+  wrap.append(head, body);
+  return { wrap, head, body, label: text };
+}
+// The desk panel and the calls panel are separate <script type="module"> blocks
+// with separate scopes; both need this, so it goes on the window once.
+window.foldSection = foldSection;
+
+function buildScoreline(record, feed) {
+  const box = document.createElement("div");
+  box.className = "call";
+  box.style.cssText = "padding:11px 13px";
+  const r = record || { settled: 0, wins: 0, losses: 0, netPnlUsd: 0 };
+  const toPlace = (feed || []).filter((c) => c.verdict === "offered" && c.status === "live" && !c.taken).length;
+  const net = r.netPnlUsd ?? 0;
+
+  const line = document.createElement("div");
+  line.className = "nums";
+  const add = (k, v, col) => {
+    const s = document.createElement("span");
+    s.innerHTML = `${k} <b></b>`;
+    const b = s.querySelector("b"); b.textContent = v;
+    if (col) b.style.color = col;
+    line.appendChild(s);
+  };
+  add("Book", `${r.wins}\u2013${r.losses}`);
+  if (r.settled) add("Settled", String(r.settled));
+  add("Net", `$${net.toLocaleString()}`, net >= 0 ? "var(--good,#4f8f52)" : "var(--bad,#b0503f)");
+  add("To place", String(toPlace), toPlace ? "var(--amber,#e0ad3d)" : undefined);
+  box.appendChild(line);
+
+  const sync = document.createElement("button");
+  sync.className = "dp-btn ghost"; sync.type = "button"; sync.textContent = "Sync my fills";
+  sync.style.cssText = "margin-top:9px";
+  const msg = document.createElement("div"); msg.className = "dp-note";
+  sync.addEventListener("click", async () => {
+    sync.disabled = true; sync.textContent = "Reading your wallet\u2026";
+    try {
+      const { status, body } = await call_api(`/api/floor/${FLOOR_N}/sync`, { method: "POST", body: "{}" });
+      msg.textContent = status === 200
+        ? `Found ${body.fillsFound ?? 0} fill${body.fillsFound === 1 ? "" : "s"}, settled ${body.settled ?? 0}.`
+        : (body.error || "sync failed");
+      if (status === 200) setTimeout(loadCalls, 900);
+    } catch { msg.textContent = "Could not reach the desk."; }
+    sync.disabled = false; sync.textContent = "Sync my fills";
+  });
+  box.append(sync, msg);
+  if (r.feesUnpaidUsd > 0) {
+    const w = document.createElement("p"); w.className = "bud-warn";
+    w.textContent = `Performance fees owed: $${r.feesUnpaidUsd} \u2014 settled against your $CLAUDECO credit.`;
+    box.appendChild(w);
+  }
+  return box;
+}
+
 function buildRecord(record, feed) {
   const box = document.createElement("div");
   box.className = "call";
