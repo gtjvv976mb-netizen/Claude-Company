@@ -436,6 +436,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               minPairAgeHours: cfg.screen.minPairAgeHours,
               maxVolToLiqRatio: cfg.screen.maxVolToLiqRatio,
               maxFdvToLiqRatio: cfg.screen.maxFdvToLiqRatio,
+              maxMarketCapUsd: cfg.screen.maxMarketCapUsd ?? null,
               exitProbeSizeUsd: cfg.targetSizeUsd,
               maxRoundTripPct: cfg.maxRoundTripSlippagePct,
               oneCallAtATime: mandate.SEQUENTIAL,
