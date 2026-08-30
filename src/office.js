@@ -7,6 +7,11 @@ import { spend, spendSince } from "./lib/llm.js";
 import { cfg } from "./config.js";
 import * as store from "./lib/store.js";
 import db from "./lib/store.js";
+import crypto from "node:crypto";
+function cryptoTimingEqual(a, b) {
+  const ab = Buffer.from(String(a)), bb = Buffer.from(String(b));
+  return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
+}
 import * as tower from "./tower.js";
 import * as auth from "./auth.js";
 import * as leasing from "./leasing.js";
@@ -145,6 +150,39 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
       });
 
       try {
+        /* ── THE EXECUTOR FEED — a poller's read-only view of its floor's calls ──
+           A tenant's OWN executor (their machine, their keys) polls this to
+           learn what to trade. Authenticated by the floor's executor secret,
+           compared in constant time. Read-only: this endpoint never trades,
+           never signs, never touches a key — it just hands the bot the calls
+           the desk already published, with everything a trade needs. This is
+           how hands-off auto-trading stays non-custodial: the execution lives
+           in the tenant's process, not ours. */
+        const feedMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/executor\/feed$/);
+        if (feedMatch) {
+          const floorNo = Number(feedMatch[1]);
+          const secret = db.prepare("SELECT executor_secret FROM copy_settings WHERE floor_no=?").get(floorNo)?.executor_secret;
+          const auth = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+          const okAuth = secret && auth && (() => {
+            try { return cryptoTimingEqual(auth, secret); } catch { return false; }
+          })();
+          if (!okAuth) return json(401, { error: "bad or missing executor secret" });
+          const after = Number(url.searchParams.get("after") || 0);
+          const rows = db.prepare(`
+            SELECT a.id, a.kind, a.mint, a.urgency, a.created_at,
+                   c.symbol, c.entry_ref, c.stop, c.target, c.close_reason,
+                   (SELECT size_sol FROM deliveries d WHERE d.call_id=a.call_id AND d.floor_no=a.floor_no) AS size_sol
+            FROM alerts a LEFT JOIN calls c ON c.id=a.call_id
+            WHERE a.floor_no=? AND a.id > ? AND a.kind IN ('entry','exit')
+            ORDER BY a.id LIMIT 50`).all(floorNo, after);
+          return json(200, { cluster: "mainnet-beta", events: rows.map((r) => ({
+            id: r.id, type: r.kind, mint: r.mint, symbol: r.symbol,
+            side: r.kind === "entry" ? "buy" : "sell",
+            size_sol: r.size_sol ?? null, entry_ref: r.entry_ref, stop: r.stop, target: r.target,
+            code: r.close_reason ?? null, urgency: r.urgency, ts: r.created_at,
+          })) });
+        }
+
         /* One fixed, cheap RPC read for the one-signature buy: the public
            mainnet RPC 403s browsers, so the page gets its blockhash here,
            through the server's own RPC. Nothing user-controlled reaches the

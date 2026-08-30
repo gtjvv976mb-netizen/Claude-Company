@@ -29,10 +29,23 @@ Jupiter — buying on entry, selling everything on exit.
    ```
 5. When you trust it, flip `EXECUTE=1`.
 
-## Making it reachable
-The building needs a public https URL. Easiest: a free Cloudflare tunnel —
-`cloudflared tunnel --url http://localhost:8787` — then paste the printed URL into the
-executor panel. Or run it on any small VPS.
+## Two ways to run it
+
+**Recommended — the poller (`poller.mjs`): no public URL needed.**
+It polls your floor's calls over plain outbound HTTPS, so it runs *anywhere* — your
+laptop, a $4 VPS, a Raspberry Pi — with no tunnel and no exposed port. In the executor
+panel you can paste any https URL (even a dummy) just to mint your secret; the poller
+never receives webhooks.
+```bash
+CC_SECRET=<secret> CC_FLOOR=<your floor #> KEYPAIR=./burner.json MAX_SOL_PER_TRADE=0.05 DAILY_SOL_CAP=0.5 EXECUTE=0 node poller.mjs
+```
+Fund the burner, start it once, walk away — it trades your floor's calls hands-off.
+For 24/7 (so it trades while your laptop sleeps), put it on a tiny always-on VPS.
+
+**Alternative — the webhook receiver (`executor.mjs`): needs a public URL.**
+The building POSTs to it. Reachable via a Cloudflare tunnel
+(`cloudflared tunnel --url http://localhost:8787`) or a VPS, with the URL pasted into the
+executor panel. Same safety and caps; use this only if you'd rather receive pushes than poll.
 
 ## Knobs (env vars)
 | var | default | meaning |

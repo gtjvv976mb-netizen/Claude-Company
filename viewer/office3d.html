@@ -4775,7 +4775,7 @@ function buildControls(settings) {
   exec_.setAttribute("aria-label", "Executor webhook URL");
   box.appendChild(exec_);
   const execNote = mk("div", "dp-note",
-    "Point YOUR OWN trading bot here and it can auto-trade this floor's calls: every entry and exit POSTs as JSON, signed with the secret below (header x-cc-signature = HMAC-SHA256 of the raw body). The desk never holds your keys — your bot signs with its own.");
+    "Auto-trade this floor's calls WITHOUT giving up your keys. Run our open-source poller (executor/poller.mjs) anywhere with internet — no public URL needed — with the secret below and your own burner wallet: it fetches every entry and exit and trades them via Jupiter, within caps you set. Fund it, start it once, walk away. The desk never holds, signs, or sees your funds. (Paste any https URL below just to create your secret.)");
   box.appendChild(execNote);
   if (settings.executor_secret) {
     const sec = mk("div", "bud-addr");
