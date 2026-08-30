@@ -4202,6 +4202,7 @@ function fmtTape(e) {
 }
 
 let oldestChron = null, chronBusy = false, chronDone = false;
+let newestChron = 0;                       // the high-water mark the tape has rendered
 async function loadChronicle(before) {
   if (chronBusy || chronDone) return 0;
   chronBusy = true;
@@ -4240,6 +4241,7 @@ async function loadChronicle(before) {
     const { events = [] } = await r.json();
     if (!events.length || events[0].id == null) { chronDone = !!before; return 0; }
     oldestChron = events[0].id;
+    for (const e of events) if (e.id > newestChron) newestChron = e.id;
     if (events.length < 250) chronDone = true;
 
     const frag = document.createDocumentFragment();
@@ -4263,7 +4265,38 @@ async function loadChronicle(before) {
   finally { chronBusy = false; }
 }
 
+/* Everything the desk said while this page was NOT listening. The stream can
+   die quietly — a proxy timeout, a sleeping laptop, a dropped network — and
+   before this the tape simply stopped while the desk kept working and kept
+   spending. Called on every (re)connect: pull by id from the high-water mark
+   and append, so a gap closes itself instead of vanishing. */
+async function fillChronicleGap() {
+  if (!newestChron) return 0;
+  try {
+    const base = window.__API_BASE__ || "";
+    const q = new URLSearchParams({ limit: "250", exclude: "world:", since: String(newestChron) });
+    const fp = location.pathname.match(/\/floor\/(\d+)/) || location.search.match(/[?&]floor=(\d+)/);
+    if (fp) q.set("floor", fp[1]);
+    const tk = (() => { try { return localStorage.getItem("cc_token"); } catch { return null; } })();
+    const r = await fetch(`${base}/api/chronicle?${q}`,
+      tk ? { headers: { authorization: "Bearer " + tk } } : undefined);
+    if (!r.ok) return 0;
+    const { events = [] } = await r.json();
+    if (!events.length) return 0;
+    const atBottom = tapeEl.scrollHeight - tapeEl.scrollTop - tapeEl.clientHeight < 60;
+    for (const e of events) {                       // oldest → newest
+      if (e.id <= newestChron) continue;
+      newestChron = e.id;
+      const f = fmtTape(e);
+      if (f) tapeEl.appendChild(tapeRow(f[0], f[1], f[2], e.ts));
+    }
+    if (atBottom) tapeEl.scrollTop = tapeEl.scrollHeight;
+    return events.length;
+  } catch { return 0; }
+}
 window.loadChronicle = loadChronicle;
+window.__fillGap = fillChronicleGap;
+window.__rewindTape = (n = 30) => { newestChron = Math.max(0, newestChron - n); return newestChron; };
 tapeEl.addEventListener("scroll", () => {
   if (tapeEl.scrollTop < 40 && oldestChron) loadChronicle(oldestChron);
 });
@@ -5092,8 +5125,9 @@ if (location.search.includes("demo")) {
   // The tenant's token rides the stream URL so the server can tell owner from
   // visitor; the token comes from the same origin the stream goes to.
   const sid = (() => { try { return localStorage.getItem("cc_token"); } catch { return null; } })();
-  const es = new EventSource((window.__API_BASE__ || "") +
-    (floorParam ? `/events?floor=${floorParam}${sid ? "&sid=" + encodeURIComponent(sid) : ""}` : "/events"));
+  const streamUrl = (window.__API_BASE__ || "") +
+    (floorParam ? `/events?floor=${floorParam}${sid ? "&sid=" + encodeURIComponent(sid) : ""}` : "/events");
+  let es = new EventSource(streamUrl);
   let ok = false;
   let backfilled = false;
   es.addEventListener("hello", (m) => {
@@ -5166,8 +5200,51 @@ if (location.search.includes("demo")) {
     if (!backfilled) { backfilled = true;
       window.loadChronicle?.().then(() => { tapeEl.scrollTop = tapeEl.scrollHeight; }); }
     tape("Floor", "Connected to the desk."); });
-  es.onmessage = (m) => { try { handle(JSON.parse(m.data)); } catch {} };
-  es.onerror = () => { if (!ok) { es.close(); goSim("no desk process on this origin"); } };
+  let lastBeat = Date.now();
+  es.onmessage = (m) => { lastBeat = Date.now(); try { handle(JSON.parse(m.data)); } catch {} };
+  es.onerror = () => {
+    if (!ok) { es.close(); goSim("no desk process on this origin"); return; }
+    // Connected once, then dropped: EventSource retries on its own, but the
+    // tape used to sit there silently while the desk kept working (and kept
+    // spending). Say so, and let the watchdog below close the gap.
+    liveEl.classList.add("sim");
+    liveText.textContent = "Reconnecting\u2026";
+  };
+  // On any (re)open the desk re-greets us — take that as the all-clear and
+  // pull whatever was missed.
+  es.addEventListener("hello", () => {
+    lastBeat = Date.now();
+    liveEl.classList.remove("sim");
+    liveText.textContent = "Live";
+    if (backfilled) fillChronicleGap();
+  });
+  /* THE WATCHDOG. The server pings every 15s, but a half-open socket answers
+     nothing and never errors — the classic way a live page goes quietly stale.
+     Two minutes of silence and we rebuild the stream ourselves. */
+  setInterval(async () => {
+    if (document.hidden) return;                    // a hidden tab is allowed to be quiet
+    const quiet = Date.now() - lastBeat;
+    if (quiet < 120000) return;
+    lastBeat = Date.now();                          // don't stampede
+    liveText.textContent = "Reconnecting\u2026";
+    // Rebuild the socket in place. NOT a page reload: if the desk itself is
+    // down, a reloading page would spin forever and take the whole office
+    // with it — this just keeps trying quietly and fills the gap on success.
+    try { es.close(); } catch {}
+    await fillChronicleGap();
+    try {
+      const next = new EventSource(streamUrl);
+      next.onmessage = es.onmessage;
+      next.onerror = es.onerror;
+      next.addEventListener("hello", () => {
+        lastBeat = Date.now();
+        liveEl.classList.remove("sim");
+        liveText.textContent = "Live";
+        fillChronicleGap();
+      });
+      es = next;
+    } catch {}
+  }, 30000);
   setTimeout(() => { if (!ok) { es.close(); goSim("desk did not answer"); } }, 2500);
 } else {
   goSim("opened as a file");
