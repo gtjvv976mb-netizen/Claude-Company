@@ -2312,10 +2312,38 @@ const bossBoard = (() => {
   const frame = new THREE.Mesh(new THREE.BoxGeometry(5.72, 3.47, 0.12),
     new THREE.MeshStandardMaterial({ color: 0x5f3e29, roughness: 0.82 }));
   frame.position.set(0, 2.85, -HALF_D + 0.03);
+  // The rug is the brain's LOGO, not a colour swatch: the Claude spark on cream,
+  // or the Grok X in monochrome — you read whose office this is from across the room.
+  const rugC = document.createElement("canvas"); rugC.width = rugC.height = 512;
+  const rugTex = new THREE.CanvasTexture(rugC);
+  rugTex.colorSpace = THREE.SRGBColorSpace;
   const rug = new THREE.Mesh(new THREE.CircleGeometry(2.0, 40),
-    new THREE.MeshStandardMaterial({ color: 0xd97757, roughness: 0.94 }));
+    new THREE.MeshStandardMaterial({ map: rugTex, color: 0xffffff, roughness: 0.94 }));
   rug.rotation.x = -Math.PI / 2;
   rug.position.set(0, DAIS_Y + 0.015, -10.2);
+  window.__drawBrainRug = (brain) => {
+    const x = rugC.getContext("2d"), S = 512, c = S / 2;
+    if (brain === "grok") {
+      // the broken X, white on charcoal
+      x.fillStyle = "#121316"; x.fillRect(0, 0, S, S);
+      x.strokeStyle = "#f2f2f4"; x.lineCap = "butt"; x.lineWidth = 46;
+      const seg = (a, b, d, e) => { x.beginPath(); x.moveTo(a, b); x.lineTo(d, e); x.stroke(); };
+      seg(168, 380, 380, 122);          // the long beam
+      seg(132, 122, 246, 262);          // upper crossing beam…
+      seg(300, 328, 380, 380);          // …finishing past the gap
+    } else {
+      // the Claude spark: coral rays on cream
+      x.fillStyle = "#f4ecd8"; x.fillRect(0, 0, S, S);
+      x.strokeStyle = "#d97757"; x.lineCap = "round"; x.lineWidth = 42;
+      for (let i = 0; i < 9; i++) {
+        x.save(); x.translate(c, c); x.rotate((i / 9) * Math.PI * 2 + 0.25);
+        x.beginPath(); x.moveTo(34, 0); x.lineTo(158, 0); x.stroke();
+        x.restore();
+      }
+    }
+    rugTex.needsUpdate = true;
+  };
+  window.__drawBrainRug("claude");
   // NOT into room: the static bake merges and clears room children after
   // build, and it swallowed the first version of this board whole. The scene
   // itself is never baked.
@@ -2395,7 +2423,7 @@ try { document.fonts.load('700 52px Caveat').then(() => drawBossBoard()); } catc
 function applyBrainRoom(brain) {
   const L = BRAIN_LOOKS[brain] ?? BRAIN_LOOKS.claude;
   bossBoard.frame.material.color.set(L.frame);
-  bossBoard.rug.material.color.set(L.rug);
+  window.__drawBrainRug?.(brain);
   // The boss is ALWAYS the boss (the tenant's own MD). Grok is a separate agent —
   // the Assistant Director who works the trades — so a brain change opens or closes
   // HIS office rather than redressing the corner office.
@@ -2923,7 +2951,10 @@ const grokBoard = (() => {
   tex.colorSpace = THREE.SRGBColorSpace;
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 1.75),
     new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
-  mesh.position.set(O.cx, GROX_DAIS + 2.0, O.z0 + 0.28);
+  // 0.32, not 0.28: the frame box's front face sits at +0.29, and at +0.28 the
+  // board plane was BURIED INSIDE THE FRAME — a wall that drew perfectly into a
+  // canvas nobody could see. The boss board's 7cm proud is the pattern.
+  mesh.position.set(O.cx, GROX_DAIS + 2.0, O.z0 + 0.32);
   const frame = new THREE.Mesh(new THREE.BoxGeometry(3.22, 1.97, 0.1),
     new THREE.MeshStandardMaterial({ color: 0x232427, roughness: 0.7, metalness: 0.25 }));
   frame.position.set(O.cx, GROX_DAIS + 2.0, O.z0 + 0.24);
@@ -2990,8 +3021,8 @@ function drawGrokBoard() {
 
   const pos = grokBook.positions || [];
   if (!pos.length) {
-    x.fillStyle = "#6b7075";
-    x.font = '500 24px "JetBrains Mono", ui-monospace, monospace';
+    x.fillStyle = "#c8ccd0";
+    x.font = '700 30px "JetBrains Mono", ui-monospace, monospace';
     x.textAlign = "center";
     x.fillText(grokOnDuty ? "THE BOOK IS FLAT" : "OFF DUTY \u2014 ASLEEP", W / 2, 126);
 
