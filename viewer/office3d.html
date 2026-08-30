@@ -860,7 +860,7 @@ const STAFF = [
   // Assistant Director who works the trades, in his own suite BESIDE the boss's:
   // same architecture, smaller, X-dark. Only appears when this floor's brain is
   // Grok (see __setGrokPresent). He never roams — like the CEO, he keeps his room.
-  { id:"GrokAD",     name:"GROX MULDER", role:"Assistant Director — works the trades", desk:[9.2,-10.8], stand:[9.2,-9.7], y:0.22, apron:0x2a2c30, grok:true },
+  { id:"GrokAD",     name:"GROX MULDER", role:"Assistant Director — works the trades", desk:[7.78,-10.8], stand:[7.78,-9.7], y:0.22, apron:0x2a2c30, grok:true },
 ];
 
 /** seat id -> crew name, for anything arriving from the server keyed by id. */
@@ -2664,7 +2664,7 @@ const bakedBuckets = bakeStatic(room);
    you see it you know a different house is trading beside the corner office. His
    BOARD carries the positions — the book he is actually working — and a row of
    tickets on the desk shows each open trade as its own object. */
-const GROK_OFFICE = { x0: 6.5, x1: 11.9, z0: -12.5, z1: -8.6, cx: 9.2 };
+const GROK_OFFICE = { x0: 5.9, x1: 9.65, z0: -12.5, z1: -8.6, cx: 7.78 };  // ends clear of the 11.2 window's mullion
 const GROX_DAIS = 0.22;                           // a step up — but under the boss's 0.35
 const grokOffice = new THREE.Group();
 grokOffice.visible = false;                       // shown only on a Grok desk
@@ -2690,7 +2690,7 @@ const grokBoard = (() => {
     color: 0x9fb4bd, transmission: 0.42, transparent: true, opacity: 0.34,
     roughness: 0.16, thickness: 0.05, metalness: 0,
   });
-  for (const [cx, w] of [[O.cx - 1.75, 1.9], [O.cx + 1.75, 1.9]]) {
+  for (const [cx, w] of [[O.cx - 1.29, 1.18], [O.cx + 1.29, 1.18]]) {
     const pane = new THREE.Mesh(BOX, glassMat);
     pane.scale.set(w, 2.5, 0.1); pane.position.set(cx, GROX_DAIS + 1.25, O.z1);
     grokOffice.add(pane);
@@ -2698,9 +2698,9 @@ const grokBoard = (() => {
     box(grokOffice, [0.12, 2.6, 0.22], [cx + w / 2, GROX_DAIS + 1.3, O.z1], edge, 0.55, 0.3);
   }
   // steel door frame over the gap — the boss's is brass
-  box(grokOffice, [0.14, 2.7, 0.28], [O.cx - 0.8, GROX_DAIS + 1.35, O.z1], edge, 0.45, 0.4);
-  box(grokOffice, [0.14, 2.7, 0.28], [O.cx + 0.8, GROX_DAIS + 1.35, O.z1], edge, 0.45, 0.4);
-  box(grokOffice, [1.9, 0.2, 0.32], [O.cx, GROX_DAIS + 2.66, O.z1], edge, 0.45, 0.4);
+  box(grokOffice, [0.14, 2.7, 0.28], [O.cx - 0.7, GROX_DAIS + 1.35, O.z1], edge, 0.45, 0.4);
+  box(grokOffice, [0.14, 2.7, 0.28], [O.cx + 0.7, GROX_DAIS + 1.35, O.z1], edge, 0.45, 0.4);
+  box(grokOffice, [1.68, 0.2, 0.32], [O.cx, GROX_DAIS + 2.66, O.z1], edge, 0.45, 0.4);
   // side sills, like the suite's
   box(grokOffice, [0.34, 0.45, D], [O.x0, GROX_DAIS + 0.22, zc], 0x1b1c1e, 0.88);
   box(grokOffice, [0.34, 0.45, D], [O.x1, GROX_DAIS + 0.22, zc], 0x1b1c1e, 0.88);
@@ -2714,7 +2714,7 @@ const grokBoard = (() => {
   for (const a of [Math.PI / 4, -Math.PI / 4]) {
     const bar = new THREE.Mesh(BOX, new THREE.MeshStandardMaterial({
       color: 0xf2f2f4, roughness: 0.6, emissive: new THREE.Color(0x6a6d72), emissiveIntensity: 0.22 }));
-    bar.scale.set(2.6, 0.014, 0.16);
+    bar.scale.set(2.2, 0.014, 0.16);
     bar.position.set(O.cx, GROX_DAIS + 0.02, zc + 0.35);
     bar.rotation.y = a;
     grokOffice.add(bar);
@@ -2734,10 +2734,10 @@ const grokBoard = (() => {
   const c = document.createElement("canvas"); c.width = 768; c.height = 448;
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 1.98),
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 1.75),
     new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
   mesh.position.set(O.cx, GROX_DAIS + 2.0, O.z0 + 0.28);
-  const frame = new THREE.Mesh(new THREE.BoxGeometry(3.62, 2.2, 0.1),
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(3.22, 1.97, 0.1),
     new THREE.MeshStandardMaterial({ color: 0x232427, roughness: 0.7, metalness: 0.25 }));
   frame.position.set(O.cx, GROX_DAIS + 2.0, O.z0 + 0.24);
   grokOffice.add(mesh, frame);
