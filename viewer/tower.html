@@ -59,7 +59,24 @@ button.home.on{background:var(--good,#4f8f52);color:#fff;border-color:transparen
 .msg.err{color:var(--bad,#b0503f)} .msg.ok{color:var(--good,#4f8f52)}
 
 .wrap{display:grid;grid-template-columns:minmax(0,1fr) 340px;height:calc(100vh - 58px)}
-@media (max-width:980px){.wrap{grid-template-columns:1fr}.rail{display:none}}
+/* MOBILE: hiding the rail deleted the entire lease flow on phones. The page
+   becomes a column instead — tower on top, directory and leasing beneath it —
+   and the masthead compacts so nothing wraps or clips. */
+@media (max-width:980px){
+  .wrap{grid-template-columns:1fr; grid-template-rows:46vh minmax(0,1fr); height:auto; min-height:calc(100vh - 50px)}
+  .rail{display:flex; border-left:none; border-top:1px solid var(--panel-line)}
+  #stage{min-height:46vh}
+  .topbar{padding:8px 10px; gap:8px; flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none}
+  .topbar::-webkit-scrollbar{display:none}
+  .firm{font-size:18px; flex:none}
+  .tag{display:none}
+  .stat{font-size:10px; flex:none}
+  .stat b{font-size:11px}
+  .home{font-size:9.5px; padding:4px 8px; flex:none}
+  .hint{font-size:8.5px}
+  .row{font-size:12px}
+  body{overflow:auto}
+}
 #stage{position:relative;min-width:0;overflow:hidden}
 #stage canvas{display:block;width:100%;height:100%;cursor:grab}
 #stage canvas.dragging{cursor:grabbing}
@@ -117,7 +134,7 @@ button.home.on{background:var(--good,#4f8f52);color:#fff;border-color:transparen
   <aside class="rail">
     <div class="railhead">
       <h2>The Directory</h2>
-      <p>Every floor is one desk: fourteen agents researching Solana, and a CEO who signs.</p>
+      <p>Every floor is one desk: sixteen agents researching Solana, and a boss who signs off.</p>
     </div>
     <div class="wallet" id="wallet"></div>
     <div class="sel" id="sel"></div>
