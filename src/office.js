@@ -25,6 +25,7 @@ import * as leasing from "./leasing.js";
 import * as rooms from "./rooms.js";
 import * as calls from "./calls.js";
 import * as mandate from "./mandate.js";
+import "./devrep.js";   // creates dev_reputation; the overview counts it
 import * as copy from "./copy.js";
 import * as perf from "./perf.js";
 import * as alerts from "./alerts.js";
@@ -441,6 +442,19 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               maxRoundTripPct: cfg.maxRoundTripSlippagePct,
               oneCallAtATime: mandate.SEQUENTIAL,
               maxLiveCalls: mandate.MAX_LIVE_CALLS,
+              /* What each seat is actually worth to the composite. Published because
+               * "we reweighted the desk toward the X read" is a claim about a running
+               * process, and the only honest way to check it is to read the numbers
+               * that process is holding. */
+              seatWeights: cfg.weights,
+            },
+            /* THE DEVELOPER LEDGER — what the desk remembers about who launched a coin.
+             * It starts empty and fills as the desk works, so this is also the simplest
+             * proof that the ledger deployed at all. */
+            devLedger: {
+              tracked: q("SELECT COUNT(*) n FROM dev_reputation"),
+              ruggers: q("SELECT COUNT(*) n FROM dev_reputation WHERE verdict='serial_rugger'"),
+              suspects: q("SELECT COUNT(*) n FROM dev_reputation WHERE verdict='suspect'"),
             },
             /* WHERE THE DESK ACTUALLY LANDS. "144 kills, 0 calls" says the gate held,
              * but not WHICH seat held it — and under the mandate that distinction is
