@@ -1448,6 +1448,27 @@ const COSTUME_PAL = {
    Centres are in world REST space, same convention as BODY: the figure stands
    ~1.8 tall, the head cube sits at y=1.62, +X is the face, +Z is its left.      */
 const FIGURE = {
+  /* GROX MULDER — the mascot head sits on a proper business suit, per the art:
+     charcoal-navy jacket, white shirt showing at the collar and placket, dark
+     tie. The rig faces +X, so the shirt and tie are thin slabs stood proud of
+     the chest's front face (x 0.12) rather than colour on the torso itself. */
+  GrokAD: {
+    pal: { shirt: 0x1e2635, trousers: 0x171d29, apron: 0x1e2635,
+           boots: 0x0d0f14, skin: 0x1e2635 },
+    drop: ["apron"],
+    body: [
+      // Width here is Z, not X — the rig faces +X, so these are thin slabs stood
+      // proud of the chest's front face. The first pass used a tie only a shade
+      // off the jacket, so the shirt read as a smudge; the white now carries it.
+      ["Chest", [0.030, 0.24, 0.21], [0.137, 1.285, 0], 0xf6f4ef],     // shirt front
+      ["Chest", [0.034, 0.06, 0.080], [0.140, 1.392, 0.078], 0xf6f4ef], // collar, left
+      ["Chest", [0.034, 0.06, 0.080], [0.140, 1.392, -0.078], 0xf6f4ef],// collar, right
+      ["Chest", [0.030, 0.17, 0.056], [0.156, 1.275, 0], 0x7c2733],    // tie, knot to chest
+      ["Spine", [0.030, 0.13, 0.048], [0.150, 1.12, 0], 0x7c2733],     // tie, tail
+      ["Chest", [0.034, 0.040, 0.066], [0.158, 1.376, 0], 0x8e2f3c],   // the knot
+    ],
+  },
+
   // Austin Powerz — A violet column topped by a brown mop 0.68 across — wider than his 0.65 shoulder span, so the hair breaks the shoulder line before anything else resolves; under it a near-black bar across the eyes, a cream frill cascading down the chest, and cream cuffs at both wrists that keep him identifiable from behind
   Scout: {
     pal: { skin: 0xd9a97f, hair: 0x8f5f30, shirt: 0x7a4fa3, trousers: 0x6a4392, boots: 0x33263a },
@@ -2116,8 +2137,11 @@ function buildAvatar(spec, index) {
      shadows with the rest of the floor, and so the slots stay put when the rig
      turns. The rig faces +X, so the slots sit on the +X face of the orb. */
   if (grok) {
-    const HEAD_Y = 1.645 - JOINT_REST.Head[1];        // world rest -> bone-local
-    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.185, 22, 18),
+    // The mascot's head is oversized — close to shoulder width in the art, not
+    // the 0.30 skull the other seats wear. Raised as well as widened, so the
+    // bottom of the orb meets the neck (1.42) instead of swallowing it.
+    const HEAD_Y = 1.745 - JOINT_REST.Head[1];        // world rest -> bone-local
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.285, 26, 20),
       new THREE.MeshStandardMaterial({ color: 0xf3f3f5, roughness: 0.38, metalness: 0.02 }));
     orb.position.set(0, HEAD_Y, 0);
     orb.castShadow = renderer.shadowMap.enabled;
@@ -2129,17 +2153,20 @@ function buildAvatar(spec, index) {
     // The forward offset is DERIVED, not guessed: a slot placed at a flat x sits
     // inside the curve and vanishes into the orb (measured: 0.165 from centre on
     // a 0.185 sphere). Solving for the surface puts every slot proud of it.
-    const SKIN = 0.192;
+    const SKIN = 0.294;
     const slot = (dz, dy, len, tilt) => {
       const fwd = Math.sqrt(Math.max(0.0001, SKIN * SKIN - dz * dz - dy * dy));
-      const g = new THREE.Mesh(new THREE.CapsuleGeometry(0.027, len, 6, 12), slotMat);
+      const g = new THREE.Mesh(new THREE.CapsuleGeometry(0.034, len, 6, 14), slotMat);
       g.position.set(fwd, HEAD_Y + dy, dz);
       g.rotation.x = tilt;                            // lean, in the face plane
       joints.Head.add(g);
       return g;
     };
-    slot( 0.070, -0.010, 0.072, -0.40);               // rig-left eye, lower
-    slot(-0.058,  0.028, 0.060, -0.40);               // rig-right eye, higher
+    // Proportions taken off the mascot art: two UPRIGHT slots, equal size, set
+    // symmetrically and a touch above the equator. The earlier angled pair came
+    // from a smaller reference and read as a squint.
+    slot( 0.095, 0.030, 0.088, 0);                    // rig-left eye
+    slot(-0.095, 0.030, 0.088, 0);                    // rig-right eye
     spark = orb;                                      // the head IS his mark
   } else if (claude) {
     // Claude's coral spark, worn where a face would be. The rig faces +X and the
