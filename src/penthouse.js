@@ -4,7 +4,7 @@ import { workup } from "./desk.js";
 import { openCall, liveCalls, liveCallFor, evaluateExit, closeCall, noteEvent } from "./calls.js";
 import { broadcast } from "./copy.js";
 import { announceExit } from "./alerts.js";
-import { listFloors } from "./tower.js";
+import { listFloors, HQ_FLOOR } from "./tower.js";
 import { emit, runFor } from "./lib/bus.js";
 import db from "./lib/store.js";
 import { spend, OutOfCredit, spendSince } from "./lib/llm.js";
@@ -411,7 +411,21 @@ function publishCall(rec, { category = null, launchpad: pad = null, wx = null } 
     // when nothing was approved. Both are legitimate, and they are not the same
     // thing, so the difference goes on the call rather than into a footnote.
     noteEvent(call.id, "mandate", `${e.reason} (tier ${e.tier})`, call.entry_ref);
-    const floors = listFloors().filter((f) => f.state === "owned").map((f) => f.n);
+    /* THE HOUSE TRADES ITS OWN CALLS TOO.
+     *
+     * `owned` alone meant floor 50 — the HQ, whose state is 'hq' because it is never
+     * for sale — was the one floor that never received the calls it had just written.
+     * The desk published for everybody except itself, so the house could not put a
+     * cent behind its own research and had no skin in the game its tenants took on.
+     *
+     * The HQ is fed through exactly the same road as a tenant: a delivery row, its own
+     * copy settings, its own executor secret, and a poller the owner runs on their own
+     * machine with their own wallet. The server gains no key and no custody by this —
+     * it still only publishes rows. What changes is that the house eats its own
+     * cooking, and its results land in the same graded record as everyone else's. */
+    const floors = listFloors()
+      .filter((f) => f.state === "owned" || f.n === HQ_FLOOR)
+      .map((f) => f.n);
     if (floors.length) broadcast(call.id, floors);
     emit("call:published", { callId: call.id, symbol: call.symbol, tier: e.tier, why: e.reason });
     return { outcome: "published", callId: call.id, tier: e.tier };

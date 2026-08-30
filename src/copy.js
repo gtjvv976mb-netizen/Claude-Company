@@ -83,7 +83,23 @@ ensureColumn("deliveries", "size_sol", "REAL", "size_usd");
 export function settingsFor(floorNo) {
   let s = db.prepare("SELECT * FROM copy_settings WHERE floor_no=?").get(floorNo);
   if (!s) {
-    db.prepare("INSERT INTO copy_settings (floor_no, updated_at) VALUES (?,?)").run(floorNo, Date.now());
+    /* The HQ is the memecoin desk. Seeding it 'balanced' — whose own note reads
+     * "Everything but pure memecoins" — would have the house skip 100% of the calls
+     * it had just written: not a cautious risk setting, a floor that cannot work.
+     * Tenants keep the cautious default and choose for themselves. */
+    const appetite = floorNo === 50 ? "aggressive" : "balanced";
+    db.prepare("INSERT INTO copy_settings (floor_no, appetite, updated_at) VALUES (?,?,?)")
+      .run(floorNo, appetite, Date.now());
+    s = db.prepare("SELECT * FROM copy_settings WHERE floor_no=?").get(floorNo);
+  }
+  /* THE FEED SECRET IS MINTED ON DEMAND, NOT AS A SIDE EFFECT OF A WEBHOOK.
+   * It previously appeared only when a tenant set an executor_url — but the shipped
+   * bot POLLS /executor/feed and never receives a webhook, so the documented path
+   * could not obtain the credential it is authenticated by. Every floor gets one the
+   * first time its settings are read; it is revealed only to that floor's owner. */
+  if (!s.executor_secret) {
+    db.prepare("UPDATE copy_settings SET executor_secret=? WHERE floor_no=? AND executor_secret IS NULL")
+      .run(crypto.randomBytes(24).toString("hex"), floorNo);
     s = db.prepare("SELECT * FROM copy_settings WHERE floor_no=?").get(floorNo);
   }
   const preset = APPETITES[s.appetite] ?? APPETITES.balanced;
