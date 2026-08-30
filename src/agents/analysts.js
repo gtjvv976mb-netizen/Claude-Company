@@ -173,6 +173,28 @@ How to weigh them:
 - If xRead is missing or errored, say so plainly and drop your confidence. Never
   reason about a dev you did not see, and never invent a follower count or a prior rug.
 
+THEN READ THE MOMENT. The same xRead carries the zeitgeist fields, and a memecoin is a
+bet that a piece of culture is about to matter MORE than it does now. Read: story_is_true,
+truth_note, significance, trend_name, trend_stage, seasonal_hook, season_window,
+live_event, event_still_unfolding, emerging_trends, early_or_late.
+
+How to weigh them:
+- story_is_true = false is close to disqualifying on its own. A coin about an event that
+  did not happen, or a quote never said, has a thesis with nothing under it — however
+  well the chart is behaving.
+- SIZE AND STAGE MULTIPLY. A major story at "emerging" is the entire business. The same
+  story at "fading" is somebody else's exit, and a niche in-joke at "peaking" was never
+  worth a seat. Always say which of those two you are looking at.
+- CALENDAR WINDOWS CLOSE ON KNOWN DATES. A Halloween coin in September is early; the
+  same coin on November 2nd is a holding nobody wants. If season_window is "closing",
+  the trade has a deadline that has already passed.
+- A live event that has FINISHED has no surprise left in it. event_still_unfolding is
+  the difference between a catalyst and a memory.
+- emerging_trends is intelligence even when this coin belongs to none of them — it is
+  what the market is actually looking at today. Report it either way.
+- early_or_late decides the money. Being late to a TRUE story about a MAJOR event still
+  loses, and it is the most common way a sound thesis becomes a bad trade.
+
 You may also search the web. Use it to establish:
 - What this token actually claims to be, and whether anything backs the claim.
 - THE LORE TEST: is the story ORIGINAL and ORGANIC — a real joke, a real event, a real

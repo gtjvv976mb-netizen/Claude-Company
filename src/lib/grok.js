@@ -151,8 +151,41 @@ export async function grokXRead({ symbol, mint, hook = "" }) {
         `- Are they PAYING for attention? One wording repeated across accounts with no ` +
         `shared community, sudden reply swarms, engagement pods. A coin that has to buy ` +
         `its attention does not have any.\n\n` +
+        `THEN READ THE MOMENT. A memecoin is a bet that a piece of culture is about to ` +
+        `matter more than it does right now, so the second question after "who is ` +
+        `promoting this" is "is the thing it references real, is it big, and is it ` +
+        `EARLY". Judge:\n` +
+        `- IS THE STORY TRUE? A coin about an event that did not happen, a quote never ` +
+        `said, or a person who is not involved has a thesis with nothing under it. ` +
+        `Check the claim, do not repeat it.\n` +
+        `- HOW BIG IS THE THING ITSELF? A niche in-joke and a story on every front page ` +
+        `are different sizes of opportunity. Say which this is.\n` +
+        `- WHERE IN THE ARC? The same true story is a different trade depending on ` +
+        `whether it broke an hour ago or has been traded for a week. Being late to a real ` +
+        `story still loses money.\n` +
+        `- SEASON AND CALENDAR. Halloween, Christmas, an election, a sports final, a ` +
+        `product launch, a court date. These have windows that OPEN and CLOSE on known ` +
+        `dates — say whether this one is opening, peaking, or already closing, and name ` +
+        `the date if there is one.\n` +
+        `- WEATHER AND LIVE EVENTS. Hurricanes, eclipses, disasters and freak weather ` +
+        `reliably spawn coins. If this rides one, is the event still unfolding or over? ` +
+        `An event that has finished has no more surprise left in it.\n` +
+        `- WHAT IS EMERGING RIGHT NOW. Independently of this coin: which memes, formats ` +
+        `or themes are RISING on X today, and does this one belong to any of them? A coin ` +
+        `at the front of a wave and a coin at the back look identical on a chart.\n\n` +
         `Then answer with ONLY a JSON object:\n` +
         `{"mentions_level":"none|low|building|hot",` +
+        `"story_is_true":<true|false|null — is the referenced event/claim real and checkable>,` +
+        `"truth_note":"what you actually verified, or why you could not",` +
+        `"significance":"niche|notable|major|global",` +
+        `"trend_name":"the meta or wave this belongs to, or null",` +
+        `"trend_stage":"emerging|building|peaking|fading|none",` +
+        `"seasonal_hook":"the season, holiday, event or date it rides, or null",` +
+        `"season_window":"opening|peak|closing|none",` +
+        `"live_event":"an unfolding event it rides (weather, disaster, sport), or null",` +
+        `"event_still_unfolding":<true|false|null>,` +
+        `"emerging_trends":["themes rising on X right now, whether or not this coin is in them"] (max 4),` +
+        `"early_or_late":"early|on_time|late",` +
         `"velocity":"rising|flat|fading",` +
         `"distinct_voices":<true if several PRE-EXISTING accounts discuss it in their own words, false if one script is pasted everywhere>,` +
         `"dev_handle":"the creator/promoter X handle, or null if not found",` +
