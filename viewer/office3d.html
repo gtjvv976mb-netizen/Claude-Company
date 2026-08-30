@@ -835,7 +835,7 @@ scene.add(room);
 
   // Back glazing + teal mullions, above the far sill only.
   const glass = new THREE.MeshPhysicalMaterial({
-    color: P.glassAqua, transmission: 0.35, transparent: true, opacity: 0.56,
+    color: P.glassAqua, transmission: 0.55, transparent: true, opacity: 0.34,
     roughness: 0.18, metalness: 0.05,
   });
   for (const x of [-14.4, -11.2, 11.2, 14.4]) {
@@ -1183,7 +1183,7 @@ function buildPlant(at) {
   // because the old half-kerbs were ghosts the whole floor walked straight through.
   // One doorway on the south side (x 5.9–8.1) is the way in; the east end is open.
   const wallGlass = new THREE.MeshPhysicalMaterial({
-    color: P.glassAqua, transmission: 0.4, transparent: true, opacity: 0.38, roughness: 0.15 });
+    color: P.glassAqua, transmission: 0.72, transparent: true, opacity: 0.14, roughness: 0.1 });
   const wallSeg = (w, d, cx, cz) => {
     box(g, [w, 0.9, d], [cx, 0.45, cz], P.wall, 0.88);
     box(g, [w + 0.04, 0.06, d + 0.04], [cx, 0.93, cz], TIMBER, 0.6);   // timber cap
@@ -1258,7 +1258,7 @@ function buildPlant(at) {
 
   // front glass, flanking a 2.6-wide brass doorway
   const glass = new THREE.MeshPhysicalMaterial({
-    color: P.glassAqua, transmission: 0.4, transparent: true, opacity: 0.42,
+    color: P.glassAqua, transmission: 0.72, transparent: true, opacity: 0.16,
     roughness: 0.14, metalness: 0.05,
   });
   for (const [cx, w] of [[-3.55, 3.9], [3.55, 3.9]]) {
@@ -2902,7 +2902,7 @@ const grokBoard = (() => {
 
   // ── front glass flanking a doorway, exactly the suite's language in his colours
   const glassMat = new THREE.MeshPhysicalMaterial({
-    color: 0x9fb4bd, transmission: 0.42, transparent: true, opacity: 0.34,
+    color: 0x9fb4bd, transmission: 0.72, transparent: true, opacity: 0.15,
     roughness: 0.16, thickness: 0.05, metalness: 0,
   });
   for (const [cx, w] of [[O.cx - 1.29, 1.18], [O.cx + 1.29, 1.18]]) {
@@ -2996,6 +2996,14 @@ window.__setGrokPresent = (on) => {
       o.material.opacity = grokOnDuty ? 1 : 0.82;
       o.material.transparent = !grokOnDuty;
     });
+    // the universal glyph for "not trading right now", floating over his head
+    if (!w.zzz) {
+      w.zzz = makeSprite("z Z z", 0.62, { bg: "#0d0d0f", fg: "#cfd2d6", accent: "#2a2c30" });
+      w.zzz.position.set(0.25, 2.45, 0);
+      w.g.add(w.zzz);
+    }
+    w.zzz.visible = !grokOnDuty;
+    window.__grokZzz = w.zzz;
   }
   drawGrokBoard();
 };
@@ -3848,6 +3856,12 @@ function frame() {
     camTarget.z += (want.z - camTarget.z) * ease;
     if (!followSeat && Math.hypot(want.x - camTarget.x, want.z - camTarget.z) < 0.04) glide = null;
     placeCamera();
+  }
+  if (window.__grokZzz && window.__grokZzz.visible) {
+    const z = window.__grokZzz;
+    z.position.y = 2.45 + Math.sin(elapsed * 1.6) * 0.09;
+    z.material.opacity = 0.55 + Math.sin(elapsed * 1.6 + 1.2) * 0.3;
+    z.material.transparent = true;
   }
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
