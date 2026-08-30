@@ -5629,7 +5629,9 @@ async function renderTeamInto(el) {
     bs.running ? "◐ practice run" : "◌ stopped");
   bv.style.color = bs?.running ? (bs.live ? "var(--good,#4f8f52)" : "var(--amber,#e0ad3d)") : "";
   cBot.appendChild(bv);
-  cBot.appendChild(mk("span", "dp-note", bs?.exists ? "manage it just below" : "set it up just below"));
+  cBot.appendChild(mk("span", "dp-note", !bs?.exists ? "set it up just below"
+    : bs.running ? "runs while this tab is open \u00b7 resumes on refresh"
+    : "manage it just below"));
   strip.appendChild(cBot);
 
   // 2. the shift — with the toggle and cadence inline
@@ -6604,17 +6606,31 @@ function buildBotCard(settings) {
     finally { BOT.busy = false; }
   }
 
-  function startBot() {
+  function startBot(resumed = false) {
     if (BOT.timer) return;                     // idempotent: never two loops
-    say("bot started — keep this tab open");
+    const b0 = loadBot();
+    if (b0 && !b0.running) { b0.running = true; saveBot(b0); }   // survive a refresh
+    say(resumed ? "bot resumed after reload" : "bot started");
     BOT.tick = botTick;                        // the newest closure owns the loop
     botTick();
     BOT.timer = setInterval(() => BOT.tick(), 20000);
     renderBot();
   }
-  function stopBot() { clearInterval(BOT.timer); BOT.timer = null; say("bot stopped"); renderBot(); }
+  function stopBot() {
+    clearInterval(BOT.timer); BOT.timer = null;
+    const b0 = loadBot();
+    if (b0 && b0.running) { b0.running = false; saveBot(b0); }   // stay stopped across reloads
+    say("bot stopped"); renderBot();
+  }
   if (BOT.timer) BOT.tick = botTick;           // a re-render adopts the running bot
   renderBot();
+
+  /* A refresh used to silently kill the bot: the loop is a timer in THIS page,
+     and the page had no memory that it had been switched on. The intent is
+     remembered now, so re-opening the floor puts him straight back to work —
+     and stopping him stays stopped. (For genuinely tab-free 24/7, that is the
+     self-hosted poller in Desk settings; a browser cannot promise it.) */
+  if (!BOT.timer && loadBot()?.running) setTimeout(() => startBot(true), 1200);
 
   /* ── PAPER TEST: try the bot without a wallet, a terminal, or a cent ──────
      This imports executor/strategy.mjs — the EXACT module the real bot trades
