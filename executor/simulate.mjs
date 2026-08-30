@@ -102,8 +102,8 @@ function runOne({ managed, calls, rand, cfg, deskLag }) {
       }
     }
     if (qty > 0) pnl += qty * path[path.length - 1];
-
-    const net = pnl - plan.sol;
+    pnl *= (1 - COST);                       // pay to get out
+    const net = pnl - plan.sol * (1 + COST); // and pay to get in
     realized += net;
     state.realizedTodaySol += net;
     state.openCount--;
@@ -122,6 +122,10 @@ const arg = (k, d) => {
 };
 
 const TRIALS = arg("trials", 400), CALLS = arg("calls", 60);
+// Round-trip cost: memecoin entry+exit slippage, spread and priority fees. The
+// codebase probes this on every candidate for a reason — it is brutal, and a
+// simulation that ignores it will show a profit on a strategy that has none.
+const COST = arg("cost", 0.06);
 const WINRATE = arg("winrate", 0.28), SEED = arg("seed", 7), DESK_LAG = arg("desklag", 6);
 const cfg = { ...DEFAULTS, _winrate: WINRATE };
 
@@ -148,7 +152,7 @@ const N = agg(naive), M = agg(managed);
 const f = (v) => (v >= 0 ? "+" : "") + v.toFixed(3);
 const pct = (v) => (v * 100).toFixed(0) + "%";
 
-console.log(`\nSIMULATION — ${TRIALS} runs x ${CALLS} calls, desk win rate ${pct(WINRATE)}, seed ${SEED}`);
+console.log(`\nSIMULATION — ${TRIALS} runs x ${CALLS} calls, desk win rate ${pct(WINRATE)}, round-trip cost ${(COST*100).toFixed(1)}%, seed ${SEED}`);
 console.log(`Same call stream through both bots. Size ${cfg.maxSolPerTrade} SOL/trade.\n`);
 console.log(`                         NAIVE (hold to desk exit)      RISK-MANAGED`);
 console.log(`  mean P&L (SOL)              ${f(N.meanSol).padEnd(22)}${f(M.meanSol)}`);

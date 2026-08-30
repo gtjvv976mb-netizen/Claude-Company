@@ -82,10 +82,33 @@ Measured against a naive bot on identical call streams (300 runs x 60 calls):
 
 Same expected return, materially smaller losses when things go wrong.
 
-**Read this honestly:** profit is a function of the *desk's call quality* (the win-rate
-column), not of this bot. No bot can promise a profit on memecoins, and anyone who tells
+### The break-even, with real trading costs
+
+The table above ignores trading costs, and that flattered it badly — it showed a profit
+even at a 5% win rate, which no honest memecoin strategy does. Charging a realistic 6%
+round trip (entry + exit slippage, spread, priority fees) gives the number that actually
+matters:
+
+| desk win rate | mean P&L (risk-managed) |
+|---|---|
+| 10% | **-0.036 SOL (loses)** |
+| 20% | **-0.011 SOL (loses)** |
+| 25% | ~break-even |
+| 40% | +0.046 SOL |
+| 55% | +0.090 SOL |
+
+**The desk must hit roughly 25% for this bot to make money at all.** Below that, costs
+eat the edge and you lose slowly no matter how good the risk engine is.
+
+**Read this honestly:** the simulation does NOT show this bot is profitable. It shows it
+is profitable *if* the desk's calls clear ~25%, and the price model behind that is one I
+wrote — not a backtest against real fills. Profit is a function of the desk's call
+quality, not of this bot. No bot can promise a profit on memecoins, and anyone who tells
 you otherwise is selling something. What the engine does is make sure a real edge isn't
 destroyed by one bad night, and that a bad streak can't compound into a blown account.
+
+Run `npm run simulate -- --cost 0.10 --winrate 0.15` to see how quickly it turns
+negative under worse assumptions. Do that before you fund anything.
 
 ```bash
 npm test        # 15 risk-engine cases: stops, trails, caps, desk exits
