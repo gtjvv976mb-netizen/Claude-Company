@@ -191,6 +191,42 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           })) });
         }
 
+        /* ── THE BOT'S RPC LANE ───────────────────────────────────────────────
+           The in-browser bot could not talk to Solana at all: the public mainnet
+           RPC answers 403 to browsers and the usual alternates fail CORS, so
+           getBalance never returned and a funded wallet sat forever on
+           "checking balance…" — and a started bot could never have sent a trade
+           either. This is a plain JSON-RPC passthrough so the page can point a
+           web3 Connection straight at it.
+
+           It is a RELAY, not an authority: the browser signs with a key this
+           server never sees, and we forward the bytes. The method allowlist is
+           deliberately the smallest set that lets a bot read its own wallet and
+           broadcast a transaction it already signed — nothing that reads other
+           users' data in bulk, nothing that costs an archival lookup. */
+        if (url.pathname === "/api/bot/rpc" && req.method === "POST") {
+          const BOT_RPC = new Set([
+            "getBalance", "getLatestBlockhash", "getTokenAccountsByOwner",
+            "getSignatureStatuses", "getAccountInfo", "getMinimumBalanceForRentExemption",
+            "sendTransaction",                      // relay only — we never sign
+            "getFeeForMessage", "getEpochInfo", "getSlot", "getBlockHeight", "getVersion",
+          ]);
+          const call = await readBody();          // readBody already returns parsed JSON
+          const method = call?.method;
+          if (!method || !BOT_RPC.has(method)) {
+            return json(400, { jsonrpc: "2.0", id: call?.id ?? null,
+              error: { code: -32601, message: `method not available here: ${method || "(none)"}` } });
+          }
+          const { rpc: rawRpc } = await import("./lib/http.js");
+          const { cfg: cfgB } = await import("./config.js");
+          const r = await rawRpc(cfgB.rpc, method, call.params ?? []);
+          if (!r.ok) {
+            return json(502, { jsonrpc: "2.0", id: call.id ?? null,
+              error: { code: -32603, message: r.error || "rpc unavailable" } });
+          }
+          return json(200, { jsonrpc: "2.0", id: call.id ?? null, result: r.data });
+        }
+
         /* One fixed, cheap RPC read for the one-signature buy: the public
            mainnet RPC 403s browsers, so the page gets its blockhash here,
            through the server's own RPC. Nothing user-controlled reaches the
