@@ -41,8 +41,21 @@
  */
 import { liveCalls } from "./calls.js";
 
-/** How many house calls may be live at once. One means strictly sequential. */
-export const MAX_LIVE_CALLS = Math.max(1, Number(process.env.PENTHOUSE_MAX_LIVE_CALLS || 1));
+/**
+ * How many house calls may be live at once. One means strictly sequential.
+ *
+ * This was 1 — "one cycle, one trade, run to completion" — which is the right shape
+ * for the first trades, because one call and one outcome is a data point you can
+ * actually read. It is also, by construction, NOT a desk that runs around the clock:
+ * with a single slot the desk idles for as long as a position takes to work.
+ *
+ * Three, at the owner's request, is what makes it continuous: a slot frees the moment
+ * any position closes, and the next cycle refills it. It stays deliberately small
+ * because book heat is real — three concurrent memecoin positions on a sub-1-SOL
+ * wallet is already most of the risk that wallet should carry, and strategy.mjs caps
+ * the executor at four regardless.
+ */
+export const MAX_LIVE_CALLS = Math.max(1, Number(process.env.PENTHOUSE_MAX_LIVE_CALLS || 3));
 /** Set PENTHOUSE_SEQUENTIAL=0 to let cycles run while a position is open. */
 export const SEQUENTIAL = process.env.PENTHOUSE_SEQUENTIAL !== "0";
 

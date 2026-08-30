@@ -22,18 +22,25 @@ console.log("\nBOOT — the modules must actually load, not merely parse");
 const t0 = Date.now();
 const ph = await import("./src/penthouse.js");
 const { openCall, closeCall, liveCalls } = await import("./src/calls.js");
-const { bookState } = await import("./src/mandate.js");
+const { bookState, MAX_LIVE_CALLS } = await import("./src/mandate.js");
 ok("penthouse.js imported", typeof ph.runPenthouseCycle === "function", `${Date.now() - t0}ms`);
 ok("freshScan exported", typeof ph.freshScan === "function");
 ok("promoteWatches exported", typeof ph.promoteWatches === "function");
 
-console.log("\nOPEN BOOK — a live call must stop every lane before it spends");
+console.log("\nFULL BOOK — every lane must stand down before it spends");
+/* The desk now runs MAX_LIVE_CALLS positions at once so it can work around the clock
+ * instead of idling behind a single trade. The gate under test is unchanged — it
+ * simply closes at three rather than one — so fill the configured book. */
 for (const c of liveCalls()) closeCall(c.id, "test reset", null);
-const held = openCall({
-  mint: "HeldPos11111111111111111111111111111111111", symbol: "HELD",
-  entryRef: 1, stop: 0.7, target: 2, thesis: "t", invalidation: "i", category: "memecoin",
-});
-ok("a position is open", !!held && bookState().full === true, `live=${bookState().live}`);
+const held = [];
+for (let i = 0; i < MAX_LIVE_CALLS; i++) {
+  held.push(openCall({
+    mint: `HeldPos${i}1111111111111111111111111111111111`, symbol: i === 0 ? "HELD" : `HELD${i}`,
+    entryRef: 1, stop: 0.7, target: 2, thesis: "t", invalidation: "i", category: "memecoin",
+  }));
+}
+ok(`${MAX_LIVE_CALLS} positions are open`, held.every(Boolean) && bookState().full === true,
+  `live=${bookState().live}/${MAX_LIVE_CALLS}`);
 
 // If the gate is wrong, THIS is where it shows: the cycle would proceed to sweep()
 // and then to paid workups. With no API key it would fail loudly instead of
@@ -42,7 +49,12 @@ const t1 = Date.now();
 const r = await ph.runPenthouseCycle();
 const ms = Date.now() - t1;
 ok("the cycle refused to run", r.skipped === "position_open", JSON.stringify(r.skipped ?? r));
-ok("it named the position it is waiting on", r.holding?.symbol === "HELD", r.holding?.symbol);
+// liveCalls() is ordered newest-first, so with a full book this names the most recent
+// position rather than the first one opened. Either is a true answer to "what are you
+// waiting on"; what matters is that the refusal is specific rather than bare.
+ok("it named a position it is waiting on",
+  typeof r.holding?.symbol === "string" && held.some((h) => h.symbol === r.holding.symbol),
+  `${r.holding?.symbol} (holding ${r.live})`);
 ok("it opened nothing", r.opened === 0);
 ok("it spent nothing", r.costUsd === 0, `$${r.costUsd}`);
 ok("and it returned immediately, so it never reached the network",
@@ -53,8 +65,11 @@ ok("the fresh lane also stood down", fs.skipped === "position_open", JSON.string
 const pw = await ph.promoteWatches();
 ok("the promotion lane also stood down", pw.skipped === "position_open", JSON.stringify(pw));
 
-console.log("\nCLOSED BOOK — closing the trade is what releases the next cycle");
-closeCall(held.id, "target_hit", 1.8);
+console.log("\nA FREED SLOT — closing ONE trade is what releases the next cycle");
+closeCall(held[0].id, "target_hit", 1.8);
+ok("one close reopens the book", bookState().full === false,
+  `live=${bookState().live}/${MAX_LIVE_CALLS} — the desk hunts again without waiting for the others`);
+for (const c of held.slice(1)) closeCall(c.id, "test reset", 1);
 ok("the book is empty again", bookState().full === false, `live=${bookState().live}`);
 // We do NOT run a full cycle here: that would hit the network and spend real money.
 // What matters is that the gate is the only thing that was stopping it.

@@ -141,21 +141,31 @@ console.log("\nSEQUENCING — the book gate");
   const { openCall, closeCall } = await import("./src/calls.js");
   ok("an empty book is not full", bookState().full === false, `live=${bookState().live}`);
 
-  const c = openCall({ mint: "SeqTest1111111111111111111111111111111111", symbol: "SEQ",
-    entryRef: 1, stop: 0.7, target: 2, thesis: "t", invalidation: "i" });
-  ok("a call opened", !!c);
+  /* The book holds MAX_LIVE_CALLS at once — three now, so the desk keeps hunting
+   * rather than idling behind one trade. What is under test is the GATE, not the
+   * number, so fill whatever the configured book is and assert it closes. */
+  const opened = [];
+  for (let i = 0; i < MAX_LIVE_CALLS; i++) {
+    ok(`with ${i} open the desk is still hunting`, bookState().full === false,
+      `live=${bookState().live}/${MAX_LIVE_CALLS}`);
+    const c = openCall({ mint: `SeqTest${i}11111111111111111111111111111111`, symbol: `SEQ${i}`,
+      entryRef: 1, stop: 0.7, target: 2, thesis: "t", invalidation: "i" });
+    ok(`call ${i + 1} opened`, !!c);
+    opened.push(c);
+  }
   const b = bookState();
-  ok("one live call fills the book", b.full === true, `live=${b.live} max=${MAX_LIVE_CALLS}`);
-  ok("the gate names what it is holding", b.holding?.symbol === "SEQ", b.holding?.symbol);
+  ok(`${MAX_LIVE_CALLS} live calls fill the book`, b.full === true, `live=${b.live} max=${MAX_LIVE_CALLS}`);
+  ok("the gate names what it is holding", !!b.holding?.symbol, b.holding?.symbol);
 
   // And the whole point: while it is full, nothing may publish.
   const e = eligibility(good());
   ok("the winner is still eligible on merit", e.eligible === true);
-  ok("but the book says full, so the cycle must not open a second",
+  ok("but the book says full, so the cycle must not open another",
     bookState().full === true);
 
-  closeCall(c.id, "test", 1.2);
-  ok("closing the call reopens the book", bookState().full === false, `live=${bookState().live}`);
+  closeCall(opened[0].id, "test", 1.2);
+  ok("closing ONE call reopens the book", bookState().full === false, `live=${bookState().live}`);
+  for (const c of opened.slice(1)) closeCall(c.id, "test", 1.2);
 }
 
 

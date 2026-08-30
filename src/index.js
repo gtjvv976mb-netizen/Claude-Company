@@ -137,7 +137,15 @@ function startGrind() {
 }
 
 function startPenthouse() {
-  const cycleMins = Number(process.env.PENTHOUSE_CYCLE_MINS || 360);   // 4x a day
+  /* 45 minutes, not 6 hours. With three slots in the book a position can close at any
+   * time, and a six-hourly cycle would leave that slot empty for most of a day — the
+   * desk would look idle while it was simply waiting for a clock.
+   *
+   * Frequent ticks are cheap because the expensive part is gated twice over: a cycle
+   * that finds the book full returns immediately having spent nothing, and the hourly
+   * pace in llm.js stops the desk eating the day's budget by lunchtime. So this sets
+   * how OFTEN the desk may look, while the money decides how often it may work. */
+  const cycleMins = Number(process.env.PENTHOUSE_CYCLE_MINS || 45);
   const monitorMins = Number(process.env.PENTHOUSE_MONITOR_MINS || 10);
   if (process.env.PENTHOUSE_ENABLED === "0") { console.log("[penthouse] disabled"); return; }
   if (!process.env.ANTHROPIC_API_KEY) { console.log("[penthouse] no API key — the house team cannot work"); return; }

@@ -17,6 +17,7 @@ import db from "./src/lib/store.js";
 import { publishCall } from "./src/penthouse.js";
 import { liveCalls, closeCall } from "./src/calls.js";
 import { settingsFor } from "./src/copy.js";
+import { MAX_LIVE_CALLS } from "./src/mandate.js";
 
 let pass = 0, fail = 0;
 const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  — " + d : ""}`))
@@ -54,10 +55,17 @@ const others = db.prepare("SELECT COUNT(*) n FROM deliveries WHERE call_id=? AND
   .get(pub.callId, FLOOR).n;
 ok("no other floor received it", others === 0, `${others} other deliveries`);
 
-console.log("\nTHE BOOK GATE STILL BINDS — one trade at a time, as asked");
-const second = publishCall(approved({ mint: "Second111111111111111111111111111111111111", symbol: "TWO" }),
+console.log(`\nTHE BOOK GATE STILL BINDS — ${MAX_LIVE_CALLS} at a time, then it closes`);
+// Fill the remaining slots, then prove the next one is refused. The desk runs several
+// positions now so it can work around the clock, but the ceiling is still a ceiling.
+for (let i = 1; i < MAX_LIVE_CALLS; i++) {
+  const r = publishCall(approved({ mint: `Extra${i}11111111111111111111111111111111111`, symbol: `EX${i}` }),
+    { category: "memecoin", toFloors: [FLOOR] });
+  ok(`slot ${i + 1} of ${MAX_LIVE_CALLS} still opens`, r.outcome === "published", `${r.outcome}`);
+}
+const over = publishCall(approved({ mint: "Second111111111111111111111111111111111111", symbol: "TWO" }),
   { category: "memecoin", toFloors: [FLOOR] });
-ok("a second call is refused while the first works", second.outcome === "book_full", second.reason ?? "");
+ok(`call ${MAX_LIVE_CALLS + 1} is refused — the book is full`, over.outcome === "book_full", over.reason ?? "");
 
 console.log("\nTHIS IS A ROAD TO THE GATE, NOT AROUND IT");
 for (const c of liveCalls()) closeCall(c.id, "test_reset", 1);

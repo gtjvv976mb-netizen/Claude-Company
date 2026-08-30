@@ -23,10 +23,15 @@ const allowed = (cap, lane) => {
   catch (e) { if (e instanceof BudgetExhausted) return false; throw e; }
 };
 /** Pretend the desk has already spent `usd` today. */
+/* Stamped 90 MINUTES AGO, not now. A day's spend does not happen in one instant, and
+ * stamping it at Date.now() made every case here also trip the hourly pace added for
+ * 24/7 running — so the file would have reported the reserve broken when what it had
+ * actually caught was a second, correct brake. The pace has its own tests in
+ * test-247.mjs; this file is about the daily lane split alone. */
 const setSpend = (usd) => {
   db.prepare("DELETE FROM llm_spend").run();
   db.prepare("INSERT INTO llm_spend (ts, seat, model, usd, in_tok, out_tok) VALUES (?,?,?,?,?,?)")
-    .run(Date.now(), "test", "claude-opus-5", usd, 0, 0);
+    .run(Date.now() - 90 * 60000, "test", "claude-opus-5", usd, 0, 0);
 };
 
 const CAP = 25;

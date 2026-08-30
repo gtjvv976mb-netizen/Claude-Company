@@ -46,11 +46,46 @@ export const OPPORTUNISTIC_SHARE = Math.min(0.95, Math.max(0.1,
 /** Lanes that yield to the reserve. Everything else spends to the full cap. */
 const OPPORTUNISTIC = new Set(["fresh", "promote"]);
 
+/**
+ * THE PACE — what actually makes a desk run around the clock.
+ *
+ * A daily cap alone does not produce a 24/7 desk, it produces a desk that works until
+ * lunchtime. Left to itself the machine spends as fast as it can find candidates, so a
+ * $40 day is gone in a few hours and the next eighteen are silent — which is precisely
+ * what happened on the 30th: 163 workups, $22 by mid-afternoon, then nothing.
+ *
+ * So spending is paced by the HOUR as well as the day. The hourly allowance is the
+ * daily cap divided across 24 hours and multiplied by a burst factor, so the desk can
+ * still work a cluster of candidates when it finds one, but cannot eat tomorrow
+ * morning's budget tonight. Running out of pace is not an error: the cycle ends
+ * gracefully, the monitor keeps watching every open position for free, and the next
+ * tick picks up where this one stopped.
+ *
+ * A tenant's paid floor run is exempt. They bought that work and it is not ours to
+ * schedule.
+ */
+export const HOURLY_BURST = Math.max(1, Number(process.env.DESK_HOURLY_BURST || 3));
+
 /** Throws before any tokens are spent if this lane's share of the last 24h is gone. */
 export function assertDailyBudget(capUsd, { lane = "cycle" } = {}) {
   if (!capUsd || capUsd <= 0) return;
   const spent = spendSince(Date.now() - 24 * 3600e3).usd;
   const yields = OPPORTUNISTIC.has(lane);
+
+  // Pace first: it is the brake that keeps the desk alive at 3am, and it binds long
+  // before the daily cap does. The tenant's own paid run never waits on it.
+  if (lane !== "floor") {
+    const hourCap = (capUsd / 24) * HOURLY_BURST;
+    const spentHour = spendSince(Date.now() - 3600e3).usd;
+    if (spentHour >= hourCap) {
+      emit("cycle:paced", { lane, spentHourUsd: spentHour, hourCapUsd: Number(hourCap.toFixed(2)),
+        dayUsd: spent, capUsd });
+      throw new BudgetExhausted(
+        `hourly pace reached: $${spentHour.toFixed(2)} of $${hourCap.toFixed(2)} this hour ` +
+        `— the desk paces $${capUsd} across the day so it is still working tonight; monitoring continues`);
+    }
+  }
+
   const laneCap = yields ? capUsd * OPPORTUNISTIC_SHARE : capUsd;
   if (spent >= laneCap) {
     emit("cycle:budget", { usedUsd: spent, capUsd, laneCap: Number(laneCap.toFixed(2)),
