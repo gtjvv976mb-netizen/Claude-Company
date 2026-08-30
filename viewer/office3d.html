@@ -850,10 +850,11 @@ const STAFF = [
   { id:"Regime",     name:"MURDOCK",    role:"Reads the weather",     desk:[9.7,-5.6],  stand:[9.7,-4.1],   apron:0x4a7c9a },
   { id:"Review",     name:"COLONEL DEBRIEF", role:"Grades every landing", desk:[-11.6,-2.6], stand:[-11.6,-1.1], apron:0x6b6f45 },
   { id:"Scribe",     name:"AGENT P",     role:"Says nothing. Files everything.",    desk:[-5.5,8.2],  stand:[-5.5,6.7],   apron:0xc8863c },
-  // Grok is NOT the boss — the boss is the tenant's own MD. Grok is the Assistant
-  // Director who works the trades, in his own room in the front-right corner. He
-  // only appears when this floor's brain is Grok (see __setGrokPresent).
-  { id:"GrokAD",     name:"GROK",       role:"Assistant Director — works the trades", desk:[14.6,10.3], stand:[14.6,8.95], grok:true },
+  // Gruk is NOT the boss — the boss is the tenant's own MD. Gruk Mulder is the
+  // Assistant Director who works the trades, in his own suite BESIDE the boss's:
+  // same architecture, smaller, X-dark. Only appears when this floor's brain is
+  // Grok (see __setGrokPresent). He never roams — like the CEO, he keeps his room.
+  { id:"GrokAD",     name:"GRUK MULDER", role:"Assistant Director — works the trades", desk:[9.2,-10.8], stand:[9.2,-9.7], y:0.22, apron:0x2a2c30, grok:true },
 ];
 
 /** seat id -> crew name, for anything arriving from the server keyed by id. */
@@ -1958,6 +1959,13 @@ const DOSSIER = {
     known: "Has never once been in the field.",
     note: "A yes authorises a ticket, not a trade. The seat can approve; it cannot sign.",
   },
+  GrokAD: {  // GRUK MULDER
+    brief: "The Assistant Director from the other agency. When a floor hires the Grok brain, he moves into the suite beside the boss and works the trades himself.",
+    detail: "Holds the PM seat on grok-4.6 when this floor's Managing Director is a Grok desk, with a live line to X - real cashtag velocity, whether distinct voices carry a story or one pasted script does. Every guard rail around the seat - the screen, the Pinocchio gate, the red team, compliance, the no-keys wall - stays exactly where it was. The board on his wall is the floor's own book.",
+    method: "Model call on xAI - metered into the same daily budget as everyone else.",
+    known: "The truth is in the order flow.",
+    note: "Appears only on Grok-brained floors. Never leaves his room; the X on his floor is not a rug, it is a statement.",
+  },
 };
 
 /* Dossier text is authored, not user input, but it lands in innerHTML — so it is
@@ -2638,16 +2646,20 @@ function bakeStatic(root) {
 }
 const bakedBuckets = bakeStatic(room);
 
-/* ═══ GROK'S OFFICE ═══════════════════════════════════════════════════════════
-   The Assistant Director's own room, front-right corner. Deliberately NOT part of
-   `room`: the static bake merges and clears its children, and this whole office has
-   to appear and disappear with the floor's brain. A few extra draw calls buys that.
+/* ═══ GRUK MULDER'S OFFICE ════════════════════════════════════════════════════
+   The Assistant Director's own suite, BESIDE the boss's on the back wall — the
+   same architecture at a junior scale: a raised dais (lower than the boss's),
+   a glass front flanking a doorway, side sills, and his own solid back wall
+   carrying his board. Deliberately NOT part of `room`: the static bake merges
+   and clears room children, and this whole office has to appear and disappear
+   with the floor's brain. A few extra draw calls buys that.
 
-   Everything in here is X-dark against the building's warm timber, so the moment you
-   see it you know a different house is trading this floor. His BOARD carries the
-   positions — the book he is actually working — and a row of tickets on the desk
-   shows each open trade as its own object. */
-const GROK_OFFICE = { x0: 12.3, x1: 16.95, z0: 7.5, z1: 12.45, cx: 14.6 };
+   Everything in here is X-dark against the building's warm timber, so the moment
+   you see it you know a different house is trading beside the corner office. His
+   BOARD carries the positions — the book he is actually working — and a row of
+   tickets on the desk shows each open trade as its own object. */
+const GROK_OFFICE = { x0: 6.5, x1: 11.9, z0: -12.5, z1: -8.6, cx: 9.2 };
+const GRUK_DAIS = 0.22;                           // a step up — but under the boss's 0.35
 const grokOffice = new THREE.Group();
 grokOffice.visible = false;                       // shown only on a Grok desk
 scene.add(grokOffice);
@@ -2655,66 +2667,78 @@ scene.add(grokOffice);
 const grokBoard = (() => {
   const O = GROK_OFFICE;
   const dark = 0x121316, darker = 0x0d0d0f, edge = 0x2a2c30;
+  const W = O.x1 - O.x0, D = O.z1 - O.z0, zc = (O.z0 + O.z1) / 2;
 
-  // ── partitions: a low solid wall with glass above, so the room reads as an office
-  //    you can see into rather than a box.
+  // ── the dais: the boss sits on 0.35 of pathStone; the AD on 0.22 of slate,
+  //    with a steel nosing where the boss has brass.
+  const dais = box(grokOffice, [W, GRUK_DAIS, D], [O.cx, GRUK_DAIS / 2, zc], 0x1a1b1e, 0.9);
+  dais.receiveShadow = true;
+  box(grokOffice, [W, 0.05, 0.12], [O.cx, GRUK_DAIS, O.z1 - 0.02], edge, 0.5, 0.35);
+
+  // ── his own back wall: a solid dark partition in front of the building
+  //    glazing, so the board hangs on HIS wall the way the boss's hangs on his.
+  box(grokOffice, [W - 0.16, 3.1, 0.12], [O.cx, GRUK_DAIS + 1.55, O.z0 + 0.15], 0x141517, 0.88);
+
+  // ── front glass flanking a doorway, exactly the suite's language in his colours
   const glassMat = new THREE.MeshPhysicalMaterial({
     color: 0x9fb4bd, transmission: 0.42, transparent: true, opacity: 0.34,
     roughness: 0.16, thickness: 0.05, metalness: 0,
   });
-  const seg = (w, d, cx, cz) => {
-    box(grokOffice, [w, 1.0, d], [cx, 0.5, cz], darker, 0.86);         // solid base
-    box(grokOffice, [w * 0.995, 0.07, d * 0.995], [cx, 1.03, cz], edge, 0.5, 0.3);  // cap rail
-    const g = new THREE.Mesh(BOX, glassMat);                            // glass above
-    g.scale.set(w * 0.97, 2.0, Math.max(d * 0.97, 0.04));
-    g.position.set(cx, 2.05, cz);
-    grokOffice.add(g);
-  };
-  const W = O.x1 - O.x0;
-  seg(W, 0.12, (O.x0 + O.x1) / 2, O.z0);                 // north partition (his board hangs here)
-  seg(0.12, 2.0, O.x0, O.z0 + 1.0);                      // west partition, north of the doorway
-  seg(0.12, 1.75, O.x0, O.z1 - 0.88);                    // west partition, south of the doorway
-  // a doorway post pair, so the gap reads as a door rather than a hole
-  box(grokOffice, [0.16, 2.6, 0.16], [O.x0, 1.3, O.z0 + 2.0], edge, 0.55, 0.3);
-  box(grokOffice, [0.16, 2.6, 0.16], [O.x0, 1.3, O.z1 - 1.76], edge, 0.55, 0.3);
+  for (const [cx, w] of [[O.cx - 1.75, 1.9], [O.cx + 1.75, 1.9]]) {
+    const pane = new THREE.Mesh(BOX, glassMat);
+    pane.scale.set(w, 2.5, 0.1); pane.position.set(cx, GRUK_DAIS + 1.25, O.z1);
+    grokOffice.add(pane);
+    box(grokOffice, [0.12, 2.6, 0.22], [cx - w / 2, GRUK_DAIS + 1.3, O.z1], edge, 0.55, 0.3);
+    box(grokOffice, [0.12, 2.6, 0.22], [cx + w / 2, GRUK_DAIS + 1.3, O.z1], edge, 0.55, 0.3);
+  }
+  // steel door frame over the gap — the boss's is brass
+  box(grokOffice, [0.14, 2.7, 0.28], [O.cx - 0.8, GRUK_DAIS + 1.35, O.z1], edge, 0.45, 0.4);
+  box(grokOffice, [0.14, 2.7, 0.28], [O.cx + 0.8, GRUK_DAIS + 1.35, O.z1], edge, 0.45, 0.4);
+  box(grokOffice, [1.9, 0.2, 0.32], [O.cx, GRUK_DAIS + 2.66, O.z1], edge, 0.45, 0.4);
+  // side sills, like the suite's
+  box(grokOffice, [0.34, 0.45, D], [O.x0, GRUK_DAIS + 0.22, zc], 0x1b1c1e, 0.88);
+  box(grokOffice, [0.34, 0.45, D], [O.x1, GRUK_DAIS + 0.22, zc], 0x1b1c1e, 0.88);
 
   // ── floor: his own dark deck with a white X laid into it
-  const deck = new THREE.Mesh(new THREE.PlaneGeometry(W - 0.2, O.z1 - O.z0 - 0.2),
+  const deck = new THREE.Mesh(new THREE.PlaneGeometry(W - 0.3, D - 0.3),
     new THREE.MeshStandardMaterial({ color: dark, roughness: 0.95 }));
   deck.rotation.x = -Math.PI / 2;
-  deck.position.set((O.x0 + O.x1) / 2, 0.012, (O.z0 + O.z1) / 2);
+  deck.position.set(O.cx, GRUK_DAIS + 0.012, zc);
   grokOffice.add(deck);
   for (const a of [Math.PI / 4, -Math.PI / 4]) {
     const bar = new THREE.Mesh(BOX, new THREE.MeshStandardMaterial({
       color: 0xf2f2f4, roughness: 0.6, emissive: new THREE.Color(0x6a6d72), emissiveIntensity: 0.22 }));
-    bar.scale.set(3.5, 0.014, 0.20);
-    bar.position.set(O.cx, 0.02, (O.z0 + O.z1) / 2 + 0.7);
+    bar.scale.set(2.6, 0.014, 0.16);
+    bar.position.set(O.cx, GRUK_DAIS + 0.02, zc + 0.35);
     bar.rotation.y = a;
     grokOffice.add(bar);
   }
 
-  // ── his desk and chair, black to match the room
-  const deskYawG = Math.PI / 2;
-  const desk = buildDesk([O.cx, 10.3], deskYawG, 0, 0x1b1c1e, null);
-  const chair = buildChair([O.cx, 8.95], deskYawG + Math.PI, 0);
-  for (const g of [desk, chair]) { room.remove(g); grokOffice.add(g); }   // out of the baked room
+  // ── his desk and chair, black to match the room, up on the dais
+  const deskYawG = -Math.PI / 2;                   // facing the floor, like the boss
+  const desk = buildDesk([O.cx, -10.8], deskYawG, 0, 0x1b1c1e, null);
+  const chair = buildChair([O.cx, -9.7], deskYawG + Math.PI, 0);
+  for (const g of [desk, chair]) {
+    room.remove(g); grokOffice.add(g);             // out of the baked room
+    g.position.y += GRUK_DAIS;                     // up on his dais
+  }
 
-  // ── THE BOARD: his book, hung on the north partition, facing into the room the
-  //    same way the boss board does so the camera reads it over his shoulder.
+  // ── THE BOARD: his book, hung on his own back wall the way the boss board
+  //    hangs behind the dais, sized under it — the junior office reads junior.
   const c = document.createElement("canvas"); c.width = 768; c.height = 448;
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(4.3, 2.5),
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 1.98),
     new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
-  mesh.position.set(O.cx, 2.32, O.z0 + 0.10);
-  const frame = new THREE.Mesh(new THREE.BoxGeometry(4.52, 2.72, 0.10),
+  mesh.position.set(O.cx, GRUK_DAIS + 2.0, O.z0 + 0.28);
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(3.62, 2.2, 0.1),
     new THREE.MeshStandardMaterial({ color: 0x232427, roughness: 0.7, metalness: 0.25 }));
-  frame.position.set(O.cx, 2.32, O.z0 + 0.03);
+  frame.position.set(O.cx, GRUK_DAIS + 2.0, O.z0 + 0.24);
   grokOffice.add(mesh, frame);
 
   // ── the ticket rail: one tile per open trade, stood up on the desk
   const tickets = new THREE.Group();
-  tickets.position.set(O.cx, 0.78, 10.3);
+  tickets.position.set(O.cx, GRUK_DAIS + 0.78, -10.8);
   grokOffice.add(tickets);
 
   return { c, tex, mesh, frame, tickets };
@@ -2742,10 +2766,10 @@ function drawGrokBoard() {
   x.fillStyle = "#fafafa";
   x.font = '700 34px "JetBrains Mono", ui-monospace, monospace';
   x.textBaseline = "middle"; x.textAlign = "left";
-  x.fillText("GROK", 26, 38);
+  x.fillText("GRUK MULDER", 26, 38);
   x.fillStyle = "#9aa0a6";
   x.font = '500 20px "JetBrains Mono", ui-monospace, monospace';
-  x.fillText("ASSISTANT DIRECTOR \u00b7 THE BOOK", 122, 40);
+  x.fillText("ASST DIRECTOR \u00b7 THE BOOK", 268, 40);
 
   const pos = grokBook.positions || [];
   if (!pos.length) {
@@ -4018,7 +4042,7 @@ const inSnackRoom = new Set();
 function snackBreak(aId, bId, ti) {
   // With arguments this plays the server's casting — same pair, same argument, on
   // every screen. Without arguments (demo mode only) it rolls its own dice.
-  const free = STAFF.filter((s) => !s.claude).map((s) => workers[s.id])
+  const free = STAFF.filter((s) => !s.claude && !s.grok).map((s) => workers[s.id])
     .filter((p) => p && !p.typing && !p.doc.visible && !p.path && !inSnackRoom.has(p.id));
   let a, b;
   if (aId && bId) {
@@ -4066,7 +4090,7 @@ setInterval(() => {
   // viewer must see the same office. Demo mode (no desk process) keeps them.
   if (window.__worldLive) return;
   if (Math.random() < 0.5) { snackBreak(); return; }
-  const roam = STAFF.filter((s) => !s.claude);      // the CEO stays in the office
+  const roam = STAFF.filter((s) => !s.claude && !s.grok);   // the CEO and the AD keep their rooms
   const spec = roam[Math.floor(Math.random() * roam.length)];
   const p = workers[spec.id];
   if (!p || p.typing || p.doc.visible || p.path || inSnackRoom.has(p.id)) return;
