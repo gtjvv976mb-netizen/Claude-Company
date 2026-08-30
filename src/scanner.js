@@ -27,7 +27,7 @@ const getState = (k) => db.prepare("SELECT value FROM scanner_state WHERE key=?"
 const setState = (k, v) => db.prepare("INSERT INTO scanner_state (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(k, String(v));
 
 /** The treasury's token account for the mint, found by RPC so no PDA math is needed. */
-async function treasuryTokenAccount() {
+export async function treasuryTokenAccount() {
   const cached = getState("treasury_token_account");
   if (cached) return cached;
   const r = await readRpc(cfg.rpc, "getTokenAccountsByOwner",

@@ -146,7 +146,23 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
 
       try {
         if (url.pathname === "/api/lease/config") {
-          return json(200, { ...leasing.config(), floors: tower.FLOORS, hq: tower.HQ_FLOOR });
+          // One-signature leasing: the client builds the SPL transfer itself,
+          // so it needs the treasury's token account and the mint's program.
+          try {
+            if (!globalThis.__leasePayInfo) {
+              const { treasuryTokenAccount } = await import("./scanner.js");
+              const { readRpc } = await import("./lib/http.js");
+              const { cfg: cfg2 } = await import("./config.js");
+              const acct = await treasuryTokenAccount().catch(() => null);
+              let program = null;
+              if (acct) {
+                const mi = await readRpc(cfg2.rpc, "getAccountInfo", [leasing.MINT, { encoding: "jsonParsed" }]);
+                program = mi.ok ? mi.data?.value?.owner ?? null : null;
+              }
+              if (acct && program) globalThis.__leasePayInfo = { treasuryTokenAccount: acct, tokenProgram: program };
+            }
+          } catch {}
+          return json(200, { ...leasing.config(), floors: tower.FLOORS, hq: tower.HQ_FLOOR, pay: globalThis.__leasePayInfo ?? null });
         }
         if (url.pathname === "/api/auth/nonce" && req.method === "POST") {
           const body = await readBody();

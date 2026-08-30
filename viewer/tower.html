@@ -860,12 +860,14 @@ function chooseWallet() {
 async function walletConnect(entry) {
   if (entry.kind === "legacy") {
     const { publicKey } = await entry.w.connect();
+    window.__walletTx = { kind: "legacy", w: entry.w };
     return { wallet: publicKey.toString(),
       sign: async (bytes) => { const s = await entry.w.signMessage(bytes, "utf8"); return s.signature ?? s; } };
   }
   const res = await entry.w.features["standard:connect"].connect();
   const account = res.accounts.find((a) => (a.chains ?? []).some((c) => String(c).startsWith("solana:"))) ?? res.accounts[0];
   if (!account) throw new Error("the wallet returned no account");
+  window.__walletTx = { kind: "standard", w: entry.w, account };
   return { wallet: account.address,
     sign: async (bytes) => {
       const [out] = await entry.w.features["solana:signMessage"].signMessage({ account, message: bytes });
@@ -899,6 +901,99 @@ async function connect() {
   } catch (e) {
     if (!/User rejected|4001/i.test(String(e?.message))) alert("Sign-in failed: " + (e?.message || e));
   }
+}
+
+/* ── ONE-SIGNATURE LEASING ────────────────────────────────────────────────
+   The buyer should be a signer, not a postman. This builds the SPL transfer
+   in-page (web3.js from CDN, loaded only when needed), the wallet signs it,
+   and the building's scanner + an allocate poll do the rest. Non-custodial
+   end to end: the only key that ever signs is the buyer's own. */
+let _web3;
+function loadWeb3() {
+  if (_web3) return _web3;
+  _web3 = new Promise((res, rej) => {
+    if (window.solanaWeb3) return res(window.solanaWeb3);
+    const sc = document.createElement("script");
+    sc.src = "https://unpkg.com/@solana/web3.js@1.95.8/lib/index.iife.min.js";
+    sc.onload = () => window.solanaWeb3 ? res(window.solanaWeb3) : rej(new Error("web3 failed to load"));
+    sc.onerror = () => rej(new Error("web3 failed to load"));
+    document.head.appendChild(sc);
+  });
+  return _web3;
+}
+
+async function payTreasury(amountBaseUnits, onStep) {
+  const W3 = await loadWeb3();
+  const handle = window.__walletTx;
+  if (!handle) throw new Error("connect the wallet first");
+  if (!CFG.pay?.treasuryTokenAccount || !CFG.pay?.tokenProgram)
+    throw new Error("one-click pay is not ready — use the manual send below");
+  const owner = new W3.PublicKey(ME.wallet);
+  const mint = new W3.PublicKey(CFG.mint);
+  const tokenProgram = new W3.PublicKey(CFG.pay.tokenProgram);
+  const dest = new W3.PublicKey(CFG.pay.treasuryTokenAccount);
+  const ATA_PROGRAM = new W3.PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+  const [src] = W3.PublicKey.findProgramAddressSync(
+    [owner.toBytes(), tokenProgram.toBytes(), mint.toBytes()], ATA_PROGRAM);
+
+  onStep("Preparing the transfer\u2026");
+  const conn = new W3.Connection("https://api.mainnet-beta.solana.com", "confirmed");
+  const { blockhash } = await conn.getLatestBlockhash("confirmed");
+
+  // TransferChecked, hand-encoded: [12][amount u64 LE][decimals u8]
+  const data = new Uint8Array(10);
+  data[0] = 12;
+  let v = BigInt(amountBaseUnits);
+  for (let i = 0; i < 8; i++) { data[1 + i] = Number(v & 0xffn); v >>= 8n; }
+  data[9] = CFG.decimals;
+  const ix = new W3.TransactionInstruction({
+    programId: tokenProgram,
+    keys: [
+      { pubkey: src, isSigner: false, isWritable: true },
+      { pubkey: mint, isSigner: false, isWritable: false },
+      { pubkey: dest, isSigner: false, isWritable: true },
+      { pubkey: owner, isSigner: true, isWritable: false },
+    ],
+    data,
+  });
+  const tx = new W3.Transaction({ feePayer: owner, recentBlockhash: blockhash }).add(ix);
+
+  onStep("Sign in your wallet\u2026");
+  if (handle.kind === "legacy") {
+    const { signature } = await handle.w.signAndSendTransaction(tx);
+    return signature;
+  }
+  const feat = handle.w.features["solana:signAndSendTransaction"];
+  if (!feat) throw new Error("this wallet cannot send transactions here — use the manual send below");
+  const [out] = await feat.signAndSendTransaction({
+    account: handle.account, chain: "solana:mainnet",
+    transaction: tx.serialize({ requireAllSignatures: false, verifySignatures: false }),
+  });
+  return b58(out.signature);
+}
+
+async function buyAndLease(floorNo, wrap, btn) {
+  const step = (t) => { wrap.className = "msg"; wrap.textContent = t; };
+  try {
+    btn.disabled = true;
+    const sig = await payTreasury(CFG.priceBaseUnits, step);
+    step(`Signed \u2713 (${String(sig).slice(0, 8)}\u2026) \u2014 waiting for the chain, then the building credits you\u2026`);
+    // The scanner walks the chain every 20s; poll until the credit lands, then claim.
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 6000));
+      await refreshMe();
+      if (ME && BigInt(ME.balanceBaseUnits) >= BigInt(ME.priceBaseUnits)) {
+        step("Credited \u2014 claiming the floor\u2026");
+        const { status, body } = await api("/api/lease/allocate", { method: "POST", body: JSON.stringify({ floorNo }) });
+        if (status === 200) { wrap.className = "msg ok"; wrap.textContent = `Floor ${floorNo} is yours.`; await refreshMe(); await loadFloors(); renderSel(); return; }
+        throw new Error(body.error || "could not claim the floor");
+      }
+    }
+    step("Payment sent \u2014 the credit is still confirming. This panel updates itself; the floor is one click away once it lands.");
+  } catch (e) {
+    wrap.className = "msg err";
+    wrap.textContent = String(e?.message || e);
+  } finally { btn.disabled = false; }
 }
 
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -942,18 +1037,22 @@ window.__leaseUI = function (f, selEl) {
     wrap.textContent = "One floor per wallet.";
     selEl.appendChild(wrap);
   } else if (BigInt(ME.balanceBaseUnits) < BigInt(ME.priceBaseUnits)) {
-    btn.textContent = `Send ${CFG.priceTokens.toLocaleString()} $CLAUDECO`;
-    btn.onclick = () => {
-      wrap.innerHTML = "";
-      const p = document.createElement("div");
-      p.innerHTML = `Send <b>${CFG.priceTokens.toLocaleString()} $CLAUDECO</b> from your wallet to:`;
-      const code = document.createElement("div");
-      code.style.cssText = "font-family:'JetBrains Mono',monospace;font-size:11px;word-break:break-all;margin:8px 0;color:var(--ink)";
-      code.textContent = CFG.treasury;
-      const note = document.createElement("div");
-      note.textContent = "The building watches the chain and credits you automatically, usually within a minute. Then press Lease.";
-      wrap.append(p, code, note);
-    };
+    btn.textContent = `Buy & lease floor ${f.n} \u2014 one signature`;
+    btn.onclick = () => buyAndLease(f.n, wrap, btn);
+    // the manual route stays for wallets that cannot sign transactions here
+    const alt = document.createElement("details");
+    alt.style.marginTop = "10px";
+    const sm = document.createElement("summary");
+    sm.textContent = "or send manually";
+    sm.style.cssText = "cursor:pointer;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;opacity:.7";
+    const code = document.createElement("div");
+    code.style.cssText = "font-family:'JetBrains Mono',monospace;font-size:11px;word-break:break-all;margin:8px 0;color:var(--ink)";
+    code.textContent = `${CFG.priceTokens.toLocaleString()} $CLAUDECO \u2192 ${CFG.treasury}`;
+    const note = document.createElement("div");
+    note.style.fontSize = "11.5px";
+    note.textContent = "The building watches the chain and credits you automatically, usually within a minute. Then press Lease.";
+    alt.append(sm, code, note);
+    selEl.appendChild(alt);
   } else {
     btn.textContent = `Lease floor ${f.n}`;
     btn.onclick = async () => {
