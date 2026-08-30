@@ -4805,6 +4805,40 @@ function buildControls(settings) {
   box.appendChild(row);
   box.appendChild(mk("div", "dp-note", "Appetite sets the conviction bar, position limit and size. Bankroll is your own SOL, declared here only so calls can be sized. It stays in your wallet — the desk never holds or signs for it."));
 
+  // ── narrative mandate: which kinds of coins this floor chases (real: decide()
+  //    skips any call whose category is off this list) ──
+  box.appendChild(mk("div", "dp-h", "What this floor chases"));
+  const ALL_CATS = [
+    ["established", "blue-chips"], ["utility", "utility"], ["infra", "infra"],
+    ["defi", "DeFi"], ["ai", "AI"], ["memecoin", "memecoins"], ["unclear", "unproven"]];
+  const catGrid = mk("div", "padgrid");
+  const catChosen = new Set(settings.categories || []);
+  for (const [val, label] of ALL_CATS) {
+    const lab = document.createElement("label");
+    lab.className = "pad" + (catChosen.has(val) ? " on" : "");
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = catChosen.has(val); cb.value = val;
+    cb.addEventListener("change", () => lab.classList.toggle("on", cb.checked));
+    lab.append(cb, document.createTextNode(label));
+    catGrid.appendChild(lab);
+  }
+  box.appendChild(catGrid);
+  box.appendChild(mk("div", "dp-note", "The narratives your team is allowed to call. A coin outside these is passed, however good it looks. Your appetite sets a sensible default; this overrides it."));
+
+  // ── liquidity floor: the thinnest book this floor will touch (real: decide()
+  //    skips calls whose call-time liquidity is under this) ──
+  box.appendChild(mk("div", "dp-h", "Liquidity floor"));
+  const liqSel = document.createElement("select");
+  liqSel.className = "dp-in";
+  liqSel.setAttribute("aria-label", "Minimum liquidity");
+  for (const [v, t] of [[0, "No floor — any book"], [10000, "$10k+"], [25000, "$25k+"], [50000, "$50k+"], [100000, "$100k+"], [250000, "$250k+"], [1000000, "$1M+"]]) {
+    const o = document.createElement("option"); o.value = v; o.textContent = t;
+    if (Number(settings.min_liq_usd || 0) === v) o.selected = true;
+    liqSel.appendChild(o);
+  }
+  box.appendChild(liqSel);
+  box.appendChild(mk("div", "dp-note", "Skip any call whose book was thinner than this when it was published — a thin book is where you become the exit liquidity. A coin with unknown liquidity is never gated out on a data gap."));
+
   box.appendChild(mk("div", "dp-h", "Platforms this floor trades"));
   const pads = mk("div", "padgrid");
   const chosen = new Set(settings.launchpads || ALL_PADS);
@@ -4872,8 +4906,10 @@ function buildControls(settings) {
   save.addEventListener("click", async () => {
     save.disabled = true; save.textContent = "Saving…";
     const launchpads = [...pads.querySelectorAll("input:checked")].map((i) => i.value);
+    const categories = [...catGrid.querySelectorAll("input:checked")].map((i) => i.value);
     const { status, body } = await call_api(`/api/floor/${FLOOR_N}/copy`, { method: "POST",
       body: JSON.stringify({ appetite: sel.value, bankrollSol: Number(bank.value), launchpads,
+                             categories, minLiqUsd: Number(liqSel.value) || null,
                              webhookUrl: hook.value.trim() || null,
                              executorUrl: exec_.value.trim() || null }) });
     msg.textContent = status === 200 ? "Saved. Future calls use these settings." : (body.error || "could not save");

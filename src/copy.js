@@ -77,6 +77,7 @@ ensureColumn("copy_settings", "webhook_url", "TEXT");
 ensureColumn("copy_settings", "executor_url", "TEXT");
 ensureColumn("copy_settings", "executor_secret", "TEXT");
 ensureColumn("copy_settings", "launchpads", "TEXT");
+ensureColumn("copy_settings", "min_liq_usd", "REAL");   // per-floor liquidity floor; null = no floor
 ensureColumn("deliveries", "size_sol", "REAL", "size_usd");
 
 export function settingsFor(floorNo) {
@@ -106,8 +107,11 @@ export function saveSettings(floorNo, patch) {
   // bankroll/auto/webhook, and writing NULL for what it did not send silently
   // wiped explicit category/launchpad overrides on every ordinary save.
   const raw = db.prepare("SELECT categories, launchpads FROM copy_settings WHERE floor_no=?").get(floorNo) || {};
+  // An empty selection means "follow my appetite's default", NOT "chase nothing" —
+  // storing [] would silently skip every call, an easy footgun off one stray click.
+  const catList = Array.isArray(patch.categories) ? patch.categories.filter((c) => c in CATEGORY_RISK) : null;
   const cats = "categories" in patch
-    ? (Array.isArray(patch.categories) ? JSON.stringify(patch.categories.filter((c) => c in CATEGORY_RISK)) : null)
+    ? (catList && catList.length ? JSON.stringify(catList) : null)
     : raw.categories ?? null;
   const hook = "webhookUrl" in patch ? (patch.webhookUrl || null) : cur.webhook_url ?? null;
   // The executor lane: setting a URL mints the floor's signing secret once;
@@ -121,8 +125,13 @@ export function saveSettings(floorNo, patch) {
   const pads = "launchpads" in patch
     ? (Array.isArray(patch.launchpads) ? JSON.stringify(patch.launchpads.filter((l) => LAUNCHPADS.includes(l))) : null)
     : raw.launchpads ?? null;
-  db.prepare("UPDATE copy_settings SET appetite=?, bankroll_sol=?, auto=?, categories=?, launchpads=?, webhook_url=?, executor_url=?, executor_secret=?, updated_at=? WHERE floor_no=?")
-    .run(appetite, bankroll, auto, cats, pads, hook, execUrl, execSecret, Date.now(), floorNo);
+  // The liquidity floor: a coin whose book at call-time is thinner than this is
+  // skipped for this floor. 0 / null = no floor. Omitted key keeps the stored value.
+  const minLiq = "minLiqUsd" in patch
+    ? (patch.minLiqUsd == null ? null : Math.max(0, Math.min(50_000_000, Number(patch.minLiqUsd) || 0)) || null)
+    : cur.min_liq_usd ?? null;
+  db.prepare("UPDATE copy_settings SET appetite=?, bankroll_sol=?, auto=?, categories=?, launchpads=?, min_liq_usd=?, webhook_url=?, executor_url=?, executor_secret=?, updated_at=? WHERE floor_no=?")
+    .run(appetite, bankroll, auto, cats, pads, minLiq, hook, execUrl, execSecret, Date.now(), floorNo);
   return settingsFor(floorNo);
 }
 
@@ -152,6 +161,13 @@ export function decide(floorNo, call) {
 
   if (!s.categories.includes(call.category))
     return { verdict: "skipped", reason: `${call.category} is outside this floor's categories` };
+
+  // The floor's liquidity floor. Only bites when we KNOW the call-time book and it
+  // is genuinely below the set floor — an unreadable liquidity (null) is never
+  // treated as zero, so a data gap can't silently gate out every call.
+  if (s.min_liq_usd && call.liq_at_call != null && call.liq_at_call < s.min_liq_usd)
+    return { verdict: "skipped",
+      reason: `liquidity $${Math.round(call.liq_at_call).toLocaleString()} is under this floor's floor of $${Math.round(s.min_liq_usd).toLocaleString()}` };
 
   if (call.conviction != null && call.conviction < s.preset.minConviction)
     return { verdict: "skipped", reason: `conviction ${Math.round(call.conviction)} is under this floor's bar of ${s.preset.minConviction}` };
