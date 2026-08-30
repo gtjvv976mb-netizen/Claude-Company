@@ -429,9 +429,11 @@ select.dp-in{cursor:pointer}
 }
 .crewpanel{flex:1; min-height:0; overflow-y:auto; display:none; flex-direction:column}
 .crewpanel.on{display:flex}
-.legend{padding:11px 13px; display:flex; flex-wrap:wrap; gap:6px 10px}
-.legend span{display:flex; align-items:center; gap:5px; font-size:10.5px; color:var(--ink-soft)}
-.legend i{width:9px;height:9px;border-radius:2px; display:block}
+.legend{padding:11px 13px; display:grid; grid-template-columns:repeat(auto-fill,minmax(74px,1fr)); gap:10px 8px}
+.legend span{display:flex; flex-direction:column; align-items:center; gap:4px; font-size:9.5px; line-height:1.25;
+  text-align:center; color:var(--ink-soft)}
+.legend i{width:56px;height:56px;border-radius:9px; display:block; background-size:cover; background-position:center;
+  border:1px solid var(--card-line,#3a4b50)}
 .note{padding:0 13px 13px; font-size:11.5px; color:var(--ink-faint); border-top:1px solid var(--panel-line); line-height:1.5}
 </style>
 
@@ -2825,7 +2827,7 @@ window.__setGrokPresent = (on) => {
 
 /* His board is a TRADING SCREEN, not a chalkboard — the boss writes in chalk, Grok
    prints. Monospace, hairline rules, P&L in the only two colours that matter. */
-let grokBook = { positions: [], settled: null };
+let grokBook = { positions: [], settled: null, record: null };
 function drawGrokBoard() {
   const x = grokBoard.c.getContext("2d");
   const W = 768, H = 448;
@@ -2847,9 +2849,30 @@ function drawGrokBoard() {
     x.fillStyle = "#6b7075";
     x.font = '500 24px "JetBrains Mono", ui-monospace, monospace';
     x.textAlign = "center";
-    x.fillText("no open positions", W / 2, H / 2 - 6);
-    x.font = '500 18px "JetBrains Mono", ui-monospace, monospace';
-    x.fillText("the book is flat", W / 2, H / 2 + 26);
+    x.fillText("THE BOOK IS FLAT", W / 2, 132);
+    // A flat book is the normal state of a disciplined desk, so the board says
+    // what he is DOING rather than sitting blank: his standing orders, in his
+    // own voice. Empty is not the same as idle.
+    x.font = '500 17px "JetBrains Mono", ui-monospace, monospace';
+    x.fillStyle = "#8a9095";
+    x.textAlign = "left";
+    const orders = [
+      "WATCHING X ......... velocity \u00b7 distinct voices \u00b7 lore origin",
+      "SCREENING .......... paid attention, bots, one pasted script",
+      "REFUSING ........... anything I cannot exit at size",
+      "THE STOP ........... is not a suggestion",
+    ];
+    let oy = 178;
+    for (const line of orders) { x.fillText(line, 52, oy); oy += 30; }
+    x.font = 'italic 500 19px "JetBrains Mono", ui-monospace, monospace';
+    x.fillStyle = "#c9ccd1";
+    x.textAlign = "center";
+    x.fillText("\u201cThe truth is in the order flow.\u201d", W / 2, 322);
+    x.font = '500 15px "JetBrains Mono", ui-monospace, monospace';
+    x.fillStyle = "#6b7075";
+    const rec = grokBook.record;
+    x.fillText(rec ? `floor record  ${rec.wins}\u2013${rec.losses}   \u00b7   ${rec.settled} settled` :
+      "no call published on this floor yet", W / 2, 370);
     grokBoard.tex.needsUpdate = true;
     return;
   }
@@ -2889,6 +2912,10 @@ function drawGrokBoard() {
     x.font = '500 17px "JetBrains Mono", ui-monospace, monospace';
     x.fillText("+" + (pos.length - 8) + " more", 26, y + 4);
   }
+  // his signature under the book, so the board reads as a person's work
+  x.textAlign = "right"; x.fillStyle = "#5f6469";
+  x.font = 'italic 500 15px "JetBrains Mono", ui-monospace, monospace';
+  x.fillText("GROX MULDER \u00b7 the truth is in the order flow", W - 26, H - 18);
   grokBoard.tex.needsUpdate = true;
 }
 const fmtPx = (v) => v >= 1 ? v.toFixed(2) : v >= 0.01 ? v.toFixed(4) : v.toExponential(1);
@@ -2920,6 +2947,7 @@ function drawGrokTickets() {
  *  the same book the Calls tab shows. */
 window.__grokBoardUpdate = (feed = []) => {
   const open = feed.filter((c) => c.status === "live" && c.verdict === "offered");
+  grokBook.record = window.__floorRecord || grokBook.record;
   grokBook.positions = open.map((c) => {
     const entry = c.entry_ref ?? null, mark = c.last_mark ?? null;
     return { symbol: c.symbol, size: c.size_sol ?? null, entry, mark,
@@ -3815,13 +3843,61 @@ function switchTab(showTape) {
   document.getElementById("tab-inbox").setAttribute("aria-selected", String(!showTape));
 }
 const legendEl = document.getElementById("legend");
+const legendTiles = {};
 for (const s of STAFF) {
   const sp = document.createElement("span");
-  const hex = "#" + (s.claude ? P.claude : s.apron).toString(16).padStart(6, "0");
-  sp.innerHTML = `<i style="background:${hex}"></i>`;
-  sp.appendChild(document.createTextNode(s.name || s.id));
+  const hex = "#" + (s.claude ? P.claude : s.grok ? 0x17181a : s.apron).toString(16).padStart(6, "0");
+  const i = document.createElement("i");
+  i.style.background = hex;                      // the colour is the placeholder…
+  legendTiles[s.id] = i;
+  sp.append(i, document.createTextNode(s.name || s.id));
   legendEl.appendChild(sp);
 }
+
+/* …and then each tile becomes an actual portrait of that agent's model.
+   Rendered from the live rig, so a costume change shows up here for free — no
+   sprite sheet to regenerate and no chance of the crew list drifting from the
+   floor. Done on a SEPARATE offscreen renderer with preserveDrawingBuffer, so
+   the main canvas keeps its faster context; built once, then disposed. */
+async function paintCrewPortraits() {
+  if (paintCrewPortraits.done) return;
+  paintCrewPortraits.done = true;
+  const R = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+  R.setSize(128, 128, false);
+  R.outputColorSpace = THREE.SRGBColorSpace;
+  R.toneMapping = THREE.AgXToneMapping;
+  R.toneMappingExposure = 1.25;
+  const cam = new THREE.OrthographicCamera(-0.62, 0.62, 0.62, -0.62, -100, 200);
+
+  const wasVisible = new Map();
+  scene.children.forEach((c) => wasVisible.set(c, c.visible));
+  try {
+    for (const spec of STAFF) {
+      const w = workers[spec.id];
+      if (!w?.g) continue;
+      scene.children.forEach((c) => { if (!c.isLight) c.visible = (c === w.g); });
+      w.g.visible = true;
+      const sprites = [];
+      w.g.traverse((o) => { if (o.isSprite && o.visible) { o.visible = false; sprites.push(o); } });
+      const p = w.g.position;
+      cam.position.set(p.x + 0.9, p.y + 1.62, p.z + 2.2);   // three-quarter, head-and-shoulders
+      cam.lookAt(p.x, p.y + 1.32, p.z);
+      cam.updateProjectionMatrix();
+      R.render(scene, cam);
+      const url = R.domElement.toDataURL("image/png");
+      const tile = legendTiles[spec.id];
+      if (tile && url.length > 2000) { tile.style.backgroundImage = `url(${url})`; tile.style.backgroundColor = "#1b2529"; }
+      sprites.forEach((o) => (o.visible = true));
+      await new Promise((r) => setTimeout(r, 0));          // keep the frame responsive
+    }
+  } catch (e) {
+    console.warn("crew portraits unavailable:", e.message);  // colours remain
+  } finally {
+    scene.children.forEach((c) => { if (wasVisible.has(c)) c.visible = wasVisible.get(c); });
+    R.dispose();
+  }
+}
+setTimeout(paintCrewPortraits, 2500);      // after the floor has settled
 
 /* ── a puff of paper over someone's head ──────────────────────────────────── */
 function puff(worker, text) {
