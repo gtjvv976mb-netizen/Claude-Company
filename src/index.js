@@ -114,10 +114,18 @@ function startGrind() {
       const universe = await sweep();
       const ranked = universe.map((c) => ({ c, r: rank(c) })).sort((a, b) => b.r.score - a.r.score);
       for (const f of due) {
-        const pick = ranked.find((x) => x.r.score > 20 && !floorJudgedRecently(f.floor_no, x.c.mint));
+        // The tenant's pinned watchlist comes FIRST: a coin they chose to stand
+        // on is researched before the open-market hunt. Only when every pin has
+        // been judged recently does the team fall back to the best-ranked sweep.
+        let pinned = [];
+        try { pinned = JSON.parse(f.watchlist || "[]"); } catch {}
+        const pin = pinned.find((m) => typeof m === "string" && m.length >= 32 && !floorJudgedRecently(f.floor_no, m));
+        const pick = pin
+          ? { c: { mint: pin, pair: ranked.find((x) => x.c.mint === pin)?.c.pair }, pinned: true }
+          : ranked.find((x) => x.r.score > 20 && !floorJudgedRecently(f.floor_no, x.c.mint));
         if (!pick) continue;
         const res = await requestRun({ floorNo: f.floor_no, wallet: f.wallet, mint: pick.c.mint });
-        console.log(`[grind] floor ${f.floor_no} -> ${pick.c.pair?.baseSymbol ?? pick.c.mint.slice(0, 6)}` +
+        console.log(`[grind] floor ${f.floor_no} -> ${pick.c.pair?.baseSymbol ?? pick.c.mint.slice(0, 6)}${pick.pinned ? " (pinned)" : ""}` +
           (res.ok ? ` (run ${res.runId}${res.free ? ", free" : ""})` : ` refused: ${res.error}`));
       }
     } catch (e) { console.log(`[grind] ${e.message}`); }

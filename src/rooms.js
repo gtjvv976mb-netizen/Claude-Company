@@ -77,7 +77,7 @@ export function saveSettings(floorNo, patch) {
 
 /** Floors currently grinding, with what they need for the auto-run decision. */
 export function grindingFloors() {
-  return db.prepare(`SELECT rs.floor_no, rs.grind_hours, l.wallet,
+  return db.prepare(`SELECT rs.floor_no, rs.grind_hours, rs.watchlist, l.wallet,
       (SELECT MAX(started_at) FROM runs r WHERE r.floor_no = rs.floor_no) AS last_run_at,
       (SELECT COUNT(*) FROM runs r2 WHERE r2.floor_no = rs.floor_no AND r2.started_at > ?) AS runs_24h
     FROM room_settings rs JOIN leases l ON l.floor_no = rs.floor_no

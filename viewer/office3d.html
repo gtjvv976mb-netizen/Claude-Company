@@ -218,6 +218,11 @@ body{
 .dp-btn.ghost{background:transparent;color:var(--ink-soft);border:1px solid var(--card-line)}
 .dp-note{font-size:11.5px;color:var(--ink-faint);line-height:1.5}
 .dp-bal{font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--ink)}
+.dp-pins{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}
+.dp-chip{display:inline-flex;align-items:center;gap:6px;font-family:"JetBrains Mono",monospace;
+  font-size:11px;padding:4px 8px;border-radius:6px;background:var(--card);border:1px solid var(--card-line);color:var(--ink)}
+.dp-x{border:0;background:transparent;color:var(--ink-faint);cursor:pointer;font-size:11px;padding:0;line-height:1}
+.dp-x:hover{color:var(--amber)}
 .runrow{display:flex;gap:8px;align-items:baseline;font-size:11.5px;padding:5px 0;border-bottom:1px dotted var(--panel-line)}
 .runrow .sym{font-weight:600;flex:none}
 .runrow .out{margin-left:auto;font-size:10px;letter-spacing:.07em;text-transform:uppercase;font-weight:700}
@@ -4148,6 +4153,24 @@ function renderRoom() {
   });
   panel.append(shift, shiftNote);
 
+  // ── how often the team grinds (real: the grind scheduler reads grind_hours) ──
+  const cadRow = mk("div", "dp-row");
+  cadRow.append(mk("span", "dp-note", "Hunt every"));
+  const cad = mk("select", "dp-in");
+  for (const h of [1, 2, 3, 4, 6, 8, 12, 24]) {
+    const o = document.createElement("option"); o.value = h; o.textContent = h + "h";
+    if (Number(ROOM.settings?.grind_hours) === h) o.selected = true;
+    cad.appendChild(o);
+  }
+  cad.setAttribute("aria-label", "Grind cadence in hours");
+  cad.addEventListener("change", async () => {
+    cad.disabled = true;
+    await api(`/api/floor/${FLOOR}/settings`, { method: "POST", body: JSON.stringify({ grindHours: Number(cad.value) }) });
+    cad.disabled = false; loadRoom();
+  });
+  cadRow.append(cad, mk("span", "dp-note", "when grinding (max 6 runs/day)"));
+  panel.appendChild(cadRow);
+
   // ── who manages this floor: Claude or Grok ──
   panel.appendChild(mk("div", "dp-h", "Your Managing Director's brain"));
   const curBrain = ROOM.settings?.md_brain === "grok" ? "grok" : "claude";
@@ -4207,6 +4230,46 @@ function renderRoom() {
     }
     setTimeout(loadRoom, 800);
   });
+
+  // ── standing watchlist: coins the team researches FIRST each grind cycle
+  //    (real: the grind scheduler reads this list and pins it ahead of the
+  //    open-market sweep). ──
+  panel.appendChild(mk("div", "dp-h", "Your watchlist"));
+  panel.appendChild(mk("p", "dp-note",
+    "Pin coins your team checks before anything else on each grind cycle. Up to 25."));
+  const pins = Array.isArray(ROOM.settings?.watchlist) ? ROOM.settings.watchlist.slice() : [];
+  const pinWrap = mk("div", "dp-pins");
+  const savePins = async (next) => {
+    await api(`/api/floor/${FLOOR}/settings`, { method: "POST", body: JSON.stringify({ watchlist: next }) });
+    loadRoom();
+  };
+  const renderPins = () => {
+    pinWrap.innerHTML = "";
+    if (!pins.length) { pinWrap.appendChild(mk("p", "dp-note", "No pinned coins — the team hunts the open market.")); }
+    for (const m of pins) {
+      const chip = mk("div", "dp-chip");
+      chip.append(mk("span", null, m.slice(0, 4) + "…" + m.slice(-4)));
+      const x = mk("button", "dp-x", "✕"); x.setAttribute("aria-label", "Remove " + m);
+      x.addEventListener("click", () => { const i = pins.indexOf(m); if (i >= 0) pins.splice(i, 1); renderPins(); savePins(pins); });
+      chip.appendChild(x); pinWrap.appendChild(chip);
+    }
+  };
+  renderPins();
+  panel.appendChild(pinWrap);
+  const pinRow = mk("div", "dp-row");
+  const pinIn = mk("input", "dp-in");
+  pinIn.placeholder = "Paste a Solana mint to pin";
+  pinIn.setAttribute("aria-label", "Mint address to pin");
+  const pinAdd = mk("button", "dp-btn ghost", "Pin");
+  pinAdd.addEventListener("click", () => {
+    const m = pinIn.value.trim();
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(m)) { pinIn.setAttribute("aria-invalid", "true"); return; }
+    if (pins.includes(m)) { pinIn.value = ""; return; }
+    if (pins.length >= 25) return;
+    pins.push(m); pinIn.value = ""; pinIn.removeAttribute("aria-invalid"); renderPins(); savePins(pins);
+  });
+  pinRow.append(pinIn, pinAdd);
+  panel.appendChild(pinRow);
 
   // ── the nameplate: what a tenant gets to call things ──
   panel.appendChild(mk("div", "dp-h", "Nameplate"));
