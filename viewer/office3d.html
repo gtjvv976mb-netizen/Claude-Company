@@ -931,6 +931,31 @@ function buildNav() {
     const r0 = Math.max(0, navRow(s.z0 - AGENT_R)), r1 = Math.min(NAV.rows - 1, navRow(s.z1 + AGENT_R));
     for (let c = c0; c <= c1; c++) for (let r = r0; r <= r1; r++) NAV.blocked[r * NAV.cols + c] = 1;
   }
+  // Keep only the LARGEST connected free region. Furniture wedges create small
+  // sealed pockets of technically-free cells; nearestFree happily resolves a
+  // walker into one, A* then finds no way out, and the fallback walks him
+  // straight through a wall. Marking pockets as blocked makes every remaining
+  // free cell reachable from every other — the fallback path dies of starvation.
+  {
+    const N = NAV.cols * NAV.rows;
+    const compId = new Int32Array(N).fill(-1);
+    let bestComp = -1, bestSize = 0, nComp = 0;
+    for (let i = 0; i < N; i++) {
+      if (NAV.blocked[i] || compId[i] >= 0) continue;
+      const stack = [i]; compId[i] = nComp; let size = 0;
+      while (stack.length) {
+        const cur = stack.pop(); size++;
+        const c = cur % NAV.cols, r = (cur / NAV.cols) | 0;
+        if (c + 1 < NAV.cols && !NAV.blocked[cur + 1] && compId[cur + 1] < 0) { compId[cur + 1] = nComp; stack.push(cur + 1); }
+        if (c - 1 >= 0 && !NAV.blocked[cur - 1] && compId[cur - 1] < 0) { compId[cur - 1] = nComp; stack.push(cur - 1); }
+        if (r + 1 < NAV.rows && !NAV.blocked[cur + NAV.cols] && compId[cur + NAV.cols] < 0) { compId[cur + NAV.cols] = nComp; stack.push(cur + NAV.cols); }
+        if (r - 1 >= 0 && !NAV.blocked[cur - NAV.cols] && compId[cur - NAV.cols] < 0) { compId[cur - NAV.cols] = nComp; stack.push(cur - NAV.cols); }
+      }
+      if (size > bestSize) { bestSize = size; bestComp = nComp; }
+      nComp++;
+    }
+    for (let i = 0; i < N; i++) if (!NAV.blocked[i] && compId[i] !== bestComp) NAV.blocked[i] = 1;
+  }
   NAV.ready = true;
 }
 
@@ -1004,6 +1029,7 @@ function navPath(sx, sz, tx, tz) {
       }
     }
   }
+  window.__navdbg = { si, gi, start, goal, reached: from[gi] >= 0, opened: seen.reduce((a, v) => a + v, 0) };
   if (from[gi] < 0 && gi !== si) return [[tx, tz]];
 
   const cells = [];
@@ -4998,14 +5024,19 @@ function renderCalls({ feed = [], settings, record }) {
   const watch = foldSection("Watch board \u2014 armed tripwires");
   const kill  = foldSection("Killed \u2014 the trades that did not happen");
   callsPanel.append(watch.wrap, kill.wrap);
-  loadWatchboard(watch.body).then(() => {
+  // These two endpoints are tenant-gated and answer 403 to anyone else. An empty
+  // body therefore means "not yours to see" as often as it means "none" — so the
+  // label must not claim "nothing armed" when the truth is "refused".
+  loadWatchboard(watch.body).then((ok) => {
     const n = watch.body.querySelectorAll(".watchrow").length;
-    watch.label.textContent = n ? `Watch board \u2014 ${n} armed tripwire${n === 1 ? "" : "s"}` : "Watch board \u2014 nothing armed";
+    watch.label.textContent = n ? `Watch board \u2014 ${n} armed tripwire${n === 1 ? "" : "s"}`
+      : ok === false ? "Watch board \u2014 tenants only" : "Watch board \u2014 nothing armed";
     watch.body.querySelector(".dp-h")?.remove();          // the fold label already says it
   });
-  loadKilled(kill.body).then(() => {
+  loadKilled(kill.body).then((ok) => {
     const n = kill.body.querySelectorAll(".killrow").length;
-    kill.label.textContent = n ? `Killed \u2014 ${n} shown` : "Killed \u2014 nothing yet";
+    kill.label.textContent = n ? `Killed \u2014 ${n} shown`
+      : ok === false ? "Killed \u2014 tenants only" : "Killed \u2014 nothing yet";
     kill.body.querySelector(".dp-h")?.remove();
   });
 
@@ -6086,6 +6117,7 @@ window.coinFace = coinFace; window.caChip = caChip;
 async function loadWatchboard(host) {
   try {
     const { status, body } = await call_api("/api/watchboard");
+    if (status === 403) return false;                     // gated, not empty
     if (status !== 200 || !body.watches?.length) return;
     const head = document.createElement("div");
     head.className = "dp-h"; head.textContent = "The watch board — armed tripwires, checked every 5 minutes";
@@ -6126,6 +6158,7 @@ async function loadWatchboard(host) {
 async function loadKilled(host) {
   try {
     const { status, body } = await call_api("/api/killed");
+    if (status === 403) return false;                     // gated, not empty
     if (status !== 200 || !body.kills?.length) return;
     const head = document.createElement("div");
     head.className = "dp-h"; head.textContent = "Killed — the trades that did not happen";
