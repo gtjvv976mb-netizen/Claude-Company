@@ -4242,27 +4242,25 @@ function renderRoom() {
     else idMsg.textContent = (body.errors || [body.error || "could not save"]).join(" \u00b7 ");
   });
 
-  // ── settings ──
+  // ── settings ── name your team (cosmetic). Risk is set where it actually
+  // bites — "Risk appetite" + "Bankroll" on the Calls tab — so there is no
+  // duplicate, dead "Risk %" dial here.
   panel.appendChild(mk("div", "dp-h", "This desk"));
   const nameIn = mk("input", "dp-in");
   nameIn.value = ROOM.settings.desk_name || "";
   nameIn.placeholder = "Name your desk";
   nameIn.setAttribute("aria-label", "Desk name");
-  const riskIn = mk("input", "dp-in");
-  riskIn.type = "number"; riskIn.step = "0.1"; riskIn.min = "0.1"; riskIn.max = "10";
-  riskIn.value = ROOM.settings.risk_pct;
-  riskIn.setAttribute("aria-label", "Max risk percent per idea");
-  const save = mk("button", "dp-btn ghost", "Save");
+  const save = mk("button", "dp-btn ghost", "Save name");
   panel.appendChild(nameIn);
   const r2 = mk("div", "dp-row");
-  r2.append(mk("span", "dp-note", "Max risk % per idea"), riskIn, save);
+  r2.append(mk("span", "dp-note", "Your team's name, on the door and the boss board"), save);
   panel.appendChild(r2);
   save.addEventListener("click", async () => {
     save.textContent = "Saving…";
     await api(`/api/floor/${FLOOR}/settings`, { method: "POST",
-      body: JSON.stringify({ deskName: nameIn.value.trim(), riskPct: Number(riskIn.value) }) });
+      body: JSON.stringify({ deskName: nameIn.value.trim() }) });
     save.textContent = "Saved";
-    setTimeout(() => { save.textContent = "Save"; loadRoom(); }, 900);
+    setTimeout(() => { save.textContent = "Save name"; loadRoom(); }, 900);
   });
 
   // ── journal ──
@@ -5161,22 +5159,80 @@ window.load_whales = async () => {
   const el = document.getElementById("whalespanel");
   el.innerHTML = "";
   const h = document.createElement("p"); h.className = "dp-note";
-  h.textContent = "Pump.fun callouts: distinct wallets taking size, net of the pool's own mirrored side. The desk watches; whether it matters is The Aye-Team's call.";
+  h.textContent = "What the whales are SAYING. Thread posts on pump.fun by the very wallets the desk just watched take size — quotes first, flow below.";
   el.appendChild(h);
   try {
-    const { status, body } = await call_api("/api/whales/feed?pad=pump.fun");
-    if (status === 403) return empty(el, "The whale feed is insider data — lease a floor to see who is taking size.");
-    const rows = body.callouts || [];
+    const [co, fe] = await Promise.all([
+      call_api("/api/whales/callouts"),
+      call_api("/api/whales/feed?pad=pump.fun"),
+    ]);
+    if (co.status === 403) return empty(el, "Whale callouts are insider data — lease a floor to hear what size is saying.");
+    const coins = co.body?.coins || [];
+    for (const c of coins) {
+      const card = document.createElement("div");
+      card.style.cssText = "margin:8px 0;padding:8px 10px;border:1px solid var(--card-line);border-radius:8px;background:var(--panel)";
+      const head = document.createElement("div");
+      head.style.cssText = "display:flex;align-items:center;gap:7px;flex-wrap:wrap";
+      const sym = document.createElement("b");
+      sym.textContent = "$" + (c.symbol || c.mint.slice(0, 6)).replace(/^\$/, "");
+      head.append(coinFace(c.mint, c.symbol, 26), sym, caChip(c.mint));
+      if (c.netUsd != null) {
+        const net = document.createElement("b");
+        net.className = c.netUsd >= 0 ? "up" : "down";
+        net.style.marginLeft = "auto";
+        net.textContent = (c.netUsd >= 0 ? "+" : "") + money(c.netUsd) + " net";
+        head.appendChild(net);
+      }
+      card.appendChild(head);
+      (c.whales || []).forEach((q, i) => {
+        const row = document.createElement("div");
+        row.style.cssText = "margin-top:6px;font-size:12.5px;line-height:1.45";
+        const who = document.createElement("b");
+        who.textContent = `🐋 Whale #${i + 1}`;
+        const bought = document.createElement("span");
+        bought.className = "faint";
+        bought.textContent = ` · bought ${money(q.whaleUsd)} · `;
+        const words = document.createElement("span");
+        words.textContent = `“${q.text}”`;
+        row.append(who, bought, words);
+        card.appendChild(row);
+      });
+      for (const q of c.chatter || []) {
+        const row = document.createElement("div");
+        row.style.cssText = "margin-top:5px;font-size:12px;line-height:1.4;opacity:.78";
+        row.textContent = `💬 ${q.username || (q.user || "").slice(0, 4) || "anon"} — “${q.text}”`;
+        card.appendChild(row);
+      }
+      el.appendChild(card);
+    }
+    if (!coins.length) {
+      const n = document.createElement("p"); n.className = "dp-note";
+      n.textContent = "No whale voices caught this pass — threads are read live off the coins whales most recently sized into.";
+      el.appendChild(n);
+    }
+    // The flow ledger the tab used to be: still the receipts under the quotes.
+    const rows = fe.body?.callouts || [];
     localStorage.setItem("cc-whales-seen", String(rows[0]?.ts || 0));
     document.getElementById("whale-dot")?.classList.remove("on");
-    if (!rows.length) return empty(el, "No pump.fun callouts on record yet. They appear here as sweeps find distinct whales taking size.");
+    if (!rows.length) {
+      if (fe.status !== 403) empty(el, "No pump.fun size on record yet. Rows appear as sweeps find distinct whales taking size.");
+      return;
+    }
+    const fh = document.createElement("p"); fh.className = "dp-note";
+    fh.style.marginTop = "10px";
+    fh.textContent = "Size taken — distinct wallets, net of the pool's own mirrored side.";
+    el.appendChild(fh);
     for (const w of rows) {
-      el.appendChild(drow([
-        ["b grow", w.symbol || w.mint.slice(0, 6)],
+      const r = drow([
+        ["b grow", ""],
         ["span", `${w.buyers ?? "?"} buying · ${w.sellers ?? "?"} selling`],
         ["b " + ((w.net_usd ?? 0) >= 0 ? "up" : "down"), money(w.net_usd)],
         ["faint", ago(w.ts)],
-      ]));
+      ]);
+      const lead = r.querySelector("b");
+      lead.style.display = "inline-flex"; lead.style.alignItems = "center"; lead.style.gap = "6px";
+      lead.append(coinFace(w.mint, w.symbol), document.createTextNode(w.symbol || w.mint.slice(0, 6)), caChip(w.mint));
+      el.appendChild(r);
     }
   } catch { empty(el, "Could not reach the desk."); }
 };
