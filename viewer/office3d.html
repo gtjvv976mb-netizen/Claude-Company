@@ -3962,6 +3962,28 @@ async function loadChronicle(before) {
     const tk = (() => { try { return localStorage.getItem("cc_token"); } catch { return null; } })();
     const r = await fetch(`${base}/api/chronicle?${q}`,
       tk ? { headers: { authorization: "Bearer " + tk } } : undefined);
+
+    /* A 403 here is the tape saying "not yours", and the old code destructured
+       it into an empty list and rendered NOTHING — so a visitor met a silent,
+       apparently dead building while the desk was in fact working. Say what is
+       happening, and show the public pulse, which is not gated. */
+    if (r.status === 403) {
+      if (!before && !window.__tapeGateShown) {
+        window.__tapeGateShown = true;
+        try {
+          const st = await fetch(`${base}/api/stats/overview`).then((x) => x.json());
+          const rs = st.research || {}, b = st.building || {};
+          tapeRow("DESK", `The house team is working right now — ${rs.workups ?? 0} candidates worked up, ` +
+            `${rs.killsByCode ?? 0} killed, ${rs.watchesOpened ?? 0} tripwires armed, ` +
+            `${b.houseCalls ?? 0} calls published.`, "ok", Date.now());
+        } catch {}
+        tapeRow("TAPE", "The blow-by-blow is private to tenants. Connect the wallet that holds your " +
+          "lease to watch your floor's seats work in real time.", "warn", Date.now());
+      }
+      chronDone = true;
+      return 0;
+    }
+
     const { events = [] } = await r.json();
     if (!events.length || events[0].id == null) { chronDone = !!before; return 0; }
     oldestChron = events[0].id;
