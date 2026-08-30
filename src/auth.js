@@ -27,7 +27,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_wallet ON sessions(wallet);
 `);
 
 const NONCE_TTL_MS = 5 * 60 * 1000;
-const SESSION_TTL_MS = 7 * 24 * 3600 * 1000;
+const SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
 
 export const SIGN_IN_PREFIX = "Claude Company — sign in";
 
@@ -85,6 +85,13 @@ export function walletFor(token) {
   if (!token) return null;
   const s = db.prepare("SELECT wallet, expires_at FROM sessions WHERE token = ?").get(token);
   if (!s || s.expires_at < Date.now()) return null;
+  // SLIDING renewal: a session that is being USED never expires under its user.
+  // The old fixed 7-day window signed people out mid-life — they came back to a
+  // zeroed masthead and locked tabs with no way back but the tower. Renew at
+  // most once a day to keep this lookup write-light.
+  const now = Date.now();
+  if (s.expires_at - now < SESSION_TTL_MS - 24 * 3600 * 1000)
+    db.prepare("UPDATE sessions SET expires_at=? WHERE token=?").run(now + SESSION_TTL_MS, token);
   return s.wallet;
 }
 

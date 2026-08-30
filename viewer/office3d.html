@@ -2918,17 +2918,35 @@ const grokBoard = (() => {
   return { c, tex, mesh, frame, tickets };
 })();
 
-/** Show or hide the Assistant Director and his office with the floor's brain. */
+/* The Assistant Director is ALWAYS in the building — hiding him made the room
+   look unbuilt on Claude floors. Off duty he simply sleeps at his desk: slumped,
+   dimmed, with his board on standby. Hiring the Grok brain wakes him. */
+let grokOnDuty = false;
 window.__setGrokPresent = (on) => {
-  grokOffice.visible = !!on;
+  grokOnDuty = !!on;
+  grokOffice.visible = true;                       // his room is part of the floor
   const w = workers && workers.GrokAD;
-  if (w && w.g) w.g.visible = !!on;
-  if (on) drawGrokBoard();
+  if (w && w.g) {
+    w.g.visible = true;
+    w.asleep = !grokOnDuty;
+    // A slumped head and a slight lean read as "asleep" from across the room
+    // without needing an animation clip.
+    const head = w.joints && w.joints.Head;
+    if (head) head.rotation.z = grokOnDuty ? 0 : 0.42;
+    const chest = w.joints && w.joints.Chest;
+    if (chest) chest.rotation.z = grokOnDuty ? 0 : 0.16;
+    w.g.traverse((o) => {
+      if (!o.material || !o.material.color) return;
+      o.material.opacity = grokOnDuty ? 1 : 0.82;
+      o.material.transparent = !grokOnDuty;
+    });
+  }
+  drawGrokBoard();
 };
 
 /* His board is a TRADING SCREEN, not a chalkboard — the boss writes in chalk, Grok
    prints. Monospace, hairline rules, P&L in the only two colours that matter. */
-let grokBook = { positions: [], settled: null, record: null };
+let grokBook = { positions: [], settled: null, record: null, stats: null };
 function drawGrokBoard() {
   const x = grokBoard.c.getContext("2d");
   const W = 768, H = 448;
@@ -2943,37 +2961,45 @@ function drawGrokBoard() {
   x.fillText("GROX MULDER", 26, 38);
   x.fillStyle = "#9aa0a6";
   x.font = '500 20px "JetBrains Mono", ui-monospace, monospace';
-  x.fillText("ASST DIRECTOR \u00b7 THE BOOK", 268, 40);
+  x.fillText(grokOnDuty ? "ASST DIRECTOR \u00b7 ON THE BOOK" : "ASST DIRECTOR \u00b7 STANDBY", 268, 40);
 
   const pos = grokBook.positions || [];
   if (!pos.length) {
     x.fillStyle = "#6b7075";
     x.font = '500 24px "JetBrains Mono", ui-monospace, monospace';
     x.textAlign = "center";
-    x.fillText("THE BOOK IS FLAT", W / 2, 132);
-    // A flat book is the normal state of a disciplined desk, so the board says
-    // what he is DOING rather than sitting blank: his standing orders, in his
-    // own voice. Empty is not the same as idle.
-    x.font = '500 17px "JetBrains Mono", ui-monospace, monospace';
-    x.fillStyle = "#8a9095";
-    x.textAlign = "left";
-    const orders = [
-      "WATCHING X ......... velocity \u00b7 distinct voices \u00b7 lore origin",
-      "SCREENING .......... paid attention, bots, one pasted script",
-      "REFUSING ........... anything I cannot exit at size",
-      "THE STOP ........... is not a suggestion",
+    x.fillText(grokOnDuty ? "THE BOOK IS FLAT" : "OFF DUTY \u2014 ASLEEP", W / 2, 126);
+
+    // Even with nothing held, the wall carries the floor's live numbers: what is
+    // on the sheet, what is actually held, how much of it is memecoin, and the
+    // exposure that decides how hard to breathe.
+    const st = grokBook.stats || {};
+    const rows = [
+      ["LIVE CALLS", st.liveCalls != null ? String(st.liveCalls) : "\u2014"],
+      ["OFFERED TO THIS FLOOR", st.open != null ? String(st.open) : "\u2014"],
+      ["POSITIONS HELD", st.taken != null ? String(st.taken) : "\u2014"],
+      ["OF WHICH MEMECOIN", st.memecoins != null ? String(st.memecoins) : "\u2014"],
+      ["EXPOSURE", st.exposureSol != null ? st.exposureSol.toFixed(3) + " SOL" : "\u2014"],
     ];
-    let oy = 178;
-    for (const line of orders) { x.fillText(line, 52, oy); oy += 30; }
-    x.font = 'italic 500 19px "JetBrains Mono", ui-monospace, monospace';
-    x.fillStyle = "#c9ccd1";
+    x.font = '500 18px "JetBrains Mono", ui-monospace, monospace';
+    let ry = 178;
+    for (const [k, v] of rows) {
+      x.textAlign = "left";  x.fillStyle = "#8a9095"; x.fillText(k, 52, ry);
+      x.textAlign = "right"; x.fillStyle = "#e8eaec"; x.fillText(v, W - 52, ry);
+      x.strokeStyle = "#1c1e21"; x.lineWidth = 1;
+      x.beginPath(); x.moveTo(52, ry + 13); x.lineTo(W - 52, ry + 13); x.stroke();
+      ry += 34;
+    }
     x.textAlign = "center";
-    x.fillText("\u201cThe truth is in the order flow.\u201d", W / 2, 322);
+    x.font = 'italic 500 18px "JetBrains Mono", ui-monospace, monospace';
+    x.fillStyle = grokOnDuty ? "#c9ccd1" : "#6b7075";
+    x.fillText(grokOnDuty ? "\u201cThe truth is in the order flow.\u201d"
+                          : "\u201cWake me when you hire me.\u201d  \ud83d\udca4", W / 2, 372);
     x.font = '500 15px "JetBrains Mono", ui-monospace, monospace';
-    x.fillStyle = "#6b7075";
+    x.fillStyle = "#5f6469";
     const rec = grokBook.record;
-    x.fillText(rec ? `floor record  ${rec.wins}\u2013${rec.losses}   \u00b7   ${rec.settled} settled` :
-      "no call published on this floor yet", W / 2, 370);
+    x.fillText(rec ? `floor record  ${rec.wins}\u2013${rec.losses}   \u00b7   ${rec.settled} settled`
+      : "no call published on this floor yet", W / 2, 404);
     grokBoard.tex.needsUpdate = true;
     return;
   }
@@ -3047,13 +3073,25 @@ function drawGrokTickets() {
 /** Fed from the tenant's own authenticated call sheet, so the book on his wall is
  *  the same book the Calls tab shows. */
 window.__grokBoardUpdate = (feed = []) => {
-  const open = feed.filter((c) => c.status === "live" && c.verdict === "offered");
+  const live = feed.filter((c) => c.status === "live");
+  const open = live.filter((c) => c.verdict === "offered");
   grokBook.record = window.__floorRecord || grokBook.record;
   grokBook.positions = open.map((c) => {
     const entry = c.entry_ref ?? null, mark = c.last_mark ?? null;
     return { symbol: c.symbol, size: c.size_sol ?? null, entry, mark,
+             category: c.category || null, taken: !!c.taken,
              pnlPct: (entry && mark) ? ((mark - entry) / entry) * 100 : null };
   });
+  // The counts he keeps on the wall: what is live, what is actually held, and
+  // how much of it is memecoin — the number that decides how hard to breathe.
+  grokBook.stats = {
+    liveCalls: live.length,
+    open: open.length,
+    taken: open.filter((c) => c.taken).length,
+    memecoins: open.filter((c) => (c.category || "").toLowerCase() === "memecoin").length,
+    exposureSol: open.reduce((a, c) => a + (c.size_sol || 0), 0),
+    closedToday: feed.filter((c) => c.status === "closed").length,
+  };
   drawGrokBoard();
   drawGrokTickets();
 };
@@ -6224,6 +6262,25 @@ function buildControls(settings) {
   return box;
 }
 
+/* A dead session must never read as a broken page: if this device HAS a token
+   but the server no longer honours it, the Wallet stat becomes the way back in
+   instead of a silent zero. Sessions slide 30 days server-side now, so this is
+   the rare case — but the door still needs a handle. */
+(async () => {
+  const tk = (() => { try { return localStorage.getItem("cc_token"); } catch { return null; } })();
+  if (!tk) return;
+  try {
+    const r = await fetch((window.__API_BASE__ || "") + "/api/me", { headers: { authorization: "Bearer " + tk } });
+    const me = await r.json();
+    if (me.wallet) return;
+    window.__sessionDead = true;               // paintHud must not repaint over the handle
+    const w = document.getElementById("s-wal");
+    if (w) w.innerHTML = `<a href="/tower" style="color:var(--amber,#e0ad3d);text-decoration:underline">Reconnect ↗</a>`;
+    const m = document.getElementById("s-mine");
+    if (m) m.textContent = "session expired";
+  } catch {}
+})();
+
 /* ── the top bar, kept current from the same data the panels use ─────────── */
 function paintHud({ feed, settings, budget, rent } = {}) {
   const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
@@ -6237,8 +6294,9 @@ function paintHud({ feed, settings, budget, rent } = {}) {
     // Two different numbers, and the old single "Balance" label conflated them:
     // the wallet's own on-chain holdings, and the credit already sent in.
     set("s-bal", toNum(budget.balanceBaseUnits).toLocaleString(undefined, { maximumFractionDigits: 0 }) + " CLAUDECO");
-    set("s-wal", budget.onchainBaseUnits == null ? "—"
-      : toNum(budget.onchainBaseUnits).toLocaleString(undefined, { maximumFractionDigits: 0 }) + " CLAUDECO");
+    if (!window.__sessionDead)
+      set("s-wal", budget.onchainBaseUnits == null ? "—"
+        : toNum(budget.onchainBaseUnits).toLocaleString(undefined, { maximumFractionDigits: 0 }) + " CLAUDECO");
   }
   const wrap = document.getElementById("s-rentwrap");
   if (wrap && rent && rent.dueAt) {
