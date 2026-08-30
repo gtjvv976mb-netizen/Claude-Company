@@ -850,6 +850,10 @@ const STAFF = [
   { id:"Regime",     name:"MURDOCK",    role:"Reads the weather",     desk:[9.7,-5.6],  stand:[9.7,-4.1],   apron:0x4a7c9a },
   { id:"Review",     name:"COLONEL DEBRIEF", role:"Grades every landing", desk:[-11.6,-2.6], stand:[-11.6,-1.1], apron:0x6b6f45 },
   { id:"Scribe",     name:"AGENT P",     role:"Says nothing. Files everything.",    desk:[-5.5,8.2],  stand:[-5.5,6.7],   apron:0xc8863c },
+  // Grok is NOT the boss — the boss is the tenant's own MD. Grok is the Assistant
+  // Director who works the trades, in his own room in the front-right corner. He
+  // only appears when this floor's brain is Grok (see __setGrokPresent).
+  { id:"GrokAD",     name:"GROK",       role:"Assistant Director — works the trades", desk:[14.6,10.3], stand:[14.6,8.95], grok:true },
 ];
 
 /** seat id -> crew name, for anything arriving from the server keyed by id. */
@@ -1974,13 +1978,13 @@ function buildAvatar(spec, index) {
   }
 
   const claude = !!spec.claude;
-  const grokBoss = claude && bossBrain === "grok";      // the boss, on a Grok desk
+  const grok = !!spec.grok;    // Grok's OWN agent — a distinct figure, never the boss
   const pal = claude
-    ? (grokBoss
-        ? { skin: 0x17181a, head: 0x0d0d0f, hair: 0x0d0d0f, eye: 0xfafafa, shirt: 0x0d0d0f,
-            trousers: 0x1b1c1e, apron: 0x0d0d0f, boots: 0x090a0b }
-        : { skin: P.claude, head: 0xf5efe4, hair: P.claude, eye: P.claude, shirt: P.claude,
-            trousers: 0xb85f42, apron: P.claude, boots: 0x7d3f2c })
+    ? { skin: P.claude, head: 0xf5efe4, hair: P.claude, eye: P.claude, shirt: P.claude,
+        trousers: 0xb85f42, apron: P.claude, boots: 0x7d3f2c }
+    : grok
+    ? { skin: 0x17181a, head: 0x0d0d0f, hair: 0x0d0d0f, eye: 0xfafafa, shirt: 0x0d0d0f,
+        trousers: 0x1b1c1e, apron: 0x0d0d0f, boots: 0x090a0b }
     : { skin: SKINS[index % SKINS.length], hair: HAIRS[(index * 3 + 1) % HAIRS.length],
         eye: 0x2a2320, shirt: SHIRTS[index % SHIRTS.length],
         trousers: TROUSERS[(index * 2) % TROUSERS.length],
@@ -2027,20 +2031,18 @@ function buildAvatar(spec, index) {
   }
 
   let spark = null, built_halo = null;
-  if (claude) {
-    // The boss's mark, worn where a face would be — Claude's coral spark, or, when
-    // the desk runs on Grok, Grok's white slash. The rig faces +X and the mark is
-    // built in the XY plane, so it is turned a quarter turn about Y or it presents
-    // edge-on and reads as a spike rather than a mark.
-    const markC = grokBoss ? 0xf5f5f5 : P.claude;
-    spark = grokBoss ? buildGrokMark(0.17, 0.036, markC, 1.15)
-                     : buildSpark(0.17, 11, 0.030, P.claude, 1.25);
+  if (claude || grok) {
+    // A marked face: Claude's coral spark for the boss, Grok's white slash for the
+    // Assistant Director. The rig faces +X and the mark is built in the XY plane, so
+    // it is turned a quarter turn about Y or it presents edge-on and reads as a spike.
+    spark = grok ? buildGrokMark(0.17, 0.036, 0xf5f5f5, 1.15)
+                 : buildSpark(0.17, 11, 0.030, P.claude, 1.25);
     spark.rotation.y = -Math.PI / 2;
     spark.position.set(0.158, 0.16, 0);
     joints.Head.add(spark);
     // a second, larger mark floating above — the one you can see across the room
-    const halo = grokBoss ? buildGrokMark(0.26, 0.05, markC, 0.95)
-                          : buildSpark(0.26, 11, 0.042, P.claude, 1.0);
+    const halo = grok ? buildGrokMark(0.26, 0.05, 0xf5f5f5, 0.95)
+                      : buildSpark(0.26, 11, 0.042, P.claude, 1.0);
     halo.rotation.y = -Math.PI / 2;
     halo.position.set(0.02, 0.52, 0);
     joints.Head.add(halo);
@@ -2196,13 +2198,11 @@ function applyBrainRoom(brain) {
   const L = BRAIN_LOOKS[brain] ?? BRAIN_LOOKS.claude;
   bossBoard.frame.material.color.set(L.frame);
   bossBoard.rug.material.color.set(L.rug);
-  // Rebuild the boss avatar so the dais shows who runs the desk — Claude's spark or
-  // Grok's slash. rebuildWorker + workers are declared further down but this only
-  // runs from the async poll, long after the scene is built.
-  if (brain !== bossBrain && typeof rebuildWorker === "function" && workers && workers.CEO) {
-    bossBrain = brain;
-    rebuildWorker("CEO");
-  }
+  // The boss is ALWAYS the boss (the tenant's own MD). Grok is a separate agent —
+  // the Assistant Director who works the trades — so a brain change opens or closes
+  // HIS office rather than redressing the corner office.
+  bossBrain = brain;
+  window.__setGrokPresent?.(brain === "grok");
 }
 drawBossBoard();
 
@@ -2266,10 +2266,9 @@ class Worker {
     this.faceTowards(this.deskAt.x, this.deskAt.z);
     scene.add(this.g);
 
-    const bossGrok = spec.claude && bossBrain === "grok";
-    this.nameSprite = makeSprite(spec.name || spec.id, spec.claude ? 1.15 : 0.92,
-      bossGrok ? { bg: "#0d0d0f", accent: "#cfd2d6" }
-               : spec.claude ? { bg: "#8a3f22", accent: "#f0c9a0" } : undefined);
+    this.nameSprite = makeSprite(spec.name || spec.id, (spec.claude || spec.grok) ? 1.12 : 0.92,
+      spec.grok ? { bg: "#0d0d0f", accent: "#cfd2d6" }
+                : spec.claude ? { bg: "#8a3f22", accent: "#f0c9a0" } : undefined);
     this.nameSprite.position.set(0, 2.28, 0);
     this.nameSprite.visible = true;
     this.g.add(this.nameSprite);
@@ -2574,6 +2573,7 @@ const DESK_KIT = {
 /* ── desks and chairs ─────────────────────────────────────────────────────── */
 const deskYaw = (spec) => Math.atan2(-(spec.desk[1] - spec.stand[1]), spec.desk[0] - spec.stand[0]);
 for (const spec of STAFF) {
+  if (spec.grok) continue;          // built into his own (toggleable, unbaked) office
   const yaw = deskYaw(spec);
   buildDesk(spec.desk, yaw + Math.PI, spec.y ?? 0, spec.claude ? P.claude : P.teal, spec.id);
   buildChair(spec.stand, yaw, spec.y ?? 0);
@@ -2637,6 +2637,204 @@ function bakeStatic(root) {
   return buckets.size;
 }
 const bakedBuckets = bakeStatic(room);
+
+/* ═══ GROK'S OFFICE ═══════════════════════════════════════════════════════════
+   The Assistant Director's own room, front-right corner. Deliberately NOT part of
+   `room`: the static bake merges and clears its children, and this whole office has
+   to appear and disappear with the floor's brain. A few extra draw calls buys that.
+
+   Everything in here is X-dark against the building's warm timber, so the moment you
+   see it you know a different house is trading this floor. His BOARD carries the
+   positions — the book he is actually working — and a row of tickets on the desk
+   shows each open trade as its own object. */
+const GROK_OFFICE = { x0: 12.3, x1: 16.95, z0: 7.5, z1: 12.45, cx: 14.6 };
+const grokOffice = new THREE.Group();
+grokOffice.visible = false;                       // shown only on a Grok desk
+scene.add(grokOffice);
+
+const grokBoard = (() => {
+  const O = GROK_OFFICE;
+  const dark = 0x121316, darker = 0x0d0d0f, edge = 0x2a2c30;
+
+  // ── partitions: a low solid wall with glass above, so the room reads as an office
+  //    you can see into rather than a box.
+  const glassMat = new THREE.MeshPhysicalMaterial({
+    color: 0x9fb4bd, transmission: 0.42, transparent: true, opacity: 0.34,
+    roughness: 0.16, thickness: 0.05, metalness: 0,
+  });
+  const seg = (w, d, cx, cz) => {
+    box(grokOffice, [w, 1.0, d], [cx, 0.5, cz], darker, 0.86);         // solid base
+    box(grokOffice, [w * 0.995, 0.07, d * 0.995], [cx, 1.03, cz], edge, 0.5, 0.3);  // cap rail
+    const g = new THREE.Mesh(BOX, glassMat);                            // glass above
+    g.scale.set(w * 0.97, 2.0, Math.max(d * 0.97, 0.04));
+    g.position.set(cx, 2.05, cz);
+    grokOffice.add(g);
+  };
+  const W = O.x1 - O.x0;
+  seg(W, 0.12, (O.x0 + O.x1) / 2, O.z0);                 // north partition (his board hangs here)
+  seg(0.12, 2.0, O.x0, O.z0 + 1.0);                      // west partition, north of the doorway
+  seg(0.12, 1.75, O.x0, O.z1 - 0.88);                    // west partition, south of the doorway
+  // a doorway post pair, so the gap reads as a door rather than a hole
+  box(grokOffice, [0.16, 2.6, 0.16], [O.x0, 1.3, O.z0 + 2.0], edge, 0.55, 0.3);
+  box(grokOffice, [0.16, 2.6, 0.16], [O.x0, 1.3, O.z1 - 1.76], edge, 0.55, 0.3);
+
+  // ── floor: his own dark deck with a white X laid into it
+  const deck = new THREE.Mesh(new THREE.PlaneGeometry(W - 0.2, O.z1 - O.z0 - 0.2),
+    new THREE.MeshStandardMaterial({ color: dark, roughness: 0.95 }));
+  deck.rotation.x = -Math.PI / 2;
+  deck.position.set((O.x0 + O.x1) / 2, 0.012, (O.z0 + O.z1) / 2);
+  grokOffice.add(deck);
+  for (const a of [Math.PI / 4, -Math.PI / 4]) {
+    const bar = new THREE.Mesh(BOX, new THREE.MeshStandardMaterial({
+      color: 0xf2f2f4, roughness: 0.6, emissive: new THREE.Color(0x6a6d72), emissiveIntensity: 0.22 }));
+    bar.scale.set(3.5, 0.014, 0.20);
+    bar.position.set(O.cx, 0.02, (O.z0 + O.z1) / 2 + 0.7);
+    bar.rotation.y = a;
+    grokOffice.add(bar);
+  }
+
+  // ── his desk and chair, black to match the room
+  const deskYawG = Math.PI / 2;
+  const desk = buildDesk([O.cx, 10.3], deskYawG, 0, 0x1b1c1e, null);
+  const chair = buildChair([O.cx, 8.95], deskYawG + Math.PI, 0);
+  for (const g of [desk, chair]) { room.remove(g); grokOffice.add(g); }   // out of the baked room
+
+  // ── THE BOARD: his book, hung on the north partition, facing into the room the
+  //    same way the boss board does so the camera reads it over his shoulder.
+  const c = document.createElement("canvas"); c.width = 768; c.height = 448;
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(4.3, 2.5),
+    new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+  mesh.position.set(O.cx, 2.32, O.z0 + 0.10);
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(4.52, 2.72, 0.10),
+    new THREE.MeshStandardMaterial({ color: 0x232427, roughness: 0.7, metalness: 0.25 }));
+  frame.position.set(O.cx, 2.32, O.z0 + 0.03);
+  grokOffice.add(mesh, frame);
+
+  // ── the ticket rail: one tile per open trade, stood up on the desk
+  const tickets = new THREE.Group();
+  tickets.position.set(O.cx, 0.78, 10.3);
+  grokOffice.add(tickets);
+
+  return { c, tex, mesh, frame, tickets };
+})();
+
+/** Show or hide the Assistant Director and his office with the floor's brain. */
+window.__setGrokPresent = (on) => {
+  grokOffice.visible = !!on;
+  const w = workers && workers.GrokAD;
+  if (w && w.g) w.g.visible = !!on;
+  if (on) drawGrokBoard();
+};
+
+/* His board is a TRADING SCREEN, not a chalkboard — the boss writes in chalk, Grok
+   prints. Monospace, hairline rules, P&L in the only two colours that matter. */
+let grokBook = { positions: [], settled: null };
+function drawGrokBoard() {
+  const x = grokBoard.c.getContext("2d");
+  const W = 768, H = 448;
+  x.fillStyle = "#0d0d0f"; x.fillRect(0, 0, W, H);
+  x.fillStyle = "#141517"; x.fillRect(0, 0, W, 74);
+  x.strokeStyle = "#2a2c30"; x.lineWidth = 2;
+  x.beginPath(); x.moveTo(0, 74); x.lineTo(W, 74); x.stroke();
+
+  x.fillStyle = "#fafafa";
+  x.font = '700 34px "JetBrains Mono", ui-monospace, monospace';
+  x.textBaseline = "middle"; x.textAlign = "left";
+  x.fillText("GROK", 26, 38);
+  x.fillStyle = "#9aa0a6";
+  x.font = '500 20px "JetBrains Mono", ui-monospace, monospace';
+  x.fillText("ASSISTANT DIRECTOR \u00b7 THE BOOK", 122, 40);
+
+  const pos = grokBook.positions || [];
+  if (!pos.length) {
+    x.fillStyle = "#6b7075";
+    x.font = '500 24px "JetBrains Mono", ui-monospace, monospace';
+    x.textAlign = "center";
+    x.fillText("no open positions", W / 2, H / 2 - 6);
+    x.font = '500 18px "JetBrains Mono", ui-monospace, monospace';
+    x.fillText("the book is flat", W / 2, H / 2 + 26);
+    grokBoard.tex.needsUpdate = true;
+    return;
+  }
+
+  // column heads
+  x.font = '500 17px "JetBrains Mono", ui-monospace, monospace';
+  x.fillStyle = "#6b7075"; x.textAlign = "left";
+  x.fillText("TICKER", 26, 100);
+  x.fillText("SIZE", 300, 100);
+  x.fillText("ENTRY", 420, 100);
+  x.fillText("MARK", 560, 100);
+  x.textAlign = "right"; x.fillText("P&L", W - 26, 100);
+
+  let y = 138;
+  for (const p of pos.slice(0, 8)) {
+    const up = p.pnlPct != null && p.pnlPct >= 0;
+    const col = p.pnlPct == null ? "#9aa0a6" : up ? "#4ec9a5" : "#e0685c";
+    x.textAlign = "left";
+    x.fillStyle = "#fafafa";
+    x.font = '700 24px "JetBrains Mono", ui-monospace, monospace';
+    x.fillText(String(p.symbol || "?").slice(0, 12), 26, y);
+    x.font = '500 20px "JetBrains Mono", ui-monospace, monospace';
+    x.fillStyle = "#c8ccd0";
+    x.fillText(p.size != null ? p.size.toFixed(3) : "\u2014", 300, y);
+    x.fillText(p.entry != null ? fmtPx(p.entry) : "\u2014", 420, y);
+    x.fillText(p.mark != null ? fmtPx(p.mark) : "\u2014", 560, y);
+    x.textAlign = "right";
+    x.fillStyle = col;
+    x.font = '700 23px "JetBrains Mono", ui-monospace, monospace';
+    x.fillText(p.pnlPct == null ? "\u2014" : (up ? "+" : "") + p.pnlPct.toFixed(1) + "%", W - 26, y);
+    x.strokeStyle = "#1c1e21"; x.lineWidth = 1;
+    x.beginPath(); x.moveTo(26, y + 20); x.lineTo(W - 26, y + 20); x.stroke();
+    y += 40;
+  }
+  if (pos.length > 8) {
+    x.textAlign = "left"; x.fillStyle = "#6b7075";
+    x.font = '500 17px "JetBrains Mono", ui-monospace, monospace';
+    x.fillText("+" + (pos.length - 8) + " more", 26, y + 4);
+  }
+  grokBoard.tex.needsUpdate = true;
+}
+const fmtPx = (v) => v >= 1 ? v.toFixed(2) : v >= 0.01 ? v.toFixed(4) : v.toExponential(1);
+
+/** Every trade as its own object: one standing ticket per open position, green up,
+ *  red down, tallest = biggest position. */
+function drawGrokTickets() {
+  const t = grokBoard.tickets;
+  while (t.children.length) { const c = t.children.pop(); c.geometry?.dispose?.(); t.remove(c); }
+  const pos = (grokBook.positions || []).slice(0, 7);
+  const big = Math.max(0.001, ...pos.map((p) => p.size || 0));
+  pos.forEach((p, i) => {
+    const up = p.pnlPct != null && p.pnlPct >= 0;
+    const h = 0.10 + 0.26 * Math.min(1, (p.size || 0) / big);
+    const m = new THREE.Mesh(BOX, new THREE.MeshStandardMaterial({
+      color: p.pnlPct == null ? 0x9aa0a6 : up ? 0x4ec9a5 : 0xe0685c,
+      roughness: 0.5,
+      emissive: new THREE.Color(p.pnlPct == null ? 0x2a2c30 : up ? 0x1d5f4c : 0x6e2f28),
+      emissiveIntensity: 0.55,
+    }));
+    m.scale.set(0.09, h, 0.16);
+    m.position.set(-0.62 + i * 0.20, h / 2, 0.18);
+    m.castShadow = renderer.shadowMap.enabled;
+    t.add(m);
+  });
+}
+
+/** Fed from the tenant's own authenticated call sheet, so the book on his wall is
+ *  the same book the Calls tab shows. */
+window.__grokBoardUpdate = (feed = []) => {
+  const open = feed.filter((c) => c.status === "live" && c.verdict === "offered");
+  grokBook.positions = open.map((c) => {
+    const entry = c.entry_ref ?? null, mark = c.last_mark ?? null;
+    return { symbol: c.symbol, size: c.size_sol ?? null, entry, mark,
+             pnlPct: (entry && mark) ? ((mark - entry) / entry) * 100 : null };
+  });
+  drawGrokBoard();
+  drawGrokTickets();
+};
+drawGrokBoard();
+
 
 /* ── the staff ────────────────────────────────────────────────────────────── */
 {
@@ -3078,6 +3276,8 @@ STAFF.forEach((spec, i) => {
   PICKABLE.push(hit);
 });
 window.__workers = workers;   // debug hook, same idiom as __bossBoard / __figure
+// The Assistant Director is off-stage until this floor's brain is Grok.
+if (workers.GrokAD && workers.GrokAD.g) workers.GrokAD.g.visible = false;
 
 /** Tear one worker out of the scene and build them again from their (edited) spec.
  * Used exactly once so far: the boss. On the house floor the corner office is BIG M;
@@ -3108,10 +3308,9 @@ window.applyIdentity = (identity) => {
   const spec = STAFF.find((x) => x.id === "CEO");
   const name = (identity.mdName || "MANAGING DIRECTOR").toUpperCase();
   const costume = identity.costume || null;
-  // The boss wears the DESK'S BRAIN mark — Claude's spark or Grok's slash — unless
-  // the tenant has dressed their MD in a custom costume, which is a persona and takes
-  // the marked face's place. (Before, any leased floor dropped the mark outright, so
-  // a Grok desk had no way to show it ran on Grok.)
+  // The boss keeps a marked face unless the tenant dressed their MD in a custom
+  // costume (a persona, which takes the marked face's place). Grok never wears the
+  // corner office — he is his own agent, in his own room.
   const wantsMark = !costume;
   if (spec.name === name && (spec.costume || null) === costume && spec.claude === wantsMark) return;
   spec.name = name;
@@ -4527,6 +4726,7 @@ async function loadCalls() {
       return;
     }
     renderCalls(body);
+    window.__grokBoardUpdate?.(body.feed || []);      // Grok's own board, same book
     paintHud({ feed: body.feed, settings: body.settings, budget: BUDGET, rent: body.rent });
   } catch (e) {
     callsPanel.innerHTML = "";
