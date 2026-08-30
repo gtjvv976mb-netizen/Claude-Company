@@ -447,6 +447,27 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
                * can now publish is WATCH paired with a NON-refuted red team. Counting
                * PM verdicts and red-team verdicts separately cannot show that; they
                * have to be joined per coin. */
+              /* WHY NOTHING PUBLISHED. The mandate refuses candidates for reasons it
+               * emits as events, and every emit is chronicled — but the chronicle is
+               * tenant-gated, so from the outside a desk that withholds looks exactly
+               * like a desk that is idle. These two are different problems with
+               * different fixes, and telling them apart needs the actual reason
+               * string, not a count. Public because "why did my bot not trade" is
+               * not a secret. `safety` separates a measured fact about the token from
+               * a lack of conviction: only the second kind is ever tunable. */
+              withheld: rows(`SELECT json_extract(data,'$.reason') reason,
+                     json_extract(data,'$.safety') safety, COUNT(*) n,
+                     MAX(ts) last_ts
+                FROM chronicle
+                WHERE type IN ('call:withheld','cohort:declined','call:rejected')
+                  AND ts > (strftime('%s','now') * 1000 - 604800000)
+                GROUP BY reason ORDER BY n DESC LIMIT 12`),
+              /* And the three ways a cycle can end without a call at all. */
+              cycleEnds: rows(`SELECT type, COUNT(*) n, MAX(ts) last_ts
+                FROM chronicle
+                WHERE type IN ('cycle:hunt_dry','cycle:holding','cycle:budget','cycle:halted','cycle:end')
+                  AND ts > (strftime('%s','now') * 1000 - 604800000)
+                GROUP BY type ORDER BY n DESC`),
               pmVsRedteam: rows(`SELECT p.verdict pm, r.verdict redteam, COUNT(*) n
                 FROM verdicts p JOIN verdicts r
                   ON p.cycle = r.cycle AND p.mint = r.mint AND r.seat = 'redteam'
