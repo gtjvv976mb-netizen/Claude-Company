@@ -2073,8 +2073,10 @@ function buildAvatar(spec, index) {
 
   // The CEO has no hair and no eyes — the spark stands in for a face. Other figures
   // drop whatever that character does not have.
-  const gone = new Set(claude ? ["hair", "eye"] : (fig.drop || []));
-  const parts = BODY.filter((b) => !gone.has(b[3]));
+  const gone = new Set(claude || grok ? ["hair", "eye"] : (fig.drop || []));
+  // GROX wears the mascot head — a white orb — so the default skull cube is
+  // dropped too. It is keyed "skin" like the forearms, so it has to go by joint.
+  const parts = BODY.filter((b) => !gone.has(b[3]) && !(grok && b[0] === "Head" && b[3] === "skin"));
 
   const specs = parts.map(([joint, size, centre, key]) => {
     // The head cube shares the `skin` key with the forearms; the CEO needs them apart.
@@ -2108,18 +2110,46 @@ function buildAvatar(spec, index) {
   }
 
   let spark = null, built_halo = null;
-  if (claude || grok) {
-    // A marked face: Claude's coral spark for the boss, Grok's white slash for the
-    // Assistant Director. The rig faces +X and the mark is built in the XY plane, so
-    // it is turned a quarter turn about Y or it presents edge-on and reads as a spike.
-    spark = grok ? buildGrokMark(0.17, 0.036, 0xf5f5f5, 1.15)
-                 : buildSpark(0.17, 11, 0.030, P.claude, 1.25);
+
+  /* GROX wears the Grok mascot as a head: a smooth white orb with two dark
+     angled slots for eyes. Built here rather than as a texture so it lights and
+     shadows with the rest of the floor, and so the slots stay put when the rig
+     turns. The rig faces +X, so the slots sit on the +X face of the orb. */
+  if (grok) {
+    const HEAD_Y = 1.645 - JOINT_REST.Head[1];        // world rest -> bone-local
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.185, 22, 18),
+      new THREE.MeshStandardMaterial({ color: 0xf3f3f5, roughness: 0.38, metalness: 0.02 }));
+    orb.position.set(0, HEAD_Y, 0);
+    orb.castShadow = renderer.shadowMap.enabled;
+    joints.Head.add(orb);
+
+    // Two rounded slots, tilted the same way, the near one dropped a little —
+    // the asymmetry is what makes the mascot read as a face rather than a die.
+    const slotMat = new THREE.MeshStandardMaterial({ color: 0x121214, roughness: 0.5 });
+    // The forward offset is DERIVED, not guessed: a slot placed at a flat x sits
+    // inside the curve and vanishes into the orb (measured: 0.165 from centre on
+    // a 0.185 sphere). Solving for the surface puts every slot proud of it.
+    const SKIN = 0.192;
+    const slot = (dz, dy, len, tilt) => {
+      const fwd = Math.sqrt(Math.max(0.0001, SKIN * SKIN - dz * dz - dy * dy));
+      const g = new THREE.Mesh(new THREE.CapsuleGeometry(0.027, len, 6, 12), slotMat);
+      g.position.set(fwd, HEAD_Y + dy, dz);
+      g.rotation.x = tilt;                            // lean, in the face plane
+      joints.Head.add(g);
+      return g;
+    };
+    slot( 0.070, -0.010, 0.072, -0.40);               // rig-left eye, lower
+    slot(-0.058,  0.028, 0.060, -0.40);               // rig-right eye, higher
+    spark = orb;                                      // the head IS his mark
+  } else if (claude) {
+    // Claude's coral spark, worn where a face would be. The rig faces +X and the
+    // mark is built in the XY plane, so it is turned a quarter turn about Y or it
+    // presents edge-on and reads as a spike.
+    spark = buildSpark(0.17, 11, 0.030, P.claude, 1.25);
     spark.rotation.y = -Math.PI / 2;
     spark.position.set(0.158, 0.16, 0);
     joints.Head.add(spark);
-    // a second, larger mark floating above — the one you can see across the room
-    const halo = grok ? buildGrokMark(0.26, 0.05, 0xf5f5f5, 0.95)
-                      : buildSpark(0.26, 11, 0.042, P.claude, 1.0);
+    const halo = buildSpark(0.26, 11, 0.042, P.claude, 1.0);
     halo.rotation.y = -Math.PI / 2;
     halo.position.set(0.02, 0.52, 0);
     joints.Head.add(halo);
