@@ -2974,10 +2974,13 @@ const grokBoard = (() => {
   frame.position.set(O.cx, GROX_DAIS + 2.0, O.z0 + 0.24);
   grokOffice.add(mesh, frame);
 
-  // ── WALL-ST-E's station: the tenant's bot stands by the kitchenette. His
-  //    footprint bakes here (before buildNav); the figure itself is built later,
-  //    beside the pick system it needs.
-  solidRect(3.6, 10.7, 0.8, 0.8);
+  // ── WALL-ST-E's DEN, front-left corner: back panel and two side stubs bake
+  //    into the nav grid (before buildNav); his parking spot between them stays
+  //    walkable so he can roll out. The den itself is built later, beside the
+  //    pick system the figure needs.
+  solidRect(-14.5, 12.2, 1.9, 0.45);
+  solidRect(-15.35, 11.6, 0.25, 1.5);
+  solidRect(-13.65, 11.6, 0.25, 1.5);
 
   // ── nobody walks through this room either: the whole footprint is solid on
   //    the nav grid. On Claude floors it is an invisible exclusion zone in a
@@ -3650,32 +3653,50 @@ function rebuildWorker(seatId) {
   PICKABLE.push(hit);
 }
 
-/* ═══ WALL-ST-E — the tenant's autotrader, in the flesh ════════════════════════
-   The bot that actually places trades lives in the TENANT'S browser (a burner
-   key this page holds and the server never sees). This is his body on the
-   floor: present when your bot exists, lamp green when LIVE, amber on a
-   practice run, grey when stopped. Clicking him opens the Team tab, where he
-   is managed. Per-viewer by nature — every tenant sees their own runner. */
+/* ═══ WALL-ST-E — the autotrader, resident of the front-left corner ═══════════
+   Like his namesake, he has a HOME: a little den by the front wall with his
+   collection on a shelf and a charging dock. He is parked there asleep on
+   EVERY floor — head down, eyes dark, lamp grey. When this viewer's bot runs
+   (practice or live) he powers up and roams the floor on the same nav grid as
+   everyone else, lamp amber on paper, green when the trades are real. Clicking
+   him opens the Team tab, where he is managed. */
+const BOT_DEN = { x: -14.5, z: 11.5 };
 const botFig = (() => {
-  const g = new THREE.Group();
-  g.position.set(3.6, 0, 10.7);
-  g.visible = false;
   const m = (c, r = 0.6, e = null, ei = 0) => new THREE.MeshStandardMaterial({
     color: c, roughness: r, ...(e ? { emissive: new THREE.Color(e), emissiveIntensity: ei } : {}) });
-  const bx = (sx, sy, sz, x, y, z, mat) => {
+  const bx = (parent, sx, sy, sz, x, y, z, mat) => {
     const b = new THREE.Mesh(BOX, mat); b.scale.set(sx, sy, sz); b.position.set(x, y, z);
-    b.castShadow = renderer.shadowMap.enabled; g.add(b); return b;
+    b.castShadow = renderer.shadowMap.enabled; parent.add(b); return b;
   };
-  bx(0.52, 0.18, 0.36, 0, 0.09, 0, m(0x2a2c30, 0.8));               // treads
-  bx(0.4, 0.5, 0.3, 0, 0.52, 0, m(0x76858a, 0.5));                  // torso
-  bx(0.3, 0.16, 0.02, 0, 0.56, -0.16, m(0x132528, 0.4, 0x267f82, 0.5)); // chest panel
-  bx(0.1, 0.34, 0.1, -0.28, 0.5, 0, m(0x5b6a70, 0.6));              // arms
-  bx(0.1, 0.34, 0.1, 0.28, 0.5, 0, m(0x5b6a70, 0.6));
-  bx(0.34, 0.26, 0.26, 0, 0.95, 0, m(0x1b1c1e, 0.45));              // head
-  bx(0.07, 0.07, 0.02, -0.08, 0.97, -0.14, m(0x0d0d0f, 0.3, 0x4ec9a5, 0.9)); // eyes
-  bx(0.07, 0.07, 0.02, 0.08, 0.97, -0.14, m(0x0d0d0f, 0.3, 0x4ec9a5, 0.9));
-  bx(0.03, 0.22, 0.03, 0, 1.19, 0, m(0x5b6a70, 0.5));               // antenna
-  const lamp = bx(0.1, 0.1, 0.1, 0, 1.34, 0, m(0x70828a, 0.4, 0x70828a, 0.8));
+
+  // ── the den: timber back, side stubs, his shelf of collected things, a dock
+  const den = new THREE.Group();
+  den.position.set(BOT_DEN.x, 0, BOT_DEN.z);
+  bx(den, 1.9, 2.0, 0.16, 0, 1.0, 0.72, m(0x5f3e29, 0.85));         // back panel
+  bx(den, 0.22, 1.5, 1.35, -0.85, 0.75, 0.12, m(0x5f3e29, 0.85));   // side stubs
+  bx(den, 0.22, 1.5, 1.35, 0.85, 0.75, 0.12, m(0x5f3e29, 0.85));
+  bx(den, 1.5, 0.07, 0.34, 0, 1.45, 0.5, m(0xa96934, 0.7));         // the shelf
+  for (const [dx, c] of [[-0.5, 0xd9534f], [-0.22, 0xe0ad3d], [0.06, 0x7ab85a], [0.34, 0x76858a], [0.58, 0xd7758f]])
+    bx(den, 0.14, 0.14, 0.14, dx, 1.55, 0.5, m(c, 0.8));            // the collection
+  bx(den, 0.9, 0.05, 0.9, 0, 0.025, -0.1, m(0x2a2c30, 0.9));        // dock plate
+  const dockLight = bx(den, 0.08, 0.04, 0.08, 0.55, 0.06, -0.45, m(0x267f82, 0.4, 0x267f82, 0.8));
+  scene.add(den);
+
+  // ── the robot himself
+  const g = new THREE.Group();
+  g.position.set(BOT_DEN.x, 0, BOT_DEN.z);
+  g.rotation.y = Math.PI;                                            // parked facing his shelf, like his namesake
+  bx(g, 0.52, 0.18, 0.36, 0, 0.09, 0, m(0x2a2c30, 0.8));            // treads
+  bx(g, 0.4, 0.5, 0.3, 0, 0.52, 0, m(0x76858a, 0.5));               // torso
+  bx(g, 0.3, 0.16, 0.02, 0, 0.56, -0.16, m(0x132528, 0.4, 0x267f82, 0.5)); // chest panel
+  bx(g, 0.1, 0.34, 0.1, -0.28, 0.5, 0, m(0x5b6a70, 0.6));           // arms
+  bx(g, 0.1, 0.34, 0.1, 0.28, 0.5, 0, m(0x5b6a70, 0.6));
+  const head = new THREE.Group(); head.position.set(0, 0.95, 0); g.add(head);
+  bx(head, 0.34, 0.26, 0.26, 0, 0, 0, m(0x1b1c1e, 0.45));           // head
+  const eyeL = bx(head, 0.07, 0.07, 0.02, -0.08, 0.02, -0.14, m(0x0d0d0f, 0.3, 0x4ec9a5, 0.9));
+  const eyeR = bx(head, 0.07, 0.07, 0.02, 0.08, 0.02, -0.14, m(0x0d0d0f, 0.3, 0x4ec9a5, 0.9));
+  bx(g, 0.03, 0.22, 0.03, 0, 1.19, 0, m(0x5b6a70, 0.5));            // antenna
+  const lamp = bx(g, 0.1, 0.1, 0.1, 0, 1.34, 0, m(0x70828a, 0.4, 0x70828a, 0.8));
   const plate = makeSprite("WALL-ST-E", 0.62, { bg: "#132528", accent: "#4ec9a5" });
   plate.position.set(0, 1.86, 0);
   g.add(plate);
@@ -3684,16 +3705,71 @@ const botFig = (() => {
   hit.userData.seat = "__bot";
   g.add(hit); PICKABLE.push(hit);
   scene.add(g);
-  return { g, lamp };
+  return { g, head, eyeL, eyeR, lamp, dockLight };
 })();
+
+/* His day: SLEEP in the den until the viewer's bot runs; then ROAM the floor's
+   own nav grid — wander, pause, look around — until the bot stops, then roll
+   home and power down. One tiny state machine, ticked from the frame loop. */
+window.__bot = () => ({ x: +botFig.g.position.x.toFixed(2), z: +botFig.g.position.z.toFixed(2), mode: botState.mode, want: botState.wantRoam });
+const BOT_STOPS = [[0, 8.8], [-6.3, 6.2], [4.4, 8.4], [10.6, 4.2], [0.6, 2.2], [-9.5, 5.6], [8.6, 1.4], [-2.5, 10.6]];
+const botState = { mode: "sleep", legs: null, li: 0, pauseT: 0, wantRoam: false, goingHome: false };
+function botPose(asleep) {
+  botFig.head.rotation.x = asleep ? 0.5 : 0;
+  botFig.eyeL.material.emissiveIntensity = asleep ? 0 : 0.9;
+  botFig.eyeR.material.emissiveIntensity = asleep ? 0 : 0.9;
+  if (asleep) { botFig.lamp.material.color.set(0x70828a); botFig.lamp.material.emissive.set(0x3a4448); }
+}
+botPose(true);
 setInterval(() => {
   const bs = window.__botStatus?.();
-  botFig.g.visible = !!bs?.exists;
-  if (!bs?.exists) return;
-  const c = bs.running ? (bs.live ? 0x4ec9a5 : 0xe0ad3d) : 0x70828a;
-  botFig.lamp.material.color.set(c);
-  botFig.lamp.material.emissive.set(c);
+  botState.wantRoam = !!(bs && bs.exists && bs.running);
+  if (botState.wantRoam) {
+    const c = bs.live ? 0x4ec9a5 : 0xe0ad3d;
+    botFig.lamp.material.color.set(c); botFig.lamp.material.emissive.set(c);
+  }
 }, 3000);
+function botTick(dt, t) {
+  const S = botState, g = botFig.g;
+  if (S.mode === "sleep") {
+    botFig.lamp.material.emissiveIntensity = 0.4 + Math.sin(t * 0.9) * 0.25;   // slow charge pulse
+    if (S.wantRoam) { S.mode = "roam"; S.goingHome = false; S.legs = null; botPose(false); }
+    return;
+  }
+  // roaming — decide where next
+  if (!S.legs) {
+    if (!S.wantRoam && !S.goingHome) { S.goingHome = true; }
+    const target = S.goingHome ? [BOT_DEN.x, BOT_DEN.z]
+      : BOT_STOPS[Math.floor(Math.random() * BOT_STOPS.length)];
+    S.legs = navPath(g.position.x, g.position.z, target[0], target[1]);
+    S.li = 0; S.pauseT = 0;
+  }
+  if (S.pauseT > 0) {                                   // stopped to look around
+    S.pauseT -= dt;
+    g.rotation.y += Math.sin(t * 2.2) * 0.004;
+    if (S.pauseT <= 0) S.legs = null;
+    return;
+  }
+  const leg = S.legs[S.li];
+  if (!leg) { S.legs = null; return; }
+  const dx = leg[0] - g.position.x, dz = leg[1] - g.position.z;
+  const d = Math.hypot(dx, dz);
+  if (d < 0.06) {
+    S.li++;
+    if (S.li >= S.legs.length) {                         // arrived
+      if (S.goingHome) {
+        g.position.set(BOT_DEN.x, 0, BOT_DEN.z); g.rotation.y = Math.PI;
+        S.mode = "sleep"; S.legs = null; botPose(true);
+        if (S.wantRoam) { S.mode = "roam"; botPose(false); S.goingHome = false; }
+      } else { S.pauseT = 1.8 + Math.random() * 2.6; }
+    }
+    return;
+  }
+  const sp = Math.min(d, dt * 1.35);
+  g.position.x += (dx / d) * sp; g.position.z += (dz / d) * sp;
+  g.rotation.y = Math.atan2(-dx, -dz);                   // his face is on -z
+  g.position.y = Math.abs(Math.sin(t * 9)) * 0.025;      // the little tread bounce
+}
 
 window.applyIdentity = (identity) => {
   if (!identity || identity.isHQ) return;
@@ -3922,6 +3998,7 @@ function frame() {
     if (!followSeat && Math.hypot(want.x - camTarget.x, want.z - camTarget.z) < 0.04) glide = null;
     placeCamera();
   }
+  botTick(dt, elapsed);
   if (window.__grokZzz && window.__grokZzz.visible) {
     const z = window.__grokZzz;
     z.position.y = 2.45 + Math.sin(elapsed * 1.6) * 0.09;
