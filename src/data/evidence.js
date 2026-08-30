@@ -176,6 +176,17 @@ export function screen(ev) {
     "wash_suspect", `volume/liquidity=${d.volToLiqRatio} > ceiling ${s.maxVolToLiqRatio}`);
   check(d.fdvToLiqRatio != null && d.fdvToLiqRatio > s.maxFdvToLiqRatio,
     "fdv_propped", `fdv/liquidity=${d.fdvToLiqRatio} > ceiling ${s.maxFdvToLiqRatio}`);
+
+  /* TOO BIG TO RE-RATE. Not a safety fact — a coin this size is perfectly tradeable,
+   * it simply is not the trade this desk exists to find. A memecoin thesis is a claim
+   * that a coin can re-rate; past the ceiling that needs millions of fresh money to
+   * arrive, which is a different business. Unknown market cap never fails this: an
+   * unreadable number must not become an execution. */
+  const mcap = p.marketCap ?? p.fdv ?? null;
+  check(s.maxMarketCapUsd > 0 && mcap != null && mcap > s.maxMarketCapUsd,
+    "too_big", `market cap $${Math.round(mcap ?? 0).toLocaleString()} is over the ` +
+      `$${Math.round(s.maxMarketCapUsd || 0).toLocaleString()} ceiling — a holding, not a memecoin trade`);
+
   check(ev.exitProbe?.roundTripLossPct != null && ev.exitProbe.roundTripLossPct > cfg.maxRoundTripSlippagePct,
     "cannot_exit", `round-trip loss ${ev.exitProbe.roundTripLossPct}% > ceiling ${cfg.maxRoundTripSlippagePct}% at $${cfg.targetSizeUsd}`);
 

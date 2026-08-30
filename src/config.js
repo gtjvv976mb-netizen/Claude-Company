@@ -62,6 +62,22 @@ export const cfg = {
     maxVolToLiqRatio: num("DESK_MAX_VOL_LIQ", 40),   // above this, suspect wash
     minTxns24h: num("DESK_MIN_TXNS24", 200),
     maxFdvToLiqRatio: num("DESK_MAX_FDV_LIQ", 250),  // thin float propping a fat FDV
+
+    /* THE CEILING — this desk hunts memecoins, not holdings.
+     *
+     * There was no market-cap bound of any kind here, in either direction, and the
+     * ranking paid up to +39 for depth alone (+15 over $75k liquidity, +10 over
+     * $400k, +14 for an aged survivor over $750k). A large established coin therefore
+     * out-ranked a small one on size before its story was read at all, and the desk
+     * kept surfacing coins you would hold rather than trade.
+     *
+     * A memecoin thesis is a claim that a coin can RE-RATE. Past roughly $10m that
+     * claim needs someone to arrive with millions, which is a different business from
+     * the one this desk is in. Below it, a 2-5x is an ordinary week.
+     *
+     * This is a ceiling on the OPPORTUNITY, not on safety — the liquidity floor and
+     * the exit probe remain the things that decide whether a position can be left. */
+    maxMarketCapUsd: num("DESK_MAX_MCAP_USD", 10_000_000),
   },
 
   // Slippage the desk refuses to accept on a round trip at target size.

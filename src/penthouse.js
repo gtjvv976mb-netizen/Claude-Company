@@ -66,13 +66,27 @@ export function rank(c) {
   const h24 = p.priceChange?.h24 ?? 0;
   const age = p.ageHours ?? 0;
 
-  // Depth: enough to exit, not so much that nothing moves it.
-  if (liq > 75_000) { s += 15; why.push("liquid enough to exit"); }
-  if (liq > 400_000) { s += 10; why.push("deep book"); }
-  // Was -8 above $5m, which demoted every real asset on the chain. A $5m book is not
-  // "too big to move" — it is the smallest size at which an exit is dependable. Only
-  // genuinely enormous caps get the penalty now.
-  if (liq > 25_000_000) { s -= 5; why.push("very large — less room to run"); }
+  /* DEPTH: ENOUGH TO EXIT, AND NO CREDIT FOR MORE.
+   *
+   * This paid +15 over $75k and another +10 over $400k, so a big book out-scored a
+   * small one by 25 points before its story was read — and with the aged-survivor
+   * bonus below, up to +39 on size alone. That is how a memecoin desk ends up
+   * surfacing coins you would hold rather than trade.
+   *
+   * Those numbers were calibrated for a desk placing $500 clips out of a $10,000
+   * book. The executor sizes at about $3.40, capped near $10, and the exit probe now
+   * prices $200. At that size a $50,000 pool and a $500,000 pool are the same pool:
+   * both round-trip under a tenth of a percent. Depth past "can I get out" buys
+   * nothing and costs the whole thesis, because upside lives in the small caps.
+   *
+   * So depth is now a THRESHOLD, not a ladder — one modest bonus for clearing the bar
+   * the executor actually needs, and a penalty once a coin is too heavy to re-rate. */
+  if (liq > 40_000) { s += 12; why.push("deep enough to exit at the size we trade"); }
+  const mcap = p.marketCap ?? p.fdv ?? null;
+  if (mcap != null) {
+    if (mcap < 2_000_000) { s += 10; why.push(`\$${(mcap / 1e6).toFixed(2)}m cap — real room to re-rate`); }
+    else if (mcap > 8_000_000) { s -= 12; why.push(`\$${(mcap / 1e6).toFixed(1)}m cap — needs millions of fresh money to move`); }
+  }
 
   // Turnover relative to depth: real interest, but wash above a point.
   const volToLiq = liq > 0 ? vol24 / liq : 0;
@@ -125,7 +139,10 @@ export function rank(c) {
   }
   // The ranker could reward youth and nothing else, so a coin that had actually survived
   // scored worse than one that had not been tested. Durability is evidence too.
-  if (age > 24 * 90 && liq > 750_000) { s += 14; why.push("survived long enough to have a base rate"); }
+  // Durability is evidence, but it was gated on a $750k book — which made this a
+  // third size bonus wearing an age label, and only big coins could ever earn it.
+  // Survival is the claim being rewarded, so gate it on survival.
+  if (age > 24 * 90 && liq > 40_000) { s += 14; why.push("survived long enough to have a base rate"); }
   if (age > 24 * 365) { s += 6; why.push("more than a year old"); }
 
   const txns = (p.txns?.h24?.buys ?? 0) + (p.txns?.h24?.sells ?? 0);
