@@ -233,7 +233,10 @@ body{
 .locked{padding:18px;text-align:center;color:var(--ink-faint);font-size:13px;line-height:1.6}
 /* the dossier: an in-world personnel file, opened by clicking a figure */
 .dossier{
-  position:absolute; right:16px; top:16px; bottom:16px; width:min(330px, calc(100% - 32px));
+  /* Starts BELOW the tab dock (top 14 + ~38 tall) — at top:16 the tabs sat on the
+     personnel file's head. Sized to its content now, capped with an inner scroll. */
+  position:absolute; right:16px; top:60px; max-height:calc(100% - 76px);
+  width:min(330px, calc(100% - 32px));
   z-index:7; display:none; flex-direction:column; overflow:hidden;
   background:var(--card); color:var(--ink);
   border:1px solid var(--card-line); border-radius:3px;
@@ -242,15 +245,15 @@ body{
 .dossier.on{display:flex; animation:dossierIn .16s ease-out}
 @keyframes dossierIn{from{opacity:0; transform:translateY(-6px)} to{opacity:1; transform:none}}
 .dossier .dhead{
-  position:relative; padding:14px 15px 12px; border-bottom:1px solid var(--card-line);
+  position:relative; padding:11px 15px 9px; border-bottom:1px solid var(--card-line);
   background:linear-gradient(180deg,#283d43,var(--card));
 }
 .dossier .dstamp{
   font-size:9.5px; letter-spacing:.22em; text-transform:uppercase; color:var(--ink-faint);
 }
 .dossier h3{
-  margin:5px 0 0; font-family:"Instrument Serif",Georgia,serif; font-weight:400;
-  font-size:25px; line-height:1.06; letter-spacing:.01em;
+  margin:4px 0 0; font-family:"Instrument Serif",Georgia,serif; font-weight:400;
+  font-size:21px; line-height:1.06; letter-spacing:.01em;
 }
 .dossier .dseat{
   margin-top:5px; font-size:11px; letter-spacing:.13em; text-transform:uppercase;
@@ -262,9 +265,9 @@ body{
   color:var(--ink-faint); font-size:16px; line-height:1;
 }
 .dossier .dclose:hover{border-color:var(--card-line); color:var(--ink)}
-.dossier .dbody{padding:14px 16px 18px; overflow:auto; font-size:13.5px; line-height:1.62}
+.dossier .dbody{padding:11px 14px 14px; overflow:auto; font-size:12.5px; line-height:1.5}
 .dossier .dbrief{
-  margin:0 0 12px; font-size:14.5px; line-height:1.45; color:var(--ink);
+  margin:0 0 10px; font-size:13px; line-height:1.42; color:var(--ink);
   border-left:2px solid var(--amber); padding-left:10px;
 }
 .dossier .drow{margin:0 0 11px}
@@ -3534,17 +3537,16 @@ window.applyIdentity = (identity) => {
   // costume (a persona, which takes the marked face's place). Grok never wears the
   // corner office — he is his own agent, in his own room.
   const wantsMark = !costume;
-  // CLAW'D IS THE DEFAULT FACE OF A CLAUDE DESK, on every floor — the boss of a
-  // leased floor is still a Claude mind, so he wears the Claude mascot under the
-  // tenant's own name. The one exception is a tenant who picked a COSTUME: that
-  // is a deliberate persona and it wins, mascot and marked face both.
-  const wantsMascot = !costume;
+  // CLAW'D IS HQ ONLY. BIG C's mascot body belongs to the house desk on floor 50
+  // and nowhere else; a leased floor's Managing Director is that tenant's own
+  // person, under their name and in their costume. Leaving the flag set gave
+  // every floor a coral mascot head wearing someone else's palette.
   if (spec.name === name && (spec.costume || null) === costume
-      && spec.claude === wantsMark && spec.mascot === wantsMascot) return;
+      && spec.claude === wantsMark && spec.mascot === false) return;
   spec.name = name;
   spec.role = "Managing Director";
   spec.claude = wantsMark;
-  spec.mascot = wantsMascot;
+  spec.mascot = false;
   spec.costume = costume;
   rebuildWorker("CEO");
 };
