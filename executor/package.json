@@ -9,7 +9,8 @@
     "webhook": "node executor.mjs",
     "test": "node test-strategy.mjs",
     "simulate": "node simulate.mjs",
-    "tune": "node tune.mjs"
+    "tune": "node tune.mjs",
+    "test:install": "node test-install.mjs"
   },
   "dependencies": {
     "@solana/web3.js": "^1.95.8"

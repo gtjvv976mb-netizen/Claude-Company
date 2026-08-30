@@ -41,7 +41,14 @@ fi
 
 mkdir -p "$DIR" && cd "$DIR"
 echo "▶ fetching the poller…"
-curl -fsSL "$STATIC/executor/poller.mjs" -o poller.mjs
+# Fetch every module the bot needs. poller.mjs imports the risk engine, and an
+# install that grabs only the poller produces a bot that dies on its first line.
+for f in poller.mjs strategy.mjs; do
+  curl -fsSL "$STATIC/executor/$f" -o "$f" || { echo "could not download $f"; exit 1; }
+done
+# Refuse to install a bot that cannot start, rather than leaving a funded wallet
+# attached to a dead service.
+node --check poller.mjs >/dev/null 2>&1 || { echo "downloaded poller.mjs is not valid JS — aborting"; exit 1; }
 echo '{"name":"cc-exec","private":true,"type":"module","dependencies":{"@solana/web3.js":"^1.95.8"}}' > package.json
 npm install --silent >/dev/null 2>&1
 
