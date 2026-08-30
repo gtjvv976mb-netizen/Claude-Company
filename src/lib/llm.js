@@ -75,7 +75,16 @@ export function assertDailyBudget(capUsd, { lane = "cycle" } = {}) {
   // Pace first: it is the brake that keeps the desk alive at 3am, and it binds long
   // before the daily cap does. The tenant's own paid run never waits on it.
   if (lane !== "floor") {
-    const hourCap = (capUsd / 24) * HOURLY_BURST;
+    /* THE FLOOR UNDER THE PACE. A pace tighter than one cycle's own allowance is not
+     * a pace, it is a deadlock: the cycle is cut off mid-hunt every single time and
+     * can never reach its publish step. That is exactly what shipped — $5/hour
+     * against a $10 cycle — and the desk went an hour without completing anything
+     * while looking, from outside, like a quiet market.
+     *
+     * Read from the same env var penthouse.js reads rather than imported from it;
+     * llm.js is below penthouse in the graph and must not reach back up. */
+    const cycleBudget = Number(process.env.PENTHOUSE_CYCLE_BUDGET_USD || 4);
+    const hourCap = Math.max((capUsd / 24) * HOURLY_BURST, cycleBudget * 1.25);
     const spentHour = spendSince(Date.now() - 3600e3).usd;
     if (spentHour >= hourCap) {
       emit("cycle:paced", { lane, spentHourUsd: spentHour, hourCapUsd: Number(hourCap.toFixed(2)),

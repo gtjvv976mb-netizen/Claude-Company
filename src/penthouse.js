@@ -28,7 +28,11 @@ import { eligibility, contenderScore, pickOne, bookState, SEQUENTIAL, MAX_LIVE_C
 
 export const WORKUPS_PER_CYCLE = Number(process.env.PENTHOUSE_WORKUPS || 3);
 /** Hard ceiling per cycle. Without it one bad night empties the account. */
-export const CYCLE_BUDGET_USD = Number(process.env.PENTHOUSE_CYCLE_BUDGET_USD || 10);
+/* $10 was more than the hourly pace allowed ($40/24 x 3 = $5), so every cycle was cut
+ * off mid-hunt and none could complete. Four fits inside the pace with room to spare,
+ * and at the measured $0.126 a workup it still buys ~32 of them — a shortlist of three
+ * plus a deep mandate hunt. Smaller cycles running often beat large ones that die. */
+export const CYCLE_BUDGET_USD = Number(process.env.PENTHOUSE_CYCLE_BUDGET_USD || 4);
 export const TOP_N = Number(process.env.PENTHOUSE_TOP_N || 5);
 
 /**
