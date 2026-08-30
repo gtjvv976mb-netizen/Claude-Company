@@ -115,7 +115,7 @@ body{
   .pulse{display:flex; left:8px; right:8px; bottom:8px; max-width:none;
     font-size:8.5px; padding:5px 8px; gap:6px}
   .pulse .preason{display:none}
-  .pulse .pnums{overflow:hidden; text-overflow:ellipsis}
+  #pulse .pnums{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .alertbar{top:50px}
   .hint{display:none}
   .memo .sym{font-size:17px}
@@ -3167,12 +3167,27 @@ function pickSeat(clientX, clientY) {
   el.addEventListener("pointermove", (e) => {
     const p = pts.get(e.pointerId);
     if (!p) return;
+    // Two fingers do BOTH jobs at once, like every map app: the pinch gap
+    // zooms and the centroid's travel pans. Measured against the OTHER
+    // finger's last known position, before this one updates.
+    if (pts.size >= 2) {
+      const other = [...pts.entries()].find(([id]) => id !== e.pointerId)?.[1];
+      if (other) {
+        const prevDist = Math.hypot(p.x - other.x, p.y - other.y);
+        const newDist = Math.hypot(e.clientX - other.x, e.clientY - other.y);
+        if (prevDist > 8 && newDist > 8) {
+          camWorldWidth = THREE.MathUtils.clamp(camWorldWidth * (prevDist / newDist), 12, 74);
+          resize();
+        }
+        panCamera((e.clientX - p.x) / 2, (e.clientY - p.y) / 2);
+      }
+      p.x = e.clientX; p.y = e.clientY;
+      return;
+    }
     const dx = e.clientX - p.x, dy = e.clientY - p.y;
     p.x = e.clientX; p.y = e.clientY;
     if (mode === "pan") {
-      // Each finger of a two-finger pan reports its own motion; halving each
-      // approximates the centroid so the floor doesn't travel at double speed.
-      panCamera(dx / pts.size, dy / pts.size);
+      panCamera(dx, dy);
       return;
     }
     // Drag right should turn the world right, as every 3D viewer does. Our camera is

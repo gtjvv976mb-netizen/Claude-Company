@@ -622,8 +622,13 @@ function pickFloor(ev) {
 
 (function controls() {
   const el = renderer.domElement;
+  // Without this, mobile browsers claim the drag as a page-scroll and fire
+  // pointercancel mid-orbit — the tower froze under a finger.
+  el.style.touchAction = "none";
+  const touches = new Map();      // pointerId → last position, for the pinch
   let dragging = false, moved = 0, px = 0, py = 0;
   el.addEventListener("pointerdown", (e) => {
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
     dragging = true; moved = 0; px = e.clientX; py = e.clientY;
     el.classList.add("dragging"); el.setPointerCapture(e.pointerId);
   });
@@ -632,6 +637,23 @@ function pickFloor(ev) {
       el.classList.toggle("overFloor", pickFloor(e) !== null);   // event-driven only
       return;
     }
+    // Pinch: two fingers on the tower zoom it, like every map on the phone.
+    if (touches.size >= 2 && touches.has(e.pointerId)) {
+      const me = touches.get(e.pointerId);
+      const other = [...touches.entries()].find(([id]) => id !== e.pointerId)?.[1];
+      if (other) {
+        const prevDist = Math.hypot(me.x - other.x, me.y - other.y);
+        const newDist = Math.hypot(e.clientX - other.x, e.clientY - other.y);
+        if (prevDist > 8 && newDist > 8) {
+          camWorldWidth = THREE.MathUtils.clamp(camWorldWidth * (prevDist / newDist), 16, 150);
+          resize();
+        }
+      }
+      me.x = e.clientX; me.y = e.clientY;
+      moved = 99;                                  // a pinch is never a floor tap
+      return;
+    }
+    if (touches.has(e.pointerId)) { const me = touches.get(e.pointerId); me.x = e.clientX; me.y = e.clientY; }
     moved += Math.abs(e.clientX - px) + Math.abs(e.clientY - py);
     // Drag right should turn the world right, as every 3D viewer does. Our camera is
     // parameterised x=cos(yaw), z=sin(yaw) while OrbitControls uses x=sin(t), z=cos(t) —
@@ -643,12 +665,14 @@ function pickFloor(ev) {
     px = e.clientX; py = e.clientY;
   });
   const up = (e) => {
+    touches.delete(e.pointerId);
     if (dragging && moved < 5) { const n = pickFloor(e); if (n) select(n, true); }
-    dragging = false; el.classList.remove("dragging");
+    if (!touches.size) { dragging = false; el.classList.remove("dragging"); }
     try { el.releasePointerCapture(e.pointerId); } catch {}
   };
   el.addEventListener("pointerup", up);
-  el.addEventListener("pointercancel", () => { dragging = false; el.classList.remove("dragging"); });
+  el.addEventListener("pointercancel", (e) => { touches.delete(e.pointerId);
+    if (!touches.size) { dragging = false; el.classList.remove("dragging"); } });
   el.addEventListener("wheel", (e) => {
     e.preventDefault();
     camWorldWidth = THREE.MathUtils.clamp(camWorldWidth + e.deltaY * 0.06, 16, 150);
