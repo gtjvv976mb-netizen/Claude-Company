@@ -543,7 +543,13 @@ const P = {                       // Markets & Makers OFFICIAL_PALETTE
 
 /* ── renderer ─────────────────────────────────────────────────────────────── */
 const stageEl = document.getElementById("stage");
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+// ?capture=1 turns on a marketing-asset mode: the drawing buffer is preserved so
+// canvas.toDataURL() returns real pixels (WebGL discards it after compositing
+// otherwise), and the rig is exposed for scripted turntables. Off by default —
+// preserveDrawingBuffer costs performance, and players never need it.
+const CAPTURE = new URLSearchParams(location.search).has("capture");
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance",
+  preserveDrawingBuffer: CAPTURE });
 renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));   // DPR cap: phones melt without it
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.AgXToneMapping;
@@ -3300,6 +3306,7 @@ STAFF.forEach((spec, i) => {
   PICKABLE.push(hit);
 });
 window.__workers = workers;   // debug hook, same idiom as __bossBoard / __figure
+if (CAPTURE) window.__rig = { renderer, scene, camera };   // scripted turntables only
 // The Assistant Director is off-stage until this floor's brain is Grok.
 if (workers.GrokAD && workers.GrokAD.g) workers.GrokAD.g.visible = false;
 
