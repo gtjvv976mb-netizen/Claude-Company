@@ -4475,7 +4475,15 @@ function renderCalls({ feed = [], settings, record }) {
       img.src = c.image_url; img.alt = ""; img.loading = "lazy"; img.referrerPolicy = "no-referrer";
       img.onerror = () => { img.remove(); av.textContent = (c.symbol || "?")[0].toUpperCase(); };
       av.appendChild(img);
-    } else av.textContent = (c.symbol || "?")[0].toUpperCase();
+    } else {
+      av.textContent = (c.symbol || "?")[0].toUpperCase();
+      coinImg(c.mint).then((url) => {
+        if (!url) return;
+        const img = document.createElement("img");
+        img.src = url; img.alt = ""; img.loading = "lazy"; img.referrerPolicy = "no-referrer";
+        img.onload = () => { av.textContent = ""; av.appendChild(img); };
+      });
+    }
     const sym = document.createElement("span"); sym.className = "sym"; sym.textContent = c.symbol || c.mint.slice(0, 6);
     const cat = document.createElement("span"); cat.className = `cat ${c.category}`; cat.textContent = c.category || "?";
     const st = document.createElement("span");
@@ -4898,6 +4906,50 @@ function renderAlerts(unread) {
   }
 }
 
+/* ── coin identity, everywhere: a face and a copyable CA for any mint ─────
+   Call rows store their image at open; watches, kills and older calls do
+   not. Rather than backfilling tables forever, the face comes straight from
+   DexScreener's public API, lazily, cached per mint for the session. */
+const coinImgCache = new Map();
+function coinImg(mint) {
+  if (coinImgCache.has(mint)) return coinImgCache.get(mint);
+  const p = fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`)
+    .then((r) => r.json())
+    .then((d) => (d?.pairs ?? []).map((x) => x?.info?.imageUrl).find(Boolean) ?? null)
+    .catch(() => null);
+  coinImgCache.set(mint, p);
+  return p;
+}
+function coinFace(mint, symbol, size = 22) {
+  const av = document.createElement("span");
+  av.className = "coinav";
+  av.style.width = av.style.height = size + "px";
+  av.style.fontSize = Math.round(size * 0.48) + "px";
+  av.textContent = (symbol || "?")[0].toUpperCase();
+  coinImg(mint).then((url) => {
+    if (!url) return;
+    const img = document.createElement("img");
+    img.src = url; img.alt = ""; img.loading = "lazy"; img.referrerPolicy = "no-referrer";
+    img.onload = () => { av.textContent = ""; av.appendChild(img); };
+  });
+  return av;
+}
+function caChip(mint) {
+  const ca = document.createElement("button");
+  ca.className = "cachip"; ca.type = "button";
+  const label = () => `CA ${mint.slice(0, 4)}\u2026${mint.slice(-4)} \u29c9`;
+  ca.textContent = label();
+  ca.title = "Copy the full contract address";
+  ca.addEventListener("click", async (ev) => {
+    ev.stopPropagation();
+    try { await navigator.clipboard.writeText(mint); ca.textContent = "copied \u2713"; }
+    catch { ca.textContent = mint; ca.style.userSelect = "all"; }
+    setTimeout(() => { ca.textContent = label(); }, 1400);
+  });
+  return ca;
+}
+window.coinFace = coinFace; window.caChip = caChip;
+
 /* ── the watch board: why nothing is happening, made legible ────────────── */
 async function loadWatchboard(host) {
   try {
@@ -4910,7 +4962,9 @@ async function loadWatchboard(host) {
       const row = document.createElement("div");
       row.className = "watchrow";
       const top = document.createElement("div"); top.className = "wr-top";
-      const sym = document.createElement("span"); sym.className = "wr-sym"; sym.textContent = w.symbol || w.mint.slice(0, 6);
+      const sym = document.createElement("span"); sym.className = "wr-sym";
+      sym.style.display = "inline-flex"; sym.style.alignItems = "center"; sym.style.gap = "7px";
+      sym.append(coinFace(w.mint, w.symbol), document.createTextNode(w.symbol || w.mint.slice(0, 6)), caChip(w.mint));
       const held = document.createElement("span"); held.className = "wr-held";
       held.textContent = w.held_count > 0 ? `RULES HELD ${w.held_count}/2 — one more check` :
         `expires ${Math.max(0, Math.round((w.expires_at - Date.now()) / 3600e3))}h`;
@@ -4948,7 +5002,9 @@ async function loadKilled(host) {
       const row = document.createElement("div"); row.className = "killrow";
       const top = document.createElement("div"); top.className = "kr-top";
       const sym = document.createElement("span"); sym.className = "kr-sym";
-      sym.textContent = `${k.symbol || k.mint.slice(0, 6)} · killed by ${k.seat}`;
+      sym.style.display = "inline-flex"; sym.style.alignItems = "center"; sym.style.gap = "7px";
+      sym.append(coinFace(k.mint, k.symbol),
+        document.createTextNode(`${k.symbol || k.mint.slice(0, 6)} · killed by ${k.seat}`), caChip(k.mint));
       const since = document.createElement("span");
       if (k.sinceKillPct != null) {
         since.className = "kr-since " + (k.sinceKillPct <= 0 ? "good" : "bad");
