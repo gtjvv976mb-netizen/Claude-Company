@@ -38,6 +38,9 @@ CREATE INDEX IF NOT EXISTS idx_watchlist_status ON watchlist(status, expires_at)
 // is not a migration.
 ensureColumn("watchlist", "held_count", "INTEGER NOT NULL DEFAULT 0");
 
+/** Consecutive clean checks a watch needs before it becomes a call. */
+const HOLDS_TO_PROMOTE = Math.max(1, Number(process.env.WATCH_HOLDS_TO_PROMOTE || 1));
+
 /** One live watch per mint: a fresh WATCH verdict replaces the old one. */
 export function addWatch({ mint, symbol, category, rules, note }) {
   const hours = Math.min(72, Math.max(1, Number(rules?.hours) || 24));
@@ -92,11 +95,17 @@ export async function checkWatchlist() {
       (rules.price_above_usd == null || (px.priceUsd ?? 0) > rules.price_above_usd) &&
       (rules.buys_h1_at_least == null || (deep.txns?.h1?.buys ?? 0) >= rules.buys_h1_at_least) &&
       (rules.liq_at_least_usd == null || (px.liquidityUsd ?? 0) >= rules.liq_at_least_usd);
-    // The warp-id debounce: rules must hold on TWO consecutive checks before we
-    // pay for a promotion — a single flash pattern is how false positives look.
+    // The debounce: how many consecutive checks the pre-stated rules must hold
+    // before we pay for a promotion. Two was chosen because a single flash is
+    // how a false positive looks — but at a 5-minute cadence that is ten minutes
+    // of a memecoin holding still, which is most of a move. Tunable now, and
+    // loosened to one by default: the rules were committed in advance and are
+    // machine-checked, so a single clean hold IS the trigger firing. The cost of
+    // the looser setting is more false positives, paid for in workups and in
+    // calls that fail faster — which is the trade being made deliberately.
     if (held) {
       const count = (w.held_count ?? 0) + 1;
-      if (count >= 2) {
+      if (count >= HOLDS_TO_PROMOTE) {
         db.prepare("UPDATE watchlist SET status='promoted', held_count=?, resolved_at=? WHERE id=?")
           .run(count, Date.now(), w.id);
         emit("watch:promoted", { mint: w.mint, symbol: w.symbol, rules,
