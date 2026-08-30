@@ -175,15 +175,18 @@ export async function requestRun({ floorNo, wallet, mint }) {
   return { ok: true, runId, charged: paid.toString(), free: useFree, freeRunsLeft: freeRunsLeft(floorNo) };
 }
 
-export function roomState(floorNo, wallet) {
+export function roomState(floorNo, wallet, { houseSeat = false } = {}) {
   const identity = identityFor(floorNo);
   const floorLabel = ordinal(floorNo);
-  const lease = leaseFor(floorNo);
+  // The HQ floor has no lease row by design; for a house owner it reads as
+  // their own room, under the house's name.
+  const lease = leaseFor(floorNo)
+    ?? (houseSeat ? { floor_no: floorNo, wallet, name: "The House Desk", base_units: "0", created_at: 0 } : null);
   return {
     identity, floorLabel,
     floorNo,
     lease,
-    isMine: Boolean(wallet && lease && lease.wallet === wallet),
+    isMine: Boolean(houseSeat || (wallet && lease && lease.wallet === wallet)),
     settings: settings(floorNo),
     runs: runsFor(floorNo),
     busy: isBusy(floorNo),

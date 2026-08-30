@@ -2974,6 +2974,11 @@ const grokBoard = (() => {
   frame.position.set(O.cx, GROX_DAIS + 2.0, O.z0 + 0.24);
   grokOffice.add(mesh, frame);
 
+  // ── WALL-ST-E's station: the tenant's bot stands by the kitchenette. His
+  //    footprint bakes here (before buildNav); the figure itself is built later,
+  //    beside the pick system it needs.
+  solidRect(3.6, 10.7, 0.8, 0.8);
+
   // ── nobody walks through this room either: the whole footprint is solid on
   //    the nav grid. On Claude floors it is an invisible exclusion zone in a
   //    dead corner; on Grok floors it is his walls. He never leaves, so the
@@ -3645,6 +3650,51 @@ function rebuildWorker(seatId) {
   PICKABLE.push(hit);
 }
 
+/* ═══ WALL-ST-E — the tenant's autotrader, in the flesh ════════════════════════
+   The bot that actually places trades lives in the TENANT'S browser (a burner
+   key this page holds and the server never sees). This is his body on the
+   floor: present when your bot exists, lamp green when LIVE, amber on a
+   practice run, grey when stopped. Clicking him opens the Team tab, where he
+   is managed. Per-viewer by nature — every tenant sees their own runner. */
+const botFig = (() => {
+  const g = new THREE.Group();
+  g.position.set(3.6, 0, 10.7);
+  g.visible = false;
+  const m = (c, r = 0.6, e = null, ei = 0) => new THREE.MeshStandardMaterial({
+    color: c, roughness: r, ...(e ? { emissive: new THREE.Color(e), emissiveIntensity: ei } : {}) });
+  const bx = (sx, sy, sz, x, y, z, mat) => {
+    const b = new THREE.Mesh(BOX, mat); b.scale.set(sx, sy, sz); b.position.set(x, y, z);
+    b.castShadow = renderer.shadowMap.enabled; g.add(b); return b;
+  };
+  bx(0.52, 0.18, 0.36, 0, 0.09, 0, m(0x2a2c30, 0.8));               // treads
+  bx(0.4, 0.5, 0.3, 0, 0.52, 0, m(0x76858a, 0.5));                  // torso
+  bx(0.3, 0.16, 0.02, 0, 0.56, -0.16, m(0x132528, 0.4, 0x267f82, 0.5)); // chest panel
+  bx(0.1, 0.34, 0.1, -0.28, 0.5, 0, m(0x5b6a70, 0.6));              // arms
+  bx(0.1, 0.34, 0.1, 0.28, 0.5, 0, m(0x5b6a70, 0.6));
+  bx(0.34, 0.26, 0.26, 0, 0.95, 0, m(0x1b1c1e, 0.45));              // head
+  bx(0.07, 0.07, 0.02, -0.08, 0.97, -0.14, m(0x0d0d0f, 0.3, 0x4ec9a5, 0.9)); // eyes
+  bx(0.07, 0.07, 0.02, 0.08, 0.97, -0.14, m(0x0d0d0f, 0.3, 0x4ec9a5, 0.9));
+  bx(0.03, 0.22, 0.03, 0, 1.19, 0, m(0x5b6a70, 0.5));               // antenna
+  const lamp = bx(0.1, 0.1, 0.1, 0, 1.34, 0, m(0x70828a, 0.4, 0x70828a, 0.8));
+  const plate = makeSprite("WALL-ST-E", 0.62, { bg: "#132528", accent: "#4ec9a5" });
+  plate.position.set(0, 1.86, 0);
+  g.add(plate);
+  const hit = new THREE.Mesh(BOX, new THREE.MeshBasicMaterial({ visible: false }));
+  hit.scale.set(0.9, 1.7, 0.9); hit.position.set(0, 0.85, 0);
+  hit.userData.seat = "__bot";
+  g.add(hit); PICKABLE.push(hit);
+  scene.add(g);
+  return { g, lamp };
+})();
+setInterval(() => {
+  const bs = window.__botStatus?.();
+  botFig.g.visible = !!bs?.exists;
+  if (!bs?.exists) return;
+  const c = bs.running ? (bs.live ? 0x4ec9a5 : 0xe0ad3d) : 0x70828a;
+  botFig.lamp.material.color.set(c);
+  botFig.lamp.material.emissive.set(c);
+}, 3000);
+
 window.applyIdentity = (identity) => {
   if (!identity || identity.isHQ) return;
   const spec = STAFF.find((x) => x.id === "CEO");
@@ -3747,6 +3797,7 @@ function pickSeat(clientX, clientY) {
     // opening a card there would fight the camera the player was just using.
     if (moved > 5 || e.button !== 0) return;
     const seat = pickSeat(e.clientX, e.clientY);
+    if (seat === "__bot") { document.getElementById("tab-calls")?.click(); return; }
     if (seat) openDossier(seat);
     else if (dossierEl.classList.contains("on")) closeDossier();
   });
@@ -5199,7 +5250,7 @@ async function renderTeamInto(el) {
   // 1. the bot
   const bs = window.__botStatus?.() ?? null;
   const cBot = mk("div", "tchip");
-  cBot.append(mk("span", "tk", "Your bot"));
+  cBot.append(mk("span", "tk", "WALL-ST-E \u00b7 your bot"));
   const bv = mk("span", "tv",
     !bs || !bs.exists ? "○ not set up" : bs.live && bs.running ? "● LIVE" :
     bs.running ? "◐ practice run" : "◌ stopped");

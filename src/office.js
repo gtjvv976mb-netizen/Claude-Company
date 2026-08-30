@@ -755,11 +755,15 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
         if (roomMatch) {
           const floorNo = Number(roomMatch[1]);
           const action = roomMatch[2];
-          if (!action) return json(200, rooms.roomState(floorNo, me));
+          // The penthouse is never LEASED — it is the house's own desk, and its
+          // owners (treasury, the dev wallet, the deed) sit in it as tenants do.
+          const houseSeat = floorNo === HQ_FLOOR && hqOwner(me);
+          if (!action) return json(200, rooms.roomState(floorNo, me, { houseSeat }));
 
           if (!me) return json(401, { error: "sign in with your wallet first" });
           const lease = leasing.leaseFor(floorNo);
-          if (!lease || lease.wallet !== me) return json(403, { error: "this is not your floor" });
+          if (!houseSeat && (!lease || lease.wallet !== me))
+            return json(403, { error: "this is not your floor" });
 
           const body = await readBody();
           if (action === "/settings") return json(200, rooms.saveSettings(floorNo, body || {}));
