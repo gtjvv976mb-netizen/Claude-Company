@@ -33,7 +33,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
     // every response needs these — not just the /api/ ones. /events did not have them,
     // which silently dropped every floor back to the demo feed.
     res.setHeader("access-control-allow-origin", "*");
-    res.setHeader("access-control-allow-headers", "content-type,authorization");
+    res.setHeader("access-control-allow-headers", "content-type,authorization,solana-client");
     res.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
     if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
 
@@ -108,7 +108,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
       const json = (code, body) => {
         res.writeHead(code, { "content-type": "application/json; charset=utf-8",
           "cache-control": "no-store", "access-control-allow-origin": "*",
-          "access-control-allow-headers": "content-type,authorization" });
+          "access-control-allow-headers": "content-type,authorization,solana-client" });
         res.end(JSON.stringify(body));
       };
       if (req.method === "OPTIONS") { json(204, {}); return; }

@@ -5801,13 +5801,13 @@ function buildBotCard(settings) {
       if (status === 200) working = body?.settings?.mode === "grind";
     } catch {}
 
-    let bal = null;
+    let bal = null, balErr = null;
     if (b) {
       try {
         const W = await web3();
         const conn = new W.Connection(RPC_URL, "confirmed");
         bal = (await conn.getBalance(new W.PublicKey(b.pk))) / 1e9;
-      } catch {}
+      } catch (e) { balErr = String(e?.message || e).slice(0, 80); }
     }
 
     const funded  = bal != null && bal >= 0.012;
@@ -5815,7 +5815,7 @@ function buildBotCard(settings) {
     const live    = !!b?.live;
     const steps = [
       { done: !!b,      label: "Create your bot wallet",  hint: b ? `${b.pk.slice(0,6)}…${b.pk.slice(-4)} — the key lives in this browser only` : "One click. The key never leaves this browser." },
-      { done: funded,   label: "Put some SOL in it",      hint: b ? (bal == null ? "checking balance…" : `${bal.toFixed(4)} SOL — send only what you'd risk losing`) : "" },
+      { done: funded,   label: "Put some SOL in it",      hint: b ? (balErr ? `balance check failed (${balErr}) — reopen this tab to retry` : bal == null ? "checking balance…" : `${bal.toFixed(4)} SOL — send only what you'd risk losing`) : "" },
       { done: running,  label: "Start it (practice mode)", hint: running ? (live ? "running — TRADING LIVE" : "running — practice, spending nothing") : "It shows what it WOULD trade, spending nothing." },
       { done: live,     label: "Go live when you trust it", hint: live ? "trading for real, inside your caps" : "Optional. Practice as long as you like first." },
     ];
