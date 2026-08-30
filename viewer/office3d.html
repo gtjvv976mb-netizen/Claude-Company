@@ -1454,14 +1454,16 @@ const FIGURE = {
      faces +X, so the shirt and tie are thin slabs stood proud of the chest's
      front face rather than colour painted on the torso. */
   CEO: {
-    pal: { skin: 0xd97757, shirt: 0x232327, trousers: 0xd97757,
-           boots: 0xa8543a, apron: 0x232327, head: 0xd97757 },
+    // Coral is reserved for the parts that are HIM — head, arms, feet. Everything
+    // between is tailoring: charcoal jacket, matching trousers.
+    pal: { skin: 0xd97757, shirt: 0x232327, trousers: 0x2b2b30,
+           boots: 0xd97757, apron: 0x232327, head: 0xd97757 },
     drop: ["hair", "eye", "apron"],
     body: [
       ["Head", [0.32, 0.42, 0.58], [0, 1.68, 0], 0xd97757],            // the slab head, seated on the neck
       ["Head", [0.038, 0.12, 0.12], [0.166, 1.73, 0.155], 0x121212],   // square eye, left
       ["Head", [0.038, 0.12, 0.12], [0.166, 1.73, -0.155], 0x121212],  // square eye, right
-      ["Spine", [0.26, 0.34, 0.44], [0, 0.99, 0], 0xd97757],           // elongated coral body
+      ["Spine", [0.26, 0.34, 0.44], [0, 0.99, 0], 0x232327],           // elongated torso, jacketed
       ["UpperArmL", [0.15, 0.21, 0.15], [0, 1.21, 0.275], 0xd97757],   // coral arm nub, left
       ["UpperArmR", [0.15, 0.21, 0.15], [0, 1.21, -0.275], 0xd97757],  // coral arm nub, right
       ["Chest", [0.030, 0.23, 0.21], [0.137, 1.295, 0], 0xf6f4ef],     // shirt front
