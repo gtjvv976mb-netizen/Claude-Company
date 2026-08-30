@@ -75,6 +75,13 @@ export const DEFAULTS = {
   scaleOutPct: 0,            // fraction sold when target is first touched (0 = ride it)
   trailPct: 0.60,            // trail this far under the high water mark, once armed
   stopBufferPct: 0,          // widen the desk's stop by this much (0 = obey exactly)
+  /* SNIPE-HOLD-SELL: take the whole position at this multiple of entry. 2 = sell at a
+   * double. Checked before the trail arms, so a trail can never intercept the double
+   * first. Set to 0 to disable and ride the trail instead. */
+  takeProfitX: 2.0,
+  /* THE FIXED FUND: the same SOL size on every trade (0 = size by Kelly/flat risk).
+   * Overrides how much is bet, never whether — Kelly's skip verdicts still apply. */
+  fixedSol: 0.02,
 };
 
 /** Should we take this entry at all, and at what size? */
@@ -131,6 +138,12 @@ export function planEntry({ call, cfg = DEFAULTS, state }) {
   // ── translate risk into position size, then obey the flat caps ──
   const equity = state.equitySol ?? c.dailySolCap;
   let want = (f * equity) / stopFrac;
+  /* THE FIXED FUND (owner's rule): when fixedSol is set, every trade is the same
+   * size, full stop. Kelly still ran above for a reason — its SKIP verdicts (bad
+   * bracket, hit rate under break-even, book too hot) still refuse the trade. The
+   * fixed fund overrides how MUCH we bet, never WHETHER we bet. Identical sizing
+   * also makes the young record legible: every outcome is comparable in SOL. */
+  if (c.fixedSol > 0) { want = c.fixedSol; why = `fixed fund: ${c.fixedSol} SOL per trade`; }
   want = Math.min(want, c.maxSolPerTrade);
   if (call.size_sol != null) want = Math.min(want, Number(call.size_sol));
 
@@ -187,6 +200,21 @@ export function stepPosition({ pos, mark, deskExit = null, cfg = DEFAULTS, nowMs
   if (mark <= pos.stop)
     return { action: "sell", fraction: 1,
       reason: pos.scaled ? "trailing stop" : "stop loss" };
+
+  /* SNIPE - HOLD - SELL. A hard multiple, taken in full, no negotiation.
+   *
+   * The trail below is the right tool for a trend you intend to ride; it is the wrong
+   * one for a micro-cap snipe, where the move is usually one impulse and the retrace
+   * that arms the trail is the same retrace that gives the gain back. On a coin that
+   * doubles and halves inside an hour, "ride it with a 40% trail" and "sell at 2x"
+   * are not close to the same trade.
+   *
+   * So when takeProfitX is set, hitting it sells EVERYTHING at the mark. It is checked
+   * before the trail arms, so the trail can never intercept a double first. Set
+   * takeProfitX to 0 to go back to riding the trail. */
+  if (c.takeProfitX > 0 && pos.entry > 0 && mark >= pos.entry * c.takeProfitX)
+    return { action: "sell", fraction: 1,
+      reason: `take profit: ${(mark / pos.entry).toFixed(2)}x at or above the ${c.takeProfitX}x rule` };
 
   // First touch of target ARMS the trail and lifts the stop to breakeven, so the
   // position can no longer lose. Only sells here if a scale-out is configured —

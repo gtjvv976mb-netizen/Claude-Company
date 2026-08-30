@@ -26,71 +26,80 @@ export const cfg = {
   maxRiskPct: num("DESK_MAX_RISK_PCT", 1.0),
   maxCandidates: num("DESK_MAX_CANDIDATES", 8),
   /* THE SIZE THE EXIT PROBE MEASURES AT — and it must resemble the size actually
-   * traded, or the desk vetoes coins on a cost nobody pays. This was $500, chosen
-   * against the $10,000 notional book above. The executor that trades these calls
-   * sizes at 2% of a sub-1-SOL wallet: about $3.40, with a hard cap near $10. So
-   * the screen was rejecting coins on the round-trip cost of a position ~150x
-   * larger than any that gets placed.
+   * traded, or the desk vetoes coins on a cost nobody pays. It has come down twice:
+   * $500 (chosen against the $10,000 notional book above), then $200, now $75.
    *
-   * $200 keeps the check meaningful rather than merely passing it: it still asks
-   * whether MANY tenants copying one call could all get out, which is the reason
-   * to probe above your own clip size at all — while no longer failing a coin over
-   * an order nobody sends. At the $25,000 liquidity floor below this round-trips
-   * at ~3.2%, comfortably inside the 8% ceiling. */
-  targetSizeUsd: num("DESK_TARGET_SIZE_USD", 200),
+   * The executor sizes at ~$3.40 with a hard cap near $10, so $75 still prices about
+   * twenty tenants copying one call at once — which is the reason to probe above your
+   * own clip at all. But it no longer vetoes the micro-caps this desk now hunts: at
+   * the $12,000 liquidity floor below, $75 round-trips at 2.5%, well inside the 8%
+   * ceiling, while a real $3.40 clip costs 0.11%. */
+targetSizeUsd: num("DESK_TARGET_SIZE_USD", 75),
 
   // Deterministic screen floors. These kill before any token is spent.
   screen: {
-    /* MEASURED, not chosen. Sweeping 301 live coins and moving this floor alone:
-     *   $75,000 -> 53 survivors      $30,000 -> 67
-     *   $50,000 -> 61                $25,000 -> 68
-     *   $40,000 -> 66                $20,000 -> 68   (no further gain)
-     * The curve is flat below $25k — every coin the market has to offer is already
-     * admitted there, so going lower buys literally nothing and only takes on pools
-     * a single wallet can drain. $25,000 is where the gains stop, which is why it
-     * is the floor rather than a rounder, braver-sounding number.
+    /* LOWERED FOR MICRO-CAPS, and only safe because the probe came down with it.
      *
-     * Note this is DEPTH, not market cap: a $1m-market-cap coin is a claim about
-     * price x supply, while liquidity is the money actually in the pool to sell
-     * into. They are routinely an order of magnitude apart. */
-    minLiquidityUsd: num("DESK_MIN_LIQUIDITY_USD", 25000),
+     * $75,000 -> $25,000 was measured against the live market: the survivor curve
+     * went flat below $25k, so nothing more was admitted. That measurement assumed
+     * the OTHER floors (volume $50k, txns 200) were unchanged — and those are what
+     * were actually excluding the sub-$1m coins this desk now wants.
+     *
+     * At $12,000 a real $3.40 clip round-trips at 0.11% and the $75 probe at 2.5%.
+     * The pool is thin enough to be drained by a determined seller, which is exactly
+     * what liq_collapse, cannot_exit, holder concentration and the freeze-authority
+     * check are for. Those did not move and must not.
+     *
+     * Note this is DEPTH, not market cap: a $1m-cap coin is a claim about price x
+     * supply, while liquidity is the money actually in the pool to sell into. They
+     * are routinely an order of magnitude apart. */
+minLiquidityUsd: num("DESK_MIN_LIQUIDITY_USD", 12000),
     // 24h here quietly strangled the sniper lane: the free screen killed every
     // coin the ignition path is FOR. The research's floor is one hour past
     // migration (rugs express inside the first hour); 1.5h keeps a margin.
     minPairAgeHours: num("DESK_MIN_PAIR_AGE_HOURS", 1.5),
-    minVolume24hUsd: num("DESK_MIN_VOL24_USD", 50000),
+    minVolume24hUsd: num("DESK_MIN_VOL24_USD", 15000),
     maxVolToLiqRatio: num("DESK_MAX_VOL_LIQ", 40),   // above this, suspect wash
-    minTxns24h: num("DESK_MIN_TXNS24", 200),
+    minTxns24h: num("DESK_MIN_TXNS24", 60),
     maxFdvToLiqRatio: num("DESK_MAX_FDV_LIQ", 250),  // thin float propping a fat FDV
 
-    /* THE CEILING — this desk hunts memecoins, not holdings.
+    /* THE CEILING — $10m, now $3m. This desk hunts the coins that can still re-rate.
      *
-     * There was no market-cap bound of any kind here, in either direction, and the
-     * ranking paid up to +39 for depth alone (+15 over $75k liquidity, +10 over
-     * $400k, +14 for an aged survivor over $750k). A large established coin therefore
-     * out-ranked a small one on size before its story was read at all, and the desk
-     * kept surfacing coins you would hold rather than trade.
+     * A memecoin thesis is a claim that a coin can multiply. At $3m a 2x needs a few
+     * million of fresh money; at $30m it needs sixty, which is somebody else's
+     * business. The upside lives well below this line, and the whole point of coming
+     * down here is that a 2x is an ordinary afternoon rather than a bull market.
      *
-     * A memecoin thesis is a claim that a coin can RE-RATE. Past roughly $10m that
-     * claim needs someone to arrive with millions, which is a different business from
-     * the one this desk is in. Below it, a 2-5x is an ordinary week.
-     *
-     * This is a ceiling on the OPPORTUNITY, not on safety — the liquidity floor and
-     * the exit probe remain the things that decide whether a position can be left. */
-    maxMarketCapUsd: num("DESK_MAX_MCAP_USD", 10_000_000),
+     * A ceiling on the OPPORTUNITY, not on safety. What decides whether a position
+     * can be LEFT is the liquidity floor and the exit probe, and an unknown market
+     * cap never fails this check — an unreadable number must not become an
+     * execution. */
+maxMarketCapUsd: num("DESK_MAX_MCAP_USD", 3_000_000),
   },
 
   // Slippage the desk refuses to accept on a round trip at target size.
   maxRoundTripSlippagePct: num("DESK_MAX_RT_SLIPPAGE", 8),
 
-  // PM weighting. The desk's opinion about what predicts a good Solana trade:
-  // safety and exitability dominate; narrative is a tiebreak.
+  /* REWEIGHTED FOR THE MARKET THIS DESK IS ACTUALLY IN.
+   *
+   * Narrative was the LOWEST-weighted seat at 0.14 — on a memecoin desk, where the
+   * story is not a tiebreak, it is the asset. Nothing else about a two-hour-old coin
+   * with a $200k cap is informative: it has no chart worth reading, no revenue, and a
+   * book thin enough that "liquidity analysis" mostly restates the screen. What it
+   * has is a dev, an X account, and either real people talking or one script pasted
+   * four hundred times. That is the whole question.
+   *
+   * So narrative — the seat holding Grok's first-party read of X — becomes the
+   * heaviest. Forensics stays near the top because it answers a different question
+   * that never stops mattering: can this be used against a holder by design.
+   * Technical falls hardest; a coin younger than a trading session has no tape to
+   * analyse and a "technical read" of one is astrology with a candlestick chart. */
   weights: {
-    forensics: 0.28,
-    liquidity: 0.22,
-    flow: 0.20,
-    technical: 0.16,
-    narrative: 0.14,
+    narrative: 0.30,   // Grok's X read — on a memecoin, the story IS the asset
+    forensics: 0.26,   // can it be used against a holder by design
+    flow: 0.22,        // are the buyers real people or one wallet in a wig
+    liquidity: 0.14,   // can it be exited; micro-caps are thin by definition
+    technical: 0.08,   // a 2-hour-old coin has no chart worth reading
   },
 
   // Defaults are the economical tier; env vars UPGRADE a seat, they no longer rescue

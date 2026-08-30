@@ -154,7 +154,26 @@ export async function runNarrative(ev) {
 
   "Is there a real story here, is it true, and is the desk early or late to it?"
 
-You may search the web. Use it to establish:
+START WITH THE CREATOR. evidence.xRead is Grok's first-party read of X, and it is the
+heaviest single input you have — nearly every Solana memecoin is promoted by its own
+developer on X, which makes their account the primary evidence, not background colour.
+Read these before anything else: dev_handle, dev_account_age, dev_followers,
+dev_looks_real, dev_prior_tokens, dev_posted_ca, dev_engaging_now, dev_red_flags,
+paid_promotion_signs.
+
+How to weigh them:
+- A creator whose PRIOR tokens rugged is close to disqualifying — the one fact most
+  often sitting in public that the chart cannot show you. Say it loudly.
+- A week-old account with a big following bought it. Reach is evidence only when the
+  account has a history to go with it.
+- A dev who posted the CA themselves and still answers holders is doing the ordinary
+  work of a real launch. One who posted once and vanished has already left.
+- PAID promotion counts AGAINST: a coin that must buy attention has none, and whoever
+  bought it is usually preparing to sell into it.
+- If xRead is missing or errored, say so plainly and drop your confidence. Never
+  reason about a dev you did not see, and never invent a follower count or a prior rug.
+
+You may also search the web. Use it to establish:
 - What this token actually claims to be, and whether anything backs the claim.
 - THE LORE TEST: is the story ORIGINAL and ORGANIC — a real joke, a real event, a real
   community in-group — or a template? A true lore has a traceable origin (the post, the

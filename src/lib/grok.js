@@ -134,15 +134,43 @@ export async function grokXRead({ symbol, mint, hook = "" }) {
       role: "user",
       content:
         `Search X for the Solana token "${symbol}" (contract ${mint}). ${hook ? "Context: " + hook + ". " : ""}` +
-        `Assess the ATTENTION, not the price. Then answer with ONLY a JSON object:\n` +
+        `Assess the ATTENTION, not the price.\n\n` +
+        `THE CREATOR IS THE MAIN SUBJECT. Nearly every Solana memecoin is promoted by ` +
+        `its own developer on X, so their account IS the primary evidence — more ` +
+        `informative than the volume of chatter around the ticker. Find the account ` +
+        `that launched or promotes this coin and read it like a record:\n` +
+        `- How old is it and how many followers? A week-old account with 50k followers ` +
+        `bought them.\n` +
+        `- Does it post as a person with a history, or does it exist only to push tokens?\n` +
+        `- HAVE THEY LAUNCHED BEFORE, and what happened? Prior tickers from the same ` +
+        `account or person, and whether those ran, died quietly, or rugged. A creator ` +
+        `who has rugged before is the most decisive fact available and it is usually ` +
+        `sitting in public on their own timeline.\n` +
+        `- Did they post the contract address themselves, and are they replying to ` +
+        `holders now, or did they post once and go quiet?\n` +
+        `- Are they PAYING for attention? One wording repeated across accounts with no ` +
+        `shared community, sudden reply swarms, engagement pods. A coin that has to buy ` +
+        `its attention does not have any.\n\n` +
+        `Then answer with ONLY a JSON object:\n` +
         `{"mentions_level":"none|low|building|hot",` +
         `"velocity":"rising|flat|fading",` +
         `"distinct_voices":<true if several PRE-EXISTING accounts discuss it in their own words, false if one script is pasted everywhere>,` +
+        `"dev_handle":"the creator/promoter X handle, or null if not found",` +
+        `"dev_account_age":"e.g. '3 years', '6 days', or null",` +
+        `"dev_followers":<number or null>,` +
+        `"dev_looks_real":<true if a person with a history, false if a token-pushing shell, null if unknown>,` +
+        `"dev_posted_ca":<true|false|null — did the creator post the contract address themselves>,` +
+        `"dev_engaging_now":<true|false|null — actively replying to holders>,` +
+        `"dev_prior_tokens":[{"ticker":"...","outcome":"ran|died|rugged|unknown"}] (max 4, only what you can source),` +
+        `"dev_red_flags":["short, specific, sourced"],` +
+        `"paid_promotion_signs":<true|false>,` +
         `"kol_posts":[{"handle":"...","gist":"..."}] (max 3, only genuinely notable accounts),` +
         `"lore_origin":"the traceable origin post/moment/person, or null",` +
         `"paid_or_botted_signs":<true|false>,` +
         `"verdict":"organic|mixed|manufactured|no_signal",` +
-        `"summary":"two sentences a portfolio manager can use"}`,
+        `"summary":"two sentences a portfolio manager can use"}\n\n` +
+        `Say null rather than guessing. An invented follower count or an imagined prior ` +
+        `rug is worse than admitting you could not find the account.`,
     }],
   }, 120000);
   if (!r.ok) return r;

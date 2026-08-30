@@ -169,6 +169,17 @@ export function evaluateExit(call, now) {
       detail: `mark ${mark} at or below ${stopWhy} (${Number(stopEff.toPrecision(4))})`, pct: 100 };
   }
 
+  /* SNIPE - HOLD - SELL. A hard multiple on the entry, taken in full.
+   *
+   * The desk and the executor must agree about when a trade is over, or the tenant's
+   * bot sells at 2x while the call sheet still shows the position open — and the
+   * graded record then describes a trade nobody made. This mirrors takeProfitX in
+   * executor/strategy.mjs; change them together or not at all. */
+  const tpX = Number(process.env.DESK_TAKE_PROFIT_X || 2);
+  if (tpX > 0 && call.entry_ref > 0 && mark != null && mark >= call.entry_ref * tpX)
+    return { fire: true, code: "take_profit", urgency: "level",
+      detail: `${(mark / call.entry_ref).toFixed(2)}x — the ${tpX}x rule, sell it all`, pct: 100 };
+
   if (call.target && mark != null && mark >= call.target)
     return { fire: true, code: "target_hit", urgency: "level", detail: `mark ${mark} reached the target ${call.target}`, pct: 100 };
 

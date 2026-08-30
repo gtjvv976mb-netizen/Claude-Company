@@ -28,16 +28,24 @@ let p=openPosition({call,sol:0.05,fillPrice:1,cfg:DEFAULTS});
 t("holds above stop", stepPosition({pos:p,mark:0.8,cfg:DEFAULTS}).action==="hold");
 t("STOPS at the stop", stepPosition({pos:p,mark:0.61,cfg:DEFAULTS}).action==="sell");
 
-// breakeven + trail (no scale-out by default)
+// SNIPE-HOLD-SELL — the default: 2x sells EVERYTHING, before the trail can arm
 p=openPosition({call,sol:0.05,fillPrice:1,cfg:DEFAULTS});
-const atTarget=stepPosition({pos:p,mark:2.0,cfg:DEFAULTS});
+const at2x=stepPosition({pos:p,mark:2.0,cfg:DEFAULTS});
+t("2x sells the whole position (takeProfitX default)", at2x.action==="sell"&&at2x.fraction===1, at2x);
+t("just under 2x still holds",
+  stepPosition({pos:openPosition({call,sol:0.05,fillPrice:1,cfg:DEFAULTS}),mark:1.99,cfg:DEFAULTS}).action==="hold");
+
+// breakeven + trail — the RIDE path, opt-in via takeProfitX: 0
+const RIDE={...DEFAULTS, takeProfitX:0};
+p=openPosition({call,sol:0.05,fillPrice:1,cfg:RIDE});
+const atTarget=stepPosition({pos:p,mark:2.0,cfg:RIDE});
 t("target does NOT emit a zero-size swap", atTarget.action==="hold", atTarget);
 t("stop lifted to breakeven-or-better at target", p.stop>=1, p.stop);
-stepPosition({pos:p,mark:5.0,cfg:DEFAULTS});
-t("trail ratchets up behind the high", p.stop>=5.0*(1-DEFAULTS.trailPct)-1e-9, p.stop);
-const before=p.stop; stepPosition({pos:p,mark:3.0,cfg:DEFAULTS});
+stepPosition({pos:p,mark:5.0,cfg:RIDE});
+t("trail ratchets up behind the high", p.stop>=5.0*(1-RIDE.trailPct)-1e-9, p.stop);
+const before=p.stop; stepPosition({pos:p,mark:3.0,cfg:RIDE});
 t("trail never loosens on a pullback", p.stop===before, p.stop);
-t("trailing stop fires", stepPosition({pos:p,mark:p.stop-0.01,cfg:DEFAULTS}).action==="sell");
+t("trailing stop fires", stepPosition({pos:p,mark:p.stop-0.01,cfg:RIDE}).action==="sell");
 
 // desk exit wins
 p=openPosition({call,sol:0.05,fillPrice:1,cfg:DEFAULTS});
