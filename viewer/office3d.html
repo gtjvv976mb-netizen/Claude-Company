@@ -448,8 +448,14 @@ select.dp-in{cursor:pointer}
 .legend{padding:11px 13px; display:grid; grid-template-columns:repeat(auto-fill,minmax(74px,1fr)); gap:10px 8px}
 .legend span{display:flex; flex-direction:column; align-items:center; gap:4px; font-size:9.5px; line-height:1.25;
   text-align:center; color:var(--ink-soft)}
-.legend i{width:56px;height:64px;border-radius:9px; display:block; background-size:contain; background-repeat:no-repeat; background-position:center;
+.legend i{width:56px;height:99px;border-radius:9px; display:block; background-size:contain; background-repeat:no-repeat; background-position:center;
   border:1px solid var(--card-line,#3a4b50)}
+/* A tile carrying a turntable STRIP steps through its frames; it only spins
+   while the Crew tab is actually open, so a hidden panel costs nothing. */
+/* Stepped by a single JS ticker (steps(var(--fr)) is not valid CSS, and the
+   count differs per device) — one interval for the whole grid, and it only
+   advances while the Crew tab is open. */
+.legend i.turn{background-repeat:no-repeat; background-position:0 0}
 .note{padding:0 13px 13px; font-size:11.5px; color:var(--ink-faint); border-top:1px solid var(--panel-line); line-height:1.5}
 </style>
 
@@ -2103,6 +2109,13 @@ const DOSSIER = {
     method: "Claude. The authorising seat, not an analyst.",
     known: "Has never once been in the field.",
     note: "A yes authorises a ticket, not a trade. The seat can approve; it cannot sign.",
+  },
+  __bot: {  // WALL-ST-E
+    brief: "Your autotrader. He does not decide anything — he DOES what the desk decided, with your money, inside your caps.",
+    detail: "Lives in your browser with a burner key this server never sees. He watches your floor's calls and acts on them: buy on an entry, sell on an exit, sized by your own settings and stopped by your own limits. Practice mode first — he shows what he WOULD trade and spends nothing — then live when you trust him. He sleeps in his junk adobe beside the boss's office until you start him, and his antenna says which it is: amber for paper, green for real money.",
+    method: "Code only — no model call, no monthly cost. He is the hands, not the brain.",
+    known: "Compacting the day's trades into neat little cubes.",
+    note: "The desk cannot sign and never holds a key. Everything he does is signed by the wallet in your browser, and one tap withdraws it.",
   },
   GrokAD: {  // GROX MULDER
     brief: "The Assistant Director from the other agency. When a floor hires the Grok brain, he moves into the suite beside the boss and works the trades himself.",
@@ -3878,7 +3891,9 @@ const dBodyEl = document.getElementById("d-body"), dStampEl = document.getElemen
 const KIND_LABEL = { model: "Model call", code: "Code only", claude: "Claude" };
 
 function openDossier(seatId) {
-  const spec = STAFF.find((x) => x.id === seatId);
+  const spec = seatId === "__bot"
+    ? { id: "__bot", name: "WALL-ST-E", role: "Your autotrader \u00b7 hands, not brain" }
+    : STAFF.find((x) => x.id === seatId);
   if (!spec) return;
   const d = DOSSIER[seatId] || {};
   const [kind, question] = SEATQ[seatId] || ["model", ""];
@@ -4371,6 +4386,20 @@ for (const s of STAFF) {
   i.style.background = hex;                      // the colour is the placeholder…
   legendTiles[s.id] = i;
   sp.append(i, document.createTextNode(s.name || s.id));
+  sp.style.cursor = "pointer";
+  sp.onclick = () => openDossier(s.id);
+  legendEl.appendChild(sp);
+}
+{
+  // The tenant's own robot is crew too — he just works for YOU, not the house.
+  const sp = document.createElement("span");
+  const i = document.createElement("i");
+  i.style.background = "#3a3222";
+  legendTiles["__bot"] = i;
+  sp.append(i, document.createTextNode("WALL-ST-E"));
+  sp.style.cursor = "pointer";
+  sp.title = "Your autotrader — click to manage him";
+  sp.onclick = () => document.getElementById("tab-calls")?.click();
   legendEl.appendChild(sp);
 }
 
@@ -4383,49 +4412,90 @@ window.__redoPortraits = () => { paintCrewPortraits.done = false; return paintCr
 async function paintCrewPortraits() {
   if (paintCrewPortraits.done) return;
   paintCrewPortraits.done = true;
+  const FW = 72, FH = 128;                                  // one frame
+  const FR = window.innerWidth < 760 ? 12 : 24;             // frames per turn
+  const TW = 56, TH = 99;                                   // the tile on screen
   const R = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
-  R.setSize(72, 128, false);                     // portrait aspect — a person, not a plaza
+  R.setSize(FW, FH, false);
   R.outputColorSpace = THREE.SRGBColorSpace;
   R.toneMapping = THREE.AgXToneMapping;
-  R.toneMappingExposure = 1.6;                   // tiles sit on a dark card; lift them
-  // ±1.05 holds the WHOLE figure (rig tops out ~1.9 high) — the old ±0.62 was a
-  // head-and-shoulders crop that read as "part of a model" in the card.
+  R.toneMappingExposure = 1.6;
   const cam = new THREE.OrthographicCamera(-0.647, 0.647, 1.15, -1.15, -100, 200);
 
-  const wasVisible = new Map();
-  scene.children.forEach((c) => wasVisible.set(c, c.visible));
-  // the scene background painted every pixel of the "alpha" canvas — portraits
-  // must render the figure alone on transparency
   const wasBg = scene.background, wasFog = scene.fog;
-  scene.background = null; scene.fog = null;
+
+  // every agent, then the tenant's own robot
+  const subjects = STAFF.map((spec) => ({ id: spec.id, g: workers[spec.id]?.g }))
+    .concat([{ id: "__bot", g: botFig.g, bot: true }]);
   try {
-    for (const spec of STAFF) {
-      const w = workers[spec.id];
-      if (!w?.g) continue;
-      scene.children.forEach((c) => { if (!c.isLight) c.visible = (c === w.g); });
-      w.g.visible = true;
+    for (const sub of subjects) {
+      if (!sub.g) continue;
+      // Hide the floor, shoot all this agent's frames, put the floor back —
+      // all inside ONE frame. An earlier version yielded between frames with
+      // the scene still hidden, and the whole office went black for ten
+      // seconds while the strips rendered.
+      const wasVisible = new Map();
+      scene.children.forEach((c) => { wasVisible.set(c, c.visible); if (!c.isLight) c.visible = (c === sub.g); });
+      scene.background = null; scene.fog = null;
+      sub.g.visible = true;
       const sprites = [];
-      w.g.traverse((o) => { if (o.isSprite && o.visible) { o.visible = false; sprites.push(o); } });
-      const p = w.g.position;
-      cam.position.set(p.x + 1.15, p.y + 1.55, p.z + 2.6);  // three-quarter, full figure
-      cam.lookAt(p.x, p.y + 1.02, p.z);
-      cam.updateProjectionMatrix();
-      R.render(scene, cam);
-      const url = R.domElement.toDataURL("image/png");
-      const tile = legendTiles[spec.id];
-      if (tile && url.length > 2000) { tile.style.backgroundImage = `url(${url})`; tile.style.backgroundColor = "#1b2529"; }
+      sub.g.traverse((o) => { if (o.isSprite && o.visible) { o.visible = false; sprites.push(o); } });
+      const sleeping = sub.bot && botState.mode === "sleep";
+      if (sub.bot) botPose(false);                          // he poses awake for his portrait
+      const p = sub.g.position;
+      const strip = document.createElement("canvas");
+      strip.width = FW * FR; strip.height = FH;
+      const sg = strip.getContext("2d");
+      for (let f = 0; f < FR; f++) {
+        const ang = (f / FR) * Math.PI * 2 + 0.6;           // start on a three-quarter view
+        cam.position.set(p.x + Math.sin(ang) * 2.4, p.y + 1.55, p.z + Math.cos(ang) * 2.4);
+        cam.lookAt(p.x, p.y + (sub.bot ? 0.66 : 1.02), p.z);
+        cam.updateProjectionMatrix();
+        R.render(scene, cam);
+        sg.drawImage(R.domElement, f * FW, 0);
+      }
+      scene.children.forEach((c) => { if (wasVisible.has(c)) c.visible = wasVisible.get(c); });
+      scene.background = wasBg; scene.fog = wasFog;
+      const url = strip.toDataURL("image/png");
+      const tile = legendTiles[sub.id];
+      if (tile && url.length > 2000) {
+        tile.style.backgroundImage = `url(${url})`;
+        tile.dataset.fr = String(FR); tile.dataset.tw = String(TW); tile.dataset.f = "0";
+        tile.style.backgroundSize = `${TW * FR}px ${TH}px`;
+        tile.classList.add("turn");
+      }
       sprites.forEach((o) => (o.visible = true));
-      await new Promise((r) => setTimeout(r, 0));          // keep the frame responsive
+      if (sleeping) botPose(true);
+      // let the floor draw between agents — but never stall on a throttled
+      // rAF (a background tab suspends it, and the strips would never finish)
+      await Promise.race([
+        new Promise((r) => requestAnimationFrame(r)),
+        new Promise((r) => setTimeout(r, 120)),
+      ]);
     }
   } catch (e) {
-    console.warn("crew portraits unavailable:", e.message);  // colours remain
+    console.warn("crew portraits unavailable:", e.message);
   } finally {
-    scene.children.forEach((c) => { if (wasVisible.has(c)) c.visible = wasVisible.get(c); });
     scene.background = wasBg; scene.fog = wasFog;
     R.dispose();
   }
 }
 setTimeout(paintCrewPortraits, 2500);      // after the floor has settled
+
+/* One ticker turns every crew tile. Cheap: a background-position write per
+   tile at 11fps, and only when the panel is actually on screen. */
+setInterval(() => {
+  const panel = document.getElementById("crewpanel");
+  if (!panel || !panel.classList.contains("on")) return;
+  for (const id in legendTiles) {
+    const t = legendTiles[id];
+    if (!t.classList.contains("turn")) continue;
+    const fr = Number(t.dataset.fr || 24), w = Number(t.dataset.tw || 56);
+    const f = ((Number(t.dataset.f || 0) + 1) % fr);
+    t.dataset.f = String(f);
+    t.style.backgroundPositionX = `-${f * w}px`;
+  }
+}, 90);
 
 /* ── nobody stands inside anybody ──────────────────────────────────────────
    Pathing keeps agents out of furniture, but two of them could still occupy
