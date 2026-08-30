@@ -83,7 +83,14 @@
   --hero-horizon-line:rgba(90,84,60,.28);
 }
 :root[data-theme="light"] .shade{display:none}
-:root[data-theme="light"] .hero-art svg{filter:saturate(.88) brightness(1.07)}
+/* the tower itself changes shift: stars out, lamps off, dusk masonry lifted
+   to daylight, the reflections calmed. The crest stays coral — the sign is
+   the sign at any hour. */
+:root[data-theme="light"] .hero-art #stars{display:none}
+:root[data-theme="light"] .hero-art #wins{opacity:.3}
+:root[data-theme="light"] .hero-art #refl{opacity:.4}
+:root[data-theme="light"] .hero-art #trees{fill:#42583a}
+:root[data-theme="light"] .hero-art #tower{filter:brightness(1.62) saturate(.62) hue-rotate(-14deg)}
 :root[data-theme="light"] .hero::before{content:"";position:absolute;top:9%;right:15%;
   width:78px;height:78px;border-radius:50%;z-index:1;
   background:radial-gradient(circle,#fffdf2 0 36%,#f7dd94 58%,rgba(247,221,148,0) 72%)}
@@ -143,8 +150,8 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent-ink);outline
 .nlinks{margin-left:auto;display:flex;align-items:center;gap:clamp(12px,2vw,26px);flex-wrap:wrap}
 .nlinks a{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10.5px;
   letter-spacing:.2em;text-transform:uppercase;text-decoration:none;
-  color:rgba(248,240,220,.82);padding:6px 0;border-bottom:1px solid transparent}
-.nlinks a:hover{color:#fff;border-bottom-color:var(--amber)}
+  color:var(--dusk-soft);padding:6px 0;border-bottom:1px solid transparent}
+.nlinks a:hover{color:var(--dusk-ink);border-bottom-color:var(--amber)}
 .pill{flex:none;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10.5px;
   font-weight:500;letter-spacing:.18em;text-transform:uppercase;text-decoration:none;
   color:var(--dusk-amber);border:1px solid rgba(229,176,79,.85);border-radius:999px;
@@ -197,7 +204,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent-ink);outline
   font-size:clamp(15.5px,1.8vw,19px);line-height:1.55;color:var(--dusk-soft)}
 .figcap{position:absolute;right:clamp(18px,3vw,44px);bottom:14px;z-index:4;margin:0;
   font-family:"JetBrains Mono",ui-monospace,monospace;font-size:9.5px;
-  letter-spacing:.14em;text-transform:uppercase;color:rgba(238,226,199,.55)}
+  letter-spacing:.14em;text-transform:uppercase;color:var(--dusk-soft);opacity:.75}
 @media (max-width:900px){.figcap{display:none}}
 @media (max-width:720px){
   .hero-art{right:-15vw;height:min(64%,560px)}

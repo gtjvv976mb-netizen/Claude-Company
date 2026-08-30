@@ -4,7 +4,7 @@
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Archivo:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Archivo:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500&family=Caveat:wght@500;700&display=swap">
 
 <style>
 /* Palette lifted from the Markets & Makers art standard (artStandard.ts OFFICIAL_PALETTE),
@@ -2037,6 +2037,131 @@ function makeSprite(text, scale = 1, opts) {
   return s;
 }
 
+/* ── THE BOSS BOARD — the floor's numbers, on the boss's wall ─────────────
+   Behind the executive dais hangs the one panel every visitor reads: the
+   floor's name, its managing brain, net P&L, record and building rank —
+   live from the same public books the leaderboard uses. The room around it
+   takes the brain's colours: Claude coral for a Claude desk, monochrome
+   black for a Grok desk. */
+const BRAIN_LOOKS = {
+  claude: { band: "#d97757", bandInk: "#2a1a14", bg: "#22343a", ink: "#f4ecd8",
+            soft: "#a9b7b2", frame: 0x5f3e29, rug: 0xd97757, tag: "A CLAUDE DESK" },
+  grok:   { band: "#0d0d0f", bandInk: "#f5f5f5", bg: "#141517", ink: "#fafafa",
+            soft: "#9aa0a6", frame: 0x1b1c1e, rug: 0x121316, tag: "A GROK DESK" },
+};
+const bossBoard = (() => {
+  const c = document.createElement("canvas"); c.width = 768; c.height = 448;
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(5.4, 3.15),
+    new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+  mesh.position.set(0, 2.85, -HALF_D + 0.10);
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(5.72, 3.47, 0.12),
+    new THREE.MeshStandardMaterial({ color: 0x5f3e29, roughness: 0.82 }));
+  frame.position.set(0, 2.85, -HALF_D + 0.03);
+  const rug = new THREE.Mesh(new THREE.CircleGeometry(2.0, 40),
+    new THREE.MeshStandardMaterial({ color: 0xd97757, roughness: 0.94 }));
+  rug.rotation.x = -Math.PI / 2;
+  rug.position.set(0, DAIS_Y + 0.015, -10.2);
+  // NOT into room: the static bake merges and clears room children after
+  // build, and it swallowed the first version of this board whole. The scene
+  // itself is never baked.
+  scene.add(mesh, frame, rug);
+  window.__bossBoard = { c, tex, mesh, frame, rug };
+  return window.__bossBoard;
+})();
+
+let bossData = { name: null, brain: "claude", net: null, wins: 0, losses: 0, settled: 0, rank: null, of: null };
+/* The board is a CHALKBOARD: the boss writes the numbers up by hand. Chalk
+   never sits perfectly — every line gets a small tilt and its own pressure,
+   with dust and old half-erased strokes in the slate. */
+function chalkText(x, text, px, py, size, color, align = "left", weight = 700) {
+  x.save();
+  x.translate(px, py);
+  x.rotate((Math.random() - 0.5) * 0.02);
+  x.font = `${weight} ${size}px Caveat, "Comic Sans MS", cursive`;
+  x.textAlign = align; x.textBaseline = "middle";
+  x.shadowColor = color; x.shadowBlur = size * 0.045;      // chalk bleeds a little
+  x.globalAlpha = 0.94; x.fillStyle = color;
+  x.fillText(text, 0, 0);
+  x.globalAlpha = 0.35; x.fillText(text, 0.8, 0.5);        // double-strike = pressure
+  x.restore();
+  x.globalAlpha = 1; x.shadowBlur = 0;
+}
+function drawBossBoard() {
+  const L = BRAIN_LOOKS[bossData.brain] ?? BRAIN_LOOKS.claude;
+  const x = bossBoard.c.getContext("2d");
+  const W = 768, H = 448;
+  // slate, with faint smudges of lessons past
+  x.fillStyle = L.bg; x.fillRect(0, 0, W, H);
+  for (let i = 0; i < 26; i++) {
+    x.globalAlpha = 0.028;
+    x.fillStyle = "#ffffff";
+    x.beginPath();
+    x.ellipse(Math.random() * W, Math.random() * H, 34 + Math.random() * 70, 8 + Math.random() * 18,
+      Math.random() * Math.PI, 0, Math.PI * 2);
+    x.fill();
+  }
+  x.globalAlpha = 1;
+  const chalk = "#f2efe4", dim = "rgba(242,239,228,.62)";
+  chalkText(x, (bossData.name || "THE FLOOR").slice(0, 24), 30, 52, 52, L.band === "#d97757" ? "#f2b49a" : chalk);
+  chalkText(x, L.tag.toLowerCase(), W - 28, 56, 30, dim, "right", 500);
+  x.strokeStyle = dim; x.globalAlpha = .5; x.lineWidth = 2;
+  x.beginPath(); x.moveTo(28, 88); x.lineTo(W - 28, 92); x.stroke(); x.globalAlpha = 1;
+
+  const row = (label, value, y, color) => {
+    chalkText(x, label, 32, y, 34, dim, "left", 500);
+    chalkText(x, value, W - 32, y, 58, color || chalk, "right");
+  };
+  const net = bossData.net;
+  row("net p&l", net == null ? "\u2014" : (net >= 0 ? "+$" : "\u2212$") + Math.abs(net).toLocaleString(undefined, { maximumFractionDigits: 0 }),
+    152, net == null ? dim : net >= 0 ? "#b9e3b6" : "#f0b2a2");
+  row("record", bossData.settled ? `${bossData.wins}W \u2013 ${bossData.losses}L` : "no settles yet", 242);
+  row("building rank", bossData.rank ? `#${bossData.rank} of ${bossData.of}` : "unranked", 332);
+  chalkText(x, "every number from the public books \u00b7 live", 32, 412, 26, dim, "left", 500);
+  bossBoard.tex.needsUpdate = true;
+}
+// chalk needs its font: redraw once Caveat actually arrives
+try { document.fonts.load('700 52px Caveat').then(() => drawBossBoard()); } catch {}
+function applyBrainRoom(brain) {
+  const L = BRAIN_LOOKS[brain] ?? BRAIN_LOOKS.claude;
+  bossBoard.frame.material.color.set(L.frame);
+  bossBoard.rug.material.color.set(L.rug);
+}
+drawBossBoard();
+
+async function pollBossBoard() {
+  const fp = location.pathname.match(/\/floor\/(\d+)/) || location.search.match(/[?&]floor=(\d+)/);
+  if (!fp) return;
+  const floorNo = Number(fp[1]);
+  const base = window.__API_BASE__ || "";
+  try {
+    const [recR, lbR, roomR] = await Promise.all([
+      fetch(`${base}${floorNo === 50 ? "/api/record" : `/api/floor/${floorNo}/record`}`),
+      fetch(`${base}/api/leaderboard`).catch(() => null),
+      fetch(`${base}/api/floor/${floorNo}`).catch(() => null),
+    ]);
+    const rec = await recR.json();
+    const lb = lbR ? await lbR.json().catch(() => null) : null;
+    const roomB = roomR ? await roomR.json().catch(() => null) : null;
+    const floors = lb?.floors ?? [];
+    const idx = floors.findIndex((f) => Number(f.floor_no ?? f.floorNo ?? f.n) === floorNo);
+    const id = roomB?.identity ?? {};
+    bossData = {
+      name: floorNo === 50 ? "THE AYE-TEAM" : (id.floorName || `FLOOR ${floorNo}`),
+      brain: roomB?.settings?.md_brain === "grok" ? "grok" : "claude",
+      net: rec?.netPnlUsd ?? null,
+      wins: rec?.wins ?? 0, losses: rec?.losses ?? 0, settled: rec?.settled ?? 0,
+      rank: idx >= 0 ? idx + 1 : null, of: floors.length || null,
+    };
+    applyBrainRoom(bossData.brain);
+    drawBossBoard();
+  } catch {}
+}
+pollBossBoard();
+setInterval(pollBossBoard, 60000);
+window.pollBossBoard = pollBossBoard;
+
 /* ── the worker ───────────────────────────────────────────────────────────── */
 const SPEED = 2.9;                     // world units per second
 const clock = new THREE.Clock();
@@ -3987,6 +4112,7 @@ function renderRoom() {
   const setBrain = async (b) => {
     bClaude.disabled = bGrok.disabled = true;
     await api(`/api/floor/${FLOOR}/settings`, { method: "POST", body: JSON.stringify({ mdBrain: b }) });
+    window.pollBossBoard?.();          // the boss's room retakes its colours at once
     loadRoom();
   };
   bClaude.addEventListener("click", () => setBrain("claude"));
