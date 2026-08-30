@@ -24,6 +24,13 @@ const SEATS = ["Scout", "Screener", "Forensics", "Liquidity", "Flow", "Technical
 // clamped there anyway, but the variety would silently shrink.
 const ROUTINE_LINES = 3, TASK_LINES = 3, CHATTER_LINES = 8, SNACK_SCRIPTS = 8, VISIT_SCRIPTS = 10;
 
+// Ambient life away from the desks: the fridge raid, the kitchenette, the sofa,
+// the meeting table, the cooler, a long look out the window. Solo or duo — the
+// client owns where these places are and what gets said there.
+const AMBIENT_KINDS = ["fridge", "cook", "sofa", "meeting", "cooler", "window"];
+const AMBIENT_DUO = new Set(["sofa", "meeting", "cooler"]);
+const AMBIENT_LINES = 4;
+
 let timer = null;
 
 export function startWorld() {
@@ -52,6 +59,16 @@ export function startWorld() {
       let b = SEATS[(rnd() * SEATS.length) | 0];
       if (b === a) b = SEATS[(SEATS.indexOf(a) + 1) % SEATS.length];
       emit("world:snack", { a, b, ti: (rnd() * SNACK_SCRIPTS) | 0 });
+    } else if (roll < 0.70) {
+      // somebody lives a little: the office is a place, not a spreadsheet
+      const kind = AMBIENT_KINDS[(rnd() * AMBIENT_KINDS.length) | 0];
+      const a = SEATS[(rnd() * SEATS.length) | 0];
+      let b = null;
+      if (AMBIENT_DUO.has(kind)) {
+        b = SEATS[(rnd() * SEATS.length) | 0];
+        if (b === a) b = SEATS[(SEATS.indexOf(a) + 2) % SEATS.length];
+      }
+      emit("world:ambient", { kind, a, b, li: (rnd() * AMBIENT_LINES) | 0 });
     } else {
       const seat = SEATS[(rnd() * SEATS.length) | 0];
       const r2 = rnd();
