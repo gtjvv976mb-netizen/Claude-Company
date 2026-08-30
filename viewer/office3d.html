@@ -350,7 +350,16 @@ body{
   text-transform:uppercase;padding:6px 11px;border-radius:5px;border:1px solid rgba(0,0,0,.28);
   background:rgba(255,255,255,.9);color:#241c0c;cursor:pointer;text-decoration:none}
 .alertrow a:hover,.alertrow button:hover{background:#fff}
-.callspanel{flex:1;min-height:0;overflow-y:auto;padding:12px;display:none;flex-direction:column;gap:10px}
+.callspanel{flex:1;min-height:0;overflow-y:auto;padding:10px;display:none;flex-direction:column;gap:7px}
+/* the team status strip: three glanceable chips — bot, shift, brain */
+.teamstrip{display:flex;gap:6px;flex-wrap:wrap}
+.tchip{flex:1 1 30%;min-width:116px;display:flex;flex-direction:column;gap:3px;
+  padding:7px 9px;border:1px solid var(--card-line);border-radius:8px;background:var(--card)}
+.tchip .tk{font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
+.tchip .tv{font-size:12px;font-weight:700;display:flex;gap:6px;align-items:center;flex-wrap:wrap;line-height:1.3}
+.tchip .dp-btn{font-size:9px;padding:3px 7px}
+.tchip select{font:inherit;font-size:10.5px;padding:1px 3px;background:var(--panel);color:var(--ink);
+  border:1px solid var(--card-line);border-radius:5px}
 .callspanel.on{display:flex}
 .call{background:var(--card);border:1px solid var(--card-line);border-radius:9px;padding:12px}
 .call.offered{border-left:3px solid var(--good,#4f8f52)}
@@ -4894,6 +4903,18 @@ function renderRoom() {
     window.__renderWatchInto(watchBox).then(() => watchBox.querySelector(".dp-h")?.remove());
   } else watchBox.appendChild(mk("p", "dp-note", "Open the Team tab once, then revisit — the board loads with it."));
 
+  // ── the killed lane: what the desk stalked and shot, beside the board ──
+  if (window.foldSection && window.__renderKilledInto) {
+    const kf = window.foldSection("Killed \u2014 the trades that did not happen");
+    panel.appendChild(kf.wrap);
+    window.__renderKilledInto(kf.body).then((ok) => {
+      const n = kf.body.querySelectorAll(".killrow").length;
+      kf.label.textContent = n ? `Killed \u2014 ${n} shown`
+        : ok === false ? "Killed \u2014 tenants only" : "Killed \u2014 nothing yet";
+      kf.body.querySelector(".dp-h")?.remove();
+    });
+  }
+
   // ── building credit: what this floor can spend ──
   panel.appendChild(mk("div", "dp-h", "Building credit"));
   const cred = mk("div", "dp-bal");
@@ -5014,142 +5035,121 @@ async function renderTeamInto(el) {
     el.appendChild(mk("p", "locked", "This team works for the floor's tenant. Lease a floor to direct one of your own."));
     return;
   }
-  const ROOM = R;                                  // the moved code reads ROOM
-  const loadRoom = refresh;                        // and refreshes through us
-  // ── the team's shift: take a break, or grind ──
-  el.appendChild(mk("div", "dp-h", "Your team's shift"));
-  const grinding = ROOM.settings?.mode === "grind";
-  const shift = mk("button", "dp-btn", grinding ? "\u2615 Take a break" : "\u2692 Let's grind");
-  const shiftNote = mk("p", "dp-note", grinding
-    ? `GRINDING \u2014 your team hunts the market's best-ranked coin every ${ROOM.settings.grind_hours}h on its own (max 6 runs/day), charged like any run: free runs first, auto-refund when there was nothing to study.`
-    : "ON A BREAK \u2014 your team works only when you say. Flip to grind and they hunt the best-ranked coin on their own clock, for as long as your credit lasts.");
-  shift.addEventListener("click", async () => {
-    shift.disabled = true; shift.textContent = "Switching shift\u2026";
-    const { status, body } = await api(`/api/floor/${FLOOR}/settings`, { method: "POST",
-      body: JSON.stringify({ mode: grinding ? "break" : "grind" }) });
-    if (status !== 200) { shiftNote.textContent = body?.error || "could not switch"; shift.disabled = false; }
-    loadRoom();
-  });
-  el.append(shift, shiftNote);
-
-  // ── how often the team grinds (real: the grind scheduler reads grind_hours) ──
-  const cadRow = mk("div", "dp-row");
-  cadRow.append(mk("span", "dp-note", "Hunt every"));
-  const cad = mk("select", "dp-in");
-  for (const h of [1, 2, 3, 4, 6, 8, 12, 24]) {
-    const o = document.createElement("option"); o.value = h; o.textContent = h + "h";
-    if (Number(ROOM.settings?.grind_hours) === h) o.selected = true;
-    cad.appendChild(o);
-  }
-  cad.setAttribute("aria-label", "Grind cadence in hours");
-  cad.addEventListener("change", async () => {
-    cad.disabled = true;
-    await api(`/api/floor/${FLOOR}/settings`, { method: "POST", body: JSON.stringify({ grindHours: Number(cad.value) }) });
-    cad.disabled = false; loadRoom();
-  });
-  cadRow.append(cad, mk("span", "dp-note", "when grinding (max 6 runs/day)"));
-  el.appendChild(cadRow);
-
-  // ── who manages this floor: Claude or Grok ──
-  el.appendChild(mk("div", "dp-h", "Your Managing Director's brain"));
-  const curBrain = ROOM.settings?.md_brain === "grok" ? "grok" : "claude";
-  const brainRow = mk("div", "dp-row");
-  const bClaude = mk("button", "dp-btn" + (curBrain === "claude" ? "" : " ghost"), "Claude");
-  const bGrok = mk("button", "dp-btn" + (curBrain === "grok" ? "" : " ghost"), "Grok");
-  const setBrain = async (b) => {
-    bClaude.disabled = bGrok.disabled = true;
-    await api(`/api/floor/${FLOOR}/settings`, { method: "POST", body: JSON.stringify({ mdBrain: b }) });
-    window.pollBossBoard?.();          // the boss's room retakes its colours at once
-    loadRoom();
+  const S = R.settings || {};
+  const grinding = S.mode === "grind";
+  const post = async (patch) => {
+    await api(`/api/floor/${FLOOR}/settings`, { method: "POST", body: JSON.stringify(patch) });
+    window.pollBossBoard?.(); refresh();
   };
-  bClaude.addEventListener("click", () => setBrain("claude"));
-  bGrok.addEventListener("click", () => setBrain("grok"));
-  brainRow.append(bClaude, bGrok);
-  el.appendChild(brainRow);
-  el.appendChild(mk("p", "dp-note", curBrain === "grok"
-    ? "Your MD thinks on Grok (xAI) — X-native instincts, same rails: the screen, the red team, compliance and the no-keys wall are unchanged. If Grok can't hold the format, the Claude seat answers instead."
-    : "Your MD thinks on Claude. Switch to Grok for an X-native manager — every safety rail stays the same either way."));
 
-  // ── research a token ──
-  el.appendChild(mk("div", "dp-h", "Put the team on a token"));
+  /* ── THE STATUS STRIP: everything a tenant checks first, in one glance ── */
+  const strip = mk("div", "teamstrip");
+
+  // 1. the bot
+  const bs = window.__botStatus?.() ?? null;
+  const cBot = mk("div", "tchip");
+  cBot.append(mk("span", "tk", "Your bot"));
+  const bv = mk("span", "tv",
+    !bs || !bs.exists ? "○ not set up" : bs.live && bs.running ? "● LIVE" :
+    bs.running ? "◐ practice run" : "◌ stopped");
+  bv.style.color = bs?.running ? (bs.live ? "var(--good,#4f8f52)" : "var(--amber,#e0ad3d)") : "";
+  cBot.appendChild(bv);
+  cBot.appendChild(mk("span", "dp-note", bs?.exists ? "manage it just below" : "set it up just below"));
+  strip.appendChild(cBot);
+
+  // 2. the shift — with the toggle and cadence inline
+  const cShift = mk("div", "tchip");
+  cShift.append(mk("span", "tk", "Team shift"));
+  const sv = mk("span", "tv", grinding ? "\u2692 Grinding" : "\u2615 On a break");
+  const flip = mk("button", "dp-btn" + (grinding ? " ghost" : ""), grinding ? "Break" : "Grind");
+  flip.onclick = () => { flip.disabled = true; post({ mode: grinding ? "break" : "grind" }); };
+  sv.appendChild(flip);
+  if (grinding) {
+    const cad = mk("select");
+    for (const h of [1, 2, 3, 4, 6, 8, 12, 24]) {
+      const o = document.createElement("option"); o.value = h; o.textContent = "every " + h + "h";
+      if (Number(S.grind_hours) === h) o.selected = true;
+      cad.appendChild(o);
+    }
+    cad.onchange = () => post({ grindHours: Number(cad.value) });
+    sv.appendChild(cad);
+  }
+  cShift.appendChild(sv);
+  cShift.appendChild(mk("span", "dp-note", grinding
+    ? "hunts the best-ranked coin on its own (max 6 runs/day)"
+    : "works only when you say"));
+  strip.appendChild(cShift);
+
+  // 3. the brain
+  const brain = S.md_brain === "grok" ? "grok" : "claude";
+  const cBrain = mk("div", "tchip");
+  cBrain.append(mk("span", "tk", "MD's brain"));
+  const bvv = mk("span", "tv");
+  for (const which of ["claude", "grok"]) {
+    const btn = mk("button", "dp-btn" + (brain === which ? "" : " ghost"), which === "claude" ? "Claude" : "Grok");
+    if (brain !== which) btn.onclick = () => { btn.disabled = true; post({ mdBrain: which }); };
+    bvv.appendChild(btn);
+  }
+  cBrain.appendChild(bvv);
+  cBrain.appendChild(mk("span", "dp-note", "same rails either way — screens, red team, no keys"));
+  strip.appendChild(cBrain);
+  el.appendChild(strip);
+
+  /* ── HUNT TARGETS: run a token now + the pinned list, folded out of the way ── */
+  const pins = Array.isArray(S.watchlist) ? S.watchlist.slice() : [];
+  const fold = window.foldSection?.("Hunt targets \u2014 run a token now \u00b7 " +
+    (pins.length ? pins.length + " pinned" : "nothing pinned"));
+  if (!fold) return;
+  el.appendChild(fold.wrap);
+  const fb = fold.body;
+
   const row = mk("div", "dp-row");
   const input = mk("input", "dp-in");
   input.placeholder = "Paste a Solana mint address";
   input.setAttribute("aria-label", "Mint address to research");
-  const go = mk("button", "dp-btn", ROOM.busy ? "Working…" : "Run 1 cycle");
-  go.disabled = ROOM.busy;
+  const go = mk("button", "dp-btn", R.busy ? "Working\u2026" : "Run 1 cycle");
+  go.disabled = R.busy;
   row.append(input, go);
-  el.appendChild(row);
-
-  const cost = ROOM.freeRunsLeft > 0
-    ? `${ROOM.freeRunsLeft} research run${ROOM.freeRunsLeft === 1 ? "" : "s"} included with your lease.`
-    : `Each run costs ${ROOM.runPriceTokens.toLocaleString()} $CLAUDECO.`;
-  el.appendChild(mk("p", "dp-note", cost + " Sixteen agents work the token end to end; you get a brief and an unsigned ticket."));
-
-  const bal = mk("div", "dp-bal");
-  bal.textContent = `Building credit: ${fmtTok(ROOM.balanceBaseUnits, ROOM.decimals)} $CLAUDECO`;
-  el.appendChild(bal);
-
-  const msg = mk("p", "dp-note");
-  el.appendChild(msg);
-
-  go.addEventListener("click", async () => {
+  fb.appendChild(row);
+  const cost = R.freeRunsLeft > 0
+    ? `${R.freeRunsLeft} free run${R.freeRunsLeft === 1 ? "" : "s"} left \u00b7 then ${R.runPriceTokens.toLocaleString()} $CLAUDECO each \u00b7 credit: ${fmtTok(R.balanceBaseUnits, R.decimals)}`
+    : `${R.runPriceTokens.toLocaleString()} $CLAUDECO per run \u00b7 credit: ${fmtTok(R.balanceBaseUnits, R.decimals)}`;
+  const msg = mk("p", "dp-note", cost);
+  fb.appendChild(msg);
+  go.onclick = async () => {
     const mint = input.value.trim();
     if (!mint) return;
-    go.disabled = true; go.textContent = "Starting…";
+    go.disabled = true; go.textContent = "Starting\u2026";
     const { status, body } = await api(`/api/floor/${FLOOR}/run`, { method: "POST", body: JSON.stringify({ mint }) });
-    if (status === 200) {
-      msg.textContent = body.free ? "Started — using an included run." : `Started — charged ${ROOM.runPriceTokens.toLocaleString()} $CLAUDECO.`;
-      startProgress();
-      showPane("tape");
-      input.value = "";
-    } else {
-      msg.textContent = body.error || "could not start";
-      go.disabled = false; go.textContent = "Run 1 cycle";
-    }
-    setTimeout(loadRoom, 800);
-  });
+    if (status === 200) { startProgress(); showPane("tape"); input.value = ""; }
+    else { msg.textContent = body.error || "could not start"; go.disabled = false; go.textContent = "Run 1 cycle"; }
+    setTimeout(refresh, 800);
+  };
 
-  // ── standing watchlist: coins the team researches FIRST each grind cycle
-  //    (real: the grind scheduler reads this list and pins it ahead of the
-  //    open-market sweep). ──
-  el.appendChild(mk("div", "dp-h", "Your watchlist"));
-  el.appendChild(mk("p", "dp-note",
-    "Pin coins your team checks before anything else on each grind cycle. Up to 25."));
-  const pins = Array.isArray(ROOM.settings?.watchlist) ? ROOM.settings.watchlist.slice() : [];
   const pinWrap = mk("div", "dp-pins");
-  const savePins = async (next) => {
-    await api(`/api/floor/${FLOOR}/settings`, { method: "POST", body: JSON.stringify({ watchlist: next }) });
-    loadRoom();
-  };
-  const renderPins = () => {
-    pinWrap.innerHTML = "";
-    if (!pins.length) { pinWrap.appendChild(mk("p", "dp-note", "No pinned coins — the team hunts the open market.")); }
-    for (const m of pins) {
-      const chip = mk("div", "dp-chip");
-      chip.append(mk("span", null, m.slice(0, 4) + "…" + m.slice(-4)));
-      const x = mk("button", "dp-x", "✕"); x.setAttribute("aria-label", "Remove " + m);
-      x.addEventListener("click", () => { const i = pins.indexOf(m); if (i >= 0) pins.splice(i, 1); renderPins(); savePins(pins); });
-      chip.appendChild(x); pinWrap.appendChild(chip);
-    }
-  };
-  renderPins();
-  el.appendChild(pinWrap);
+  const savePins = (next) => post({ watchlist: next });
+  if (!pins.length) pinWrap.appendChild(mk("p", "dp-note", "Pin coins the team checks FIRST each grind cycle (up to 25)."));
+  for (const m of pins) {
+    const chip = mk("div", "dp-chip");
+    chip.append(mk("span", null, m.slice(0, 4) + "\u2026" + m.slice(-4)));
+    const x = mk("button", "dp-x", "\u2715"); x.setAttribute("aria-label", "Remove " + m);
+    x.onclick = () => { const i = pins.indexOf(m); if (i >= 0) pins.splice(i, 1); savePins(pins); };
+    chip.appendChild(x); pinWrap.appendChild(chip);
+  }
+  fb.appendChild(pinWrap);
   const pinRow = mk("div", "dp-row");
   const pinIn = mk("input", "dp-in");
-  pinIn.placeholder = "Paste a Solana mint to pin";
+  pinIn.placeholder = "Pin a mint the team checks first";
   pinIn.setAttribute("aria-label", "Mint address to pin");
   const pinAdd = mk("button", "dp-btn ghost", "Pin");
-  pinAdd.addEventListener("click", () => {
+  pinAdd.onclick = () => {
     const m = pinIn.value.trim();
     if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(m)) { pinIn.setAttribute("aria-invalid", "true"); return; }
-    if (pins.includes(m)) { pinIn.value = ""; return; }
-    if (pins.length >= 25) return;
-    pins.push(m); pinIn.value = ""; pinIn.removeAttribute("aria-invalid"); renderPins(); savePins(pins);
-  });
+    if (pins.includes(m) || pins.length >= 25) { pinIn.value = ""; return; }
+    pins.push(m); savePins(pins);
+  };
   pinRow.append(pinIn, pinAdd);
-  el.appendChild(pinRow);
-
+  fb.appendChild(pinRow);
 
 }
 window.__renderTeamInto = renderTeamInto;
@@ -5285,6 +5285,7 @@ async function openSwap({ mint, symbol, sol, side = "buy" }) {
 }
 
 window.__renderWatchInto = (el) => loadWatchboard(el);
+window.__renderKilledInto = (el) => loadKilled(el);
 
 async function loadCalls() {
   if (FLOOR_N == null) { callsPanel.innerHTML = `<p class="locked">No floor in this address.</p>`; return; }
@@ -5336,18 +5337,12 @@ function renderCalls({ feed = [], settings, record }) {
   callsPanel.appendChild(feedWrap);
 
   // 4. THE REST — folded, each drawer counting what is inside it.
-  const kill  = foldSection("Killed \u2014 the trades that did not happen");
-  callsPanel.append(kill.wrap);
+  // The killed lane lives on the Desk now, beside the watch board — the room
+  // shows what the desk stalked and what it shot; the Team tab manages the team.
   // These two endpoints are tenant-gated and answer 403 to anyone else. An empty
   // body therefore means "not yours to see" as often as it means "none" — so the
   // label must not claim "nothing armed" when the truth is "refused".
   // The watch board lives on the Desk tab now — the room shows what the desk stalks.
-  loadKilled(kill.body).then((ok) => {
-    const n = kill.body.querySelectorAll(".killrow").length;
-    kill.label.textContent = n ? `Killed \u2014 ${n} shown`
-      : ok === false ? "Killed \u2014 tenants only" : "Killed \u2014 nothing yet";
-    kill.body.querySelector(".dp-h")?.remove();
-  });
 
   const more = foldSection("More: risk settings \u00b7 budget \u00b7 self-hosted executor");
   more.body.appendChild(buildBudget());
@@ -5761,6 +5756,8 @@ function buildBotCard(settings) {
   });
 
   const loadBot = () => { try { return JSON.parse(localStorage.getItem(BOT_KEY) || "null"); } catch { return null; } };
+  // The Team strip reads the bot at a glance without owning any of its state.
+  window.__botStatus = () => { const b = loadBot(); return { exists: !!b, running: !!BOT.timer, live: !!b?.live }; };
   const saveBot = (b) => localStorage.setItem(BOT_KEY, JSON.stringify(b));
 
   // NOT the public mainnet RPC: it answers 403 to browsers (and the usual
