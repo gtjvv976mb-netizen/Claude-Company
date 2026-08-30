@@ -462,6 +462,29 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
                 WHERE type IN ('call:withheld','cohort:declined','call:rejected')
                   AND ts > (strftime('%s','now') * 1000 - 604800000)
                 GROUP BY reason ORDER BY n DESC LIMIT 12`),
+              /* WHY A SEAT DID NOT ANSWER.
+               * `insufficient_coverage` is now the desk's single biggest refusal —
+               * eight of nineteen — and it is not a judgement about a coin at all: it
+               * means three of five analysts failed to answer and the desk correctly
+               * refused to decide on a thin book. That costs money AND loses
+               * candidates. ask() already retries 429/5xx three times with backoff, so
+               * whatever is killing these is something else, and the only way to know
+               * which is to read the actual error rather than guess at it. */
+              seatFailures: rows(`SELECT json_extract(data,'$.seat') seat,
+                     substr(json_extract(data,'$.error'), 1, 140) error, COUNT(*) n, MAX(ts) last_ts
+                FROM chronicle
+                WHERE type = 'seat:failed'
+                  AND ts > (strftime('%s','now') * 1000 - 604800000)
+                GROUP BY seat, error ORDER BY n DESC LIMIT 10`),
+              /* And the retries that preceded them — a seat that burned all three
+               * attempts looks identical, from the outside, to one that never tried. */
+              seatRetries: rows(`SELECT json_extract(data,'$.seat') seat,
+                     substr(json_extract(data,'$.error'), 1, 110) error, COUNT(*) n
+                FROM chronicle
+                WHERE type = 'seat:retry'
+                  AND ts > (strftime('%s','now') * 1000 - 604800000)
+                GROUP BY seat, error ORDER BY n DESC LIMIT 8`),
+
               /* And the three ways a cycle can end without a call at all. */
               cycleEnds: rows(`SELECT type, COUNT(*) n, MAX(ts) last_ts
                 FROM chronicle
