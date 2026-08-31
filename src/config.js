@@ -94,12 +94,29 @@ maxMarketCapUsd: num("DESK_MAX_MCAP_USD", 3_000_000),
    * that never stops mattering: can this be used against a holder by design.
    * Technical falls hardest; a coin younger than a trading session has no tape to
    * analyse and a "technical read" of one is astrology with a candlestick chart. */
+  /* THE CHART IS THE LEAST INFORMATIVE THING ABOUT A MEMECOIN.
+   *
+   * Narrative was originally the LOWEST seat at 0.14 and technical the fourth at 0.16 —
+   * weights that belong to an asset with fundamentals, where price action summarises
+   * what a market of informed participants concluded. A six-hour-old coin has no such
+   * market: its chart is a few hours of the same attention the narrative seat is
+   * reading, redrawn as candles. Weighting both is double-counting the weaker copy.
+   *
+   * What actually moves these: whether the lore is real and traceable, whether a trend
+   * is live and this coin is early to it, whether an endorsement is a genuine person
+   * with reach or a bought post — and, separately, whether the thing can rug you.
+   *
+   * So narrative dominates, forensics holds its ground because "can this be used
+   * against a holder" never stops mattering at any weight, flow answers whether the
+   * buyers are people or one wallet in a wig, and the chart keeps a token weight
+   * rather than none: a coin that has already gone vertical is still worth knowing
+   * about, and zero would mean never hearing it. */
   weights: {
-    narrative: 0.30,   // Grok's X read — on a memecoin, the story IS the asset
+    narrative: 0.38,   // lore, trend, endorsement — on a memecoin this IS the asset
     forensics: 0.26,   // can it be used against a holder by design
-    flow: 0.22,        // are the buyers real people or one wallet in a wig
-    liquidity: 0.14,   // can it be exited; micro-caps are thin by definition
-    technical: 0.08,   // a 2-hour-old coin has no chart worth reading
+    flow: 0.24,        // real wallets arriving, or a few round-tripping
+    liquidity: 0.09,   // can it be exited; micro-caps are thin by definition
+    technical: 0.03,   // the chart, which on a 6-hour-old coin is attention redrawn
   },
 
   // Defaults are the economical tier; env vars UPGRADE a seat, they no longer rescue
