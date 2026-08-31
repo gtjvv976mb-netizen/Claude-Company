@@ -2729,6 +2729,26 @@ class Worker {
 
     if (this.raised) this.baseY = window.__floorHeightAt(this.x, this.z);
 
+    /* PEOPLE ARE SOLID TOO. Desks, walls and plants have blocked movement since
+       the nav grid went in, but figures walked straight THROUGH each other —
+       two agents heading for the same errand merged into one silhouette. A
+       nav grid cannot fix this: it is baked once and people move. So they push
+       apart continuously, a little each frame, which reads as stepping aside
+       rather than bouncing. Seated figures are anchors and never shove. */
+    if (!this.wantSeated || this.path) {
+      const R = 0.62;
+      for (const id in workers) {
+        const o = workers[id];
+        if (o === this || !o.g.visible) continue;
+        const dx = this.x - o.x, dz = this.z - o.z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 > R * R || d2 < 1e-6) continue;
+        const d = Math.sqrt(d2), push = (R - d) * (o.wantSeated && !o.path ? 1 : 0.5);
+        this.x += (dx / d) * push; this.z += (dz / d) * push;
+        this.g.position.x = this.x; this.g.position.z = this.z;
+      }
+    }
+
     // seated blend
     const target = this.wantSeated && !moving ? 1 : 0;
     this.seated += (target - this.seated) * Math.min(1, dt * 7);
