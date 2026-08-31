@@ -450,10 +450,39 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
   if (!opened.length && process.env.PENTHOUSE_MUST_CALL !== "0") {
     const alreadyTried = new Set(shortlist.map((c) => c.mint));
     let hunted = 0;
+    /* THE HUNT NEEDS A CLOCK TOO.
+     *
+     * It walks the ENTIRE ranked list — some eighty coins — and its only exits were a
+     * published call, an exhausted market, or the money brake. But a coin that dies at
+     * the free screen costs NOTHING, so the money brake never trips on the common
+     * case: the hunt just keeps going, paying a `gather()` round trip per coin, for as
+     * long as the market is large.
+     *
+     * That is the second half of why cycles were not finishing. The first was the
+     * whale loop before the cohort pick; this is the same disease after it —
+     * `cohort:ranked` fired ten minutes ago while `cycle:end` was still hours old.
+     * An unbounded loop of cheap operations is still unbounded.
+     *
+     * A cycle that ends without a call is a fine outcome and the record already says
+     * so. A cycle that never ends says nothing at all. */
+    const huntDeadline = Date.now() + Number(process.env.PENTHOUSE_HUNT_BUDGET_MS || 240_000);
+    const huntMax = Number(process.env.PENTHOUSE_HUNT_MAX || 12);
     for (const c of scored) {
       if (opened.length) break;
+      if (hunted >= huntMax) {
+        emit("cycle:hunt_capped", { hunted, note: `stopped after ${huntMax} candidates — the cycle must end` });
+        break;
+      }
+      if (Date.now() > huntDeadline) {
+        emit("cycle:hunt_timeboxed", { hunted, note: "out of time — a cycle that never ends reports nothing" });
+        break;
+      }
       if (alreadyTried.has(c.mint) || liveCallFor(c.mint) || store.recentlyJudged(c.mint)) continue;
       if (wx.regime === "risk_off" && c.category === "established") continue;
+      // The screen is free and already knows the answer for most of these. Paying a
+      // gather() round trip to rediscover it is the loop's whole cost.
+      const doomed = wouldSurviveScreen(c);
+      if (doomed) continue;
       hunted++;
       emit("cycle:hunting", { symbol: c.pair?.baseSymbol, score: c.score, hunted });
       let rec;
@@ -602,8 +631,26 @@ export async function promoteWatches() {
     const { checkWatchlist } = await import("./watchlist.js");
     const { checked, promoted } = await checkWatchlist();
     if (!promoted.length) return { checked, promoted: 0 };
-    const w = promoted.find((x) => !liveCallFor(x.mint));
-    if (!w) return { checked, promoted: promoted.length, outcome: "already live" };
+    /* THE THIRD LANE THAT NEVER LEARNED THE SCREEN.
+     *
+     * `too_big` kept firing after both the cycle and the fresh lane were fixed, because
+     * this one still worked up whatever the watchlist promoted. Watches were added
+     * before the market-cap ceiling existed, so the list is full of coins the desk
+     * would now refuse on sight — and promoting one buys a workup to rediscover that.
+     *
+     * A promotion means "the rules I set have held". It does not mean the coin is still
+     * something this desk trades. */
+    const w = promoted.find((x) => {
+      if (liveCallFor(x.mint)) return false;
+      const doomed = x.pair ? wouldSurviveScreen(x) : null;
+      if (doomed) {
+        emit("watch:stale", { mint: x.mint, symbol: x.symbol, reason: doomed,
+          note: "watched before the screen moved — it would be refused on arrival" });
+        return false;
+      }
+      return true;
+    });
+    if (!w) return { checked, promoted: promoted.length, outcome: "none still tradeable" };
 
     const hook = `watch promoted \u00b7 ${w.symbol ?? w.mint.slice(0, 6)} \u00b7 rules held: ` +
       Object.entries(w.rules).filter(([, v]) => v != null).map(([k, v]) => `${k}=${v}`).join(", ");
