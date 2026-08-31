@@ -145,7 +145,7 @@ function startPenthouse() {
    * that finds the book full returns immediately having spent nothing, and the hourly
    * pace in llm.js stops the desk eating the day's budget by lunchtime. So this sets
    * how OFTEN the desk may look, while the money decides how often it may work. */
-  const cycleMins = Number(process.env.PENTHOUSE_CYCLE_MINS || 45);
+  const cycleMins = Number(process.env.PENTHOUSE_CYCLE_MINS || 20);
   const monitorMins = Number(process.env.PENTHOUSE_MONITOR_MINS || 10);
   if (process.env.PENTHOUSE_ENABLED === "0") { console.log("[penthouse] disabled"); return; }
   if (!process.env.ANTHROPIC_API_KEY) { console.log("[penthouse] no API key — the house team cannot work"); return; }

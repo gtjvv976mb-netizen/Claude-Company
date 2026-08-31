@@ -28,13 +28,18 @@ import { eligibility, contenderScore, pickOne, bookState, SEQUENTIAL, MAX_LIVE_C
  * looks at ~190 coins and pays for ~3.
  */
 
-export const WORKUPS_PER_CYCLE = Number(process.env.PENTHOUSE_WORKUPS || 3);
+/* AGGRESSION, PART ONE: MORE SHOTS ON GOAL.
+ * Three coins a cycle at 32 cycles a day is 96 looks — and on a market where a coin
+ * worth trading appears every half hour, that is a narrow net. Eight per cycle on a
+ * faster clock roughly quadruples the looks. The daily money cap still governs the
+ * total, so this widens the net without removing the brake. */
+export const WORKUPS_PER_CYCLE = Number(process.env.PENTHOUSE_WORKUPS || 8);
 /** Hard ceiling per cycle. Without it one bad night empties the account. */
 /* $10 was more than the hourly pace allowed ($40/24 x 3 = $5), so every cycle was cut
  * off mid-hunt and none could complete. Four fits inside the pace with room to spare,
  * and at the measured $0.126 a workup it still buys ~32 of them — a shortlist of three
  * plus a deep mandate hunt. Smaller cycles running often beat large ones that die. */
-export const CYCLE_BUDGET_USD = Number(process.env.PENTHOUSE_CYCLE_BUDGET_USD || 4);
+export const CYCLE_BUDGET_USD = Number(process.env.PENTHOUSE_CYCLE_BUDGET_USD || 8);
 export const TOP_N = Number(process.env.PENTHOUSE_TOP_N || 5);
 
 /**

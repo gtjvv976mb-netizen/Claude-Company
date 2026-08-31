@@ -145,8 +145,26 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
    *
    * This does not soften the red team. It requires it to show its work, which is the
    * standard it was written to. */
-  const fatal = (redteam.attacks ?? []).filter(
-    (a) => a?.severity === "fatal" && String(a?.evidence ?? "").trim().length > 20);
+  /* THE BAR HAD A HOLE IN IT. "severity: fatal plus 20 characters of text" is
+   * something the seat can always produce, so the rule caught nothing: across the last
+   * two cycles refuted went 42 -> 44 with ZERO downgrades. It was measuring effort, not
+   * evidence.
+   *
+   * The charter's actual standard is that a refutation names a SPECIFIC, CHECKABLE
+   * fact — and the checkable facts on a memecoin are a short, closed list. So a fatal
+   * attack now has to be ABOUT one of them. "The volume is 3 wallets round-tripping"
+   * qualifies. "This is speculative and could go to zero" does not, however
+   * confidently it is written, because nobody could go and find it false.
+   *
+   * Deliberately generous: any one of these words anywhere in the attack or its
+   * evidence passes. The test is whether the seat is pointing at a fact of the right
+   * KIND, not whether it phrased it a particular way. */
+  const CHECKABLE = /wash|round.?trip|manufactur|bot|rug|mint authorit|freeze|honeypot|impersonat|paid|bought|shill|bundl|cluster|holder|float|concentrat|deployer|creator|sold|dump|exit|slippage|liquidity|unlock|vest|insider|snipe/i;
+  const fatal = (redteam.attacks ?? []).filter((a) => {
+    if (a?.severity !== "fatal") return false;
+    const text = `${a?.attack ?? ""} ${a?.evidence ?? ""}`.trim();
+    return text.length > 20 && CHECKABLE.test(text);
+  });
   if (redteam.verdict === "refuted" && fatal.length === 0) {
     redteam.downgraded_from = "refuted";
     redteam.downgrade_reason =

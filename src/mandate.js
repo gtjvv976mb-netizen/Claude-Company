@@ -55,7 +55,7 @@ import { liveCalls } from "./calls.js";
  * wallet is already most of the risk that wallet should carry, and strategy.mjs caps
  * the executor at four regardless.
  */
-export const MAX_LIVE_CALLS = Math.max(1, Number(process.env.PENTHOUSE_MAX_LIVE_CALLS || 3));
+export const MAX_LIVE_CALLS = Math.max(1, Number(process.env.PENTHOUSE_MAX_LIVE_CALLS || 6));
 /** Set PENTHOUSE_SEQUENTIAL=0 to let cycles run while a position is open. */
 export const SEQUENTIAL = process.env.PENTHOUSE_SEQUENTIAL !== "0";
 
