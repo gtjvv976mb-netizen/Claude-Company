@@ -219,6 +219,28 @@ export function screen(ev) {
    * arbitrary code on every transfer and can refuse your sell. Those are not risks to
    * be priced, they are the trade being a trap, and no conviction score should be able
    * to outvote them. */
+  /* UNVERIFIED IS NOT SAFE. This is the asymmetry the desk was missing.
+   *
+   * Everywhere else, an unknown is deliberately not held against a coin: an unreadable
+   * market cap does not fail the size band, an unfindable dev is not a rugger. That is
+   * right, because those are OPPORTUNITY questions and refusing to guess is honest.
+   *
+   * Safety inverts it. Every check below reads a fact from the chain, and when the read
+   * FAILS the check simply does not fire — so an unreadable mint account produced the
+   * same silent pass as a clean one, and the public RPC 429s often enough that this is
+   * a routine event rather than an edge case. A honeypot whose mint account failed to
+   * load walked straight through the gate.
+   *
+   * For safety, "we could not check" must never equal "it is fine". You are about to
+   * put money into something you were unable to verify, and the only honest answer is
+   * to decline and look at the next coin — of which there is one every half hour. */
+  if (!ev.mintAccount || ev.mintAccount.error)
+    check(true, "unverified_mint", `could not read the mint account (${ev.mintAccount?.error ?? "no data"}) — mint and freeze authority are UNKNOWN, not absent`);
+  if (!ev.holders?.ok)
+    check(true, "unverified_holders", `could not read holder distribution (${ev.holders?.error ?? "no data"}) — concentration and bundling are UNKNOWN`);
+  if (ev.exitProbe?.roundTripLossPct == null)
+    check(true, "unverified_exit", `the round-trip probe did not complete (${ev.exitProbe?.error ?? "no result"}) — whether this can be SOLD is unknown`);
+
   const flags = (ev.mintAccount?.flags ?? []).map((f) => f.flag ?? f);
   check(flags.includes("freeze_authority_live"),
     "freezable", "freeze authority is live — accounts can be frozen mid-trade");
