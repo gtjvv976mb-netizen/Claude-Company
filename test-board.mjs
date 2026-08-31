@@ -6,7 +6,7 @@
  * empty drawer was invisible: "no legitimate coin under $100k this hour" is a finding,
  * and it looked exactly like not having looked.
  */
-import { CAP_BANDS, COIN_TYPES, capBandOf, coinTypeOf, cellOf, buildBoard, selectAcrossBoard }
+import { CAP_BANDS, COIN_TYPES, capBandOf, coinTypeOf, cellOf, buildBoard, selectAcrossBoard, PAD_QUOTA }
   from "./src/categories.js";
 
 let pass = 0, fail = 0;
@@ -75,6 +75,45 @@ const strict = buildBoard(market, { perCell: 5, viable: (c) => c.pair.marketCap 
 ok("a coin the screen would refuse never gets shortlisted",
   strict.cells.every((c) => c.coins.every((x) => x.pair.marketCap >= 500_000)),
   "the board never shortlists what the desk was always going to refuse");
+
+console.log("\nPUMP.FUN GETS THE MAJORITY OF PAID ATTENTION");
+// A market rigged AGAINST the quota: every top-scoring coin is another pad, and the
+// pump.fun coins are buried at the bottom of their cells.
+const padded = (mcap, pad, sym, score) => ({
+  mint: sym, score, launchpad: pad,
+  pair: { marketCap: mcap, baseName: sym, baseSymbol: sym, websites: [] },
+});
+const padMarket = [
+  padded(200_000, "meteora-dbc", "MET1", 99), padded(210_000, "bags.fm", "BAG1", 98),
+  padded(220_000, "moonshot", "MOON1", 97),   padded(230_000, "meteora-dbc", "MET2", 96),
+  padded(240_000, "pump.fun", "PF1", 60),     padded(60_000, "pump.fun", "PF2", 55),
+  padded(700_000, "pump.fun", "PF3", 50),     padded(3_000_000, "pump.fun", "PF4", 45),
+];
+const padBoard = buildBoard(padMarket, { perCell: 5 });
+const padPick = selectAcrossBoard(padBoard, 6);
+const pf = padPick.filter((p) => p.launchpad === "pump.fun").length;
+ok("pump.fun is the MAJORITY of a cycle's workups", pf / padPick.length > 0.5,
+  `${pf} of ${padPick.length} — where pump.fun carries the volume, it gets the attention`);
+ok("...and it meets the quota it was given", pf >= Math.ceil(6 * PAD_QUOTA),
+  `${pf} >= ${Math.ceil(6 * PAD_QUOTA)}`);
+ok("a pump.fun coin beats a HIGHER-SCORING coin from another pad",
+  padPick.some((p) => p.launchpad === "pump.fun" && p.score < 99) &&
+  padPick.findIndex((p) => p.launchpad === "pump.fun") === 0,
+  "the quota is filled first, so the free score no longer decides the top of the list alone");
+
+/* The bug this test exists for: a filtered pass that stops at the first barren depth
+ * quits above coins it was sent to find. It returned 50% against a 60% quota. */
+ok("the filtered pass walks PAST rows it rejects to reach a buried coin",
+  padPick.some((p) => p.pair.baseSymbol === "PF1"),
+  "PF1 sits at depth 4 of its cell behind four coins from other pads");
+
+console.log("\nBUT THE QUOTA IS A FLOOR, NOT A CAP");
+const noPump = buildBoard(padMarket.filter((c) => c.launchpad !== "pump.fun"), { perCell: 5 });
+const noPumpPick = selectAcrossBoard(noPump, 4);
+ok("a market with NO pump.fun still fills the whole budget", noPumpPick.length === 4,
+  "refusing a good coin for being born on the wrong pad would be the worse mistake");
+ok("no coin is ever picked twice", new Set(padPick.map((p) => p.mint)).size === padPick.length,
+  "the quota pass and the general pass share one seen-set");
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

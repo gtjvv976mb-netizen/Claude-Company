@@ -21,6 +21,9 @@
  */
 import { cfg } from "./config.js";
 
+/* What share of each cycle's paid attention goes to pump.fun. A floor, not a cap. */
+export const PAD_QUOTA = Math.min(1, Math.max(0, Number(process.env.PENTHOUSE_PAD_QUOTA || 0.6)));
+
 /** Market-cap bands, as the owner specified them. */
 export const CAP_BANDS = {
   micro:     { lo: 10_000,     hi: 100_000,    label: "micro",     note: "$10k-$100k — sharpest moves, sharpest rugs" },
@@ -118,18 +121,53 @@ export function buildBoard(scored, { perCell = 5, viable = () => true } = {}) {
  * is exactly the failure the board exists to prevent. Only once every cell has been
  * sampled does it come back for second-bests.
  */
-export function selectAcrossBoard(board, budget) {
+export function selectAcrossBoard(board, budget, { padQuota = PAD_QUOTA, pad = "pump.fun" } = {}) {
+  const take = (c, cell) => ({ ...c, cellKey: cell.key, band: cell.band, coinType: cell.type });
+  const seen = new Set();
   const picked = [];
-  for (let depth = 0; picked.length < budget; depth++) {
-    let addedAny = false;
-    for (const cell of board.cells) {
-      if (picked.length >= budget) break;
-      const c = cell.coins[depth];
-      if (!c) continue;
-      picked.push({ ...c, cellKey: cell.key, band: cell.band, coinType: cell.type });
-      addedAny = true;
+
+  /* Stop on EXHAUSTION, not on a barren depth.
+   *
+   * The obvious loop breaks when a depth adds nothing — which is right for an
+   * unfiltered pass and wrong for a filtered one. Measured: asking for 60%
+   * pump.fun returned 50%, because depth 1 of every cell happened to be another
+   * pad, the pass called that the end of the board, and gave up four rows above
+   * the pump.fun coin sitting at depth 4. The filter has to be allowed to walk
+   * PAST the rows it rejects. So the exit condition is "no cell had a coin at
+   * this depth at all". */
+  const sweepBoard = (want, filter) => {
+    for (let depth = 0; picked.length < want; depth++) {
+      let sawAny = false;
+      for (const cell of board.cells) {
+        if (picked.length >= want) break;
+        const c = cell.coins[depth];
+        if (!c) continue;
+        sawAny = true;                              // it EXISTS, even if filtered out
+        if (seen.has(c.mint) || !filter(c)) continue;
+        seen.add(c.mint);
+        picked.push(take(c, cell));
+      }
+      if (!sawAny) break;                           // the board really is exhausted
     }
-    if (!addedAny) break;                         // the board is exhausted
-  }
+  };
+
+  /* PUMP.FUN FIRST, DELIBERATELY.
+   *
+   * Measured on a live sweep: pump.fun is 41% of everything surfaced and 53% of what
+   * survives the free screen — already the largest pad, because it carries the volume.
+   * But 53% is a majority by accident, and an accident is not a policy: on a quiet
+   * hour the mix could just as easily come back mostly meteora.
+   *
+   * So the quota is filled first, one per cell as always, and only then is the rest of
+   * the budget spent on the whole board. It is a FLOOR, not a cap — if the other pads
+   * have nothing viable the quota pass simply takes fewer and the general pass fills
+   * in, because refusing to look at a good coin for being born on the wrong launchpad
+   * would be a worse mistake than the one this fixes. */
+  const quota = Math.min(budget, Math.ceil(budget * padQuota));
+  sweepBoard(quota, (c) => c.launchpad === pad);
+  const fromPad = picked.length;
+  sweepBoard(budget, () => true);
+
+  if (picked.length) picked.padMix = { [pad]: fromPad, other: picked.length - fromPad };
   return picked;
 }
