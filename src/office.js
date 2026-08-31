@@ -794,7 +794,17 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               error: "this floor's live desk is private to its tenant" });
             // A guest pass buys the CALL SHEET, not the tenant's credentials:
             // webhook URLs and the executor signing secret are the owner's only.
-            const isOwner = !!me && leasing.leaseFor(floorNo)?.wallet === me;
+            /* THE HQ HAS NO LEASE, SO ITS OWNER FAILED THE OWNER CHECK.
+             *
+             * This read `leaseFor(floorNo)?.wallet === me`, and floor 50 is never for
+             * sale — leaseFor(50) is null, so the check was false for everyone
+             * including the boss. The HQ owner was handed `executor_secret: null` and
+             * could not obtain the credential their own bot authenticates with, on
+             * the one floor they definitely own. Same test the rest of this file
+             * already uses for HQ standing. */
+            const isOwner = !!me && (floorNo === HQ_FLOOR
+              ? hqOwner(me)
+              : leasing.leaseFor(floorNo)?.wallet === me);
             const st = copy.settingsFor(floorNo);
             const settings = isOwner ? st
               : { ...st, webhook_url: st.webhook_url ? "(set)" : null,
