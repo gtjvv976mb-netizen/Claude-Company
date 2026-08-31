@@ -1,4 +1,5 @@
-export const POLICY_VERSION = "snipe-v2";
+// v3: the high-water mark requires two consecutive witnesses before it ratchets a stop.
+export const POLICY_VERSION = "snipe-v3";
 
 export const POLICY_DEFAULTS = Object.freeze({
   takeProfitX: 2,
@@ -87,7 +88,27 @@ export function pricePolicy({ position, mark, deskExit = null, nowMs = Date.now(
   }
   if (!(mark > 0)) return { action: "hold", reason: "no readable mark", position: p, policyVersion: POLICY_VERSION };
 
-  p.high = Math.max(Number(p.high) || 0, mark);
+  /* THE HIGH-WATER MARK NEEDS TWO WITNESSES.
+   * The high used to ratchet on any single sample, and the stops it arms can never
+   * come back down — so one anomalous quote (a one-block WSOL-heavy pool reads the
+   * sell quote rich) at 1.9x armed breakeven AND the trail on a position whose real
+   * price was 1.1x, and the very next honest tick force-sold it as a "ratcheted
+   * stop". Measured with this exact policy: t1 glitch 1.9 → hold, stop 1.425; t2
+   * real 1.1 → sell. An irreversible state change now requires the mark to clear the
+   * OLD high on two consecutive ticks; the committed value is the LOWER of the two
+   * samples, both real observations, taken conservatively. A genuine run commits one
+   * tick late — the trail is 25%, a 15s tick costs it nothing — while a lone spike
+   * between two ordinary ticks leaves no trace. Downstream sells still read the raw
+   * mark: a sell decision executes at a REAL re-quoted price, so a glitch there
+   * costs a premature exit at the true market, never a manufactured loss. */
+  const prevHigh = Number(p.high) || 0;
+  if (mark > prevHigh) {
+    const staged = Number(p.pendingHigh) || 0;
+    if (staged > prevHigh) p.high = Math.min(staged, mark);   // second consecutive witness
+    p.pendingHigh = mark;                                     // stage this sample for the next tick
+  } else {
+    p.pendingHigh = 0;                                        // the spike had no second witness
+  }
   if (p.entry > 0 && p.high >= p.entry * c.breakevenArmX)
     p.stop = Math.max(Number(p.stop) || 0, p.entry);
   if (p.entry > 0 && p.high >= p.entry * c.trailArmX)

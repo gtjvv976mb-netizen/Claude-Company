@@ -54,6 +54,20 @@ const LIVE_LIMITS = Object.freeze({
   maxRentLamports: 3_000_000,
   maxEntryRoundTripLossPct: 12,
   maxAttempts: 3,
+  /* Adversarial-review hardening, 2026-09-01 — each closes a hole where the only
+   * number consulted was one the counterparty authored:
+   * blockHeightWindow: a quoted lastValidBlockHeight further than this above the
+   *   chain's real height is refused BEFORE signing. Unbounded, one inflated value
+   *   wedged the journal forever and disarmed every exit behind it.
+   * maxQuoteShortfallPct: if simulation delivers more than this % above the QUOTED
+   *   output, the quote was low-balled (stale or adversarial) and the signed minOut
+   *   floor is garbage — refuse. The chain is the one number Jupiter cannot author.
+   * maxExitAttempts: exits get more tries than entries — a stop that fails three
+   *   times during the exact dump that fired it must not be dead forever — but
+   *   bounded, because every on-chain failure burns a real, accounted fee. */
+  blockHeightWindow: 600,
+  maxQuoteShortfallPct: 15,
+  maxExitAttempts: 12,
 });
 const log = (...args) => console.log(new Date().toISOString(), "WALL-ST-E", ...args);
 const fatal = (message) => { console.error(new Date().toISOString(), "WALL-ST-E REFUSES:", message); process.exit(1); };
@@ -169,6 +183,17 @@ const JUPITER_CFG = {
     { min: 0.1, max: EXECUTE ? LIVE_LIMITS.maxEntryRoundTripLossPct : 50 }),
   maxAttempts: number("MAX_TX_ATTEMPTS", process.env.MAX_TX_ATTEMPTS || LIVE_LIMITS.maxAttempts,
     { min: 1, max: EXECUTE ? LIVE_LIMITS.maxAttempts : 10 }),
+  // Exit retries beyond maxAttempts: only when every prior attempt is terminally
+  // proven dead, and never past this. See LIVE_LIMITS for why exits differ.
+  maxExitAttempts: number("MAX_EXIT_TX_ATTEMPTS",
+    process.env.MAX_EXIT_TX_ATTEMPTS || LIVE_LIMITS.maxExitAttempts,
+    { min: 1, max: EXECUTE ? LIVE_LIMITS.maxExitAttempts : 50 }),
+  blockHeightWindow: number("BLOCK_HEIGHT_WINDOW",
+    process.env.BLOCK_HEIGHT_WINDOW || LIVE_LIMITS.blockHeightWindow,
+    { min: 150, max: EXECUTE ? LIVE_LIMITS.blockHeightWindow : 10_000 }),
+  maxQuoteShortfallPct: number("MAX_QUOTE_SHORTFALL_PCT",
+    process.env.MAX_QUOTE_SHORTFALL_PCT || LIVE_LIMITS.maxQuoteShortfallPct,
+    { min: 1, max: EXECUTE ? LIVE_LIMITS.maxQuoteShortfallPct : 100 }),
   finalityTimeoutMs: number("FINALITY_TIMEOUT_MS", process.env.FINALITY_TIMEOUT_MS || 30_000,
     { min: 1_000, max: 120_000 }),
 };
@@ -636,7 +661,37 @@ async function manageOpen() {
     try { currentSolUsd = await jupiter.solUsdPrice(); }
     catch (error) { solUsdError = error; }
   }
-  for (const pos of openList()) {
+
+  /* ONE DENOMINATOR OUTAGE MUST NOT DISARM EVERY STOP.
+   * The SOL/USD leg is fetched once per tick; when it failed, the code discarded the
+   * token→WSOL quote it ALREADY HELD for every position and left mark=null, which
+   * pricePolicy treats as "hold". So during a Jupiter USDC-route outage — precisely
+   * when rugs cluster — stops, trails and take-profits were all silently off for
+   * every open position at once, and the only backstop was the 12h age exit selling
+   * the remnant. SOL/USD moves single-digit percent in hours while these stops care
+   * about 20%+ token moves, so a cached rate is overwhelmingly better than no stop.
+   * The cache is used for up to SOL_USD_CACHE_MAX_AGE_MS (default 24h) with the
+   * staleness logged; past that, the old fail-closed hold applies. */
+  if (currentSolUsd > 0) {
+    S.solUsdCache = { v: currentSolUsd, ts: Date.now() };
+  } else if (solUsdError || !(currentSolUsd > 0)) {
+    const cache = S.solUsdCache;
+    const maxAge = Number(process.env.SOL_USD_CACHE_MAX_AGE_MS || 24 * 3600e3);
+    if (cache?.v > 0 && Date.now() - cache.ts <= maxAge) {
+      currentSolUsd = cache.v;
+      solUsdError = null;
+      log(`SOL/USD leg failed — using the cached rate $${cache.v} from ${Math.round((Date.now() - cache.ts) / 60000)}m ago so stops stay armed`);
+    }
+  }
+
+  /* Iterate by KEY and re-resolve each position from the live state. The loop used to
+   * hold the array snapshot: any exit inside it swaps S for a structuredClone
+   * (applyConfirmedExit), leaving every later `pos` a detached object — trail
+   * ratchets written to it were silently dropped by save(), and the custody
+   * entry-block flag set on it never reached the state the entry gate reads. */
+  for (const posKey of openList().map((p) => p.mint)) {
+    const pos = openList().find((p) => p.mint === posKey);
+    if (!pos) continue;                            // exited earlier in this same pass
     try {
       if (EXECUTE) {
         const wasBlocked = pos.balanceReconciliationRequired;
@@ -690,6 +745,11 @@ async function manageOpen() {
       else if (decision.action === "sell_part") await sellAll(pos, decision.reason, decision.fraction);
       else save();
     } catch (error) {
+      // A sellAll above may have swapped S for a clone; write the failure onto the
+      // LIVE object or the flags evaporate with the detached one.
+      const live = openList().find((p) => p.mint === posKey);
+      const pos = live ?? { symbol: posKey };
+      if (!live) { log(`manage ${pos.symbol}: ${error.message} — position left the book mid-pass`); continue; }
       if (pos.exitExecutionRequired) {
         pos.exitExecutionLastError = error.message;
         pos.exitExecutionLastAttemptAt = Date.now();

@@ -309,6 +309,22 @@ export function validateSimulationEffects(before, after, expected, cfg) {
       throw new Error("simulation SOL spend is outside the exact input plus capped fees");
   }
 
+  /* THE QUOTE MUST AGREE WITH THE CHAIN, NOT ONLY WITH ITSELF.
+   * Until now every price-sanity number — impact, minOut, the round-trip preflight —
+   * was authored by the same API response it was checking, so a low-balled quote
+   * (outAmount at a fraction of fair value, minOut 3% under that) sailed through:
+   * the instruction was self-consistent and the simulation check below only asked
+   * `actual >= minOut`, which a garbage floor trivially passes. The wallet then signs
+   * a transaction whose on-chain floor is far below fair value, and whoever sees it
+   * in flight collects the difference.
+   *
+   * The simulation's ACTUAL output is the one number in this file the counterparty
+   * cannot author — it comes from replaying the transaction against the real chain.
+   * If the chain delivers materially MORE than the quote promised, the quote did not
+   * describe the market; it described a floor somebody wanted signed. Refuse. */
+  const quotedOutput = BigInt(positiveRaw(expected.quotedOutputRaw, "quoted output for simulation cross-check"));
+  const shortfallCapPct = BigInt(Math.round(cfg.maxQuoteShortfallPct ?? 15));
+
   if (expected.outputMint !== WSOL) {
     const pre = checkedTokenAmount(before.output, {
       program: expected.outputProgram, mint: expected.outputMint, wallet: expected.wallet,
@@ -320,10 +336,16 @@ export function validateSimulationEffects(before, after, expected, cfg) {
     });
     if (post < pre || post - pre < minOutput)
       throw new Error("simulation destination-token delta is below the signed minimum output");
+    if ((post - pre) * 100n > quotedOutput * (100n + shortfallCapPct))
+      throw new Error(`the chain delivers ${post - pre} against a quote of ${quotedOutput} — the quote is more than ` +
+        `${cfg.maxQuoteShortfallPct ?? 15}% below reality, so the signed minimum-output floor protects nothing; refusing`);
   } else {
     const receivedNet = custodyAfter - custodyBefore;
     if (receivedNet + BigInt(cfg.maxNetworkFeeLamports) < minOutput)
       throw new Error("simulation SOL proceeds are below the signed minimum after capped fees");
+    if (receivedNet * 100n > quotedOutput * (100n + shortfallCapPct))
+      throw new Error(`the chain delivers ${receivedNet} lamports against a quote of ${quotedOutput} — the quote is ` +
+        `more than ${cfg.maxQuoteShortfallPct ?? 15}% below reality, so the signed minimum-output floor protects nothing; refusing`);
   }
   return true;
 }
@@ -771,9 +793,56 @@ export class JupiterV2Executor {
       observedAddresses.map((address) => new PublicKey(address)), "processed");
     if (!Array.isArray(preAccounts) || preAccounts.length !== observedAddresses.length || !preAccounts[0])
       throw new Error("RPC omitted pre-simulation wallet/account state");
+
+    /* BOUND THE EXPIRY AGAINST THE CHAIN, NOT AGAINST THE ORDER'S OWN CLAIM.
+     * validateOrderEnvelope only checks lastValidBlockHeight is a positive integer —
+     * one order carrying 9e15 produced an attempt whose "wait for expiry" branch could
+     * never fire: the journal held it as unresolved forever, and because an unresolved
+     * intent blocks every new submission, EXITS included, all stops were disarmed
+     * until a human intervened. The chain's real height is the one number the
+     * counterparty does not author; a blockhash is only valid ~150 blocks, so an
+     * expiry more than blockHeightWindow ahead is a lie whatever the intent. */
+    const chainHeight = await this.connection.getBlockHeight("confirmed");
+    const claimedExpiry = Number(order.lastValidBlockHeight);
+    if (!Number.isSafeInteger(chainHeight) || chainHeight <= 0)
+      throw new Error("could not read the chain block height to bound the order expiry");
+    if (claimedExpiry <= chainHeight)
+      throw new Error(`order expiry ${claimedExpiry} is already behind the chain height ${chainHeight}`);
+    if (claimedExpiry > chainHeight + (this.cfg.blockHeightWindow ?? 600))
+      throw new Error(`order expiry ${claimedExpiry} is ${claimedExpiry - chainHeight} blocks ahead of the chain ` +
+        `(cap ${this.cfg.blockHeightWindow ?? 600}) — an unbounded expiry wedges the journal and disarms every exit`);
+
     tx.sign([this.keypair]);
     const signed = Buffer.from(tx.serialize());
     if (signed.length > 1232) throw new Error(`serialized transaction is ${signed.length} bytes (Solana max 1232)`);
+    const signature = bs58.encode(Buffer.from(tx.signatures[0]));
+
+    /* NOTHING EXTERNAL HAS SEEN THESE BYTES YET — and that is now the contract.
+     * The simulation used to run right here, which sent the fully signed, broadcastable
+     * transaction to the primary RPC BEFORE the journal had any record of it. An RPC
+     * that broadcast what it was only asked to simulate (or a crash inside that call)
+     * produced an on-chain buy the journal never knew existed: unmanaged, unstopped,
+     * and invisible to the daily-cap accounting. The absence-proof machinery cannot
+     * protect an attempt it never heard of. So _buildSigned now STOPS at the signed
+     * bytes; executeIntent journals them first and only then runs _simulateSigned. */
+    return {
+      record: {
+        requestId: order.requestId,
+        signedTx: signed,
+        signature,
+        blockhash: tx.message.recentBlockhash,
+        lastValidBlockHeight: Number(order.lastValidBlockHeight),
+        quotedOutputRaw: String(order.outAmount),
+        minOutputRaw: String(order.otherAmountThreshold),
+        order,
+      },
+      sim: { tx, observedAddresses, preAccounts, validation, order, intent },
+    };
+  }
+
+  /** The pre-submission simulation, run only AFTER the signed bytes are journaled —
+   * this call is itself a disclosure of broadcastable bytes to the primary RPC. */
+  async _simulateSigned({ tx, observedAddresses, preAccounts, validation, order, intent }) {
     const simulation = await this.connection.simulateTransaction(tx, {
       commitment: "processed", sigVerify: true, replaceRecentBlockhash: false,
       accounts: { encoding: "base64", addresses: observedAddresses },
@@ -790,20 +859,11 @@ export class JupiterV2Executor {
         outputMint: intent.outputMint,
         amountRaw: intent.amountRaw,
         minOutputRaw: String(order.otherAmountThreshold),
+        quotedOutputRaw: String(order.outAmount),
         inputProgram: validation.inputProgram,
         outputProgram: validation.outputProgram,
       }, this.cfg);
-    const signature = bs58.encode(Buffer.from(tx.signatures[0]));
-    return {
-      requestId: order.requestId,
-      signedTx: signed,
-      signature,
-      blockhash: tx.message.recentBlockhash,
-      lastValidBlockHeight: Number(order.lastValidBlockHeight),
-      quotedOutputRaw: String(order.outAmount),
-      minOutputRaw: String(order.otherAmountThreshold),
-      order,
-    };
+    return true;
   }
 
   async _status(signature, connection = this.connection) {
@@ -1087,11 +1147,46 @@ export class JupiterV2Executor {
     let attempt = this.journal.latestAttempt(intent.id);
     if (attempt && ["signed", "submitted"].includes(attempt.state)) return this._resume(intent, attempt);
     const count = this.journal.attempts(intent.id).length;
-    if (count >= this.cfg.maxAttempts) throw new Error(`intent ${intent.id} exhausted ${this.cfg.maxAttempts} attempts`);
+
+    /* EXITS ARE NOT EXHAUSTIBLE THE WAY ENTRIES ARE.
+     * A flat cap of 3 was correct for entries — money not spent is money kept — and
+     * catastrophic for exits: three SlippageToleranceExceeded failures during the
+     * exact dump that fired the stop (the normal condition, not the rare one) left the
+     * intent permanently dead, the position riding to zero, and new entries frozen
+     * behind the latch. An exit may retry past maxAttempts ONLY while every prior
+     * attempt is terminally resolved (anything live already returned via _resume
+     * above, and hasBlockingIntent holds cross-intent), with a cooldown so a fast
+     * dump cannot burn fees every tick, and never past maxExitAttempts — each
+     * on-chain failure costs a real, accounted fee. */
+    const isExit = intent.kind !== "entry";
+    if (count >= this.cfg.maxAttempts) {
+      if (!isExit) throw new Error(`intent ${intent.id} exhausted ${this.cfg.maxAttempts} attempts`);
+      const exitCap = this.cfg.maxExitAttempts ?? 12;
+      if (count >= exitCap) throw new Error(`exit intent ${intent.id} exhausted ${exitCap} attempts — manual intervention required`);
+      const last = attempt?.updatedAt ?? attempt?.createdAt ?? 0;
+      const coolMs = this.cfg.exitRetryCooldownMs ?? 60_000;
+      if (this.now() - Number(last) < coolMs)
+        throw new Error(`exit intent ${intent.id} is cooling down after attempt ${count} (${coolMs}ms between retries)`);
+      this.log(`exit ${intent.id}: retrying past the entry cap — attempt ${count + 1} of ${exitCap}, all prior attempts terminally resolved`);
+    }
     if (this.hardStop()) throw new Error("HARD STOP is present — no new submission");
     if (intent.kind === "entry") this.submissionGate(intent);
-    const signed = await this._buildSigned(intent);
-    attempt = this.journal.recordSigned(intent.id, { ...signed, attempt: count + 1 });
+
+    /* Journal BEFORE the simulation discloses the bytes; see _buildSigned. A failed
+     * simulation is marked SUBMITTED, not failed — the primary RPC has already seen
+     * broadcastable bytes, so the attempt must ride the absence-proof reconciliation
+     * (two RPCs agreeing the signature never landed, past its now-bounded expiry)
+     * before any replacement may be signed. Marking it failed would let recordSigned
+     * attach a fresh signature while the first could still land: the double-buy. */
+    const built = await this._buildSigned(intent);
+    attempt = this.journal.recordSigned(intent.id, { ...built.record, attempt: count + 1 });
+    try {
+      await this._simulateSigned(built.sim);
+    } catch (error) {
+      this.journal.markSubmitted(intent.id, attempt.attempt);
+      throw new Error(`refused after signing: ${error.message} — the signed bytes were disclosed to the RPC, ` +
+        `so the attempt is held for absence-proof reconciliation instead of being retried blind`);
+    }
     intent = this.journal.getIntent(intent.id);
     return this._resume(intent, attempt);
   }

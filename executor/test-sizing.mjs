@@ -12,7 +12,9 @@ const t=(n,c,got)=>{ c?pass++:fail++; console.log(`${c?"PASS":"FAIL"}  ${n}${c?"
 const st=(o={})=>({ ...freshState(0), equitySol: 5, ...o });
 // the V1 bracket from the thesis: stop -2.8%, target +3.5%  => gross R = 1.25
 const call = { mint:"m", symbol:"T", entry_ref: 1.0, stop: 0.972, target: 1.035, size_sol: 5 };
-t("sizing uses the shared snipe-v2 strategy", POLICY_VERSION === "snipe-v2", POLICY_VERSION);
+// v3: two-witness high-water ratchet (2026-09-01). The pin is the tripwire that
+// fired when the behavior changed - keep pinning the literal.
+t("sizing uses the shared snipe-v3 strategy", POLICY_VERSION === "snipe-v3", POLICY_VERSION);
 
 // R_net with 6% costs should be far below the 1.25 gross figure
 const p1 = planEntry({ call, cfg: KELLY, state: st() });

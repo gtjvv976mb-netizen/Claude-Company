@@ -264,7 +264,9 @@ await ok("compute priority fees are capped relative to the signed trade basis", 
 await ok("simulation must show the exact SOL spend and minimum token receipt", async () => {
   const expected = {
     wallet: wallet.publicKey.toBase58(), inputMint: WSOL, outputMint: mint,
-    amountRaw: "5000000", minOutputRaw: "970", inputProgram: TOKEN_PROGRAM,
+    // quotedOutputRaw joined the contract with the quote-vs-chain cross-check: the
+    // simulated 987 sits inside the 15% band above a 970 quote — an honest fill.
+    amountRaw: "5000000", quotedOutputRaw: "970", minOutputRaw: "970", inputProgram: TOKEN_PROGRAM,
     outputProgram: TOKEN_PROGRAM,
   };
   const before = { wallet: systemAccount(20_000_000), input: null, output: null };
@@ -399,7 +401,10 @@ await ok("transport retry reuses byte-identical signed transaction and signature
       err: null, confirmationStatus: "finalized", confirmations: null,
     } : null] }),
     getTransaction: async () => finalized(chainSignature),
-    getBlockHeight: async () => 100,
+    // Coherent with the order fixture's lastValidBlockHeight of 999: the expiry bound
+    // added 2026-09-01 refuses to sign an order more than blockHeightWindow (600)
+    // blocks ahead of the REAL chain. 999 - 600 = 399 ahead — a plausible fresh order.
+    getBlockHeight: async () => 600,
   };
   const fetchFn = async (url, options = {}) => {
     if (String(url).includes("/order?")) { orderCalls++; return response(builtOrder); }
