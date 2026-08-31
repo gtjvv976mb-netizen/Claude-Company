@@ -6230,7 +6230,14 @@ function buildBudget() {
   const mk = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x) e.textContent = x; return e; };
   box.appendChild(mk("div", "dp-h", "Your agents' budget"));
 
-  if (!BUDGET) { box.appendChild(mk("div", "dp-note", "Loading…")); refreshBudget(); return box; }
+  if (!BUDGET) {
+    box.appendChild(mk("div", "dp-note", "Loading\u2026"));
+    // ONE attempt, ever. buildBudget -> refreshBudget -> loadCalls -> buildBudget
+    // is a cycle, and when the budget comes back empty it never terminates: the
+    // panel repainted several times a second and ate every click on it.
+    if (!window.__budgetTried) { window.__budgetTried = true; refreshBudget(); }
+    return box;
+  }
 
   const bal = Number(BigInt(BUDGET.balanceBaseUnits) / 10n ** BigInt(Math.max(0, BUDGET.decimals - 3))) / 1000;
   const big = mk("div", "bud-bal");
@@ -6268,9 +6275,10 @@ function buildBudget() {
 async function refreshBudget() {
   try {
     const { body } = await call_api("/api/budget");
-    BUDGET = body;
+    const gained = !BUDGET && !!body;          // only a real gain justifies a repaint
+    BUDGET = body || null;
     paintHud({ budget: BUDGET });
-    if (callsPanel.classList.contains("on")) loadCalls();
+    if (gained && callsPanel.classList.contains("on")) loadCalls();
   } catch {}
 }
 
