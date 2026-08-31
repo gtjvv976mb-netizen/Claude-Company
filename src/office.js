@@ -2,7 +2,10 @@ import http from "node:http";
 /* Floor 50 — the penthouse — belongs to the HOUSE: the treasury wallet always,
    plus every wallet named in HQ_OWNER (comma-separated — the dev wallet lives
    here), plus whatever wallet is written on the floor's own deed. */
-const HQ_OWNER_LIST = [
+/* RETIRED. HQ ownership is the deed on floor 50 and nothing else — see
+   tower.hqOwnerWallet(). Kept only so an old HQ_OWNER env var cannot silently
+   grant standing it no longer carries. */
+const HQ_OWNER_LIST_RETIRED = [
   ...(process.env.HQ_OWNER || "").split(",").map((w) => w.trim()).filter(Boolean),
   "3J57tqAJqRmSBn1ZYDu9JpMMyTfBHdcGGwECiPQeiji3",   // the dev wallet — standing owner (owner-stated)
 ];
@@ -60,8 +63,9 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
       {
         const sid = url.searchParams.get("sid");
         const who = sid ? auth.walletFor(sid) : null;
-        const isHq = (w) => !!w && (w === leasing.TREASURY || HQ_OWNER_LIST.includes(w)
-          || tower.getFloor(50)?.owner === w);
+        // ONE wallet owns the HQ — the deed on floor 50, nobody else. Not the
+        // treasury, not a list. See tower.hqOwnerWallet().
+        const isHq = (w) => tower.isHqOwner(w);
         let allowed;
         if (wantFloor == null || wantFloor === 50) allowed = isHq(who) || (!!who && !!leasing.leaseOf(who));
         else {
@@ -135,8 +139,10 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
       // payments land; HQ_OWNER is the wallet the boss signs in with. They are
       // often the same wallet — the day they are not, the boss was locked out of
       // their own building and saw the demo like a tourist.
-      const hqOwner = (w) => !!w && (w === leasing.TREASURY || HQ_OWNER_LIST.includes(w)
-        || tower.getFloor(HQ_FLOOR)?.owner === w);
+      /* SOLE OWNERSHIP. This was a set — treasury OR an env list OR the deed —
+       * which handed the house desk's settings and its executor secret to several
+       * wallets at once. It is now the deed alone, asserted on every boot. */
+      const hqOwner = (w) => tower.isHqOwner(w);
       // Live data is for people with standing: the HQ's owner anywhere, a tenant
       // on their own floor. Everyone else — every floor, the HQ included — gets
       // the demo shift. The 3D office is the showroom; the data is the product.

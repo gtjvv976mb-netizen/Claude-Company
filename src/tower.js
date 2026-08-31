@@ -33,6 +33,34 @@ if (seeded === 0) {
   for (let n = 1; n <= FLOORS; n++) ins.run(n, n === HQ_FLOOR ? "hq" : "vacant");
 }
 
+/**
+ * THE DEED TO FLOOR 50.
+ *
+ * HQ standing used to be a SET — the treasury wallet, anything listed in HQ_OWNER, and
+ * the floor's own deed — so several wallets held the keys to the house desk and its
+ * executor secret. The owner asked for one wallet, alone.
+ *
+ * It is written onto the floor rather than kept in a list, so exactly one place answers
+ * "who owns the HQ", and it is the same column that answers it for every other floor.
+ * Re-asserted on every boot, because an access rule that can drift out of the database
+ * is not an access rule.
+ *
+ * The constant fallback exists so this can never lock the owner out of their own
+ * building: if the deed is ever blank, it answers instead. Changing who owns the HQ is
+ * then deliberate (HQ_OWNER_WALLET) rather than accidental.
+ */
+export const HQ_OWNER_WALLET =
+  (process.env.HQ_OWNER_WALLET || "3J57tqAJqRmSBn1ZYDu9JpMMyTfBHdcGGwECiPQeiji3").trim();
+
+db.prepare("UPDATE floors SET state='hq', owner=? WHERE n=? AND (owner IS NULL OR owner <> ?)")
+  .run(HQ_OWNER_WALLET, HQ_FLOOR, HQ_OWNER_WALLET);
+
+/** The single wallet that owns the HQ — not the treasury, not a list. */
+export function hqOwnerWallet() {
+  return db.prepare("SELECT owner FROM floors WHERE n=?").get(HQ_FLOOR)?.owner || HQ_OWNER_WALLET;
+}
+export const isHqOwner = (w) => !!w && w === hqOwnerWallet();
+
 export function listFloors() {
   return db.prepare("SELECT n, state, owner, name, md_name FROM floors ORDER BY n").all();
 }
