@@ -624,6 +624,31 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           if (process.env.PENTHOUSE_ENABLED === "0") { state = "PAUSED"; reason = "research disabled by the operator"; }
           else if (!process.env.ANTHROPIC_API_KEY) { state = "PAUSED"; reason = "no API key — the house team cannot work"; }
           else if (cap > 0 && sp.usd >= cap) { state = "PAUSED"; reason = `daily budget reached ($${sp.usd.toFixed(2)} of $${cap}) — monitoring and watch checks continue free`; }
+          /* IS THE PAID HALF ACTUALLY WORKING?
+           *
+           * RUNNING used to mean only "not paused" — the desk had budget, a key, and no
+           * open position. It reported RUNNING for hours while every single workup threw
+           * the same ReferenceError, because a failed workup is caught, counted, and
+           * stepped over so one bad coin cannot end a cycle. That is right for one bad
+           * coin and catastrophic for a bug on the shared path: cycles started, ran and
+           * ended looking healthy while nothing was being researched at all.
+           *
+           * The tell was available the whole time and nobody was reading it — the SAME
+           * error, on every token, every cycle. One coin failing is weather. Every coin
+           * failing the same way is a broken build, and the heartbeat should say so
+           * rather than leaving it to be inferred from counters that cannot tell
+           * "not reached" from "failed". */
+          const errRow = (() => { try {
+            return db.prepare(`
+              SELECT json_extract(data,'$.error') e, COUNT(*) n FROM chronicle
+              WHERE type='cycle:error' AND ts > ? GROUP BY e ORDER BY n DESC LIMIT 1`
+            ).get(Date.now() - 3600e3);
+          } catch { return null; } })();
+          if (state === "RUNNING" && errRow?.e && errRow.n >= 5) {
+            state = "DEGRADED";
+            reason = `${errRow.n} workups in the last hour failed identically: "${errRow.e}" — every coin failing the same way is a broken build, not a bad coin`;
+          }
+
           const lastEv = q("SELECT MAX(ts) t FROM chronicle")?.t ?? null;
           const cnt = (sql) => q(sql)?.n ?? 0;
           const live = calls.liveCalls();
