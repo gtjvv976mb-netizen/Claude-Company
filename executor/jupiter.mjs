@@ -964,7 +964,25 @@ export class JupiterV2Executor {
 
   async _reconcile(intent, attempt, executeResult = attempt.execute) {
     const durableJupiterSuccess = executeResult?.status === "Success" && Number(executeResult.code) === 0;
-    const finality = await this._waitFinalized(attempt.signature);
+    /* A "signed" attempt has never been disclosed — its signature CANNOT be on chain —
+     * so waiting the full finality timeout for it is pure stall: measured, a wedged
+     * signed attempt cost ~30 seconds of every tick, exactly when a latched exit needs
+     * the tick loop fast. One quick status read keeps the belt (the invariant could be
+     * wrong) without the 30-second suspenders. Submitted attempts keep the full wait —
+     * their bytes are genuinely in flight. */
+    const finality = attempt.state === "signed"
+      ? await (async () => {
+          const status = await this._status(attempt.signature);
+          const isFinalized = status?.confirmationStatus === "finalized" || (status && status.confirmations === null);
+          if (!isFinalized) return { outcome: "pending", observedStatus: !!status, observedFinalized: false };
+          // Mirror _waitFinalized's shape EXACTLY — its failed branch carries the
+          // transaction too, and downstream fee-evidence verification needs it.
+          const transaction = await this._finalizedTransaction(attempt.signature);
+          return status.err
+            ? { outcome: "failed", error: status.err, transaction, observedStatus: true, observedFinalized: true }
+            : { outcome: "finalized", transaction, observedStatus: true, observedFinalized: true };
+        })()
+      : await this._waitFinalized(attempt.signature);
     if (finality.outcome === "failed") {
       const error = `transaction finalized with error: ${JSON.stringify(finality.error)}`;
       if (durableJupiterSuccess) {
@@ -1106,6 +1124,24 @@ export class JupiterV2Executor {
     // and never depend on building a replacement transaction.
     if (attempt.execute?.status === "Success" && Number(attempt.execute.code) === 0)
       return this._reconcile(intent, attempt, attempt.execute);
+
+    /* NEVER DISCLOSE PROVABLY-DEAD BYTES. A "signed" attempt has, by the new
+     * invariant, never left this process — so after downtime longer than its
+     * blockhash lifetime (a laptop sleep is enough) the transaction is provably
+     * un-landable. POSTing it anyway did worse than waste a call: markSubmitted ran
+     * first, so _reconcile then saw a "submitted" attempt whose absence it could
+     * prove but whose state demanded the conservative verdict, and marked the intent
+     * AMBIGUOUS — permanently disarming every exit over bytes that were never in
+     * flight. Check the chain height BEFORE disclosing: an expired signed attempt
+     * routes to _reconcile, whose "signed" branch takes the safe markExpired path and
+     * clears the way for a fresh attempt. One getBlockHeight per resume, and only
+     * bytes that can still land are ever disclosed. */
+    if (attempt.state === "signed") {
+      const height = await this.connection.getBlockHeight("confirmed");
+      if (Number.isSafeInteger(height) && height > attempt.lastValidBlockHeight)
+        return this._reconcile(intent, attempt, attempt.execute);
+    }
+
     if (this.hardStop()) return this._reconcile(intent, attempt, attempt.execute);
     if (intent.kind === "entry") {
       try { this.submissionGate(intent); }
@@ -1169,10 +1205,17 @@ export class JupiterV2Executor {
      * dump cannot burn fees every tick, and never past maxExitAttempts — each
      * on-chain failure costs a real, accounted fee. */
     const isExit = intent.kind !== "entry";
-    if (count >= this.cfg.maxAttempts) {
-      if (!isExit) throw new Error(`intent ${intent.id} exhausted ${this.cfg.maxAttempts} attempts`);
-      const exitCap = this.cfg.maxExitAttempts ?? 12;
-      if (count >= exitCap) throw new Error(`exit intent ${intent.id} exhausted ${exitCap} attempts — manual intervention required`);
+    const exitCap = this.cfg.maxExitAttempts ?? 12;
+    /* The exit cap binds from attempt ONE, not only past the entry cap. Nesting it
+     * inside the count>=maxAttempts branch meant an operator who set
+     * MAX_EXIT_TX_ATTEMPTS below MAX_TX_ATTEMPTS was silently ignored for the first
+     * maxAttempts fee-burning tries — their fee-exposure model wrong by exactly the
+     * bound they asked for. */
+    if (isExit && count >= exitCap)
+      throw new Error(`exit intent ${intent.id} exhausted ${exitCap} attempts — manual intervention required`);
+    if (!isExit && count >= this.cfg.maxAttempts)
+      throw new Error(`intent ${intent.id} exhausted ${this.cfg.maxAttempts} attempts`);
+    if (isExit && count >= this.cfg.maxAttempts) {
       const last = attempt?.updatedAt ?? attempt?.createdAt ?? 0;
       const coolMs = this.cfg.exitRetryCooldownMs ?? 60_000;
       if (this.now() - Number(last) < coolMs)

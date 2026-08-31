@@ -942,25 +942,29 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
   if (call) {
     const evidenceLinked = linkPublishedCall(rec.decisionRunId, call.id, { floorNo: sourceFloor });
     if (evidenceLinked) {
-      noteEvent(call.id, "evidence", "linked to immutable decision evidence", call.entry_ref);
+      /* Provenance rows carry NO mark. They used to pass call.entry_ref, so one
+       * observation wrote two-to-three identical marked rows and the two-witness pair
+       * rule saw a single read "confirm" itself — silently voiding the invariant for
+       * any event kind that writes a mark. The entry price already lives on
+       * calls.entry_ref; these rows are narrative, not observations. */
+      noteEvent(call.id, "evidence", "linked to immutable decision evidence");
     } else {
       // Direct/manual callers may not carry a decision row. Keep the call operational,
       // but exclude it from policy-learning evidence and make the gap visible.
       noteEvent(call.id, "evidence_unlinked",
-        "not eligible for strategy scorecards: no matching attributed decision", call.entry_ref);
+        "not eligible for strategy scorecards: no matching attributed decision");
       emit("call:evidence-unlinked", { callId: call.id, sourceFloor });
     }
     // The record shows HOW FAR DOWN the desk reached for this one. A tier-4 call is
     // an approval; a tier-1 call is the mandate taking the cohort's best available
     // when nothing was approved. Both are legitimate, and they are not the same
     // thing, so the difference goes on the call rather than into a footnote.
-    noteEvent(call.id, "mandate", `${e.reason} (tier ${e.tier})`, call.entry_ref);
+    noteEvent(call.id, "mandate", `${e.reason} (tier ${e.tier})`);
     // Why the choosing seat picked THIS one, on the call itself — so the record shows
     // the reasoning next to the outcome rather than only the outcome.
     if (bestPick?.why)
       noteEvent(call.id, "bestpick",
-        `${bestPick.why} | edge: ${bestPick.edge} | expects ${bestPick.expected_move} | worst case: ${bestPick.worst_case}`,
-        call.entry_ref);
+        `${bestPick.why} | edge: ${bestPick.edge} | expects ${bestPick.expected_move} | worst case: ${bestPick.worst_case}`);
     /* THE HOUSE TRADES ITS OWN CALLS TOO.
      *
      * `owned` alone meant floor 50 — the HQ, whose state is 'hq' because it is never
@@ -1150,6 +1154,57 @@ export async function freshScan({ minScore = 45 } = {}) {
 }
 
 let monitorBusy = false;
+/**
+ * SUB-TICK MARKS — cheap price witnesses between full monitor passes.
+ *
+ * The two-witness high (snipe-v3) assumed witnesses ~15s apart; the server's monitor
+ * writes ONE mark per pass, default ten minutes — a 40x gap that made any pump peaking
+ * inside a single pass one-witness forever. Measured on an honest path: a 1.40x
+ * excursion never armed breakeven and the call closed at 0.60 where the old code
+ * closed at 0.95. This loop writes a consensus price for every LIVE call every few
+ * dozen seconds — one free DexScreener read per call, no models, no RPC-heavy
+ * gather() — so the pair rule has honest neighbours to confirm against.
+ *
+ * It also CONFIRMS recent close prints. Take-profit and desk-target fire on the raw
+ * mark by design (the broadcast must not wait), but on the paper book that raw mark
+ * became close_mark unchecked — one anomalous 6x read on a 1.05x token books a
+ * manufactured win into the stats tenants choose floors by. A close is re-read once
+ * shortly after; a print more than 30% from the confirming read is restated to the
+ * confirmed price, with the restatement on the record.
+ */
+export async function subTickMarks() {
+  let marked = 0, confirmed = 0;
+  const live = db.prepare("SELECT id, mint FROM calls WHERE status=\'live\'").all();
+  for (const call of live) {
+    try {
+      const px = await ds.pairsFor(call.mint);
+      if (!px?.ok) continue;
+      const cons = ds.consensus(px.pairs);
+      if (cons.ok && cons.priceUsd > 0) { noteEvent(call.id, "mark", null, cons.priceUsd); marked++; }
+    } catch { /* a failed read is a missing witness, never an error */ }
+  }
+  const recent = db.prepare(`SELECT id, mint, close_mark FROM calls
+    WHERE status=\'closed\' AND close_confirmed IS NULL AND closed_at > ?`).all(Date.now() - 10 * 60e3);
+  for (const call of recent) {
+    try {
+      const px = await ds.pairsFor(call.mint);
+      if (!px?.ok) continue;
+      const cons = ds.consensus(px.pairs);
+      if (!(cons.ok && cons.priceUsd > 0)) continue;
+      const drift = call.close_mark > 0 ? Math.abs(call.close_mark - cons.priceUsd) / call.close_mark : 0;
+      if (drift > 0.30) {
+        db.prepare("UPDATE calls SET close_mark=?, close_confirmed=1 WHERE id=?").run(cons.priceUsd, call.id);
+        noteEvent(call.id, "close_restated",
+          `close print ${call.close_mark} was ${Math.round(drift * 100)}% from the confirming read — restated to ${cons.priceUsd}`);
+      } else {
+        db.prepare("UPDATE calls SET close_confirmed=1 WHERE id=?").run(call.id);
+      }
+      confirmed++;
+    } catch { /* unconfirmed stays unconfirmed; the next loop tries again */ }
+  }
+  return { marked, confirmed };
+}
+
 export async function monitorCalls() {
   // Reentrancy: a slow pass (rate-limited RPC, many open calls) must not overlap
   // the next tick and double-fire the same exit.

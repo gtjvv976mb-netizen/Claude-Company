@@ -693,7 +693,17 @@ async function manageOpen() {
    * the mispricing to SOL's half-hour drift, normally low single digits. */
   if (currentSolUsd > 0) {
     S.solUsdCache = { v: currentSolUsd, ts: Date.now() };
+    /* The cache must survive a restart, because restarts CORRELATE with the outages
+     * it exists for — a deploy, crash or box reboot during quote-route chaos is the
+     * normal case, not the unlucky one. It lived only on the in-memory S, which
+     * saveRuntime does not persist, so the first tick after any mid-outage restart
+     * silently re-disarmed every stop the cache was built to keep armed. Durable
+     * meta, best-effort: a failed write must never fail a tick. */
+    try { journal.setMeta("sol_usd_cache", JSON.stringify(S.solUsdCache)); } catch {}
   } else if (solUsdError || !(currentSolUsd > 0)) {
+    if (!S.solUsdCache) {
+      try { const m = journal.getMeta("sol_usd_cache"); if (m) S.solUsdCache = JSON.parse(m); } catch {}
+    }
     const cache = S.solUsdCache;
     const maxAge = Number(process.env.SOL_USD_CACHE_MAX_AGE_MS || 30 * 60e3);
     if (cache?.v > 0 && Date.now() - cache.ts <= maxAge) {

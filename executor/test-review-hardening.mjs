@@ -150,7 +150,7 @@ console.log("\nSIGNING-PATH CONTRACTS (asserted structurally — the live tests 
     /maxExitAttempts/.test(exec) && /cooling down/.test(exec),
     "a stop that failed three times during the dump that fired it is no longer dead forever");
   ok("F6: entries keep the hard cap of maxAttempts",
-    /if \(!isExit\) throw new Error\(`intent \$\{intent\.id\} exhausted/.test(exec),
+    /if \(!isExit && count >= this\.cfg\.maxAttempts\)/.test(exec),
     "money not spent is money kept — only exits earn extra attempts");
 }
 
@@ -180,6 +180,53 @@ console.log("\nSTATE-HANDLING CONTRACTS IN THE POLLER");
   ok("the new bounds are FROZEN live ceilings like every other cap",
     /blockHeightWindow: 600/.test(limits) && /maxQuoteShortfallPct: 15/.test(limits) && /maxExitAttempts: 12/.test(limits),
     "env can lower them in live mode, never raise them");
+}
+
+/* ── THIRD-PASS FIXES (2026-09-01, seven confirmed, zero refuted) ────────────── */
+console.log("\nTHIRD-PASS CONTRACTS");
+{
+  const fs = await import("node:fs");
+  const jup = fs.readFileSync(new URL("./jupiter.mjs", import.meta.url), "utf8");
+  const pol = fs.readFileSync(new URL("./poller.mjs", import.meta.url), "utf8");
+  const pent = fs.readFileSync(new URL("../src/penthouse.js", import.meta.url), "utf8");
+  const idx = fs.readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
+  const callsSrc = fs.readFileSync(new URL("../src/calls.js", import.meta.url), "utf8");
+
+  const resume = jup.slice(jup.indexOf("async _resume"), jup.indexOf("async executeIntent"));
+  ok("P3-1: _resume checks the chain height on a 'signed' attempt BEFORE disclosing it",
+    /attempt\.state === "signed"/.test(resume) &&
+    // Compare against the CALL, not the word — the explanatory comment mentions
+    // markSubmitted before the code does, which is exactly what tripped this first.
+    resume.indexOf("getBlockHeight") < resume.indexOf("this.journal.markSubmitted("),
+    "dead bytes route to the safe markExpired path instead of latching AMBIGUOUS after a laptop sleep");
+
+  const reconcile = jup.slice(jup.indexOf("async _reconcile"), jup.indexOf("async _resume"));
+  ok("P3-7: a never-disclosed 'signed' attempt gets one quick status read, not the 30s wait",
+    /attempt\.state === "signed"/.test(reconcile) && /_waitFinalized/.test(reconcile),
+    "a wedged signed attempt must not stall every stop-evaluation tick by finalityTimeout");
+
+  const exec = jup.slice(jup.indexOf("async executeIntent"), jup.indexOf("async recoverPending"));
+  ok("P3-6: the exit cap binds from attempt ONE, outside the entry-cap branch",
+    /if \(isExit && count >= exitCap\)/.test(exec) &&
+    exec.indexOf("isExit && count >= exitCap") < exec.indexOf("count >= this.cfg.maxAttempts"),
+    "an operator's MAX_EXIT_TX_ATTEMPTS below the entry cap was silently ignored");
+
+  ok("P3-5: the SOL/USD cache is durable, not process-memory",
+    /setMeta\("sol_usd_cache"/.test(pol) && /getMeta\("sol_usd_cache"/.test(pol),
+    "restarts correlate with the outages the cache exists for");
+
+  ok("P3-3: provenance rows carry no mark — one observation can no longer confirm itself",
+    !/noteEvent\(call\.id, "evidence", [^)]*entry_ref\)/.test(pent) &&
+    !/noteEvent\(call\.id, "mandate", [^)]*entry_ref\)/.test(pent),
+    "duplicate same-value rows satisfied the pair rule and voided the two-witness invariant");
+
+  ok("P3-2: sub-tick marks give the pair rule honest neighbours inside a monitor pass",
+    /export async function subTickMarks/.test(pent) && /PENTHOUSE_SUBMARK_SECS/.test(idx),
+    "the two-witness window was the 10-minute pass — 40x the 15s the policy priced");
+
+  ok("P3-4: a close print is provisional until one confirming read agrees",
+    /close_restated/.test(pent) && /close_confirmed/.test(callsSrc),
+    "one anomalous 6x read booked a manufactured win into the stats tenants choose floors by");
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

@@ -61,6 +61,8 @@ CREATE INDEX IF NOT EXISTS idx_call_events ON call_events(call_id, id DESC);
 
 ensureColumn("calls", "launchpad", "TEXT");
 ensureColumn("calls", "image_url", "TEXT");
+// A close print is provisional until one confirming read agrees with it (subTickMarks).
+ensureColumn("calls", "close_confirmed", "INTEGER");
 // Sea Otter: when the thesis last cleared the screen it was admitted on.
 ensureColumn("calls", "last_verified_at", "INTEGER");
 // The market cap AT THE CALL, so a tenant's sleeve filter (micro / low / mid) has a

@@ -583,6 +583,9 @@ await ok("one RPC cannot turn a finalized error into replacement authority", asy
     connection: {
       getSignatureStatuses: async () => ({ value: [errorStatus] }),
       getTransaction: async () => null,
+      // _resume now bounds a signed attempt against the chain before any disclosure;
+      // height 50 < expiry 100 keeps this test on its consensus claim, not expiry.
+      getBlockHeight: async () => 50,
     },
     secondaryConnection: { getSignatureStatuses: async () => ({ value: [null] }) },
     keypair: wallet, journal, apiKey: "test", hardStop: () => true,
@@ -617,6 +620,9 @@ await ok("matching finalized errors on both RPCs may safely fail the attempt", a
       transaction: { signatures: ["sig-error-both"] },
       meta: { err: errorStatus.err, fee: 5000 },
     }),
+    // The signed-attempt expiry bound in _resume reads the chain first; 50 < 100
+    // keeps this test about finalized-error consensus, not expiry.
+    getBlockHeight: async () => 50,
   };
   const executor = new JupiterV2Executor({
     connection: rpc, secondaryConnection: rpc, keypair: wallet, journal, apiKey: "test",

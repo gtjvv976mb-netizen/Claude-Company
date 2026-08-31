@@ -1,7 +1,7 @@
 import { runCycle, workup } from "./desk.js";
 import { startOffice } from "./office.js";
 import { startScanner } from "./scanner.js";
-import { runPenthouseCycle, monitorCalls, freshScan, promoteWatches } from "./penthouse.js";
+import { runPenthouseCycle, monitorCalls, freshScan, promoteWatches, subTickMarks } from "./penthouse.js";
 import { autoSyncAll, collectOwed } from "./perf.js";
 import { startWorld } from "./world.js";
 import { chroniclePrune } from "./lib/bus.js";
@@ -79,6 +79,11 @@ function startBooks() {
 
 function startMonitoring() {
   const monitorMins = Number(process.env.PENTHOUSE_MONITOR_MINS || 10);
+  // Sub-tick price witnesses between full passes: the two-witness high needs
+  // neighbours closer than the 10-minute monitor gap, and fresh close prints
+  // need one confirming read before the book treats them as fact.
+  const subMarkSecs = Number(process.env.PENTHOUSE_SUBMARK_SECS || 45);
+  setInterval(() => { subTickMarks().catch(() => {}); }, subMarkSecs * 1000);
   const watch = async () => {
     try { const r = await monitorCalls();
       if (r.closed) console.log(`[monitor] closed ${r.closed} of ${r.checked} open calls`);
@@ -147,6 +152,11 @@ function startPenthouse() {
    * how OFTEN the desk may look, while the money decides how often it may work. */
   const cycleMins = Number(process.env.PENTHOUSE_CYCLE_MINS || 20);
   const monitorMins = Number(process.env.PENTHOUSE_MONITOR_MINS || 10);
+  // Sub-tick price witnesses between full passes: the two-witness high needs
+  // neighbours closer than the 10-minute monitor gap, and fresh close prints
+  // need one confirming read before the book treats them as fact.
+  const subMarkSecs = Number(process.env.PENTHOUSE_SUBMARK_SECS || 45);
+  setInterval(() => { subTickMarks().catch(() => {}); }, subMarkSecs * 1000);
   if (process.env.PENTHOUSE_ENABLED === "0") { console.log("[penthouse] disabled"); return; }
   if (!process.env.ANTHROPIC_API_KEY) { console.log("[penthouse] no API key — the house team cannot work"); return; }
 
