@@ -212,17 +212,20 @@ body{
 .deskpanel{flex:1;min-height:0;overflow-y:auto;padding:14px;display:none;flex-direction:column;gap:14px}
 .deskpanel.on{display:flex}
 .dp-h{font-size:11.5px;letter-spacing:.13em;text-transform:uppercase;font-weight:700;color:var(--ink-faint)}
-.dp-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.dp-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .dp-in{flex:1;min-width:0;font:inherit;font-size:12.5px;padding:9px 11px;border-radius:7px;
   border:1px solid var(--card-line);background:var(--card);color:var(--ink)}
 .dp-in:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
 .dp-btn{font:inherit;font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
-  padding:9px 14px;border-radius:7px;border:0;background:var(--teal);color:var(--cream);cursor:pointer}
+  padding:6px 11px;border-radius:7px;border:0;background:var(--teal);color:var(--cream);cursor:pointer}
 .dp-btn:disabled{opacity:.5;cursor:default}
 .dp-btn.ghost{background:transparent;color:var(--ink-soft);border:1px solid var(--card-line)}
-.dp-note{font-size:11.5px;color:var(--ink-faint);line-height:1.5}
+/* margin:0 — these are <p> elements, so the browser was adding 11.5px ABOVE AND
+   BELOW every note in the panel. With flex gaps doing the spacing, that default
+   was the invisible air between every row. */
+.dp-note{font-size:11.5px;color:var(--ink-faint);line-height:1.45;margin:0}
 .dp-bal{font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--ink)}
-.dp-pins{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}
+.dp-pins{margin:0;display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}
 .dp-chip{display:inline-flex;align-items:center;gap:6px;font-family:"JetBrains Mono",monospace;
   font-size:11px;padding:4px 8px;border-radius:6px;background:var(--card);border:1px solid var(--card-line);color:var(--ink)}
 .dp-x{border:0;background:transparent;color:var(--ink-faint);cursor:pointer;font-size:11px;padding:0;line-height:1}
@@ -230,7 +233,7 @@ body{
 .runrow{display:flex;gap:8px;align-items:baseline;font-size:11.5px;padding:5px 0;border-bottom:1px dotted var(--panel-line)}
 .runrow .sym{font-weight:600;flex:none}
 .runrow .out{margin-left:auto;font-size:10px;letter-spacing:.07em;text-transform:uppercase;font-weight:700}
-.locked{padding:18px;text-align:center;color:var(--ink-faint);font-size:13px;line-height:1.6}
+.locked{padding:9px 10px;margin:4px 0;text-align:center;color:var(--ink-faint);font-size:12px;line-height:1.45}
 /* the dossier: an in-world personnel file, opened by clicking a figure */
 .dossier{
   /* Starts BELOW the tab dock (top 14 + ~38 tall) — at top:16 the tabs sat on the
@@ -361,7 +364,7 @@ body{
 .tchip select{font:inherit;font-size:10.5px;padding:1px 3px;background:var(--panel);color:var(--ink);
   border:1px solid var(--card-line);border-radius:5px}
 .callspanel.on{display:flex}
-.call{background:var(--card);border:1px solid var(--card-line);border-radius:9px;padding:12px}
+.call{background:var(--card);border:1px solid var(--card-line);border-radius:9px;padding:8px 10px}
 .call.offered{border-left:3px solid var(--good,#4f8f52)}
 .call.skipped{opacity:.62}
 .call header{display:flex;align-items:baseline;gap:8px;margin-bottom:5px}
@@ -5924,7 +5927,7 @@ function renderCalls({ feed = [], settings, record }, { liveOnly = false } = {})
     liveRegion.innerHTML = "";
     liveRegion.appendChild(buildScoreline(record, feed));
     const w = document.createElement("div");
-    w.style.cssText = "display:flex;flex-direction:column;gap:9px";
+    w.style.cssText = "display:flex;flex-direction:column;gap:7px";
     liveRegion.appendChild(w);
     paintFeedInto(w, feed, settings);
     return;
@@ -5941,7 +5944,7 @@ function renderCalls({ feed = [], settings, record }, { liveOnly = false } = {})
 
   // 1. THE TEAM — how you manage it: shift, cadence, brain, token, pinned hunts.
   const teamBox = document.createElement("div");
-  teamBox.style.cssText = "display:flex;flex-direction:column;gap:11px";
+  teamBox.style.cssText = "display:flex;flex-direction:column;gap:5px";
   callsPanel.appendChild(teamBox);
   window.__renderTeamInto?.(teamBox);
 
@@ -5950,11 +5953,11 @@ function renderCalls({ feed = [], settings, record }, { liveOnly = false } = {})
 
   // 2+3. THE LIVE REGION — score and calls. The ONLY part a poll rebuilds.
   liveRegion = document.createElement("div");
-  liveRegion.style.cssText = "display:flex;flex-direction:column;gap:7px";
+  liveRegion.style.cssText = "display:flex;flex-direction:column;gap:5px";
   callsPanel.appendChild(liveRegion);
   liveRegion.appendChild(buildScoreline(record, feed));
   const feedWrap = document.createElement("div");
-  feedWrap.style.cssText = "display:flex;flex-direction:column;gap:9px";
+  feedWrap.style.cssText = "display:flex;flex-direction:column;gap:7px";
   liveRegion.appendChild(feedWrap);
 
   // 4. THE REST — folded, each drawer counting what is inside it.
@@ -6156,7 +6159,7 @@ function foldSection(label, { open = false } = {}) {
   head.setAttribute("aria-expanded", String(open));
   head.style.cssText = "display:flex;align-items:center;gap:8px;width:100%;text-align:left;cursor:pointer;" +
     "background:none;border:0;color:inherit;font:inherit;font-size:10.5px;letter-spacing:.14em;" +
-    "text-transform:uppercase;padding:9px 2px;opacity:.85";
+    "text-transform:uppercase;padding:4px 2px;opacity:.85";
   const caret = document.createElement("span");
   caret.textContent = open ? "\u25be" : "\u25b8";
   caret.style.cssText = "font-size:11px;opacity:.7";
@@ -6164,7 +6167,7 @@ function foldSection(label, { open = false } = {}) {
   text.textContent = label;
   head.append(caret, text);
   const body = document.createElement("div");
-  body.style.cssText = "display:" + (open ? "flex" : "none") + ";flex-direction:column;gap:11px;padding-bottom:6px";
+  body.style.cssText = "display:" + (open ? "flex" : "none") + ";flex-direction:column;gap:6px;padding-bottom:4px";
   head.addEventListener("click", () => {
     const now = body.style.display === "none";
     body.style.display = now ? "flex" : "none";
