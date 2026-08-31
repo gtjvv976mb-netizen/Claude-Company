@@ -10,10 +10,14 @@
 #   curl -fsSL https://claudedotcompany.com/executor/install.sh | bash -s -- \
 #     --secret <YOUR_EXECUTOR_SECRET> --floor <YOUR_FLOOR_NUMBER>
 #
-# Optional flags: --max-sol 0.05  --daily-cap 0.5  --api https://...
+# Optional flags: --max-sol 0.05  --daily-cap 0.5  --rpc https://...  --api https://...
+#
+# --rpc MATTERS: without it the bot falls back to Solana's free public endpoint,
+# which is aggressively rate-limited and 403s some clients. A trading loop that
+# gets throttled mid-exit is a real way to lose money — pass your own provider.
 set -euo pipefail
 
-SECRET=""; FLOOR=""; MAX_SOL="0.05"; DAILY_CAP="0.5"
+SECRET=""; FLOOR=""; MAX_SOL="0.05"; DAILY_CAP="0.5"; RPC=""
 API="https://claude-company-api.onrender.com"
 STATIC="https://claudedotcompany.com"
 while [ $# -gt 0 ]; do
@@ -22,6 +26,7 @@ while [ $# -gt 0 ]; do
     --floor) FLOOR="$2"; shift 2;;
     --max-sol) MAX_SOL="$2"; shift 2;;
     --daily-cap) DAILY_CAP="$2"; shift 2;;
+    --rpc) RPC="$2"; shift 2;;
     --api) API="$2"; shift 2;;
     --static) STATIC="$2"; shift 2;;
     *) echo "unknown flag: $1"; exit 1;;
@@ -57,6 +62,10 @@ if [ ! -f burner.json ]; then
   echo "▶ generating a BURNER wallet (node keygen — no solana CLI needed)…"
   node -e 'const{Keypair}=require("@solana/web3.js");const fs=require("fs");const k=Keypair.generate();fs.writeFileSync("burner.json",JSON.stringify(Array.from(k.secretKey)));console.log(k.publicKey.toBase58())' > .pubkey
 fi
+# A burner from a previous run leaves no .pubkey; derive it rather than failing.
+if [ ! -s .pubkey ] && [ -f burner.json ]; then
+  node -e 'const{Keypair}=require("@solana/web3.js");const fs=require("fs");console.log(Keypair.fromSecretKey(new Uint8Array(JSON.parse(fs.readFileSync("burner.json")))).publicKey.toBase58())' > .pubkey
+fi
 PUBKEY="$(cat .pubkey)"
 
 # systemd service (24/7, restart on reboot). Starts in DRY RUN by design.
@@ -75,6 +84,7 @@ Environment=KEYPAIR=$DIR/burner.json
 Environment=MAX_SOL_PER_TRADE=$MAX_SOL
 Environment=DAILY_SOL_CAP=$DAILY_CAP
 Environment=EXECUTE=0
+${RPC:+Environment=SOLANA_RPC=$RPC}
 ExecStart=$(command -v node) $DIR/poller.mjs
 Restart=always
 RestartSec=5
@@ -101,6 +111,7 @@ cat <<DONE
     2) sudo systemctl restart cc-executor
 
   Caps in force: max $MAX_SOL SOL/trade, $DAILY_CAP SOL/day.
+  RPC: ${RPC:-Solana public (rate-limited — pass --rpc for your own provider)}
   Stop anytime:  sudo systemctl stop cc-executor
 ════════════════════════════════════════════════════════════════
 DONE
