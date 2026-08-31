@@ -194,13 +194,9 @@ function startPenthouse() {
    * next boot for three hours on the strength of a failure. A halt is not a day's
    * work. It counts as done only if it worked something up, published something, or
    * legitimately had nothing to do because a position is already open. */
-  const researchStamped = async () => {
-    setKv("last_cycle_start_at", Date.now());
-    const r = await research();
-    const didWork = !!r && ((r.workedUp ?? 0) > 0 || (r.opened ?? 0) > 0 || r.skipped === "position_open");
-    if (didWork) setKv("last_cycle_done_at", Date.now());
-    else console.log(`[penthouse] cycle did no work (${r?.stopped ?? "failed"}) — not stamping it as done, the next boot will retry`);
-  };
+  /* researchStamped lived here and stamped completion itself. The continuous loop
+   * below does that inline, and two copies of the same rule is how they drift apart —
+   * which already cost a day once, when a stamp recorded intent instead of outcome. */
   const MIN_RETRY_MS = Number(process.env.PENTHOUSE_MIN_RETRY_MINS || 20) * 60000;
   const sinceDone = Date.now() - getKv("last_cycle_done_at");
   const sinceStart = Date.now() - getKv("last_cycle_start_at");
@@ -220,17 +216,70 @@ function startPenthouse() {
     catch { return true; }   // table missing -> do not force; fail toward the stamp
   })();
   if (!everPublished && sinceStart > MIN_RETRY_MS) {
-    console.log(`[penthouse] boot cycle in 15s — the desk has never published a call, so no completion stamp is trusted`);
-    setTimeout(researchStamped, 15000);
+    console.log(`[penthouse] no call has ever published — the continuous loop starts without trusting any completion stamp`);
+    // the continuous loop below starts on its own
   } else if (sinceDone > (cycleMins / 2) * 60000 && sinceStart > MIN_RETRY_MS) {
-    console.log(`[penthouse] boot cycle in 15s — no cycle has COMPLETED in ${Math.round(sinceDone / 60000)}m`);
-    setTimeout(researchStamped, 15000);
+    console.log(`[penthouse] no cycle has COMPLETED in ${Math.round(sinceDone / 60000)}m — the continuous loop picks it up`);
+    // the continuous loop below starts on its own
   } else if (sinceStart <= MIN_RETRY_MS) {
     console.log(`[penthouse] boot cycle held — one started ${Math.round(sinceStart / 60000)}m ago, inside the ${MIN_RETRY_MS / 60000}m retry guard`);
   } else {
     console.log(`[penthouse] boot cycle skipped — last COMPLETED ${Math.round(sinceDone / 60000)}m ago`);
   }
-  setInterval(researchStamped, cycleMins * 60000);
+  /* CONTINUOUS, NOT ON A CLOCK.
+   *
+   * A fixed 20-minute interval means the desk works for about five minutes and then
+   * sits idle for fifteen — roughly three quarters of the clock spent waiting while
+   * memecoins move. That is the wrong shape for this market, and "runs 24/7" was only
+   * true of the process, not of the work.
+   *
+   * So the loop goes again as soon as it finishes, and the BRAKES set the pace instead
+   * of a timer. That is the right way round: the hourly pace and the daily cap already
+   * know how fast the desk can afford to think, and they are measured in money rather
+   * than minutes. A timer was always a crude proxy for them.
+   *
+   * The backoff is what stops a continuous loop becoming a hot one. Three cases, and
+   * they need different answers:
+   *   worked   — go again almost immediately; there is more market to read.
+   *   nothing  — the pool was empty or the book full. Nothing is wrong, but nothing
+   *              will change in ten seconds either, so wait a little.
+   *   blocked  — paced or out of budget. Waiting is the entire remedy, so wait longer
+   *              rather than spinning against a brake that will refuse identically.
+   */
+  const GAP_WORKED = Number(process.env.PENTHOUSE_GAP_WORKED_S || 45) * 1000;
+  const GAP_IDLE = Number(process.env.PENTHOUSE_GAP_IDLE_S || 240) * 1000;
+  const GAP_BLOCKED = Number(process.env.PENTHOUSE_GAP_BLOCKED_S || 600) * 1000;
+
+  let running = false;
+  async function continuousResearch() {
+    if (running) return;                 // never two cycles in flight
+    running = true;
+    let gap = GAP_IDLE;
+    try {
+      const r = await research();
+      if (r && ((r.workedUp ?? 0) > 0 || (r.opened ?? 0) > 0)) {
+        setKv("last_cycle_done_at", Date.now());
+        gap = GAP_WORKED;
+      } else if (r?.stopped || r?.skipped === "budget") {
+        gap = GAP_BLOCKED;
+      } else if (r?.skipped === "position_open") {
+        // The book is full, which is success, not a stall — a slot frees when a trade
+        // closes and the monitor is what notices that, not this loop.
+        setKv("last_cycle_done_at", Date.now());
+        gap = GAP_IDLE;
+      }
+    } catch (e) {
+      console.log(`[penthouse] loop error: ${e.message}`);
+      gap = GAP_BLOCKED;
+    } finally {
+      running = false;
+      setTimeout(continuousResearch, gap);
+    }
+  }
+  setKv("last_cycle_start_at", Date.now());
+  setTimeout(continuousResearch, 20000);
+  console.log(`[penthouse] research runs CONTINUOUSLY — ${GAP_WORKED / 1000}s after a productive pass, ` +
+    `${GAP_IDLE / 1000}s when idle, ${GAP_BLOCKED / 1000}s when the money brake is on`);
 
   // The sniper lane: cheap, frequent, and only ever pays for ignition.
   const freshMins = Number(process.env.PENTHOUSE_FRESH_MINS || 5);
@@ -257,7 +306,7 @@ function startPenthouse() {
   };
   setTimeout(promote, 120000);
   setInterval(promote, promoteMins * 60000);
-  console.log(`[penthouse] research every ${cycleMins}m, fresh scan every ${freshMins}m, watch checks every ${promoteMins}m`);
+  console.log(`[penthouse] fresh scan every ${freshMins}m, watch checks every ${promoteMins}m`);
 }
 
 async function main() {

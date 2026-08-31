@@ -472,6 +472,34 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               bootedAt: BOOTED_AT,
               upMins: Math.round((Date.now() - BOOTED_AT) / 60000),
             },
+            /* THE FUNNEL. The desk is a narrowing pipe and its shape is the whole
+             * story: hundreds swept for free, most killed by a screen that costs
+             * nothing, a handful bought, one traded. Reading the drop-off at each
+             * stage is how you tell "the market offered nothing" from "the desk is
+             * strangling itself" — two failures that look identical from the outside
+             * and cost a full day to separate by hand. */
+            funnel: (() => {
+              try {
+                const ev = (t, since) => q(`SELECT COUNT(*) n FROM chronicle WHERE type='${t}' AND ts > ${since}`);
+                const since = Date.now() - 6 * 3600e3;
+                const j = (t, path) => { try {
+                  return db.prepare(`SELECT COALESCE(SUM(CAST(json_extract(data,'$.${path}') AS INTEGER)),0) n
+                                     FROM chronicle WHERE type=? AND ts > ?`).get(t, since)?.n ?? 0;
+                } catch { return 0; } };
+                return {
+                  windowHours: 6,
+                  swept: j("board:built", "considered"),
+                  offBoardBySize: j("board:built", "offBoard"),
+                  cellsFilled: j("board:built", "cellsFilled"),
+                  shortlisted: j("scout:shortlist", "count"),
+                  studied: j("cohort:ranked", "studied"),
+                  eligible: j("cohort:ranked", "eligible"),
+                  published: q(`SELECT COUNT(*) n FROM calls WHERE opened_at > ${since}`),
+                  cyclesRun: ev("cycle:end", since),
+                };
+              } catch { return null; }
+            })(),
+
             /* THE SHADOW BOOK — what the desk's REFUSALS went on to do.
              * The only honest answer to "we could have profited": a desk whose
              * refusals mostly die is calibrated; one whose refusals mostly double is
