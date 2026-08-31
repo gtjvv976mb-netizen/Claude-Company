@@ -113,7 +113,13 @@ export async function gather(mint, hook = "") {
 
   return {
     ok: true,
-    promotion, callouts, deployer, marketRegime, crosscheck, xRead,
+    promotion, callouts, deployer, marketRegime, crosscheck,
+    /* NO xRead HERE. The paid X read was split out into enrichWithXRead() so that the
+     * free safety screen runs FIRST and the desk never buys a Grok read for a coin it
+     * was always going to refuse. This return kept naming the variable that moved, so
+     * every gather() threw `xRead is not defined` — a ReferenceError on the single path
+     * every workup goes through, which took the entire paid pipeline down while the
+     * free stages carried on looking healthy. enrichWithXRead sets ev.xRead. */
     mint,
     hook,
     symbol: best?.baseSymbol ?? "?",
