@@ -77,5 +77,28 @@ ok("a coin rank loves but the screen kills is caught here",
   wouldSurviveScreen(contradiction) === "too_big",
   "the exact contradiction that produced eight barren cycles");
 
+
+/* ── ONE RULE, BOTH LANES ─────────────────────────────────────────────────────
+ * The fresh lane had its own hand-rolled copy of this filter, with its own inline
+ * defaults. When the market-cap ceiling was added to the screen, that copy never
+ * learned about it — so the 5-minute lane kept buying workups on coins over the
+ * ceiling and `too_big` became the desk's most common refusal at 21 occurrences.
+ * Two lanes with two copies of one rule is a bug waiting for the next threshold to
+ * move. */
+console.log("\nTHE FRESH LANE USES THE SAME FILTER, NOT A COPY");
+{
+  const src = await (await import("node:fs/promises")).readFile("./src/penthouse.js", "utf8");
+  const fresh = src.slice(src.indexOf("export async function freshScan"));
+  ok("the fresh lane calls wouldSurviveScreen", fresh.includes("wouldSurviveScreen("));
+  ok("and no longer hand-rolls its own thresholds",
+    !/minLiquidityUsd \?\? 25000|minVolume24hUsd \?\? 10000|minTxns24h \?\? 50/.test(fresh),
+    "no inline default thresholds left in the lane");
+  // The specific coin shape that produced 21 refusals.
+  const big = coin({ sym: "BIG", mcap: (s.maxMarketCapUsd || 3e6) * 20, liq: 900_000, vol: 2_000_000, tx: 5000 });
+  ok("a coin over the ceiling is rejected by the shared filter",
+    wouldSurviveScreen(big) === "too_big",
+    "the fresh lane now drops it instead of paying for a workup");
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

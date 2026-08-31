@@ -659,14 +659,18 @@ export async function freshScan({ minScore = 45 } = {}) {
       if (store.recentlyJudged(c.mint)) continue;
       const age = c.pair?.ageHours ?? 0;
       if (age <= 0 || age >= 48) continue;
-      // Pre-screen from pair data already in hand: the lane's one workup slot
-      // must not be spent on a coin the free screen will kill on arrival —
-      // its first champion scored 52 on ignition and died of thin_liquidity.
-      const liq = c.pair?.liquidityUsd ?? 0;
-      const vol = c.pair?.volume?.h24 ?? 0;
-      const tx = (c.pair?.txns?.h24?.buys ?? 0) + (c.pair?.txns?.h24?.sells ?? 0);
-      if (liq < (cfg.screen?.minLiquidityUsd ?? 25000) || vol < (cfg.screen?.minVolume24hUsd ?? 10000)
-          || tx < (cfg.screen?.minTxns24h ?? 50)) continue;
+      /* Pre-screen from pair data already in hand: the lane's one workup slot must not
+       * be spent on a coin the free screen will kill on arrival — its first champion
+       * scored 52 on ignition and died of thin_liquidity.
+       *
+       * This used to be hand-rolled here, checking liquidity, volume and transactions
+       * with its own inline defaults — and when the market-cap ceiling was added to the
+       * screen, this copy never learned about it. So the 5-minute lane kept buying
+       * workups on coins over the ceiling, and `too_big` became the desk's single most
+       * common refusal at 21 occurrences. Two lanes with two copies of one rule is a
+       * bug waiting for the next threshold to move; both now call the same function. */
+      const wouldDie = wouldSurviveScreen(c);
+      if (wouldDie) continue;
       const cat = classify(c);
       const r = rank(c);
       // The race adjustment: the winner of a live naming race gets the seat;
