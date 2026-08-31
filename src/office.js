@@ -649,6 +649,24 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             reason = `${errRow.n} workups in the last hour failed identically: "${errRow.e}" — every coin failing the same way is a broken build, not a bad coin`;
           }
 
+          /* WHY SEATS FAIL, in public.
+           *
+           * "fewer than three analysts returned" is the desk's 4th most common refusal —
+           * 13 paid workups thrown away, gather and all, because three of five seats
+           * could not answer. Each seat already retries three times on 429/5xx/parse, so
+           * three failing TOGETHER is not flakiness; it is one shared cause firing five
+           * times. Which cause was unreadable, because the error strings sat in the
+           * private chronicle while the public counters only said "insufficient".
+           *
+           * That is the same shape as the outage this heartbeat just caught, so it gets
+           * the same treatment: group the failures and say the reason out loud. */
+          const seatFails = (() => { try {
+            return db.prepare(`
+              SELECT json_extract(data,'$.seat') seat, json_extract(data,'$.error') err, COUNT(*) n
+              FROM chronicle WHERE type='seat:failed' AND ts > ?
+              GROUP BY seat, err ORDER BY n DESC LIMIT 5`).all(Date.now() - 6 * 3600e3);
+          } catch { return []; } })();
+
           const lastEv = q("SELECT MAX(ts) t FROM chronicle")?.t ?? null;
           const cnt = (sql) => q(sql)?.n ?? 0;
           const live = calls.liveCalls();
@@ -660,6 +678,17 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           const settled = q("SELECT COUNT(*) n, COALESCE(SUM(pnl_usd),0) pnl, SUM(pnl_usd>0) w FROM results");
           return json(200, {
             state, reason, lastEventTs: lastEv, grokEnabled: !!process.env.XAI_API_KEY,
+            /* The desk's own failures, not the market's. Anything here is the desk
+             * losing paid work to its own plumbing. */
+            seatFailures6h: seatFails.map((r) => ({ seat: r.seat, n: r.n, error: String(r.err ?? "").slice(0, 160) })),
+            withheldToday: (() => { try {
+              return db.prepare(`
+                SELECT reason, COUNT(*) n FROM chronicle
+                WHERE type='call:withheld' AND ts > ?
+                GROUP BY json_extract(data,'$.reason') ORDER BY n DESC LIMIT 6`).all(dayAgo)
+                .map((r) => { let x = r.reason; try { x = JSON.parse(r.reason); } catch {}
+                              return { n: r.n, reason: String(x?.reason ?? x ?? "").slice(0, 120) }; });
+            } catch { return []; } })(),
             today: {
               workups: cnt(`SELECT COUNT(DISTINCT cycle||'-'||mint) n FROM verdicts WHERE ts > ${dayAgo}`),
               kills: cnt(`SELECT COUNT(*) n FROM verdicts WHERE killed=1 AND ts > ${dayAgo}`),
