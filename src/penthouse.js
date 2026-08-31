@@ -175,9 +175,53 @@ const SUBSTANTIVE = new Set(["established", "utility", "infra", "defi", "ai"]);
  * guaranteed carries no information. So at least one slot is reserved for a coin with a
  * real base rate behind it, and the refusal starts meaning something.
  */
+/**
+ * WOULD THE FREE SCREEN KILL THIS BEFORE A SEAT EVER SAW IT?
+ *
+ * The cycle gets THREE workup slots and was choosing them purely on rank — while
+ * rank() rewards depth and momentum, and the screen kills on thresholds rank knows
+ * nothing about. So the desk kept spending its whole allowance on coins that died at
+ * the first free gate: eight consecutive cycles studied 1-3 coins each and produced
+ * ZERO eligible candidates, every time.
+ *
+ * That is not a strictness problem, it is a selection problem — the slots were being
+ * filled with coins the desk was always going to refuse. The fresh lane has pre-filtered
+ * like this since its first champion died of thin_liquidity; the cycle never learned.
+ *
+ * Only the checks answerable from pair data already in hand. Anything needing an RPC
+ * read or a Jupiter probe still belongs inside the workup, where it is measured
+ * properly rather than guessed at here.
+ */
+export function wouldSurviveScreen(c) {
+  const p = c.pair || {};
+  const s = cfg.screen;
+  const liq = p.liquidityUsd ?? 0;
+  const vol = p.volume?.h24 ?? 0;
+  const tx = (p.txns?.h24?.buys ?? 0) + (p.txns?.h24?.sells ?? 0);
+  const mcap = p.marketCap ?? p.fdv ?? null;
+  const age = p.ageHours ?? 0;
+  if (liq < s.minLiquidityUsd) return "thin_liquidity";
+  if (vol < s.minVolume24hUsd) return "no_volume";
+  if (tx < s.minTxns24h) return "no_participants";
+  if (age < s.minPairAgeHours) return "too_new";
+  if (s.maxMarketCapUsd > 0 && mcap != null && mcap > s.maxMarketCapUsd) return "too_big";
+  if (liq > 0 && vol / liq > s.maxVolToLiqRatio) return "wash_suspect";
+  if (liq > 0 && mcap != null && mcap / liq > s.maxFdvToLiqRatio) return "fdv_propped";
+  return null;
+}
+
 export function selectShortlist(scored, workups) {
-  const substantive = scored.filter((c) => SUBSTANTIVE.has(c.category));
-  const speculative = scored.filter((c) => !SUBSTANTIVE.has(c.category));
+  /* Spend the slots on coins that can actually reach a seat. If the filter would empty
+   * the list entirely the desk falls back to the ranked order — a cycle that studies a
+   * doomed coin still learns something, whereas a cycle that studies nothing cannot. */
+  const viable = scored.filter((c) => wouldSurviveScreen(c) === null);
+  const pool = viable.length ? viable : scored;
+  if (viable.length < scored.length)
+    emit("cycle:prefiltered", { considered: scored.length, viable: viable.length,
+      note: "coins the free screen would kill were dropped before paying for a workup" });
+
+  const substantive = pool.filter((c) => SUBSTANTIVE.has(c.category));
+  const speculative = pool.filter((c) => !SUBSTANTIVE.has(c.category));
   const reserved = Math.min(substantive.length, Math.max(1, Math.floor(workups / 2)));
 
   const picked = substantive.slice(0, reserved);
