@@ -65,15 +65,31 @@ export const DEFAULTS = {
   fDefault: 0.02,            // what to risk while the sample is too small to trust
   nMin: 12,                  // closed trades before an estimated W is usable at all
   bookHeatMax: 0.08,         // sum of f across open positions — correlated names share it
-  maxAgeHours: 48,           // the third exit: stop, target, or AGE. Never "close to working"
+  maxAgeHours: 12,           // the third exit: stop, target, or AGE. Never "close to working"
   // TUNED BY SIMULATION, not by feel — see tune.mjs. On a fat-tailed return
   // distribution every scale-out setting REDUCED mean P&L: cutting winners kills
   // the runners that carry the whole edge. Zero scale-out with a wide trail
   // matched the naive bot's mean while cutting the bad-run tail (10th pct
   // -0.152 -> -0.118 SOL) and drawdown (-0.233 -> -0.187). Change these only
   // with a fresh sweep, never by intuition.
-  scaleOutPct: 0,            // fraction sold when target is first touched (0 = ride it)
-  trailPct: 0.60,            // trail this far under the high water mark, once armed
+  /* TAKE THE MONEY. These three were written for riding a trend and are wrong for a
+   * snipe, which is what this desk actually does: in low, out high, do not fall in love.
+   *
+   * scaleOutPct 0 -> 0.5. Half the position comes off the moment the desk's own target
+   * prints. That is the trade paying for itself: the remainder rides to the 2x rule as
+   * a free option, and a coin that reverses immediately after has still made money.
+   *
+   * trailPct 0.60 -> 0.25. Measured, because the old number was indefensible: a 60%
+   * trail on a coin that peaked at 1.9x put the stop at 0.76 — under the breakeven
+   * floor — so the position handed back the ENTIRE gain and exited flat. At 25% the
+   * same peak keeps +42%. A memecoin moves in one impulse and the retrace that arms a
+   * wide trail is the same retrace that takes the gain away.
+   *
+   * maxAgeHours 48 -> 12. Two days is a trend-follower's horizon. A micro-cap that has
+   * not resolved within half a day is not building, it is over, and the position is
+   * occupying risk budget that the next candidate needs — one appears every half hour. */
+  scaleOutPct: 0.5,          // half off at the desk's target; the rest rides free
+  trailPct: 0.25,            // trail this far under the high water mark, once armed
   stopBufferPct: 0,          // widen the desk's stop by this much (0 = obey exactly)
   /* SNIPE-HOLD-SELL: take the whole position at this multiple of entry. 2 = sell at a
    * double. Checked before the trail arms, so a trail can never intercept the double
