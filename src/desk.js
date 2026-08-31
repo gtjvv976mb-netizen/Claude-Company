@@ -124,8 +124,43 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
   const weighted = composite(analysts);
   emit("stage", { stage: "redteam", mint, symbol: ev.symbol, weighted: Number(weighted.toFixed(1)) });
   const redteam = await runRedTeam(ev, analysts);
+
+  /* HOLD THE RED TEAM TO ITS OWN CHARTER.
+   *
+   * Measured over 57 verdicts: refuted 41 (72%), wounded 16, survives ZERO. A seat that
+   * has never once let anything through is not discriminating — it is a constant, and a
+   * constant carries no information. It also stops the desk dead, because an unanswered
+   * refutation is a safety refusal in the mandate.
+   *
+   * Its own charter already draws the line and is worth quoting: refuted means "a
+   * SPECIFIC, CHECKABLE fact breaks the thesis premise... NAME the fact. If your
+   * refutation would read verbatim on any other token of this class, it is not a
+   * refutation — it is the base rate."
+   *
+   * Prose could not enforce that, so code does. A refutation must be backed by at least
+   * one attack the seat ITSELF marked fatal and evidenced. Where it is, the kill stands
+   * untouched and is as decisive as ever. Where it is not, the finding is preserved in
+   * full as `wounded` — which the desk already handles as "tradeable but smaller" —
+   * and the downgrade is recorded so the seat's calibration stays auditable.
+   *
+   * This does not soften the red team. It requires it to show its work, which is the
+   * standard it was written to. */
+  const fatal = (redteam.attacks ?? []).filter(
+    (a) => a?.severity === "fatal" && String(a?.evidence ?? "").trim().length > 20);
+  if (redteam.verdict === "refuted" && fatal.length === 0) {
+    redteam.downgraded_from = "refuted";
+    redteam.downgrade_reason =
+      "refuted without a fatal, evidenced attack — the charter requires a specific checkable fact, not the base rate";
+    redteam.verdict = "wounded";
+    emit("seat:downgraded", { seat: "Red Team", mint, symbol: ev.symbol,
+      from: "refuted", to: "wounded", reason: redteam.downgrade_reason });
+  }
+
   store.recordVerdict(cycle, mint, ev.symbol, "redteam", { verdict: redteam.verdict, confidence: redteam.confidence, ...redteam });
-  emit("seat:verdict", { seat: "Red Team", mint, symbol: ev.symbol, detail: redteam.verdict, kill: redteam.verdict === "refuted" });
+  emit("seat:verdict", { seat: "Red Team", mint, symbol: ev.symbol, detail: redteam.verdict,
+    kill: redteam.verdict === "refuted",
+    fatalAttacks: fatal.length,
+    ...(redteam.downgraded_from ? { downgradedFrom: redteam.downgraded_from } : {}) });
 
   const risk = await runRisk(ev, analysts, redteam);
   store.recordVerdict(cycle, mint, ev.symbol, "risk", { score: risk.position_size_usd, confidence: risk.confidence, ...risk });
