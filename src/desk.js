@@ -188,7 +188,61 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
     fatalAttacks: fatal.length,
     ...(redteam.downgraded_from ? { downgradedFrom: redteam.downgraded_from } : {}) });
 
-  const risk = await runRisk(ev, analysts, redteam);
+  let risk = await runRisk(ev, analysts, redteam);
+
+  /* THE ZERO-SIZE CONTRADICTION — the reason this desk had never published a call.
+   *
+   * The Risk seat sized 10 of 11 workups at $0, and said why, verbatim:
+   *   "Per method rule 4, refuted means position_size_usd is 0 — not negotiable."
+   * No such rule has ever existed. Rule 4 says a refuted verdict cuts size HARD and
+   * that zero is reserved for a mechanical failure — the exit failing at size, or a
+   * live authority. One of those same verdicts recorded "the $500 probe was clean at
+   * 0.05% round-trip" in its own notes, which is that test PASSING.
+   *
+   * A zero size then blocks four independent gates, none of which mentions the red
+   * team: the PM's charter forbids proposing on a zero, the ticket below is not
+   * drafted, compliance raises zero_size_proposal, and the mandate declines for no
+   * usable stop. That is why the refusal ledger showed not one red-team decline while
+   * the red team looked like the problem — the trades died one seat earlier, of a
+   * sentence nobody wrote.
+   *
+   * The charter now states the floor unambiguously. This is the belt to that braces,
+   * because a rule a model can misread is a rule code should check. But the desk must
+   * NOT invent a size — that would be trading on arithmetic no judgement stands behind.
+   * So it asks the seat ONCE more, quoting the seat's own rule against the specific
+   * evidence that contradicts it. If the seat still says zero, the desk takes zero. */
+  const probe = ev.exitProbe?.roundTripLossPct;
+  const exitFails = probe == null || probe > cfg.maxRoundTripSlippagePct;
+  const authorityLive = !!(ev.mintAccount?.mintAuthority || ev.mintAccount?.freezeAuthority);
+
+  if (risk?.position_size_usd === 0 && !exitFails && !authorityLive) {
+    emit("seat:contradiction", { seat: "Risk", mint, symbol: ev.symbol,
+      note: "sized at zero while BOTH mechanical conditions for zero are absent — re-asking once",
+      roundTripLossPct: probe, ceiling: cfg.maxRoundTripSlippagePct,
+      mintAuthority: ev.mintAccount?.mintAuthority ?? null,
+      freezeAuthority: ev.mintAccount?.freezeAuthority ?? null });
+
+    const retry = await runRisk(ev, analysts, redteam, {
+      challenge:
+        `You returned position_size_usd = 0. Rule 4 permits zero in exactly two cases, and NEITHER holds here:\n` +
+        `  (a) the exit fails at size — the round-trip probe measured ${probe}%, inside the desk ceiling of ${cfg.maxRoundTripSlippagePct}%. It did not fail.\n` +
+        `  (b) a live authority can rug it — mintAuthority=${ev.mintAccount?.mintAuthority ?? "null"}, ` +
+        `freezeAuthority=${ev.mintAccount?.freezeAuthority ?? "null"}. Nothing is live.\n\n` +
+        `There is no rule that a refuted red-team verdict forces zero. Rule 4 says such a trade "survives SMALL". ` +
+        `Size it — as small as your judgement requires — and give the stop that goes with it. ` +
+        `If you still believe zero is right, return zero and quote the specific number or authority field you are invoking under (a) or (b).`,
+    }).catch(() => null);
+
+    if (retry) {
+      emit("seat:verdict", { seat: "Risk", mint, symbol: ev.symbol, score: retry.score,
+        confidence: retry.confidence,
+        note: retry.position_size_usd > 0
+          ? `re-sized to $${retry.position_size_usd} once the fabricated rule was withdrawn`
+          : "held at zero on a second look — the desk takes the seat's answer" });
+      risk = retry;
+      store.recordVerdict(cycle, mint, ev.symbol, "risk", retry);
+    }
+  }
   store.recordVerdict(cycle, mint, ev.symbol, "risk", { score: risk.position_size_usd, confidence: risk.confidence, ...risk });
   emit("seat:verdict", { seat: "Risk", mint, symbol: ev.symbol, detail: `$${risk.position_size_usd}` });
 

@@ -141,7 +141,7 @@ a tighter invalidation), or "survives" (your attacks did not land).`,
 }
 
 /** RISK — sizing and the stop. Sees the red team, because size is where doubt is expressed. */
-export async function runRisk(ev, analysts, redteam) {
+export async function runRisk(ev, analysts, redteam, { challenge = null } = {}) {
   return ask({
     seat: "Risk",
     model: cfg.models.risk,
@@ -164,10 +164,29 @@ Method — follow it explicitly:
    meaningful slippage, a larger position cannot be exited at the price your stop assumes,
    and your stop is therefore fiction. Set liquidity_adjusted true when you have cut for this.
 4. Cut size for the red team. A "wounded" verdict should reduce size materially. A
-   "refuted" verdict cuts size by AT LEAST half again — the PM must answer the attack
-   with evidence for the trade to survive, and if it does survive, it survives small.
-   Zero is reserved for the attack that shows the trade mechanically cannot work:
-   the exit fails at size, or a live authority can rug it.
+   "refuted" verdict cuts size hard — the PM must answer the attack with evidence for
+   the trade to survive, and if it does survive, it survives SMALL. Small is not zero.
+
+   ZERO IS A MECHANICAL VERDICT, NOT A CONFIDENCE ONE. You may return
+   position_size_usd = 0 in exactly two cases, both of them facts you can point to in
+   the evidence rather than conclusions you reached:
+     (a) the exit fails at size — the round-trip probe did not complete, or it came
+         back worse than the desk's slippage ceiling; or
+     (b) a live authority can rug it — mint or freeze authority is not renounced.
+   If NEITHER of those is true, you must return a non-zero size, however small. A
+   refuted verdict on a coin that can still be bought and sold is a REASON TO BE SMALL.
+   It is not permission to abstain, and it is not a rule that "refuted means zero".
+
+   This is written at length because the seat got it wrong in production, verbatim:
+   "Per method rule 4, refuted means position_size_usd is 0 — not negotiable." No such
+   rule has ever existed. That single misreading sized 10 of 11 workups at zero, and a
+   zero size independently blocks the PM from proposing, suppresses the ticket, trips a
+   compliance veto and fails the mandate's stop check — so the desk published NOTHING at
+   all. The same verdict's own notes recorded "the $500 probe was clean at 0.05%
+   round-trip", which is case (a) failing to apply, on its own evidence.
+
+   If you size at zero, name which of (a) or (b) you are invoking and quote the number
+   or the authority field you are invoking it on.
 5. Volatility: a token that moves 30% a day cannot carry a 10% stop. It will be taken out
    by noise before the thesis resolves.
 
@@ -180,7 +199,8 @@ Reserve 0 for one case only: the trade is mechanically untradeable — no exit
 path at size, or no stop level that means anything. Everything else gets a size — small when uncertain, never zero.
 A clean but uncertain survivor sizes at roughly a quarter of the per-idea
 ceiling, not at nothing. Uncertainty is expressed in dollars, not in refusal.`,
-    prompt: `Size this idea for ${ev.symbol}.\n\n${bundle(ev)}\n\n${book(analysts)}\n\n=== RED TEAM ===\n${JSON.stringify(redteam)}`,
+    prompt: `Size this idea for ${ev.symbol}.\n\n${bundle(ev)}\n\n${book(analysts)}\n\n=== RED TEAM ===\n${JSON.stringify(redteam)}${
+      challenge ? `\n\n=== THE DESK IS ASKING YOU TO CHECK ONE THING ===\n${challenge}` : ""}`,
   });
 }
 
