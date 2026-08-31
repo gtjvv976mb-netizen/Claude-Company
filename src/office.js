@@ -511,6 +511,21 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
                   AND ts > (strftime('%s','now') * 1000 - 604800000)
                 GROUP BY seat, error ORDER BY n DESC LIMIT 8`),
 
+              /* DID THE CYCLE EVER GET TO CHOOSE?
+               * 14 workups were eligible under the mandate and not one was published,
+               * which can mean two completely different things: the cohort step ran and
+               * found nothing it could publish, or it never ran because the cycle died
+               * before reaching it. The events say which — cohort:ranked carries what
+               * each cycle studied and who won. Without this the two failures are
+               * indistinguishable from the outside, and they need opposite fixes. */
+              cohort: rows(`SELECT json_extract(data,'$.studied') studied,
+                     json_extract(data,'$.eligible') eligible,
+                     json_extract(data,'$.winner.symbol') winner,
+                     json_extract(data,'$.winner.tier') tier, ts
+                FROM chronicle WHERE type='cohort:ranked'
+                  AND ts > (strftime('%s','now') * 1000 - 604800000)
+                ORDER BY ts DESC LIMIT 8`),
+
               /* And the three ways a cycle can end without a call at all. */
               cycleEnds: rows(`SELECT type, COUNT(*) n, MAX(ts) last_ts
                 FROM chronicle
