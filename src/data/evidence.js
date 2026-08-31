@@ -61,40 +61,18 @@ export async function gather(mint, hook = "") {
     if (deployer && !deployer.ok) deployer = { note: deployer.note ?? "deployer unknown" };
   }
 
-  // THE X READ — Grok's native X search, the one evidence source we could
-  // never reach before: is the attention real, rising, and carried by distinct
-  // voices? Skipped on monitor ticks (prices, not biographies) and without a
-  // key. LLM-shaped, so it rides as evidence for the seats — never a screen.
-  let xRead = null;
-  if (hook !== "monitor" && hasGrok()) {
-    const xr = await grokXRead({ symbol: best?.baseSymbol ?? mint.slice(0, 6), mint, hook }).catch(() => null);
-    if (xr?.ok) xRead = { ...xr.read, citations: xr.citations };
-    else if (xr) xRead = { error: xr.error };
-
-    /* THE LEDGER. A rugger rotates wallets between launches, so on-chain forensics
-     * meets a first-time deployer every time; the X handle is the identity they
-     * cannot abandon, because the audience is the product. Recording what the read
-     * found — and handing back what the desk already knew about this handle —
-     * is what makes the second coin from a known rugger free to catch. */
-    if (xRead?.dev_handle) {
-      try {
-        const { recordDev, reputationFor } = await import("../devrep.js");
-        const prior = reputationFor(xRead.dev_handle);
-        recordDev({
-          handle: xRead.dev_handle, serialRugger: xRead.serial_rugger,
-          rugEvidence: xRead.rug_evidence, redFlags: xRead.dev_red_flags,
-          deletedHistory: xRead.deleted_history,
-          symbol: best?.baseSymbol ?? null, mint,
-        });
-        // What we knew BEFORE this read, so a seat can tell a fresh finding from a
-        // record — and see the other coins this account has already put through here.
-        if (prior && prior.verdict !== "unknown")
-          xRead.desk_record = { verdict: prior.verdict, evidence: prior.evidence,
-            seen_before: prior.tokens.length, first_seen: prior.first_seen };
-      } catch {}
-    }
-  }
-
+  /* THE X READ USED TO HAPPEN HERE, AND IT COSTS MONEY.
+   *
+   * gather() is free evidence — DexScreener, RPC, Jupiter. Grok's x_search is not, and
+   * running it here meant the desk paid to research the reputation of every coin it was
+   * about to reject as a honeypot. Measured: 107 paid X reads against 235 screen kills.
+   *
+   * Safety is now the FIRST gate, as it should always have been. Nothing is bought
+   * about a coin until the deterministic screen has said it can be held and sold:
+   * mint and freeze authority, an exit that closes, holder concentration, the launch
+   * farm, the bundle. Only then does the desk pay to ask who is promoting it.
+   *
+   * See enrichWithXRead below, called from workup() after the screen passes. */
   const vol24 = best?.volume?.h24 ?? null;
   // Depth must be measured across ALL venues, not the single deepest pair. A token
   // trading on 30 pools looks fraudulently thin if you only price the biggest one.
@@ -224,9 +202,34 @@ export function screen(ev) {
 
   // A live freeze authority is a honeypot vector no quote can see: a Jupiter
   // round trip proves a ROUTE exists, not that your transfer will execute.
+  /* THE HONEYPOT MECHANICS. Every one of these is a way the token can be used against
+   * whoever holds it, and every one is readable from the mint account for free — so
+   * they belong HERE, in the first gate, before the desk spends anything researching
+   * who is promoting the coin.
+   *
+   * Two of these were previously only a seat's OPINION. The forensics analyst called a
+   * live mint authority "near-disqualifying unless there is a credible, verifiable
+   * reason (e.g. a documented emissions schedule)" — which is the right nuance for an
+   * asset that HAS an emissions schedule, and no nuance at all for a memecoin, where a
+   * live mint authority simply means the creator can print supply and sell it to you.
+   * Leaving that to a judgement call put a printable coin in front of the paid seats,
+   * and let it through whenever the seat was feeling generous.
+   *
+   * A permanentDelegate can take the tokens out of your wallet. A transferHook runs
+   * arbitrary code on every transfer and can refuse your sell. Those are not risks to
+   * be priced, they are the trade being a trap, and no conviction score should be able
+   * to outvote them. */
   const flags = (ev.mintAccount?.flags ?? []).map((f) => f.flag ?? f);
   check(flags.includes("freeze_authority_live"),
     "freezable", "freeze authority is live — accounts can be frozen mid-trade");
+  check(flags.includes("mint_authority_live"),
+    "mintable", "mint authority is live — the creator can print supply and sell it to you");
+  check(flags.includes("ext_permanentDelegate"),
+    "seizable", "a permanent delegate can move or burn tokens out of your wallet without consent");
+  check(flags.includes("ext_transferHook"),
+    "transfer_hook", "an arbitrary program runs on every transfer and can block your sell entirely");
+  check(flags.includes("ext_defaultAccountState"),
+    "frozen_by_default", "new accounts are frozen by default — a buyer may be unable to sell");
 
   // One wallet holding half the float (pool already excluded upstream).
   check(ev.holders?.ok && ev.holders.top1Pct > 50,
@@ -258,4 +261,43 @@ export function screen(ev) {
   }
 
   return { pass: fails.length === 0, fails };
+}
+
+/**
+ * THE PAID HALF OF THE EVIDENCE — bought only for coins that already cleared safety.
+ *
+ * Split out of gather() deliberately. The screen is free and answers the question that
+ * can disqualify a coin outright ("can this be used against a holder, and can I get
+ * out"). Reputation research is expensive and answers a question that only matters
+ * once the answer to the first one is yes.
+ *
+ * Mutates and returns `ev` so the caller keeps one evidence object; fails open, because
+ * no X read is missing evidence, never a block.
+ */
+export async function enrichWithXRead(ev, hook = "") {
+  if (hook === "monitor" || !hasGrok()) return ev;
+  const xr = await grokXRead({ symbol: ev.pair?.baseSymbol ?? ev.mint.slice(0, 6), mint: ev.mint, hook })
+    .catch(() => null);
+  if (xr?.ok) ev.xRead = { ...xr.read, citations: xr.citations };
+  else if (xr) ev.xRead = { error: xr.error };
+
+  /* THE LEDGER. A rugger rotates wallets between launches, so on-chain forensics meets
+   * a first-time deployer every time; the X handle is the identity they cannot abandon,
+   * because the audience is the product. */
+  if (ev.xRead?.dev_handle) {
+    try {
+      const { recordDev, reputationFor } = await import("../devrep.js");
+      const prior = reputationFor(ev.xRead.dev_handle);
+      recordDev({
+        handle: ev.xRead.dev_handle, serialRugger: ev.xRead.serial_rugger,
+        rugEvidence: ev.xRead.rug_evidence, redFlags: ev.xRead.dev_red_flags,
+        deletedHistory: ev.xRead.deleted_history,
+        symbol: ev.pair?.baseSymbol ?? null, mint: ev.mint,
+      });
+      if (prior && prior.verdict !== "unknown")
+        ev.xRead.desk_record = { verdict: prior.verdict, evidence: prior.evidence,
+          seen_before: prior.tokens.length, first_seen: prior.first_seen };
+    } catch {}
+  }
+  return ev;
 }

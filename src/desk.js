@@ -1,5 +1,5 @@
 import * as ds from "./data/dexscreener.js";
-import { gather, screen } from "./data/evidence.js";
+import { gather, screen, enrichWithXRead } from "./data/evidence.js";
 import { ANALYSTS, runAnalyst, runNarrative } from "./agents/analysts.js";
 import { runScout, runRedTeam, runRisk, runPM, runExecution } from "./agents/decision.js";
 import { complianceCheck } from "./agents/compliance.js";
@@ -79,6 +79,14 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
       detail: sc.fails.map((f) => f.code).join(", "), report: rec.reportFile });
     return rec;
   }
+
+  /* SAFETY CLEARED — only now does the desk buy anything about this coin.
+   *
+   * The screen above answered the question that disqualifies outright: can this be used
+   * against a holder, and can the position be left. Reputation research is expensive
+   * and only matters once that answer is yes, so the paid X read happens HERE rather
+   * than inside gather(), where it was costing 107 reads against 235 screen kills. */
+  await enrichWithXRead(ev, hook);
 
   // --- Stages 2-6: five independent analysts, in parallel. ---
   emit("stage", { stage: "analysis", mint, symbol: ev.symbol });
