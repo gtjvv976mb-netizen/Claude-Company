@@ -36,6 +36,9 @@ import * as identity from "./identity.js";
 import * as passes from "./passes.js";
 import { callouts } from "./whales.js";
 
+/** When THIS process started. A short uptime next to a stale event is a restart. */
+const BOOTED_AT = Date.now();
+
 /** Serves the trading floor and streams the desk's real events to it. */
 export function startOffice(port = Number(process.env.PORT) || 4949) {
   const server = http.createServer(async (req, res) => {
@@ -453,6 +456,20 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
                * process, and the only honest way to check it is to read the numbers
                * that process is holding. */
               seatWeights: cfg.weights,
+            },
+            /* WHICH BUILD IS ACTUALLY SERVING THIS.
+             *
+             * I have spent a day inferring deploy state from side effects — does this
+             * event type exist yet, has that counter moved — and been wrong more than
+             * once. Render sets RENDER_GIT_COMMIT on every deploy; publishing it turns
+             * "is my fix live" from an inference into a lookup. A fix that is not
+             * deployed and a fix that does not work look identical from out here, and
+             * they need completely different responses. */
+            build: {
+              commit: (process.env.RENDER_GIT_COMMIT || "unknown").slice(0, 7),
+              branch: process.env.RENDER_GIT_BRANCH || null,
+              bootedAt: BOOTED_AT,
+              upMins: Math.round((Date.now() - BOOTED_AT) / 60000),
             },
             /* THE DEVELOPER LEDGER — what the desk remembers about who launched a coin.
              * It starts empty and fills as the desk works, so this is also the simplest
