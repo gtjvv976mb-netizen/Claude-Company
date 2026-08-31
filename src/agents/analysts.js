@@ -32,6 +32,22 @@ How to weigh what you find:
 - Holder concentration is a QUESTION, not a verdict: the largest token accounts include
   LP vaults, burn addresses and exchange wallets. Say which you think they are and how
   confident you are. Do not call a pool vault an insider.
+- IS IT BUNDLED? This is the launchpad scam concentration alone does not catch. A
+  bundler buys the supply at launch and SPLITS it across many wallets, so top-1 looks
+  modest and top-10 looks survivable while one person still controls the float and will
+  sell into the first real bid.
+  The shape gives it away, and it is precomputed for you:
+    holders.clusteredHolders — how many top accounts sit within 8% of each other
+    holders.bundleSuspect    — true at 4 or more
+  A crowd arrives at different times with different money, so balances decay
+  geometrically. A bundle is one buy divided N ways, so its wallets sit in a tight band
+  at nearly the same size. Several near-identical balances is not how a crowd forms; it
+  is how a spreadsheet does. Treat a positive signature as serious and SAY SO — but it
+  is a signature, not proof, and LP vaults and CEX omnibus wallets can imitate it.
+- DOES THE MIDDLE OF THE BOOK HOLD? holders.midToHead is accounts 3-8 measured against
+  the top two. A coin with big whales and nothing beneath them is a pool, a dev, and a
+  crowd of nobody — the people who would defend a price are simply not there. Near zero
+  is hollow; comfortably above zero means real mid-sized conviction exists.
 - If holder data failed to fetch, say so and drop confidence. Do not estimate it.
 
 KILL only for a defect that can take a holder's money by design.
