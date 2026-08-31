@@ -9,7 +9,7 @@ import { identityFor, ordinal } from "./identity.js";
  *
  * Each floor has its own settings, its own journal, and its own research runs, which the
  * tenant triggers and pays for in $CLAUDECO. Runs are metered rather than continuous for
- * a reason worth stating plainly: fourteen Opus seats per token costs real money, and a
+ * a reason worth stating plainly: a full multi-model workup costs real money, and a
  * one-time lease cannot fund unlimited compute. Metering is what keeps the promise honest.
  */
 

@@ -26,6 +26,9 @@ const good = (over = {}) => ({
   pm: { decision: "PROPOSE", conviction: 70, thesis: "t", invalidation: "deployer sells" },
   redteam: { verdict: "survives", headline: "h" },
   compliance: { pass: true, violations: [] },
+  risk: { position_size_usd: 50, stop_price: 0.8, max_loss_usd: 10 },
+  ceo: { ruling: "APPROVE", order_size_usd: 50 },
+  order: { size: 50 },
   ticket: { stop_price: 0.8, take_profit: [{ price: 1.9 }] },
   ev: { pair: { priceUsd: 1.0, priceChange: { m5: 2 } } },
   ...over,
@@ -54,6 +57,7 @@ const unsafe = [
   ["negative stop",            { ticket: { stop_price: -1 } }],
   ["no readable price",        { ev: { pair: { priceUsd: 0 } } }],
   ["stop at or above entry",   { ticket: { stop_price: 1.0 }, ev: { pair: { priceUsd: 1.0, priceChange: { m5: 0 } } } }],
+  ["zero-sized authorization", { risk: { position_size_usd: 0 }, ceo: { ruling: "HOLD", order_size_usd: 0 }, order: { size: 0 } }],
   ["spike-shaped entry",       { ev: { pair: { priceUsd: 1, priceChange: { m5: 44 } } } }],
 ];
 for (const [name, over] of unsafe) {
@@ -179,7 +183,7 @@ console.log("\nCOMPLIANCE — a WATCH ticket must be audited exactly like a PROP
     take_profit: [{ price: 1.04, pct_to_sell: 100 }], max_slippage_bps: 500,
   };
   const ev = { pair: { priceUsd: 1.0 }, exitProbe: { roundTripLossPct: 3 } };
-  const risk = { position_size_usd: 50, stop_price: 0.8, max_loss_usd: 5 };
+  const risk = { position_size_usd: 50, stop_price: 0.8, max_loss_usd: 11.5 };
 
   const asPropose = complianceCheck({ pm: { decision: "PROPOSE" }, risk, redteam: {}, ticket: badEdge, ev });
   ok("a bad-edge PROPOSE ticket is vetoed (unchanged)", asPropose.pass === false,

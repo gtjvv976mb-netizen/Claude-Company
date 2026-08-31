@@ -1461,7 +1461,7 @@ function buildSpark(radius, rays, thickness, colour, emissive = 0.55) {
 
 /**
  * One prop per operative, hung off the rig's bones so it follows the animation.
- * Kept to two or three boxes each: at fourteen figures the silhouette has to read from
+ * Kept to two or three boxes each: across a full floor the silhouette has to read from
  * across the room, and detail that only resolves up close costs draw calls for nothing.
  */
 
@@ -2123,11 +2123,11 @@ const DOSSIER = {
     note: "A yes authorises a ticket, not a trade. The seat can approve; it cannot sign.",
   },
   __bot: {  // WALL-ST-E
-    brief: "Your autotrader. He does not decide anything — he DOES what the desk decided, with your money, inside your caps.",
-    detail: "Lives in your browser with a burner key this server never sees. He watches your floor's calls and acts on them: buy on an entry, sell on an exit, sized by your own settings and stopped by your own limits. Practice mode first — he shows what he WOULD trade and spends nothing — then live when you trust him. He sleeps in his junk adobe beside the boss's office until you start him, and his antenna says which it is: amber for paper, green for real money.",
+    brief: "Your paper executor. He does not decide anything — he rehearses what the desk called, inside your caps.",
+    detail: "This hardening release is research and paper-only. Browser transaction broadcast and both standalone signing paths are fail-closed. WALL-ST-E can inspect calls and rehearse policy decisions, but cannot spend SOL. A future live release requires a durable transaction journal, instruction validation, recovery tests and a supervised canary.",
     method: "Code only — no model call, no monthly cost. He is the hands, not the brain.",
     known: "Compacting the day's trades into neat little cubes.",
-    note: "The desk cannot sign and never holds a key. Everything he does is signed by the wallet in your browser, and one tap withdraws it.",
+    note: "The desk cannot sign and never holds a key. This release only rehearses the shared policy; it never builds or broadcasts a transaction.",
   },
   GrokAD: {  // GROX MULDER
     brief: "The Assistant Director from the other agency. When a floor hires the Grok brain, he moves into the suite beside the boss and works the trades himself.",
@@ -3905,7 +3905,7 @@ const KIND_LABEL = { model: "Model call", code: "Code only", claude: "Claude" };
 
 function openDossier(seatId) {
   const spec = seatId === "__bot"
-    ? { id: "__bot", name: "WALL-ST-E", role: "Your autotrader \u00b7 hands, not brain" }
+    ? { id: "__bot", name: "WALL-ST-E", role: "Your paper executor \u00b7 signing disabled" }
     : STAFF.find((x) => x.id === seatId);
   if (!spec) return;
   const d = DOSSIER[seatId] || {};
@@ -4454,7 +4454,7 @@ for (const s of STAFF) {
   legendTiles["__bot"] = i;
   sp.append(i, document.createTextNode("WALL-ST-E"));
   sp.style.cursor = "pointer";
-  sp.title = "Your autotrader — click to manage him";
+  sp.title = "Your paper executor — live signing is disabled";
   sp.onclick = () => openDossier("__bot");
   legendEl.appendChild(sp);
 }
@@ -6339,466 +6339,50 @@ async function refreshBudget() {
 /* ── the tenant's own settings: appetite, bankroll, and which platforms ──── */
 const ALL_PADS = ["pump.fun", "letsbonk.fun", "bags.fm", "moonshot", "boop.fun", "meteora-dbc", "trix", "other"];
 
-/* ── THE BOT CARD ─────────────────────────────────────────────────────────────
-   Lifted OUT of the "Desk settings · budget · executor" drawer. Two-click
-   auto-trading is the headline feature and it was sitting behind a collapsed
-   10px label that did not even say "bot" — findable only by someone who already
-   knew it existed. It gets its own card, always visible, at the top of Calls. */
+/* ── THE PAPER-EXECUTOR CARD ──────────────────────────────────────────────────
+   Keep the release gate visible at the top of Calls. A legacy browser burner can
+   export its key for recovery, but no browser signing code ships in this page. */
 function buildBotCard(settings) {
   let box = document.createElement("div");   // `let`: the paper-test drawer
   box.className = "call";                    // reassigns this to its own body
   const card = box;                          // ...so the CARD is returned, not the drawer
   const mk = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x) e.textContent = x; return e; };
-  /* ── RUN IT HERE: the whole bot, in this tab, in two clicks ───────────────
-     The VPS route is correct but it asks a lot: a server, a terminal, systemd.
-     This runs the SAME risk engine and the same Jupiter swaps right here, with a
-     burner key generated in this browser that never leaves it. Same trust model
-     as the self-hosted poller — your machine, your key — minus the machine.
 
-     The honest trade: a browser tab is not a server. It only trades while this
-     page is open, so the stop is only watched while you are here. That is stated
-     in the UI, not buried, and the VPS path remains for anyone who wants 24/7. */
-  // No preamble at all: the tick strip and its one hint say where you are, and
-  // the key-never-leaves promise is on step 1 where it is actually relevant.
-
-  const botBox = mk("div");                 // NOT .bud-addr — that is the monospace
-  botBox.style.cssText = "margin:2px 0";    // address box, and it padded the whole checklist
-  botBox.style.cssText = "font-size:11px;line-height:1.7";
-  box.appendChild(botBox);
-  const botRow = mk("div", "dp-row");
-  box.appendChild(botRow);
-  const botLog = mk("div", "bud-addr");
-  botLog.style.cssText = "white-space:pre-wrap;font-size:10.5px;line-height:1.6;max-height:150px;overflow:auto;display:none";
-  box.appendChild(botLog);
-
-  const BOT_KEY = `cc_bot_${FLOOR_N}`;
-  // The Calls panel is rebuilt from scratch on every refresh. If the bot's timer
-  // and log lived in that closure, a refresh would orphan a RUNNING loop while
-  // the UI showed "stopped" — and the next click would start a second bot buying
-  // in parallel. One singleton on window, reattached by each render.
-  const BOT = (window.__ccBot ||= { timer: null, busy: false, lines: [] });
-  const say = (m) => {
-    BOT.lines.unshift(`${new Date().toLocaleTimeString()}  ${m}`);
-    BOT.lines = BOT.lines.slice(0, 60);
-    botLog.style.display = "block";
-    botLog.textContent = BOT.lines.join("\n");
-  };
-  if (BOT.lines.length) { botLog.style.display = "block"; botLog.textContent = BOT.lines.join("\n"); }
-  let W3 = null;
-  const web3 = () => W3 ? Promise.resolve(W3) : new Promise((res, rej) => {
-    if (window.solanaWeb3) return res(W3 = window.solanaWeb3);
-    const sc = document.createElement("script");
-    sc.src = "https://unpkg.com/@solana/web3.js@1.95.8/lib/index.iife.min.js";
-    sc.onload = () => window.solanaWeb3 ? res(W3 = window.solanaWeb3) : rej(new Error("web3 failed to load"));
-    sc.onerror = () => rej(new Error("web3 failed to load"));
-    document.head.appendChild(sc);
-  });
-
-  const loadBot = () => { try { return JSON.parse(localStorage.getItem(BOT_KEY) || "null"); } catch { return null; } };
-  // The Team strip reads the bot at a glance without owning any of its state.
-  window.__botStatus = () => { const b = loadBot(); return { exists: !!b, running: !!BOT.timer, live: !!b?.live }; };
-  const saveBot = (b) => localStorage.setItem(BOT_KEY, JSON.stringify(b));
-
-  // NOT the public mainnet RPC: it answers 403 to browsers (and the usual
-  // alternates fail CORS), so a funded wallet read as "checking balance…"
-  // forever and a started bot could never have broadcast a trade. This goes
-  // through our own relay, which forwards a tight allowlist upstream. The
-  // signing still happens here, with a key the server never sees.
-  // web3.js will not accept a relative endpoint, so this is always absolute.
-  const RPC_URL = (window.__API_BASE__ || location.origin).replace(/\/$/, "") + "/api/bot/rpc";
-
-  async function botKeypair() {
-    const W = await web3();
-    const b = loadBot();
-    if (!b) return null;
-    return W.Keypair.fromSecretKey(new Uint8Array(b.sk));
-  }
-
-  /* ── THE START CHECKLIST ───────────────────────────────────────────────────
-     Once a wallet existed the old panel showed FIVE buttons at once — copy,
-     start, go live, withdraw, show key — with nothing saying which to press.
-     And the team's on/off switch lived on a different tab entirely, so the two
-     halves of "make this thing work" were never in the same place.
-
-     Now it is a checklist that always renders exactly ONE next action, in
-     order, with everything already done ticked off and everything not yet
-     relevant greyed. Managing controls only appear once there is something to
-     manage. */
-  async function renderBot() {
-    const b = loadBot();
-    botRow.innerHTML = "";
-    botBox.innerHTML = "";
-
-    // Read the team's shift here so the fix is one click away, in this panel,
-    // rather than "now go find the Desk tab".
-    let working = null;
-    try {
-      const { status, body } = await call_api(`/api/floor/${FLOOR_N}`);
-      if (status === 200) working = body?.settings?.mode === "grind";
-    } catch {}
-
-    let bal = null, balErr = null;
-    if (b) {
+  /* RELEASE GATE — do not initialize the legacy browser signer. The API relay also
+     rejects transaction broadcast, so this UI check is defense in depth rather than
+     the only brake. Keep recovery access for anyone who funded a burner before the
+     gate shipped; ownership of those funds must not be stranded by a safety release. */
+  const releaseGate = mk("div");
+  releaseGate.appendChild(mk("div", "dp-h", "Paper executor · live signing disabled"));
+  releaseGate.appendChild(mk("div", "dp-note",
+    "This release can deliver and rehearse calls, but it cannot build, sign, or broadcast a trade. " +
+    "Live execution stays closed until durable transaction recovery and instruction validation pass a supervised canary."));
+  let legacyBot = null;
+  const legacyKey = `cc_bot_${FLOOR_N}`;
+  try { legacyBot = JSON.parse(localStorage.getItem(legacyKey) || "null"); } catch {}
+  if (legacyBot) {
+    legacyBot.live = false;
+    legacyBot.running = false;
+    localStorage.setItem(legacyKey, JSON.stringify(legacyBot));
+    const recovery = mk("button", "dp-btn ghost", "Copy legacy burner recovery key");
+    recovery.type = "button";
+    recovery.onclick = async () => {
+      if (!confirm("Copy the legacy burner's secret key?\n\nAnyone with it controls that wallet. Import it into a trusted Solana wallet only to recover funds, then clear your clipboard.")) return;
       try {
-        const W = await web3();
-        const conn = new W.Connection(RPC_URL, "confirmed");
-        bal = (await conn.getBalance(new W.PublicKey(b.pk))) / 1e9;
-      } catch (e) { balErr = String(e?.message || e).slice(0, 80); }
-    }
-
-    const funded  = bal != null && bal >= 0.012;
-    const running = !!BOT.timer;
-    const live    = !!b?.live;
-    const steps = [
-      { done: !!b,      label: "Create your bot wallet",  hint: b ? `${b.pk.slice(0,6)}…${b.pk.slice(-4)} — the key lives in this browser only` : "One click. The key never leaves this browser." },
-      { done: funded,   label: "Put some SOL in it",      hint: b ? (balErr ? `balance check failed (${balErr}) — reopen this tab to retry` : bal == null ? "checking balance…" : `${bal.toFixed(4)} SOL — send only what you'd risk losing`) : "" },
-      { done: running,  label: "Start it (practice mode)", hint: running ? (live ? "running — TRADING LIVE" : "running — practice, spending nothing") : "It shows what it WOULD trade, spending nothing." },
-      { done: live,     label: "Go live when you trust it", hint: live ? "trading for real, inside your caps" : "Optional. Practice as long as you like first." },
-    ];
-    const stepNo = steps.findIndex((s) => !s.done);
-    const allDone = stepNo === -1;
-
-    /* Four steps, each with a heading and a paragraph, took SEVENTY-SEVEN
-       PERCENT of the panel — measured. A checklist only ever has one next
-       action, so that is what it shows: a tick strip for where you are, then
-       the current step alone. Finished steps that carry live data (the wallet,
-       the balance) keep a single line; the rest are a tick. */
-    const strip = mk("div");
-    strip.style.cssText = "display:flex;gap:6px;align-items:center;font-family:'JetBrains Mono',monospace;font-size:11px";
-    steps.forEach((s, i) => {
-      const t = mk("span", null, s.done ? "\u2713" : i === stepNo ? "\u25b8" : "\u25cb");
-      t.style.cssText = s.done ? "color:var(--good,#4f8f52)" : i === stepNo ? "color:var(--amber,#e0ad3d);font-weight:800" : "opacity:.4";
-      t.title = `${i + 1}. ${s.label}`;
-      strip.appendChild(t);
-    });
-    const cap = mk("span", "dp-note", allDone ? "your bot is live" : `step ${stepNo + 1} of 4 \u00b7 ${steps[stepNo].label}`);
-    cap.style.cssText = "font-size:11px;margin-left:2px";
-    strip.appendChild(cap);
-    botBox.appendChild(strip);
-
-    if (!allDone && steps[stepNo].hint) {
-      const h = mk("div", "dp-note", steps[stepNo].hint);
-      h.style.cssText = "font-size:11px;margin-top:3px";
-      botBox.appendChild(h);
-    }
-    // the two facts worth keeping visible once they exist: wallet and balance
-    if (b) {
-      const w = mk("div", "dp-note", `${b.pk.slice(0, 6)}\u2026${b.pk.slice(-4)}` +
-        (bal != null ? ` \u00b7 ${bal.toFixed(3)} SOL` : balErr ? " \u00b7 balance check failed" : ""));
-      w.style.cssText = "font-size:10.5px;font-family:'JetBrains Mono',monospace;margin-top:2px;opacity:.7";
-      botBox.appendChild(w);
-    }
-
-    // If the team is not working, no calls will ever arrive — say so here and
-    // fix it here, instead of sending the reader to another tab.
-    if (working === false) {
-      const warn = mk("div", "dp-note", "\u26a0\ufe0f Team on a break \u2014 no calls will come.");
-      warn.style.cssText = "margin-top:8px;color:var(--amber,#e0ad3d)";
-      const go = mk("button", "dp-btn ghost", "Put my team to work");
-      go.type = "button";
-      go.onclick = async () => {
-        go.disabled = true; go.textContent = "Starting the shift…";
-        await call_api(`/api/floor/${FLOOR_N}/settings`, { method: "POST", body: JSON.stringify({ mode: "grind" }) });
-        renderBot();
-      };
-      botBox.appendChild(warn);
-      botRow.appendChild(go);
-    }
-
-    // ── exactly one primary action, matching the current step ──
-    if (!b) {
-      const create = mk("button", "dp-btn", "Create my bot wallet");
-      create.type = "button";
-      create.onclick = async () => {
-        create.disabled = true; create.textContent = "Creating…";
-        try {
-          const W = await web3();
-          const kp = W.Keypair.generate();
-          saveBot({ sk: Array.from(kp.secretKey), pk: kp.publicKey.toBase58(),
-                    live: false, cursor: 0, positions: {}, primed: false });
-          say("bot wallet created — it lives only in this browser");
-          renderBot();
-        } catch (e) {
-          botBox.appendChild(mk("div", "dp-note", "could not create: " + e.message));
-          create.disabled = false; create.textContent = "Create my bot wallet";
-        }
-      };
-      botRow.appendChild(create);
-    } else if (!funded) {
-      const addr = mk("div", "bud-addr", b.pk);
-      addr.style.cssText = "font-size:11px;word-break:break-all;margin-top:8px";
-      botBox.appendChild(addr);
-      const copy = mk("button", "dp-btn", "Copy the address to fund");
-      copy.type = "button";
-      copy.onclick = () => { navigator.clipboard?.writeText(b.pk); copy.textContent = "Copied ✓"; setTimeout(() => (copy.textContent = "Copy the address to fund"), 1400); };
-      const recheck = mk("button", "dp-btn ghost", "I've sent it — check");
-      recheck.type = "button";
-      recheck.onclick = () => { recheck.textContent = "Checking…"; renderBot(); };
-      botRow.append(copy, recheck);
-    } else if (!running) {
-      const start = mk("button", "dp-btn", "Start the bot");
-      start.type = "button";
-      start.onclick = () => startBot();
-      botRow.appendChild(start);
-    } else if (!live) {
-      const goLive = mk("button", "dp-btn", "Go live — trade for real");
-      goLive.type = "button";
-      goLive.onclick = () => {
-        if (!confirm("Go live?\n\nThe bot will spend REAL SOL from this burner wallet on your floor's calls, up to your caps. Only continue with money you are willing to lose entirely.")) return;
-        const cur = loadBot(); cur.live = true; saveBot(cur);
-        say("LIVE — real trades from now on");
-        renderBot();
-      };
-      botRow.appendChild(goLive);
-    }
-
-    // ── managing controls, only once there is something to manage ──
-    if (b) {
-      const manage = foldSection("Manage this wallet");
-      const mkBtn = (label, fn, cls = "dp-btn ghost") => {
-        const x = mk("button", cls, label); x.type = "button"; x.onclick = fn; return x;
-      };
-      const row2 = mk("div", "dp-row");
-      if (running) row2.appendChild(mkBtn("Stop the bot", () => stopBot()));
-      if (live) row2.appendChild(mkBtn("Back to practice mode", () => {
-        const cur = loadBot(); cur.live = false; saveBot(cur); say("back to practice"); renderBot();
-      }));
-      row2.appendChild(mkBtn("Copy address", () => navigator.clipboard?.writeText(b.pk)));
-      row2.appendChild(mkBtn("Withdraw all SOL", () => withdrawBot()));
-      row2.appendChild(mkBtn("Show secret key", () => {
-        if (!confirm("Reveal the burner's secret key?\n\nAnyone with it controls this wallet. Save it somewhere safe so you can recover the funds if you clear this browser.")) return;
-        say("SECRET KEY (save it, then clear this log): [" + loadBot().sk.join(",") + "]");
-      }));
-      manage.body.appendChild(row2);
-      manage.body.appendChild(mk("div", "dp-note",
-        `Open positions: ${Object.keys(b.positions || {}).length}. The bot only runs while this tab is open — see the one-command VPS install below for 24/7.`));
-      botBox.appendChild(manage.wrap);
-    }
+        await navigator.clipboard.writeText(JSON.stringify(legacyBot.sk || []));
+        recovery.textContent = "Copied — import it now, then clear clipboard";
+      } catch { alert("Clipboard access failed. Open this page in a secure browser context and try again."); }
+    };
+    releaseGate.appendChild(mk("div", "dp-note",
+      `Legacy burner ${String(legacyBot.pk || "unknown").slice(0, 8)}… detected. It has been forced to paper mode; use recovery only if it still holds funds.`));
+    releaseGate.appendChild(recovery);
   }
-
-  async function withdrawBot() {
-    const b = loadBot(); if (!b) return;
-    const dest = window.__wallet || prompt("Send the SOL to which address?");
-    if (!dest) return;
-    try {
-      const W = await web3();
-      const kp = await botKeypair();
-      const conn = new W.Connection(RPC_URL, "confirmed");
-      const bal = await conn.getBalance(kp.publicKey);
-      const lamports = bal - 5000;
-      if (lamports <= 0) return say("nothing to withdraw");
-      const tx = new W.Transaction().add(W.SystemProgram.transfer({
-        fromPubkey: kp.publicKey, toPubkey: new W.PublicKey(dest), lamports }));
-      tx.feePayer = kp.publicKey;
-      tx.recentBlockhash = (await conn.getLatestBlockhash("confirmed")).blockhash;
-      tx.sign(kp);
-      const sig = await conn.sendRawTransaction(tx.serialize());
-      say(`withdrew ${(lamports / 1e9).toFixed(4)} SOL to ${dest.slice(0, 6)}… — ${sig.slice(0, 16)}…`);
-      renderBot();
-    } catch (e) { say("withdraw failed: " + e.message); }
-  }
-
-  async function botTick() {
-    if (BOT.busy) return;                      // never let two ticks overlap
-    BOT.busy = true;
-    try {
-      const S = await import("/executor/strategy.mjs");
-      const W = await web3();
-      const b = loadBot(); if (!b) return;
-      const kp = await botKeypair();
-      const conn = new W.Connection(RPC_URL, "confirmed");
-      const cfg = { ...S.DEFAULTS };
-      const WSOL = "So11111111111111111111111111111111111111112";
-
-      const quote = async (i, o, amt) => {
-        const r = await fetch(`https://quote-api.jup.ag/v6/quote?inputMint=${i}&outputMint=${o}&amount=${amt}&slippageBps=300`);
-        const q = await r.json();
-        if (!q?.outAmount) throw new Error("no route"); return q;
-      };
-      const doSwap = async (q) => {
-        const r = await fetch("https://quote-api.jup.ag/v6/swap", { method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ quoteResponse: q, userPublicKey: kp.publicKey.toBase58(),
-            wrapAndUnwrapSol: true, prioritizationFeeLamports: 200000, dynamicComputeUnitLimit: true }) });
-        const sj = await r.json();
-        if (!sj?.swapTransaction) throw new Error("no swap tx");
-        const tx = W.VersionedTransaction.deserialize(Uint8Array.from(atob(sj.swapTransaction), (c) => c.charCodeAt(0)));
-        tx.sign([kp]);
-        const sig = await conn.sendRawTransaction(tx.serialize(), { maxRetries: 3 });
-        const bh = await conn.getLatestBlockhash("confirmed");
-        const st = await conn.confirmTransaction({ signature: sig, ...bh }, "confirmed");
-        if (st?.value?.err) throw new Error("swap failed on-chain");
-        return sig;
-      };
-
-      // 1. new calls from the desk
-      const res = await call_api(`/api/floor/${FLOOR_N}/feed`);
-      const feed = (res.body?.feed || []).filter((c) => c.status === "live" && c.verdict === "offered");
-      for (const c of feed) {
-        if (b.positions[c.mint]) continue;
-        if (!c.entry_ref || !c.stop) continue;
-        const st = { ...S.freshState(0), openCount: Object.keys(b.positions).length,
-                     deployedTodaySol: b.deployedToday || 0, realizedTodaySol: b.realizedToday || 0,
-                     spendableSol: Infinity };
-        const plan = S.planEntry({ call: { ...c, stop: c.stop, target: c.target, size_sol: c.size_sol }, cfg, state: st });
-        if (plan.action !== "buy") { say(`skip ${c.symbol}: ${plan.reason}`); continue; }
-        if (!b.live) { say(`WOULD BUY ${c.symbol} — ${plan.sol} SOL (dry run)`); b.positions[c.mint] = { dry: true, symbol: c.symbol }; saveBot(b); continue; }
-        say(`buying ${c.symbol} — ${plan.sol} SOL…`);
-        const q = await quote(WSOL, c.mint, Math.round(plan.sol * 1e9));
-        const sig = await doSwap(q);
-        const pos = S.openPosition({ call: { ...c, stop: c.stop / c.entry_ref, target: c.target ? c.target / c.entry_ref : null },
-                                     sol: plan.sol, fillPrice: 1, cfg });
-        pos.qtyRaw = String(q.outAmount); pos.paidSol = plan.sol; pos.symbol = c.symbol; pos.mint = c.mint;
-        b.positions[c.mint] = pos; b.deployedToday = (b.deployedToday || 0) + plan.sol;
-        saveBot(b);
-        say(`BOUGHT ${c.symbol} — ${sig.slice(0, 16)}…`);
-      }
-
-      // 2. risk pass on what we hold
-      for (const [mint, pos] of Object.entries(b.positions)) {
-        if (pos.dry) continue;
-        let mark = null;
-        try { const q = await quote(mint, WSOL, pos.qtyRaw); mark = (Number(q.outAmount) / 1e9) / (pos.paidSol || 1); } catch {}
-        const gone = feed.every((c) => c.mint !== mint);
-        const d = S.stepPosition({ pos, mark, deskExit: gone ? { code: "desk exit" } : null, cfg });
-        if (d.action === "sell") {
-          if (!b.live) { say(`WOULD SELL ${pos.symbol} — ${d.reason} (dry run)`); delete b.positions[mint]; saveBot(b); continue; }
-          say(`selling ${pos.symbol} — ${d.reason}…`);
-          const q = await quote(mint, WSOL, pos.qtyRaw);
-          const sig = await doSwap(q);
-          const net = Number(q.outAmount) / 1e9 - (pos.paidSol || 0);
-          b.realizedToday = (b.realizedToday || 0) + net;
-          delete b.positions[mint]; saveBot(b);
-          say(`SOLD ${pos.symbol} ${net >= 0 ? "+" : ""}${net.toFixed(4)} SOL — ${sig.slice(0, 16)}…`);
-        } else { saveBot(b); }
-      }
-      renderBot();
-    } catch (e) { say("tick error: " + e.message); }
-    finally { BOT.busy = false; }
-  }
-
-  function startBot(resumed = false) {
-    if (BOT.timer) return;                     // idempotent: never two loops
-    const b0 = loadBot();
-    if (b0 && !b0.running) { b0.running = true; saveBot(b0); }   // survive a refresh
-    say(resumed ? "bot resumed after reload" : "bot started");
-    BOT.tick = botTick;                        // the newest closure owns the loop
-    botTick();
-    BOT.timer = setInterval(() => BOT.tick(), 20000);
-    renderBot();
-  }
-  function stopBot() {
-    clearInterval(BOT.timer); BOT.timer = null;
-    const b0 = loadBot();
-    if (b0 && b0.running) { b0.running = false; saveBot(b0); }   // stay stopped across reloads
-    say("bot stopped"); renderBot();
-  }
-  if (BOT.timer) BOT.tick = botTick;           // a re-render adopts the running bot
-  renderBot();
-
-  /* A refresh used to silently kill the bot: the loop is a timer in THIS page,
-     and the page had no memory that it had been switched on. The intent is
-     remembered now, so re-opening the floor puts him straight back to work —
-     and stopping him stays stopped. (For genuinely tab-free 24/7, that is the
-     self-hosted poller in Desk settings; a browser cannot promise it.) */
-  if (!BOT.timer && loadBot()?.running) setTimeout(() => startBot(true), 1200);
-
-  /* ── PAPER TEST: try the bot without a wallet, a terminal, or a cent ──────
-     This imports executor/strategy.mjs — the EXACT module the real bot trades
-     with, dependency-free precisely so it can also run here — and drives it over
-     fat-tailed synthetic price paths with real round-trip costs charged. What you
-     see is the engine's own decisions, not a mock of them. */
-  // Tried once, not watched daily — so it lives in a drawer, and `box` below
-  // means the drawer's body from here on.
-  const paperFold = window.foldSection?.("Test the bot on paper");
-  if (paperFold) { box.appendChild(paperFold.wrap); box = paperFold.body; }
-  box.appendChild(mk("div", "dp-note",
-    "The real risk engine over simulated price paths, 6% round-trip charged. No wallet, no money."));
-  const paperRow = mk("div", "dp-row");
-  const wrSel = document.createElement("select");
-  wrSel.className = "dp-in"; wrSel.setAttribute("aria-label", "Assumed desk win rate");
-  for (const [v, t] of [[0.15, "Pessimistic — 15% hit rate"], [0.25, "Break-even — 25%"], [0.35, "Good desk — 35%"], [0.50, "Optimistic — 50%"]]) {
-    const o = document.createElement("option"); o.value = v; o.textContent = t;
-    if (v === 0.25) o.selected = true; wrSel.appendChild(o);
-  }
-  const runPaper = mk("button", "dp-btn ghost", "Run 200 paper trades");
-  runPaper.type = "button";
-  paperRow.append(wrSel, runPaper);
-  box.appendChild(paperRow);
-  const paperOut = mk("div", "bud-addr");
-  paperOut.style.cssText = "white-space:pre-wrap;font-size:11px;line-height:1.6;display:none";
-  box.appendChild(paperOut);
-
-  runPaper.addEventListener("click", async () => {
-    runPaper.disabled = true; runPaper.textContent = "Trading…";
-    paperOut.style.display = "block";
-    paperOut.textContent = "loading the engine…";
-    try {
-      const S = await import("/executor/strategy.mjs");
-      const winrate = Number(wrSel.value), COST = 0.06, CALLS = 200;
-      let seed = 12345;
-      const rand = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
-      const path = () => {
-        const u = rand();
-        let end;
-        if (u < 0.34) end = 0.05 + rand() * 0.25;
-        else if (u < 1 - winrate) end = 0.45 + rand() * 0.45;
-        else if (u < 1 - winrate * 0.22) end = 1.15 + rand() * 1.1;
-        else end = 2.5 + rand() * 9;
-        const drift = Math.log(end) / 240, vol = 0.055 + rand() * 0.05, p = [1];
-        for (let i = 1; i <= 240; i++) {
-          const z = Math.sqrt(-2 * Math.log(rand() || 1e-9)) * Math.cos(2 * Math.PI * rand());
-          p.push(Math.max(1e-6, p[i - 1] * Math.exp(drift + vol * z)));
-        }
-        return p;
-      };
-      const cfg = { ...S.DEFAULTS };
-      const st = S.freshState(0);
-      let pnl = 0, taken = 0, stops = 0, trails = 0, deskExits = 0, wins = 0, skipped = 0;
-      let peak = 0, eq = 0, dd = 0;
-      for (let n = 0; n < CALLS; n++) {
-        const pth = path(), stop = 0.62, target = 1.9;
-        const call = { mint: "m" + n, symbol: "C" + n, size_sol: cfg.maxSolPerTrade, stop, target, ts: n };
-        S.rollDay(st, n * 8 * 3600e3, 86400e3);   // calls arrive ~3/day, so the caps roll
-        const plan = S.planEntry({ call, cfg, state: st });
-        if (plan.action !== "buy") { skipped++; continue; }
-        taken++; st.deployedTodaySol += plan.sol; st.openCount++;
-        const pos = S.openPosition({ call, sol: plan.sol, fillPrice: 1, cfg });
-        const deskAt = (() => { for (let i = 1; i < pth.length; i++) if (pth[i] <= stop || pth[i] >= target) return Math.min(pth.length - 1, i + 40); return pth.length - 1; })();
-        let qty = pos.qty, gross = 0, done = false;
-        for (let i = 1; i < pth.length && !done; i++) {
-          const d = S.stepPosition({ pos, mark: pth[i], deskExit: i >= deskAt ? { code: "desk" } : null, cfg });
-          if (d.action === "sell") {
-            gross += qty * pth[i]; qty = 0; done = true;
-            if (d.reason === "stop loss") stops++;
-            else if (d.reason === "trailing stop") trails++;
-            else deskExits++;
-          }
-        }
-        if (qty > 0) gross += qty * pth[pth.length - 1];
-        gross *= (1 - COST);
-        const net = gross - plan.sol * (1 + COST);
-        pnl += net; st.realizedTodaySol += net; st.openCount--;
-        if (net >= 0) wins++;
-        eq += net; peak = Math.max(peak, eq); dd = Math.min(dd, eq - peak);
-      }
-      const sign = (v) => (v >= 0 ? "+" : "") + v.toFixed(4);
-      paperOut.textContent =
-        `${CALLS} calls at a ${(winrate * 100).toFixed(0)}% hit rate, ${cfg.maxSolPerTrade} SOL each, 6% round-trip cost\n` +
-        `\n  taken ${taken}   skipped by caps ${skipped}   winners ${wins} (${((wins / Math.max(1, taken)) * 100).toFixed(0)}%)` +
-        `\n  closed by:  stop ${stops}   trailing stop ${trails}   desk exit ${deskExits}` +
-        `\n\n  NET  ${sign(pnl)} SOL        worst drawdown ${dd.toFixed(4)} SOL\n` +
-        `\n${pnl >= 0
-          ? "In this run the engine came out ahead — but that is THIS assumed hit rate, not a forecast."
-          : "In this run the engine LOST money. At a low hit rate, costs eat the edge no matter how good the risk management is."}` +
-        `\nThe desk has published no calls yet, so its real hit rate is unknown. Try the pessimistic setting too.`;
-    } catch (e) {
-      paperOut.textContent = "could not load the engine: " + e.message;
-    }
-    runPaper.disabled = false; runPaper.textContent = "Run 200 paper trades";
-  });
-
-  return card;              // the CARD — `box` is the paper drawer's body by now
+  const docs = document.createElement("a");
+  docs.href = "/executor/README.md"; docs.target = "_blank"; docs.rel = "noopener";
+  docs.textContent = "Read the dry-run executor and live-readiness gates";
+  releaseGate.appendChild(docs);
+  card.appendChild(releaseGate);
+  return card;
 }
 
 function buildControls(settings) {
@@ -6883,15 +6467,16 @@ function buildControls(settings) {
   box.appendChild(hook);
   box.appendChild(mk("div", "dp-note", "Exit calls are pushed here too, so you hear them with the tab closed. Discord, Telegram and Slack only."));
 
-  box.appendChild(mk("div", "dp-h", "Your executor (auto-trading)"));
+  box.appendChild(mk("div", "dp-h", "Your dry-run executor"));
   const exec_ = document.createElement("input");
   exec_.className = "dp-in"; exec_.type = "url";
-  exec_.placeholder = "https://your-bot.example.com/hook (optional)";
-  exec_.value = (settings.executor_url && settings.executor_url !== "(set)") ? settings.executor_url : (settings.executor_url === "(set)" ? "" : "");
+  exec_.placeholder = "Push delivery disabled — polling only";
+  exec_.value = "";
+  exec_.disabled = true;
   exec_.setAttribute("aria-label", "Executor webhook URL");
   box.appendChild(exec_);
   const execNote = mk("div", "dp-note",
-    "Auto-trade this floor's calls without giving up your keys. Run our open-source poller (executor/poller.mjs) anywhere with internet — no public URL needed — with the secret below and your own burner wallet: it fetches every entry and exit and trades them via Jupiter, within caps you set. Fund it, start it once, walk away. The desk never holds, signs, or sees your funds.");
+    "Run the open-source poller to inspect the authenticated feed and rehearse the shared policy on your own machine. This release rejects EXECUTE=1, executor webhooks are off, and the browser relay cannot broadcast transactions. Do not fund its burner identity for auto-trading.");
   box.appendChild(execNote);
   if (!settings.executor_secret) {
     const mint = document.createElement("button");
@@ -6922,13 +6507,12 @@ function buildControls(settings) {
     sec.appendChild(rot);
     box.appendChild(sec);
 
-    // Connect-and-go: one command that stands the poller up on any Linux box
-    // (a $4/mo VPS, a Raspberry Pi) in ~60s, in DRY RUN, with this floor and
-    // secret already filled in. The tenant copies one line — no terminal skill.
-    box.appendChild(mk("div", "dp-h", "Turn it on — one command"));
+    // The installer prompts through /dev/tty so the feed secret never lands in argv
+    // or shell history. It creates a mode-0600 EnvironmentFile and stays dry-run-only.
+    box.appendChild(mk("div", "dp-h", "Install the dry-run poller"));
     box.appendChild(mk("div", "dp-note",
-      "Paste this into a fresh Ubuntu VPS (DigitalOcean/Hetzner ~$4/mo) or any Linux box. It installs the poller, makes a burner wallet, and starts it in DRY RUN — it prints the wallet to fund and how to go live. It runs 24/7 and survives reboots."));
-    const cmd = `curl -fsSL https://claudedotcompany.com/executor/install.sh | bash -s -- --secret ${settings.executor_secret} --floor ${FLOOR_N}`;
+      "Paste this into a Linux terminal. The installer asks for the signing secret privately, stores it in a mode-0600 file, and starts a dry-run service. There is no live activation procedure in this release."));
+    const cmd = `curl -fsSL https://claudedotcompany.com/executor/install.sh | bash -s -- --floor ${FLOOR_N}`;
     const box2 = mk("div", "bud-addr");
     box2.style.cssText = "white-space:pre-wrap;word-break:break-all;font-size:10px;line-height:1.5";
     box2.textContent = cmd;
@@ -6942,7 +6526,7 @@ function buildControls(settings) {
     };
     box.appendChild(copyBtn);
     box.appendChild(mk("div", "dp-note",
-      "Prefer your own machine? The same poller runs locally — see the README at /executor/. Either way: fund the burner it shows you with only what you'll risk, then flip it live."));
+      "Prefer your own machine? The same dry-run poller runs locally — see /executor/README.md. Do not fund it for auto-trading; EXECUTE=1 deliberately fails."));
   }
 
   const save = mk("button", "dp-btn", "Save settings");
@@ -6955,8 +6539,7 @@ function buildControls(settings) {
     const { status, body } = await call_api(`/api/floor/${FLOOR_N}/copy`, { method: "POST",
       body: JSON.stringify({ appetite: sel.value, bankrollSol: Number(bank.value), launchpads,
                              categories, minLiqUsd: Number(liqSel.value) || null,
-                             webhookUrl: hook.value.trim() || null,
-                             executorUrl: exec_.value.trim() || null }) });
+                             webhookUrl: hook.value.trim() || null }) });
     msg.textContent = status === 200 ? "Saved. Future calls use these settings." : (body.error || "could not save");
     save.disabled = false; save.textContent = "Save settings";
     if (status === 200) setTimeout(loadCalls, 700);

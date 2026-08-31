@@ -101,6 +101,41 @@ ensureColumn("copy_settings", "take_profit_x", "REAL NOT NULL DEFAULT 0");
 ensureColumn("copy_settings", "fixed_sol", "REAL NOT NULL DEFAULT 0");
 ensureColumn("copy_settings", "mcap_tier", "TEXT NOT NULL DEFAULT 'any'");
 
+/* One-time data migrations need their own ledger. ALTER TABLE keeps schemas current,
+ * but it cannot repair a value that an older release seeded incorrectly. In that
+ * release floor 50 was created with the balanced preset, whose category list excludes
+ * memecoins; the memecoin desk consequently skipped every call it published. The
+ * migration changes only the legacy default shape (balanced + no explicit category
+ * override), so a deliberate custom allow-list is never touched. */
+db.exec(`
+CREATE TABLE IF NOT EXISTS data_migrations (
+  name       TEXT PRIMARY KEY,
+  applied_at INTEGER NOT NULL
+);
+`);
+
+function migrateData(name, fn) {
+  if (db.prepare("SELECT 1 FROM data_migrations WHERE name=?").get(name)) return false;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    fn();
+    db.prepare("INSERT INTO data_migrations (name, applied_at) VALUES (?,?)")
+      .run(name, Date.now());
+    db.exec("COMMIT");
+    return true;
+  } catch (e) {
+    try { db.exec("ROLLBACK"); } catch {}
+    throw e;
+  }
+}
+
+migrateData("2026-08-31-hq-memecoin-appetite", () => {
+  db.prepare(`UPDATE copy_settings SET appetite='aggressive', updated_at=?
+              WHERE floor_no=50 AND appetite='balanced' AND categories IS NULL
+                AND (updated_at IS NULL OR updated_at < 1788101164000)`)
+    .run(Date.now());
+});
+
 /**
  * The market-cap sleeves a floor can subscribe to.
  *
@@ -276,12 +311,23 @@ export function decide(floorNo, call) {
   const convScale = call.conviction != null ? Math.min(1, Math.max(0.4, call.conviction / 100)) : 0.6;
   const autoSize = s.bankroll_sol * (s.preset.riskPctPerTrade / 100) * risk.sizeMultiplier * convScale;
   const fixed = Number(s.fixed_sol) > 0 ? Number(s.fixed_sol) : null;
-  const sizeSol = Number((fixed ?? autoSize).toFixed(4));
+  // NULL is a legacy call with no portable desk cap. Zero is an explicit refusal
+  // and must stay zero all the way downstream; treating both as falsy would revive
+  // a trade the team authorized at no size.
+  const hasDeskCap = call.desk_size_usd != null && Number(call.desk_equity_usd) > 0;
+  const deskRatio = hasDeskCap
+    ? Math.max(0, Number(call.desk_size_usd) || 0) / Number(call.desk_equity_usd) : null;
+  const teamCapSol = deskRatio != null ? s.bankroll_sol * deskRatio : Infinity;
+  const uncapped = fixed ?? autoSize;
+  const sizeSol = Number(Math.min(uncapped, teamCapSol).toFixed(4));
   if (sizeSol < 0.001) return { verdict: "skipped", reason: "the sized position rounds to nothing on this bankroll" };
 
-  const how = fixed
+  const baseHow = fixed
     ? `fixed ${fixed} SOL a trade`
     : `${s.appetite} · ${risk.sizeMultiplier}x for ${call.category} · conviction ${Math.round(call.conviction ?? 0)}`;
+  const how = Number.isFinite(teamCapSol) && teamCapSol < uncapped
+    ? `${baseHow} · capped to the team's ${(deskRatio * 100).toFixed(3)}% book allocation`
+    : baseHow;
   return { verdict: "offered", sizeSol, reason: how };
 }
 

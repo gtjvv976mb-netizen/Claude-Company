@@ -1,16 +1,15 @@
 /**
- * CLAUDE COMPANY — POLLING EXECUTOR (risk-managed)
+ * CLAUDE COMPANY — POLLING EXECUTOR (dry-run hardening release)
  *
- * Hands-off auto-trading that never asks for your keys. Runs anywhere with plain
- * outbound internet — your laptop, a $4 VPS, a Raspberry Pi — with NO public URL,
- * no tunnel, no exposed port. It polls YOUR floor's calls over HTTPS, holds YOUR
- * burner wallet, obeys YOUR caps, and trades via Jupiter.
+ * Runs anywhere with outbound internet and no public URL. It polls YOUR floor's
+ * calls over HTTPS, evaluates local caps, and logs decisions. EXECUTE=1 is rejected
+ * until the durable transaction engine is complete and separately canary-tested.
  *
  * It does not just relay the desk. Between the desk's entry and its exit it runs
  * its own risk engine (strategy.mjs, tuned by simulation in tune.mjs):
  *
  *   - a hard STOP checked every poll, so a rug at 3am does not wait for the desk
- *   - a TRAIL that arms once the call's target is touched and ratchets up behind
+ *   - a TRAIL that arms at 1.5x and ratchets up behind
  *     the high, so a runner is not round-tripped
  *   - the DESK'S OWN EXIT always wins and sells everything
  *   - DAILY LOSS LIMIT and MAX OPEN POSITIONS, the two brakes that decide whether
@@ -22,18 +21,19 @@
  * State (positions, daily counters, cursor) is persisted, so a restart resumes
  * managing open trades instead of orphaning them.
  *
- * SAFETY: burner wallet only; DRY RUN by default (EXECUTE=1 to arm); every cap
- * enforced locally and never trusted from the wire.
+ * SAFETY: this release is DRY RUN only and rejects EXECUTE=1 until the durable
+ * transaction engine is complete. Caps remain local and are never trusted from wire.
  *
  * SETUP
  *   1) Floor's Calls tab -> Desk settings -> Your executor: copy the signing secret.
- *   2) solana-keygen new -o burner.json   (or let install.sh make one) and fund it.
+ *   2) solana-keygen new -o burner.json   (or let install.sh make one). Do not fund it.
  *   3) npm install
  *   4) CC_SECRET=<secret> CC_FLOOR=<n> KEYPAIR=./burner.json EXECUTE=0 node poller.mjs
  */
 import fs from "node:fs";
 import { Connection, Keypair, VersionedTransaction, PublicKey } from "@solana/web3.js";
 import { DEFAULTS, planEntry, openPosition, stepPosition, rollDay, freshState } from "./strategy.mjs";
+import { policyConfigForPosition, resolveTakeProfitRule } from "./trade-policy.mjs";
 
 const API = (process.env.CC_API || "https://claude-company-api.onrender.com").replace(/\/$/, "");
 const SECRET = process.env.CC_SECRET || "";
@@ -48,6 +48,14 @@ const RPC = process.env.SOLANA_RPC || "https://api.mainnet-beta.solana.com";
 const WSOL = "So11111111111111111111111111111111111111112";
 const STATE_FILE = process.env.STATE_FILE || "./.cc-state.json";
 const LAMPORTS = 1e9;
+
+// This release hardens the research/paper path but does not yet ship the durable
+// transaction WAL and instruction-level Jupiter validation required for unattended
+// custody. Fail closed instead of presenting an experimental signer as production.
+if (EXECUTE) {
+  console.error("LIVE execution is intentionally disabled in this release; run with EXECUTE=0 while the durable transaction engine is completed and canary-tested.");
+  process.exit(1);
+}
 
 const CFG = {
   ...DEFAULTS,
@@ -76,28 +84,50 @@ const log = (...a) => console.log(new Date().toISOString(), ...a);
 
 /* ── persisted state: cursor, positions, daily counters ───────────────────── */
 let S = { cursor: 0, positions: {}, state: freshState(Date.now()), primed: false };
-try { S = { ...S, ...JSON.parse(fs.readFileSync(STATE_FILE, "utf8")) }; } catch {}
+if (fs.existsSync(STATE_FILE)) {
+  try { S = { ...S, ...JSON.parse(fs.readFileSync(STATE_FILE, "utf8")) }; }
+  catch (e) {
+    console.error(`state file is unreadable; refusing to overwrite it: ${e.message}`);
+    process.exit(1);
+  }
+}
 S.state = { ...freshState(Date.now()), ...(S.state || {}) };
-const save = () => { try { fs.writeFileSync(STATE_FILE, JSON.stringify(S, null, 2)); } catch (e) { log("state save failed:", e.message); } };
+const save = () => {
+  const tmp = `${STATE_FILE}.tmp-${process.pid}`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(S, null, 2), { mode: 0o600 });
+    fs.renameSync(tmp, STATE_FILE);
+    try { fs.chmodSync(STATE_FILE, 0o600); } catch {}
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch {}
+    throw new Error(`state save failed: ${e.message}`);
+  }
+};
 const openList = () => Object.values(S.positions);
 
 /* ── Jupiter ──────────────────────────────────────────────────────────────── */
-const JUP = "https://quote-api.jup.ag/v6";
+const JUP = (process.env.JUPITER_API_BASE || "https://lite-api.jup.ag/swap/v1").replace(/\/$/, "");
+const JUP_HEADERS = process.env.JUPITER_API_KEY ? { "x-api-key": process.env.JUPITER_API_KEY } : {};
 async function quote(inputMint, outputMint, amountRaw) {
-  const r = await fetch(`${JUP}/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountRaw}&slippageBps=${SLIPPAGE_BPS}`);
+  const qs = new URLSearchParams({ inputMint, outputMint, amount: String(amountRaw), slippageBps: String(SLIPPAGE_BPS) });
+  const r = await fetch(`${JUP}/quote?${qs}`, { headers: JUP_HEADERS, redirect: "error", signal: AbortSignal.timeout(10000) });
   if (!r.ok) throw new Error(`quote ${r.status}`);
   const q = await r.json();
   if (!q?.outAmount) throw new Error("no route");
   return q;
 }
 async function swap(q) {
-  const r = await fetch(`${JUP}/swap`, { method: "POST", headers: { "content-type": "application/json" },
+  const r = await fetch(`${JUP}/swap`, { method: "POST", headers: { "content-type": "application/json", ...JUP_HEADERS },
+    redirect: "error", signal: AbortSignal.timeout(15000),
     body: JSON.stringify({ quoteResponse: q, userPublicKey: kp.publicKey.toBase58(), wrapAndUnwrapSol: true,
       // Without a priority fee a swap frequently never lands under congestion —
       // and an exit that never lands is a position you still own.
       prioritizationFeeLamports: PRIORITY_FEE, dynamicComputeUnitLimit: true }) });
   const s = await r.json();
+  if (!r.ok) throw new Error(`swap build ${r.status}`);
+  if (s?.simulationError) throw new Error(`Jupiter simulation failed: ${JSON.stringify(s.simulationError)}`);
   if (!s?.swapTransaction) throw new Error("no swap tx");
+  if (!Number.isFinite(Number(s.lastValidBlockHeight))) throw new Error("swap response omitted lastValidBlockHeight");
   const tx = VersionedTransaction.deserialize(Buffer.from(s.swapTransaction, "base64"));
   tx.sign([kp]);
   const sig = await conn.sendRawTransaction(tx.serialize(), { maxRetries: 3 });
@@ -105,9 +135,9 @@ async function swap(q) {
   // nothing about whether the swap succeeded. A slippage breach lands on-chain as
   // a FAILED transaction and still yields a signature, so logging "BOUGHT" here
   // (and charging the daily cap) would report trades that never happened.
-  const bh = await conn.getLatestBlockhash("confirmed");
   const st = await conn.confirmTransaction(
-    { signature: sig, blockhash: bh.blockhash, lastValidBlockHeight: bh.lastValidBlockHeight }, "confirmed");
+    { signature: sig, blockhash: tx.message.recentBlockhash,
+      lastValidBlockHeight: Number(s.lastValidBlockHeight) }, "confirmed");
   if (st?.value?.err) throw new Error(`swap failed on-chain: ${JSON.stringify(st.value.err)}`);
   return sig;
 }
@@ -142,15 +172,21 @@ async function onEntry(ev) {
    *
    * take_profit_x rides on the event rather than living in this process's env, so a
    * tenant switching "sell at 2x" to "ride to 10x" in the UI takes effect on the next
-   * poll instead of on the next redeploy of their VPS. 0 means auto — fall back to
-   * whatever this bot is configured with, and ultimately to the desk's own target. */
-  const tpx = Number(ev.take_profit_x) > 0 ? Number(ev.take_profit_x) : CFG.takeProfitX;
-  const perCall = { ...CFG, takeProfitX: tpx };
+   * poll instead of on the next redeploy of their VPS. 0 means auto — use the
+   * shared snipe-v2 default 2x rule and honor the authored target. An explicit
+   * multiple overrides the target; the desk's explicit exit always still wins. */
+  const takeProfitRule = resolveTakeProfitRule(ev.take_profit_x, CFG.takeProfitX);
+  const { takeProfitX: tpx, honorDeskTarget } = takeProfitRule;
+  const explicitTpx = !honorDeskTarget;
+  const fixed = Number(ev.fixed_sol) > 0
+    ? Math.min(Number(ev.fixed_sol), CFG.maxSolPerTrade) : CFG.fixedSol;
+  const perCall = { ...CFG, ...takeProfitRule, fixedSol: fixed };
   const plan = planEntry({ call: ev, cfg: perCall, state: S.state });
   if (plan.action !== "buy") return log(`SKIP ${ev.symbol}: ${plan.reason}`);
 
   log(`ENTRY ${ev.symbol} — ${plan.sol} SOL | stop ${ev.stop} target ${ev.target}` +
-      (tpx > 0 ? ` | sell at ${tpx}x` : " | riding the desk's target"));
+      (explicitTpx ? ` | explicit full exit at ${tpx}x`
+        : ` | auto full exit at ${tpx}x or the desk target, whichever comes first`));
   if (!EXECUTE) return log("  DRY RUN");
 
   const q = await quote(WSOL, ev.mint, Math.round(plan.sol * LAMPORTS));
@@ -169,7 +205,7 @@ async function onEntry(ev) {
   /* The rule IN FORCE WHEN THIS OPENED, remembered on the position. A trade should be
    * closed by the rule it was entered under: someone changing their mind at 1.9x must
    * not retroactively rewrite a position already on its way to a double. */
-  pos.takeProfitX = tpx;
+  Object.assign(pos, takeProfitRule);
   S.positions[ev.mint] = pos;
   S.state.deployedTodaySol += plan.sol;
   save();
@@ -178,8 +214,17 @@ async function onEntry(ev) {
 
 /* ── exits: the desk's, and our own ───────────────────────────────────────── */
 async function sellAll(pos, why, fraction = 1) {
-  const held = EXECUTE ? await heldRaw(pos.mint) : BigInt(pos.qtyRaw || 0);
-  const amt = fraction >= 1 ? held : (held * BigInt(Math.round(fraction * 1e6))) / 1000000n;
+  // An operator may upgrade with an old state file that still represents a real
+  // holding. This dry-run-only release must never retire that state without the
+  // corresponding on-chain sale; preserve it for explicit manual reconciliation.
+  if (!EXECUTE) return log(`DRY RUN EXIT ${pos.symbol} — ${why} — position retained; no transaction sent`);
+
+  const held = await heldRaw(pos.mint);
+  // Never liquidate tokens that predated this call. The tracked position is the
+  // maximum this executor is authorized to sell, even if the burner holds more.
+  const tracked = BigInt(pos.qtyRaw || 0);
+  const scoped = held < tracked ? held : tracked;
+  const amt = fraction >= 1 ? scoped : (scoped * BigInt(Math.round(fraction * 1e6))) / 1000000n;
   if (amt <= 0n) {
     // Do NOT drop the position here. "Balance reads zero" is not the same as "we
     // own nothing": the buy may be a slot away from confirmation, or the RPC may
@@ -193,7 +238,6 @@ async function sellAll(pos, why, fraction = 1) {
   }
   pos.emptyReads = 0;
   log(`EXIT ${pos.symbol} — ${why}`);
-  if (!EXECUTE) { if (fraction >= 1) delete S.positions[pos.mint]; save(); return log("  DRY RUN"); }
 
   const q = await quote(pos.mint, WSOL, amt.toString());
   const outSol = Number(q.outAmount) / LAMPORTS;
@@ -224,7 +268,7 @@ async function manageOpen() {
       }
       // Judged by the rule it was opened under, not whatever the UI says right now.
       const d = stepPosition({ pos, mark, deskExit: null,
-        cfg: pos.takeProfitX != null ? { ...CFG, takeProfitX: pos.takeProfitX } : CFG });
+        cfg: policyConfigForPosition(pos, CFG) });
       if (d.action === "sell") await sellAll(pos, d.reason);
       else if (d.action === "sell_part") await sellAll(pos, d.reason, d.fraction);
       else save();                       // persist trail/stop ratchets
@@ -240,47 +284,57 @@ async function tick() {
   if (ticking) return;
   ticking = true;
   try {
-    const r = await fetch(`${API}/api/floor/${FLOOR}/executor/feed?after=${S.cursor}`,
-      { headers: { authorization: "Bearer " + SECRET } });
-    if (r.status === 401) return log("auth rejected — check CC_SECRET / CC_FLOOR");
-    if (r.ok) {
-      const { events = [] } = await r.json();
-      // FIRST RUN: adopt the latest id and trade forward from here. Starting at 0
-      // would replay the floor's entire call history and market-buy long-dead coins.
-      if (!S.primed) {
-        S.primed = true;
-        if (events.length) {
-          S.cursor = Math.max(S.cursor, ...events.map((e) => e.id));
+    try {
+      const r = await fetch(`${API}/api/floor/${FLOOR}/executor/feed?after=${S.cursor}`,
+        { headers: { authorization: "Bearer " + SECRET }, signal: AbortSignal.timeout(10000) });
+      if (r.status === 401) log("auth rejected — check CC_SECRET / CC_FLOOR");
+      else if (r.ok) {
+        const payload = await r.json();
+        const events = payload.events || [];
+        // FIRST RUN adopts the server's true latest id, not merely the first 50-row
+        // page. Otherwise a large history can leak into later polls as fresh entries.
+        if (!S.primed) {
+          const previousCursor = S.cursor;
+          S.primed = true;
+          S.cursor = Math.max(S.cursor, Number(payload.latest_id) || 0);
           log(`primed at cursor ${S.cursor} — ${events.length} historic event(s) skipped, trading forward only`);
-          save();
-          return;
-        }
-        save();
-      }
-      for (const ev of events) {
-        try {
-          if (ev.type === "entry") await onEntry(ev);
-          else if (ev.type === "exit") {
-            const pos = S.positions[ev.mint];
-            if (pos) await sellAll(pos, `desk exit (${ev.code || "exit"})`);
-            else log(`EXIT ${ev.symbol} — not held`);
+          try { save(); }
+          catch (e) { S.primed = false; S.cursor = previousCursor; throw e; }
+        } else {
+          for (const ev of events) {
+            try {
+              if (ev.type === "entry") await onEntry(ev);
+              else if (ev.type === "exit") {
+                const pos = S.positions[ev.mint];
+                if (pos) await sellAll(pos, `desk exit (${ev.code || "exit"})`);
+                else log(`EXIT ${ev.symbol} — not held`);
+              } else throw new Error(`unknown event type ${ev.type}`);
+              // Cursor is an acknowledgement: advance only after the action succeeded
+              // or deliberately skipped. A thrown buy/sell remains retryable.
+              const previousCursor = S.cursor;
+              S.cursor = Math.max(S.cursor, ev.id);
+              try { save(); }
+              catch (e) { S.cursor = previousCursor; throw e; }
+            } catch (e) {
+              log(`ERROR on ${ev.symbol}: ${e.message} — event remains pending`);
+              break;
+            }
           }
-        } catch (e) { log(`ERROR on ${ev.symbol}: ${e.message}`); }
-        S.cursor = Math.max(S.cursor, ev.id);
-        save();
+        }
       }
-    }
-  } catch (e) { log("poll error:", e.message); }
-  try { await manageOpen(); }            // always run risk, even if the feed failed
-  catch (e) { log("manage error:", e.message); }
-  finally { ticking = false; }
+    } catch (e) { log("poll error:", e.message); }
+    try { await manageOpen(); }          // auth/feed failure never disables local stops
+    catch (e) { log("manage error:", e.message); }
+  } finally {
+    ticking = false;                     // every return/error releases the next tick
+  }
 }
 
 log(`poller up — floor ${FLOOR} — wallet ${kp.publicKey.toBase58()} — ${EXECUTE ? "LIVE" : "DRY RUN"}`);
 log(`  caps: ${CFG.maxSolPerTrade} SOL/trade, ${CFG.dailySolCap}/day deploy, ` +
     `${CFG.dailyLossLimitSol} daily loss limit, ${CFG.maxOpenPositions} open max`);
-log(`  risk: hard stop + ${(CFG.trailPct * 100).toFixed(0)}% trail once target is touched` +
-    (CFG.scaleOutPct > 0 ? `, ${(CFG.scaleOutPct * 100).toFixed(0)}% scale-out` : ", no scale-out (ride the runners)"));
+log(`  risk: full exit at desk target/default ${CFG.takeProfitX}x, breakeven at 1.35x, ` +
+    `${(CFG.trailPct * 100).toFixed(0)}% trail from 1.5x, no partial exits`);
 log(`  resuming ${openList().length} open position(s) from cursor ${S.cursor}`);
 await tick();
 setInterval(tick, POLL_MS);

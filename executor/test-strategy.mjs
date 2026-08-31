@@ -2,10 +2,12 @@
  * Risk-engine test suite. `npm test` in this folder.
  * Every case here is a way a trading bot loses money by accident.
  */
-import { DEFAULTS, planEntry, openPosition, stepPosition, freshState } from "./strategy.mjs";
+import { DEFAULTS, POLICY_VERSION, planEntry, openPosition, stepPosition, freshState } from "./strategy.mjs";
+import { policyConfigForPosition, resolveTakeProfitRule } from "./trade-policy.mjs";
 let pass=0, fail=0;
 const t=(name,cond,got)=>{ cond?pass++:fail++; console.log(`${cond?"PASS":"FAIL"}  ${name}${cond?"":"  -> got "+JSON.stringify(got)}`); };
 const call={ mint:"m", symbol:"T", size_sol:0.05, stop:0.62, target:1.9, ts:0 };
+t("executor and server share snipe-v2", POLICY_VERSION === "snipe-v2", POLICY_VERSION);
 
 // caps
 let st=freshState(0); st.openCount=4;
@@ -28,34 +30,51 @@ let p=openPosition({call,sol:0.05,fillPrice:1,cfg:DEFAULTS});
 t("holds above stop", stepPosition({pos:p,mark:0.8,cfg:DEFAULTS}).action==="hold");
 t("STOPS at the stop", stepPosition({pos:p,mark:0.61,cfg:DEFAULTS}).action==="sell");
 
-// SNIPE-HOLD-SELL — the default: 2x sells EVERYTHING, before the trail can arm
+// SNIPE-V2: both authored targets and the default 2x rule sell EVERYTHING.
 p=openPosition({call,sol:0.05,fillPrice:1,cfg:DEFAULTS});
 const at2x=stepPosition({pos:p,mark:2.0,cfg:DEFAULTS});
 t("2x sells the whole position (takeProfitX default)", at2x.action==="sell"&&at2x.fraction===1, at2x);
-// Just under the 2x rule the position is NOT closed — but with the default half-off
-// scale it does take profit at the desk's target on the way past. Both matter, so
-// assert both rather than the old "hold", which only held because nothing was banked.
-const near2x=stepPosition({pos:openPosition({call,sol:0.05,fillPrice:1,cfg:DEFAULTS}),mark:1.99,cfg:DEFAULTS});
-t("just under 2x does not close the position", near2x.action!=="sell", near2x);
-t("...and half comes off at the desk's target on the way", near2x.action==="sell_part"&&near2x.fraction===0.5, near2x);
+const atTarget=stepPosition({
+  pos:openPosition({call,sol:0.05,fillPrice:1,cfg:DEFAULTS}), mark:1.9, cfg:DEFAULTS,
+});
+t("desk target sells the whole position", atTarget.action==="sell"&&atTarget.fraction===1&&/desk target/.test(atTarget.reason), atTarget);
+const forcedScale=stepPosition({
+  pos:openPosition({call,sol:0.05,fillPrice:1,cfg:DEFAULTS}), mark:1.9,
+  cfg:{...DEFAULTS,scaleOutPct:0.5},
+});
+t("legacy scaleOutPct cannot re-enable partial exits", forcedScale.action==="sell"&&forcedScale.fraction===1, forcedScale);
+const autoRule=resolveTakeProfitRule(0,DEFAULTS.takeProfitX);
+t("auto persists shared 2x plus the authored target", autoRule.takeProfitX===2&&autoRule.honorDeskTarget===true, autoRule);
+const explicitRule=resolveTakeProfitRule(10,DEFAULTS.takeProfitX);
+p=openPosition({call,sol:0.05,fillPrice:1,cfg:{...DEFAULTS,...explicitRule}});
+Object.assign(p,explicitRule);
+// A JSON round trip mirrors the state-file restart boundary.
+const restored=JSON.parse(JSON.stringify(p));
+const explicit10=policyConfigForPosition(restored,DEFAULTS);
+const throughDeskTarget=stepPosition({pos:restored,mark:2,cfg:explicit10});
+t("explicit 10x overrides the authored target", throughDeskTarget.action==="hold", throughDeskTarget);
+const atExplicit10=stepPosition({pos:restored,mark:10,cfg:explicit10});
+t("explicit 10x exits in full at 10x", atExplicit10.action==="sell"&&atExplicit10.fraction===1, atExplicit10);
 
-// breakeven + trail — the RIDE path, opt-in via takeProfitX: 0
-const RIDE={...DEFAULTS, takeProfitX:0};
-p=openPosition({call,sol:0.05,fillPrice:1,cfg:RIDE});
-const atTarget=stepPosition({pos:p,mark:2.0,cfg:RIDE});
-// THE INVARIANT, not the default: a zero scale-out must never reach the wallet as a
-// zero-size swap. This asserted it by way of scaleOutPct happening to be 0; now that
-// the default banks half, the guard is tested where it actually lives.
-const NOSCALE={...DEFAULTS, takeProfitX:0, scaleOutPct:0};
-const noScaleAtTarget=stepPosition({pos:openPosition({call,sol:0.05,fillPrice:1,cfg:NOSCALE}),mark:2.0,cfg:NOSCALE});
-t("scaleOutPct 0 never emits a zero-size swap", noScaleAtTarget.action==="hold", noScaleAtTarget);
-t("and the default DOES bank half at the target", atTarget.action==="sell_part"&&atTarget.fraction===0.5, atTarget);
-t("stop lifted to breakeven-or-better at target", p.stop>=1, p.stop);
-stepPosition({pos:p,mark:5.0,cfg:RIDE});
-t("trail ratchets up behind the high", p.stop>=5.0*(1-RIDE.trailPct)-1e-9, p.stop);
-const before=p.stop; stepPosition({pos:p,mark:3.0,cfg:RIDE});
+// Ratchets are price-triggered, independent of the authored target. A targetless
+// position makes each arm observable without the target correctly closing it first.
+const runner={...call,target:null};
+p=openPosition({call:runner,sol:0.05,fillPrice:1,cfg:DEFAULTS});
+stepPosition({pos:p,mark:1.34,cfg:DEFAULTS});
+t("breakeven does not arm below 1.35x", p.stop===runner.stop, p.stop);
+stepPosition({pos:p,mark:1.35,cfg:DEFAULTS});
+t("breakeven arms at 1.35x", p.stop>=p.entry, p.stop);
+t("breakeven ratchet fires on a full giveback",
+  stepPosition({pos:p,mark:0.99,cfg:DEFAULTS}).action==="sell");
+
+p=openPosition({call:runner,sol:0.05,fillPrice:1,cfg:DEFAULTS});
+stepPosition({pos:p,mark:1.5,cfg:DEFAULTS});
+t("25% trail arms at 1.5x", Math.abs(p.stop-1.5*(1-DEFAULTS.trailPct))<1e-9, p.stop);
+stepPosition({pos:p,mark:1.8,cfg:DEFAULTS});
+const before=p.stop;
+stepPosition({pos:p,mark:1.6,cfg:DEFAULTS});
 t("trail never loosens on a pullback", p.stop===before, p.stop);
-t("trailing stop fires", stepPosition({pos:p,mark:p.stop-0.01,cfg:RIDE}).action==="sell");
+t("ratcheted trail fires", stepPosition({pos:p,mark:p.stop-0.01,cfg:DEFAULTS}).action==="sell");
 
 // desk exit wins
 p=openPosition({call,sol:0.05,fillPrice:1,cfg:DEFAULTS});

@@ -24,6 +24,7 @@ export const cfg = {
 
   equityUsd: num("DESK_EQUITY_USD", 10000),
   maxRiskPct: num("DESK_MAX_RISK_PCT", 1.0),
+  maxBookRiskPct: num("DESK_MAX_BOOK_RISK_PCT", 4.0),
   maxCandidates: num("DESK_MAX_CANDIDATES", 8),
   /* THE SIZE THE EXIT PROBE MEASURES AT — and it must resemble the size actually
    * traded, or the desk vetoes coins on a cost nobody pays. It has come down twice:

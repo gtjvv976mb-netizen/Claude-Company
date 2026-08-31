@@ -1,6 +1,6 @@
 import db, { ensureColumn } from "./lib/store.js";
 import { emit } from "./lib/bus.js";
-import { CATEGORY_RISK } from "./market.js";
+import { POLICY_DEFAULTS, POLICY_VERSION, pricePolicy } from "../executor/trade-policy.mjs";
 
 /**
  * THE CALL SHEET — what the house team is actually doing.
@@ -63,6 +63,12 @@ ensureColumn("calls", "last_verified_at", "INTEGER");
 // number to compare against. Without it every floor sees every call regardless of the
 // end of the market it asked for.
 ensureColumn("calls", "mcap_at_call", "REAL");
+// The team-authored size and loss budget must survive publication. Without these,
+// every floor discarded Risk and CEO's work and independently invented a fresh size.
+ensureColumn("calls", "desk_size_usd", "REAL");
+ensureColumn("calls", "desk_risk_usd", "REAL");
+ensureColumn("calls", "desk_equity_usd", "REAL");
+ensureColumn("calls", "policy_version", "TEXT");
 
 export function openCall(c) {
   // Every pump.fun-origin call carries the one invalidation the research pass
@@ -74,12 +80,14 @@ export function openCall(c) {
   try {
     const info = db.prepare(`
       INSERT INTO calls (mint,symbol,category,launchpad,image_url,conviction,entry_ref,entry_lo,entry_hi,stop,target,
-                         thesis,invalidation,flags_at_call,liq_at_call,rt_loss_at_call,mcap_at_call,opened_at,report_file,last_verified_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+                         thesis,invalidation,flags_at_call,liq_at_call,rt_loss_at_call,mcap_at_call,
+                         desk_size_usd,desk_risk_usd,desk_equity_usd,policy_version,opened_at,report_file,last_verified_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       c.mint, c.symbol ?? null, c.category ?? null, c.launchpad ?? null, c.imageUrl ?? null, c.conviction ?? null,
       c.entryRef ?? null, c.entryLo ?? null, c.entryHi ?? null, c.stop ?? null, c.target ?? null,
       c.thesis ?? null, c.invalidation ?? null,
       c.flags == null ? null : JSON.stringify(c.flags), c.liqUsd ?? null, c.rtLossPct ?? null, c.mcapUsd ?? null,
+      c.deskSizeUsd ?? null, c.deskRiskUsd ?? null, c.deskEquityUsd ?? null, c.policyVersion ?? POLICY_VERSION,
       Date.now(), c.reportFile ?? null,
       Date.now());          // last_verified_at — clearing the gauntlet IS the first verification
     const call = getCall(info.lastInsertRowid);
@@ -149,68 +157,29 @@ export function evaluateExit(call, now) {
     return { fire: true, code: "liq_collapse", urgency: "unconditional",
       detail: `liquidity fell from $${Math.round(call.liq_at_call).toLocaleString()} to $${Math.round(now.liqUsd).toLocaleString()}`, pct: 100 };
 
-  /* Exit geometry, from the one mechanism family with reproducible evidence
-   * behind it (trend-following exits, B-grade across decades): the fixed stop is
-   * a FLOOR that only ever tightens — never widens — and winners are ratcheted
-   * rather than round-tripped.
-   *   breakeven: once the call has been up 35%, it is not allowed to become a loss.
-   *   trail:     once up 50%, a 28% retrace off the high-water mark ends it.
-   * Both express through one effective stop so the precedence stays legible. */
-  const hwm = Math.max(highWaterMark(call.id) ?? 0, mark ?? 0, call.entry_ref ?? 0);
-  let stopEff = call.stop ?? null;
-  let stopWhy = "the stop";
-  if (call.entry_ref && hwm >= call.entry_ref * 1.35) {
-    const be = call.entry_ref * 1.02;
-    if (stopEff == null || be > stopEff) { stopEff = be; stopWhy = "breakeven ratchet (was up 35%+)"; }
-  }
-  if (call.entry_ref && hwm >= call.entry_ref * 1.5) {
-    const trail = hwm * 0.72;
-    if (stopEff == null || trail > stopEff) { stopEff = trail; stopWhy = `trail, 28% off the high of ${hwm}`; }
-  }
-  if (stopEff != null && mark != null && mark <= stopEff) {
-    const code = stopWhy === "the stop" ? "stop_hit" : stopWhy.startsWith("breakeven") ? "breakeven" : "trail_stop";
-    return { fire: true, code, urgency: "level",
-      detail: `mark ${mark} at or below ${stopWhy} (${Number(stopEff.toPrecision(4))})`, pct: 100 };
-  }
+  /* ONE VERSIONED PRICE POLICY. The server's paper record and the user's executor
+   * import this same pure function, so a target/stop/expiry has one meaning. Chain
+   * failures above still outrank price because only the desk can observe them. */
+  const policyHwm = Math.max(highWaterMark(call.id) ?? 0, mark ?? 0, call.entry_ref ?? 0);
+  const policy = pricePolicy({
+    position: { entry: call.entry_ref, stop: call.stop, target: call.target,
+      high: policyHwm, openedAtMs: call.opened_at },
+    mark,
+    // Tests and replay jobs may supply the observation timestamp. Live monitoring
+    // omits it and uses the wall clock.
+    nowMs: Number.isFinite(Number(now?.nowMs)) ? Number(now.nowMs) : Date.now(),
+    config: { ...POLICY_DEFAULTS,
+      takeProfitX: Number(process.env.DESK_TAKE_PROFIT_X || POLICY_DEFAULTS.takeProfitX),
+      maxAgeHours: Number(process.env.DESK_MAX_AGE_HOURS || POLICY_DEFAULTS.maxAgeHours),
+      trailPct: Number(process.env.DESK_TRAIL_PCT || POLICY_DEFAULTS.trailPct) },
+  });
+  if (policy.action === "sell") return { fire: true, code:
+      policy.reason.startsWith("take profit") ? "take_profit" :
+      policy.reason.startsWith("age exit") ? "thesis_expired" :
+      policy.reason === "desk target hit" ? "target_hit" : "stop_hit",
+    urgency: "level", detail: `${policy.reason} · policy ${POLICY_VERSION}`, pct: 100 };
+  return { fire: false, policyVersion: POLICY_VERSION };
 
-  /* SNIPE - HOLD - SELL. A hard multiple on the entry, taken in full.
-   *
-   * The desk and the executor must agree about when a trade is over, or the tenant's
-   * bot sells at 2x while the call sheet still shows the position open — and the
-   * graded record then describes a trade nobody made. This mirrors takeProfitX in
-   * executor/strategy.mjs; change them together or not at all. */
-  const tpX = Number(process.env.DESK_TAKE_PROFIT_X || 2);
-  if (tpX > 0 && call.entry_ref > 0 && mark != null && mark >= call.entry_ref * tpX)
-    return { fire: true, code: "take_profit", urgency: "level",
-      detail: `${(mark / call.entry_ref).toFixed(2)}x — the ${tpX}x rule, sell it all`, pct: 100 };
-
-  if (call.target && mark != null && mark >= call.target)
-    return { fire: true, code: "target_hit", urgency: "level", detail: `mark ${mark} reached the target ${call.target}`, pct: 100 };
-
-  /* Thesis expiry — the time barrier. A call is a claim about NOW; the research
-   * pass found our geometry had a stop and a target but no clock, and time is
-   * the dimension memecoins actually die along. Fast sleeves get 48h to work,
-   * everything else a week; expiry is not failure, it is the thesis ageing out. */
-  const ageMs = Date.now() - call.opened_at;
-  const fast = call.category === "memecoin" || call.category === "unclear";
-  if (ageMs > (fast ? 48 : 168) * 3600e3)
-    return { fire: true, code: "thesis_expired", urgency: "normal",
-      detail: `the thesis had ${fast ? 48 : 168}h to work and time has run out — exit at the market`, pct: 100 };
-
-  /* Stagnation: a reflexive coin that has gone nowhere in a day is not a thesis
-   * resting, it is dead momentum occupying risk budget. Slow sleeves are exempt. */
-  const FAST = new Set(["memecoin", "unclear", "ai"]);
-  if (FAST.has(call.category) && call.entry_ref && hwm < call.entry_ref * 1.15
-      && (Date.now() - call.opened_at) / 3.6e6 > 24)
-    return { fire: true, code: "stagnant", urgency: "level",
-      detail: "24h without ever being up 15% — dead momentum, risk budget released", pct: 100 };
-
-  const maxHold = (CATEGORY_RISK[call.category] ?? CATEGORY_RISK.unclear).maxHoldHours;
-  const heldHours = (Date.now() - call.opened_at) / 3.6e6;
-  if (heldHours > maxHold) return { fire: true, code: "expired", urgency: "level",
-    detail: `held ${Math.round(heldHours)}h, past the ${maxHold}h horizon for a ${call.category}`, pct: 100 };
-
-  return { fire: false };
 }
 
 export function stats() {

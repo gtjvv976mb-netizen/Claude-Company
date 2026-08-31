@@ -3,6 +3,8 @@ import { gather, screen, enrichWithXRead } from "./data/evidence.js";
 import { ANALYSTS, runAnalyst, runNarrative } from "./agents/analysts.js";
 import { runScout, runRedTeam, runRisk, runPM, runExecution } from "./agents/decision.js";
 import { complianceCheck } from "./agents/compliance.js";
+import { enforceRiskRails, enforceCeoRails, retainedBookRiskUsd } from "./agents/risk-rails.js";
+import { applyRedTeamBar } from "./agents/redteam-policy.js";
 import { runCEO } from "./agents/ceo.js";
 import { writeOrderSlip } from "./order.js";
 import { emit } from "./lib/bus.js";
@@ -10,19 +12,11 @@ import { spend, assertDailyBudget} from "./lib/llm.js";
 import { cfg } from "./config.js";
 import * as store from "./lib/store.js";
 import { writeReport } from "./report.js";
+import { liveCalls } from "./calls.js";
+import { composite } from "./agents/composite.js";
+import * as evaluation from "./evaluation.js";
 
 const cycleId = () => new Date().toISOString().replace(/[:.]/g, "-");
-
-/** Confidence-weighted composite of the five analyst seats. */
-function composite(analysts) {
-  let num = 0, den = 0;
-  for (const [k, a] of Object.entries(analysts)) {
-    const w = (cfg.weights[k] ?? 0) * (a.confidence ?? 0.5);
-    num += (a.score ?? 50) * w;
-    den += w;
-  }
-  return den > 0 ? num / den : 50;
-}
 
 /** Stage 0: build the raw universe from public feeds. */
 export async function buildUniverse() {
@@ -61,7 +55,9 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
   const ev = await gather(mint, hook);
   if (!ev.ok) {
     emit("token:end", { mint, outcome: "no_data", detail: ev.error });
-    return { mint, outcome: "no_data", error: ev.error };
+    const rec = { mint, outcome: "no_data", error: ev.error, finalDecision: "no_data" };
+    evaluation.recordDecision(cycle, rec);
+    return rec;
   }
   store.touchSeen(mint, ev.symbol);
   emit("token:evidence", { mint, symbol: ev.symbol, liq: ev.pairs.totalLiquidityUsd, price: ev.pair?.priceUsd });
@@ -77,6 +73,7 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
     rec.reportFile = writeReport(cycle, rec);
     emit("token:end", { mint, symbol: ev.symbol, outcome: "screened_out",
       detail: sc.fails.map((f) => f.code).join(", "), report: rec.reportFile });
+    evaluation.recordDecision(cycle, rec);
     return rec;
   }
 
@@ -115,7 +112,10 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
   // A desk missing half its analysts is not a desk. Refuse to decide on a thin book.
   if (Object.keys(analysts).length < 3) {
     emit("token:end", { mint, symbol: ev.symbol, outcome: "insufficient_coverage" });
-    return { mint, symbol: ev.symbol, outcome: "insufficient_coverage", seatFailures, ev, analysts };
+    const rec = { mint, symbol: ev.symbol, outcome: "insufficient_coverage", seatFailures, ev, analysts,
+      finalDecision: "insufficient_coverage" };
+    evaluation.recordDecision(cycle, rec);
+    return rec;
   }
 
   const killer = Object.entries(analysts).find(([, a]) => a.kill);
@@ -125,13 +125,15 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
     rec.reportFile = writeReport(cycle, rec);
     emit("token:end", { mint, symbol: ev.symbol, outcome: "killed",
       detail: `${killer[0]}: ${killer[1].kill_reason}`, report: rec.reportFile });
+    evaluation.recordDecision(cycle, rec);
     return rec;
   }
 
   // --- Stage 7-9: adversary, risk, decision. ---
   const weighted = composite(analysts);
   emit("stage", { stage: "redteam", mint, symbol: ev.symbol, weighted: Number(weighted.toFixed(1)) });
-  const redteam = await runRedTeam(ev, analysts);
+  const redteamRaw = await runRedTeam(ev, analysts);
+  let redteam = redteamRaw;
 
   /* HOLD THE RED TEAM TO ITS OWN CHARTER.
    *
@@ -167,20 +169,11 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
    * Deliberately generous: any one of these words anywhere in the attack or its
    * evidence passes. The test is whether the seat is pointing at a fact of the right
    * KIND, not whether it phrased it a particular way. */
-  const CHECKABLE = /wash|round.?trip|manufactur|bot|rug|mint authorit|freeze|honeypot|impersonat|paid|bought|shill|bundl|cluster|holder|float|concentrat|deployer|creator|sold|dump|exit|slippage|liquidity|unlock|vest|insider|snipe/i;
-  const fatal = (redteam.attacks ?? []).filter((a) => {
-    if (a?.severity !== "fatal") return false;
-    const text = `${a?.attack ?? ""} ${a?.evidence ?? ""}`.trim();
-    return text.length > 20 && CHECKABLE.test(text);
-  });
-  if (redteam.verdict === "refuted" && fatal.length === 0) {
-    redteam.downgraded_from = "refuted";
-    redteam.downgrade_reason =
-      "refuted without a fatal, evidenced attack — the charter requires a specific checkable fact, not the base rate";
-    redteam.verdict = "wounded";
-    emit("seat:downgraded", { seat: "Red Team", mint, symbol: ev.symbol,
-      from: "refuted", to: "wounded", reason: redteam.downgrade_reason });
-  }
+  const barred = applyRedTeamBar(redteam, ev);
+  redteam = barred.redteam;
+  const fatal = barred.verifiedFatal;
+  if (redteam.downgraded_from) emit("seat:downgraded", { seat: "Red Team", mint, symbol: ev.symbol,
+    from: "refuted", to: "wounded", reason: redteam.downgrade_reason });
 
   store.recordVerdict(cycle, mint, ev.symbol, "redteam", { verdict: redteam.verdict, confidence: redteam.confidence, ...redteam });
   emit("seat:verdict", { seat: "Red Team", mint, symbol: ev.symbol, detail: redteam.verdict,
@@ -188,61 +181,12 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
     fatalAttacks: fatal.length,
     ...(redteam.downgraded_from ? { downgradedFrom: redteam.downgraded_from } : {}) });
 
-  let risk = await runRisk(ev, analysts, redteam);
-
-  /* THE ZERO-SIZE CONTRADICTION — the reason this desk had never published a call.
-   *
-   * The Risk seat sized 10 of 11 workups at $0, and said why, verbatim:
-   *   "Per method rule 4, refuted means position_size_usd is 0 — not negotiable."
-   * No such rule has ever existed. Rule 4 says a refuted verdict cuts size HARD and
-   * that zero is reserved for a mechanical failure — the exit failing at size, or a
-   * live authority. One of those same verdicts recorded "the $500 probe was clean at
-   * 0.05% round-trip" in its own notes, which is that test PASSING.
-   *
-   * A zero size then blocks four independent gates, none of which mentions the red
-   * team: the PM's charter forbids proposing on a zero, the ticket below is not
-   * drafted, compliance raises zero_size_proposal, and the mandate declines for no
-   * usable stop. That is why the refusal ledger showed not one red-team decline while
-   * the red team looked like the problem — the trades died one seat earlier, of a
-   * sentence nobody wrote.
-   *
-   * The charter now states the floor unambiguously. This is the belt to that braces,
-   * because a rule a model can misread is a rule code should check. But the desk must
-   * NOT invent a size — that would be trading on arithmetic no judgement stands behind.
-   * So it asks the seat ONCE more, quoting the seat's own rule against the specific
-   * evidence that contradicts it. If the seat still says zero, the desk takes zero. */
-  const probe = ev.exitProbe?.roundTripLossPct;
-  const exitFails = probe == null || probe > cfg.maxRoundTripSlippagePct;
-  const authorityLive = !!(ev.mintAccount?.mintAuthority || ev.mintAccount?.freezeAuthority);
-
-  if (risk?.position_size_usd === 0 && !exitFails && !authorityLive) {
-    emit("seat:contradiction", { seat: "Risk", mint, symbol: ev.symbol,
-      note: "sized at zero while BOTH mechanical conditions for zero are absent — re-asking once",
-      roundTripLossPct: probe, ceiling: cfg.maxRoundTripSlippagePct,
-      mintAuthority: ev.mintAccount?.mintAuthority ?? null,
-      freezeAuthority: ev.mintAccount?.freezeAuthority ?? null });
-
-    const retry = await runRisk(ev, analysts, redteam, {
-      challenge:
-        `You returned position_size_usd = 0. Rule 4 permits zero in exactly two cases, and NEITHER holds here:\n` +
-        `  (a) the exit fails at size — the round-trip probe measured ${probe}%, inside the desk ceiling of ${cfg.maxRoundTripSlippagePct}%. It did not fail.\n` +
-        `  (b) a live authority can rug it — mintAuthority=${ev.mintAccount?.mintAuthority ?? "null"}, ` +
-        `freezeAuthority=${ev.mintAccount?.freezeAuthority ?? "null"}. Nothing is live.\n\n` +
-        `There is no rule that a refuted red-team verdict forces zero. Rule 4 says such a trade "survives SMALL". ` +
-        `Size it — as small as your judgement requires — and give the stop that goes with it. ` +
-        `If you still believe zero is right, return zero and quote the specific number or authority field you are invoking under (a) or (b).`,
-    }).catch(() => null);
-
-    if (retry) {
-      emit("seat:verdict", { seat: "Risk", mint, symbol: ev.symbol, score: retry.score,
-        confidence: retry.confidence,
-        note: retry.position_size_usd > 0
-          ? `re-sized to $${retry.position_size_usd} once the fabricated rule was withdrawn`
-          : "held at zero on a second look — the desk takes the seat's answer" });
-      risk = retry;
-      store.recordVerdict(cycle, mint, ev.symbol, "risk", retry);
-    }
-  }
+  const modelRisk = await runRisk(ev, analysts, redteam);
+  const openRiskUsd = retainedBookRiskUsd(liveCalls());
+  const risk = enforceRiskRails({ risk: modelRisk, ev, redteam, openRiskUsd });
+  if (risk.rail_notes?.length) emit("seat:adjusted", { seat: "Risk", mint, symbol: ev.symbol,
+    detail: risk.rail_notes.join("; "), modelTier: modelRisk.risk_tier,
+    finalSize: risk.position_size_usd });
   store.recordVerdict(cycle, mint, ev.symbol, "risk", { score: risk.position_size_usd, confidence: risk.confidence, ...risk });
   emit("seat:verdict", { seat: "Risk", mint, symbol: ev.symbol, detail: `$${risk.position_size_usd}` });
 
@@ -284,12 +228,16 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
   if (!comp.pass) finalDecision = "VETOED";
 
   const record = { mint, symbol: ev.symbol, outcome: "decided", weighted, ev, analysts,
-    redteam, risk, pm, ticket, compliance: comp, finalDecision };
+    redteamRaw, redteam, risk, pm, ticket, compliance: comp, finalDecision };
 
   // --- Stage 12: the CEO. Only a clean proposal reaches the door. ---
   if (finalDecision === "PROPOSE") {
     emit("stage", { stage: "ceo", mint, symbol: ev.symbol });
-    const ceo = await runCEO({ ev, pm, risk, redteam, ticket, compliance: comp });
+    const modelCeo = await runCEO({ ev, pm, risk, redteam, ticket, compliance: comp });
+    const ceo = enforceCeoRails({ ceo: modelCeo, risk });
+    if (ceo.rail_notes?.length) emit("seat:adjusted", { seat: "CEO", mint, symbol: ev.symbol,
+      detail: ceo.rail_notes.join("; "), modelSize: modelCeo.order_size_usd,
+      finalSize: ceo.order_size_usd });
     record.ceo = ceo;
     store.recordVerdict(cycle, mint, ev.symbol, "ceo",
       { verdict: ceo.ruling, score: ceo.order_size_usd, confidence: ceo.confidence, ...ceo });
@@ -302,12 +250,13 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
     record.proposalId = store.recordProposal(cycle, ev, { ...pm, decision: finalDecision }, risk, ticket);
   }
 
-  // --- Stage 12: scribe. ---
+  // --- Stage 13: scribe. ---
   const file = writeReport(cycle, record);
   record.reportFile = file;
   emit("token:end", { mint, symbol: ev.symbol, outcome: finalDecision, conviction: pm.conviction,
     thesis: pm.thesis, size: record.order?.size ?? risk.position_size_usd, stop: ticket?.stop_price,
     gmgn: record.order?.links?.gmgn, report: file });
+  evaluation.recordDecision(cycle, record);
   return record;
 }
 

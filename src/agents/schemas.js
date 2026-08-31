@@ -35,6 +35,13 @@ export const RedTeamOut = z.object({
     attack: z.string(),
     severity: z.enum(["fatal", "serious", "minor"]),
     evidence: z.string(),
+    fact_code: z.enum(["wash_trading", "deployer_misconduct", "live_authority", "holder_control",
+      "exit_failure", "liquidity_collapse", "fake_social_proof", "false_identity", "unlock_risk", "other"]),
+    evidence_path: z.string().describe("Exact evidence-bundle path, or empty only when source_url supplies external proof."),
+    observed_value: z.string(),
+    threshold_or_comparison: z.string(),
+    source_url: z.string().nullable(),
+    verification_status: z.enum(["verified", "inference", "unverified"]),
   })),
   unfalsifiable_claims: z.array(z.string()).describe("Bull-case claims that cannot be checked and should carry no weight."),
   what_would_change_my_mind: z.string(),
@@ -43,12 +50,11 @@ export const RedTeamOut = z.object({
 });
 
 export const RiskOut = z.object({
-  position_size_usd: z.number().describe("Recommended notional. May be 0."),
-  size_rationale: z.string(),
+  risk_tier: z.enum(["minimal", "quarter", "half", "full"])
+    .describe("Judgment only. Code converts this tier into dollars from the configured book and hard rails."),
+  size_rationale: z.string().describe("Why this risk tier fits the evidence and red-team verdict."),
   stop_price: z.number().describe("Price at which the thesis is mechanically wrong. 0 if not applicable."),
   stop_rationale: z.string(),
-  max_loss_usd: z.number(),
-  pct_of_equity_at_risk: z.number(),
   liquidity_adjusted: z.boolean().describe("True if you reduced size because the exit probe said you could not get out at full size."),
   portfolio_notes: z.string(),
   confidence: z.number().min(0).max(1),

@@ -138,6 +138,9 @@ export function eligibility(rec) {
     return decline("no readable entry price", true);
   if (stop >= price)
     return decline(`the stop (${stop}) sits at or above the entry (${price}) — it would fire on arrival`, true);
+  const authorizedSize = Number(rec.order?.size ?? rec.ceo?.order_size_usd ?? rec.risk?.position_size_usd);
+  if (!(authorizedSize > 0))
+    return decline("the team authorized zero size — there is no trade to publish", true);
   const m5 = rec.ev?.pair?.priceChange?.m5 ?? 0;
   if (m5 > 20)
     return decline(`spike-shaped entry: +${m5}% in five minutes — copiers would be the exit`, true);

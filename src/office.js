@@ -37,6 +37,7 @@ import * as alerts from "./alerts.js";
 import * as identity from "./identity.js";
 import * as passes from "./passes.js";
 import { callouts } from "./whales.js";
+import { retiredBrowserRpcResponse } from "./execution-gates.js";
 
 /** When THIS process started. A short uptime next to a stale event is a restart. */
 const BOOTED_AT = Date.now();
@@ -176,8 +177,8 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
            compared in constant time. Read-only: this endpoint never trades,
            never signs, never touches a key — it just hands the bot the calls
            the desk already published, with everything a trade needs. This is
-           how hands-off auto-trading stays non-custodial: the execution lives
-           in the tenant's process, not ours. */
+           how a tenant can rehearse the same policy without handing us custody:
+           this release's poller is deliberately dry-run only. */
         const feedMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/executor\/feed$/);
         if (feedMatch) {
           const floorNo = Number(feedMatch[1]);
@@ -203,6 +204,10 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               -- coins the desk has already exited.
               AND NOT (a.kind = 'entry' AND c.status = 'closed')
             ORDER BY a.id LIMIT 50`).all(floorNo, after);
+          const latestId = db.prepare(`SELECT MAX(a.id) id FROM alerts a
+            LEFT JOIN calls c ON c.id=a.call_id
+            WHERE a.floor_no=? AND a.kind IN ('entry','exit')
+              AND NOT (a.kind='entry' AND c.status='closed')`).get(floorNo)?.id ?? after;
           /* THE FLOOR'S OWN RULES RIDE WITH THE CALL.
            * The bot must not have to be reconfigured when a tenant changes their mind
            * in the UI: the take-profit multiple travels on every event, so a floor
@@ -210,52 +215,27 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
            * poll rather than on the next redeploy of somebody's VPS. 0 means auto —
            * the bot then honours the desk's own authored target. */
           const fs = copy.settingsFor(floorNo);
-          return json(200, { cluster: "mainnet-beta",
+          return json(200, { cluster: "mainnet-beta", latest_id: latestId,
+            next_cursor: rows.length ? rows[rows.length - 1].id : after,
             rules: { take_profit_x: fs.take_profit_x ?? 0, fixed_sol: fs.fixed_sol ?? 0,
                      mcap_tier: fs.mcap_tier ?? "any" },
             events: rows.map((r) => ({
-              id: r.id, type: r.kind, mint: r.mint, symbol: r.symbol,
+              id: r.id, event_id: `${floorNo}:${r.kind}:${r.id}`, type: r.kind, mint: r.mint, symbol: r.symbol,
               side: r.kind === "entry" ? "buy" : "sell",
               size_sol: r.size_sol ?? null, entry_ref: r.entry_ref, stop: r.stop, target: r.target,
-              take_profit_x: fs.take_profit_x ?? 0,
+              take_profit_x: fs.take_profit_x ?? 0, fixed_sol: fs.fixed_sol ?? 0,
               code: r.close_reason ?? null, urgency: r.urgency, ts: r.created_at,
             })) });
         }
 
-        /* ── THE BOT'S RPC LANE ───────────────────────────────────────────────
-           The in-browser bot could not talk to Solana at all: the public mainnet
-           RPC answers 403 to browsers and the usual alternates fail CORS, so
-           getBalance never returned and a funded wallet sat forever on
-           "checking balance…" — and a started bot could never have sent a trade
-           either. This is a plain JSON-RPC passthrough so the page can point a
-           web3 Connection straight at it.
-
-           It is a RELAY, not an authority: the browser signs with a key this
-           server never sees, and we forward the bytes. The method allowlist is
-           deliberately the smallest set that lets a bot read its own wallet and
-           broadcast a transaction it already signed — nothing that reads other
-           users' data in bulk, nothing that costs an archival lookup. */
+        /* ── RETIRED BROWSER RPC LANE ─────────────────────────────────────────
+           The browser signer is not part of this release, so retaining even a
+           read-only wildcard-CORS proxy would expose the private production RPC for
+           no product benefit. Keep a deliberate tombstone response at the old path
+           instead of forwarding any method or parameters upstream. */
         if (url.pathname === "/api/bot/rpc" && req.method === "POST") {
-          const BOT_RPC = new Set([
-            "getBalance", "getLatestBlockhash", "getTokenAccountsByOwner",
-            "getSignatureStatuses", "getAccountInfo", "getMinimumBalanceForRentExemption",
-            "sendTransaction",                      // relay only — we never sign
-            "getFeeForMessage", "getEpochInfo", "getSlot", "getBlockHeight", "getVersion",
-          ]);
-          const call = await readBody();          // readBody already returns parsed JSON
-          const method = call?.method;
-          if (!method || !BOT_RPC.has(method)) {
-            return json(400, { jsonrpc: "2.0", id: call?.id ?? null,
-              error: { code: -32601, message: `method not available here: ${method || "(none)"}` } });
-          }
-          const { rpc: rawRpc } = await import("./lib/http.js");
-          const { cfg: cfgB } = await import("./config.js");
-          const r = await rawRpc(cfgB.rpc, method, call.params ?? []);
-          if (!r.ok) {
-            return json(502, { jsonrpc: "2.0", id: call.id ?? null,
-              error: { code: -32603, message: r.error || "rpc unavailable" } });
-          }
-          return json(200, { jsonrpc: "2.0", id: call.id ?? null, result: r.data });
+          const retired = retiredBrowserRpcResponse();
+          return json(retired.status, retired.body);
         }
 
         /* One fixed, cheap RPC read for the one-signature buy: the public
@@ -624,6 +604,18 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           if (process.env.PENTHOUSE_ENABLED === "0") { state = "PAUSED"; reason = "research disabled by the operator"; }
           else if (!process.env.ANTHROPIC_API_KEY) { state = "PAUSED"; reason = "no API key — the house team cannot work"; }
           else if (cap > 0 && sp.usd >= cap) { state = "PAUSED"; reason = `daily budget reached ($${sp.usd.toFixed(2)} of $${cap}) — monitoring and watch checks continue free`; }
+
+          /* An empty provider balance is different from the desk's own daily cap.
+           * Surface the provider event directly so the heartbeat cannot stay green
+           * while every paid seat is refusing work. */
+          const dry = q(`SELECT MAX(ts) t, COUNT(*) n FROM chronicle
+                         WHERE type='desk:out_of_credit' AND ts > ?`, Date.now() - 3600e3);
+          if (dry?.n > 0) {
+            state = "BLOCKED";
+            reason = `the Anthropic account balance is empty (${dry.n} seat${dry.n === 1 ? "" : "s"} refused in the last hour) — ` +
+              `this is the API account, NOT the desk's $${cap}/day cap, which still has $${Math.max(0, cap - sp.usd).toFixed(2)} of headroom. ` +
+              `Top up the Anthropic account behind ANTHROPIC_API_KEY; free screening continues meanwhile.`;
+          }
           /* IS THE PAID HALF ACTUALLY WORKING?
            *
            * RUNNING used to mean only "not paused" — the desk had budget, a key, and no

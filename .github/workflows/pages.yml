@@ -28,11 +28,13 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Run isolated regression suite
+        run: npm test
       - name: Build static site
         # SITE_URL (the custom domain) makes og:image absolute for link-preview crawlers.
         # API_BASE points the static site at the Render service; Pages cannot run the
         # scanner or the database itself.
-        run: API_BASE="${{ vars.API_BASE }}" node scripts/build-viewer.mjs
+        run: API_BASE="${{ vars.API_BASE }}" npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

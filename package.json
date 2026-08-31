@@ -8,6 +8,9 @@
     "node": ">=22.5.0"
   },
   "scripts": {
+    "test": "node scripts/test-all.mjs",
+    "build": "node scripts/build-viewer.mjs",
+    "check": "npm test && npm run build",
     "desk": "node src/index.js run",
     "one": "node src/index.js one",
     "watch": "node src/index.js watch",

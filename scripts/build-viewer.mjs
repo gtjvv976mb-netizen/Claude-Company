@@ -47,7 +47,7 @@ fs.copyFileSync(path.join(ROOT, "token", "claudeco-64.png"), path.join(OUT, "ass
 
 // The self-hosted executor, served static so the one-command install resolves.
 fs.mkdirSync(path.join(OUT, "executor"), { recursive: true });
-for (const f of ["poller.mjs", "install.sh", "executor.mjs", "README.md", "strategy.mjs", "simulate.mjs"]) {
+for (const f of ["poller.mjs", "install.sh", "executor.mjs", "README.md", "strategy.mjs", "trade-policy.mjs", "simulate.mjs"]) {
   const src = path.join(ROOT, "executor", f);
   if (fs.existsSync(src)) fs.copyFileSync(src, path.join(OUT, "executor", f));
 }

@@ -59,18 +59,23 @@ export function validExecutorUrl(url) {
 
 /** Fire one signed event at a floor's executor. Best effort; never blocks an exit. */
 export async function pushExecutor(floorNo, event) {
+  // Polling is the durable, non-SSRF delivery path. Push delivery stays disabled until
+  // it has a resolved-address egress policy and persistent retry outbox.
+  if (process.env.EXECUTOR_WEBHOOKS_ENABLED !== "1") return false;
   const row = db.prepare("SELECT executor_url, executor_secret FROM copy_settings WHERE floor_no=?").get(floorNo);
   if (!row?.executor_url || !row?.executor_secret) return false;
-  const body = JSON.stringify({ v: 1, ts: Date.now(), floor: floorNo, ...event });
+  const eventId = `${floorNo}:${event.type}:${event.call?.id ?? "unknown"}`;
+  const body = JSON.stringify({ v: 2, event_id: eventId, ts: Date.now(), floor: floorNo, ...event });
   const sig = crypto.createHmac("sha256", row.executor_secret).update(body).digest("hex");
+  let t;
   try {
     const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), 6000);
-    await fetch(row.executor_url, { method: "POST",
+    t = setTimeout(() => ctl.abort(), 6000);
+    const res = await fetch(row.executor_url, { method: "POST", redirect: "error",
       headers: { "content-type": "application/json", "x-cc-signature": sig }, body, signal: ctl.signal });
-    clearTimeout(t);
-    return true;
+    return res.ok;
   } catch { return false; }
+  finally { if (t) clearTimeout(t); }
 }
 
 export function validWebhook(url) {
@@ -119,14 +124,16 @@ async function push(url, title, body) {
   const payload = v.url.includes("api.telegram.org")
     ? { text }                                  // telegram sendMessage needs chat_id in the URL
     : { content: text };                        // discord / slack
+  let t;
   try {
     const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), 6000);
-    await fetch(v.url, { method: "POST", headers: { "content-type": "application/json" },
+    t = setTimeout(() => ctl.abort(), 6000);
+    const res = await fetch(v.url, { method: "POST", redirect: "error",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify(payload), signal: ctl.signal });
-    clearTimeout(t);
-    return true;
+    return res.ok;
   } catch { return false; }
+  finally { if (t) clearTimeout(t); }
 }
 
 /**

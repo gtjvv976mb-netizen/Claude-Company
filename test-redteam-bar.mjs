@@ -1,76 +1,75 @@
-/**
- * THE RED TEAM MUST SHOW ITS WORK.
- *
- * Measured over 57 live verdicts: refuted 41 (72%), wounded 16, survives ZERO. A seat
- * that has never once let anything through is not discriminating — it is a constant,
- * and a constant carries no information. It also stopped the desk dead, because an
- * unanswered refutation is a safety refusal in the mandate.
- *
- * Its own charter already draws the line: refuted means "a SPECIFIC, CHECKABLE fact
- * breaks the thesis premise... NAME the fact. If your refutation would read verbatim on
- * any other token of this class, it is not a refutation — it is the base rate."
- *
- * Prose could not enforce that, so code does. This asserts the rule, and — more
- * importantly — asserts that a REAL refutation is left completely alone.
- */
+/** The Red Team's hard verdict must resolve to retained, checkable evidence. */
+import { applyRedTeamBar, verifiedFatalAttacks } from "./src/agents/redteam-policy.js";
+
 let pass = 0, fail = 0;
-const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  — " + d : ""}`))
-                                 : (fail++, console.log(`  FAIL ${n}${d ? "  — " + d : ""}`)); };
+const ok = (name, condition, detail = "") => {
+  if (condition) { pass++; console.log(`  ok   ${name}${detail ? `  \u2014 ${detail}` : ""}`); }
+  else { fail++; console.log(`  FAIL ${name}${detail ? `  \u2014 ${detail}` : ""}`); }
+};
 
-/** The rule as desk.js applies it. */
-function applyBar(redteam) {
-  const rt = { ...redteam };
-  const fatal = (rt.attacks ?? []).filter(
-    (a) => a?.severity === "fatal" && String(a?.evidence ?? "").trim().length > 20);
-  if (rt.verdict === "refuted" && fatal.length === 0) {
-    rt.downgraded_from = "refuted";
-    rt.verdict = "wounded";
-  }
-  return { rt, fatal: fatal.length };
-}
-
-console.log("\nA REAL REFUTATION IS UNTOUCHED");
-const real = applyBar({
-  verdict: "refuted", headline: "the volume is manufactured",
-  attacks: [{ target: "flow", attack: "wash trading", severity: "fatal",
-    evidence: "94% of h24 volume is 3 wallets round-tripping the same 40 SOL, 1,180 txns" }],
+const evidence = {
+  mintAccount: { mintAuthority: "MintAuth111", freezeAuthority: null, flags: ["mint_authority_live"] },
+  holders: { top1Pct: 63.4, clusteredHolders: 6 },
+  exitProbe: { roundTripLossPct: 2.1 },
+  xRead: { citations: ["https://example.com/post"] },
+};
+const attack = (over = {}) => ({
+  target: "forensics",
+  attack: "the retained mint authority can inflate supply",
+  severity: "fatal",
+  evidence: "mintAccount.mintAuthority is MintAuth111",
+  fact_code: "live_authority",
+  evidence_path: "mintAccount.mintAuthority",
+  observed_value: "MintAuth111",
+  threshold_or_comparison: "authority is non-null",
+  source_url: null,
+  verification_status: "verified",
+  ...over,
 });
-ok("a fatal, evidenced attack keeps the kill", real.rt.verdict === "refuted", "still refuted");
-ok("and is not marked as downgraded", !real.rt.downgraded_from);
 
-console.log("\nTHE BASE RATE WEARING A VERDICT IS NOT");
-for (const [label, rt] of [
-  ["no attacks at all", { verdict: "refuted", attacks: [] }],
-  ["only 'serious', never fatal", { verdict: "refuted", attacks: [
-    { severity: "serious", evidence: "the holders look concentrated to me, hard to say" }] }],
-  ["fatal but unevidenced", { verdict: "refuted", attacks: [
-    { severity: "fatal", evidence: "risky" }] }],
-  ["fatal with empty evidence", { verdict: "refuted", attacks: [
-    { severity: "fatal", evidence: "   " }] }],
+console.log("\nA VERIFIED FACT KEEPS THE REFUTATION");
+const real = applyRedTeamBar({
+  verdict: "refuted", headline: "supply remains controllable", bear_case: "the authority can print",
+  attacks: [attack()],
+}, evidence);
+ok("verified fatal attack is found", real.verifiedFatal.length === 1);
+ok("a real refutation remains refuted", real.redteam.verdict === "refuted");
+ok("it is not marked downgraded", !real.redteam.downgraded_from);
+
+console.log("\nPROSE CANNOT DRESS ITSELF AS A FACT");
+for (const [name, a] of [
+  ["generic keyword prose", attack({ fact_code: "other", attack: "liquidity might disappear" })],
+  ["missing evidence path", attack({ evidence_path: "holders.doesNotExist" })],
+  ["unverified assertion", attack({ verification_status: "unverified" })],
+  ["missing observed value", attack({ observed_value: "" })],
+  ["non-fatal severity", attack({ severity: "serious" })],
 ]) {
-  const r = applyBar(rt);
-  ok(`${label} -> downgraded, not a kill`, r.rt.verdict === "wounded" && r.rt.downgraded_from === "refuted");
+  const r = applyRedTeamBar({ verdict: "refuted", headline: name, attacks: [a] }, evidence);
+  ok(`${name} is downgraded`, r.redteam.verdict === "wounded", r.redteam.downgrade_reason);
+  ok(`${name} has no verified fatal`, r.verifiedFatal.length === 0);
 }
 
-console.log("\nNOTHING ELSE MOVES");
-const wounded = applyBar({ verdict: "wounded", attacks: [] });
-ok("a wounded verdict is left alone", wounded.rt.verdict === "wounded" && !wounded.rt.downgraded_from);
-const survives = applyBar({ verdict: "survives", attacks: [] });
-ok("a survives verdict is left alone", survives.rt.verdict === "survives");
-const keep = applyBar({ verdict: "refuted", headline: "keeps its findings",
-  bear_case: "the whole bear case", attacks: [{ severity: "minor", evidence: "x" }] });
-ok("the seat's findings are PRESERVED, not erased", keep.rt.headline === "keeps its findings" && !!keep.rt.bear_case,
-  "downgrading a verdict must not delete the analysis behind it");
+console.log("\nEXTERNAL SOCIAL CLAIMS REQUIRE A RETAINED HTTPS SOURCE");
+const social = attack({
+  fact_code: "fake_social_proof",
+  evidence_path: "",
+  source_url: "https://example.com/post",
+  observed_value: "account never published the claimed endorsement",
+  threshold_or_comparison: "claimed post absent from the named account",
+});
+ok("HTTPS evidence can verify an external claim",
+  verifiedFatalAttacks({ attacks: [social] }, evidence).length === 1);
+ok("a non-retained HTTPS citation cannot",
+  verifiedFatalAttacks({ attacks: [{ ...social, source_url: "https://invented.example/not-retained" }] }, evidence).length === 0);
+ok("a non-HTTPS citation cannot",
+  verifiedFatalAttacks({ attacks: [{ ...social, source_url: "javascript:alert(1)" }] }, evidence).length === 0);
 
-console.log("\nWHAT THIS WOULD HAVE DONE TO THE LIVE RECORD");
-// The desk cannot publish a coin the red team refuted unless the PM answered it, and
-// the PM has proposed once in 47. So every unevidenced refutation was a dead end.
-const before = { refuted: 41, wounded: 16, survives: 0 };
-console.log(`  before: refuted ${before.refuted} (${(before.refuted / 57 * 100).toFixed(0)}%), wounded ${before.wounded}, survives ${before.survives}`);
-console.log("  after : every refutation that cannot name a fatal, evidenced fact becomes");
-console.log("          'wounded' — which the desk already trades, smaller.");
-ok("the rule only ever downgrades, never upgrades", true,
-  "a real kill can still stop any coin, on any lane, at any time");
+console.log("\nNON-REFUTED VERDICTS AND FINDINGS ARE PRESERVED");
+const wounded = applyRedTeamBar({ verdict: "wounded", headline: "keep me", attacks: [] }, evidence);
+ok("wounded remains wounded", wounded.redteam.verdict === "wounded");
+ok("the original findings remain", wounded.redteam.headline === "keep me");
+const survives = applyRedTeamBar({ verdict: "survives", attacks: [] }, evidence);
+ok("survives remains survives", survives.redteam.verdict === "survives");
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

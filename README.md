@@ -1,14 +1,20 @@
 # Claude Tower
 
-A fifty-floor building. Every floor is one automated Solana research desk: fourteen
-purpose-built agents working a single trade from end to end, plus a CEO seat behind a
-brass door that only the floor's owner can open.
+A fifty-floor building. Every floor is one automated Solana research desk. Its core
+decision path has fourteen seats including the CEO; the standing Regime and Review seats
+bring the permanent team to sixteen. Grok floors may add an alternate PM brain.
 
 Floor 50 is the headquarters. Floors 1–49 are tenancies at 50 USDC, one-time.
 
-**It researches and prepares orders. It does not execute them.** There is no signing code
-and no key handling anywhere in this repository, and none should ever be added. The desk's
-final artifact is an unsigned order slip and a GMGN link. You place the trade.
+**This release is research and paper trading only.** The hosted desk never receives a
+private key, never signs a wallet transaction, and produces an unsigned order slip and a
+GMGN link. This repository also contains isolated, user-operated reference executors, but
+they are deliberately fail-closed in this release: setting `EXECUTE=1` makes either
+executor exit before it can trade. `EXECUTE=0` dry-run is the only supported mode until a
+durable transaction log, instruction validation, and canary testing are complete.
+The browser executor is gated too: no signer code ships in the page and the old hosted RPC
+relay returns `410 Gone` without contacting Solana. A legacy browser burner can export its
+recovery key, but must be imported into a trusted wallet to recover any remaining funds.
 
 ---
 
@@ -27,19 +33,24 @@ code narrows the field cheaply, the model only reasons about what survived.
 | 5 | **Narrative** | model + web | Is there a story, is it true, and am I early? |
 | 6 | **Technical** | model | Is this a location worth entering? |
 | 7 | **Red Team** | model | *Why does this trade lose money?* |
-| 8 | **Risk** | model | How much, and where is it mechanically wrong? |
+| 8 | **Risk** | model + code | Choose a tier and thesis stop; code derives size and loss. |
 | 9 | **PM** | model | Propose, watch, or pass — on what thesis? |
 | 10 | **Execution** | model | The unsigned ticket: route, slicing, stop, targets. |
 | 11 | **Compliance** | code | Does this break a house rule? *(veto, not advice)* |
 | 12 | **CEO** | model | Do I trust this desk, on this trade, today? |
 | 13 | **Scribe** | code | Write it down so the desk can be graded later. |
 
+Two permanent seats sit outside that per-token sequence: **Regime** computes the broader
+SOL/BTC weather used by the evidence and portfolio gates, while **Review** grades each
+closed call and gives one transferable lesson to the next PM decision.
+
 Stages 2–6 run **in parallel and blind to each other**. Five analysts who read each other's
 notes produce one opinion wearing five hats; the desk needs five actual opinions.
 
 The **Red Team** is not asked to be balanced — it is asked to destroy the idea. A proposal
-survives only if the PM can say *how* the attack was answered, and that answer is a required
-field. "Refuted" can never become a proposal.
+survives only if the PM can answer a structured, verified fatal fact with retained evidence.
+An answered refutation may reach the CEO at mechanically reduced size; unsupported fatal
+prose is retained as a wounded finding, not promoted into a hard veto.
 
 The **CEO** is the only seat shown the desk's own historical record, because its question
 isn't "is this a good trade" — the PM already answered that — but "do I trust my desk today".
@@ -51,22 +62,22 @@ settings, its own journal, and its own research runs, which its tenant triggers 
 for. The building is the interface; the desk is the product.
 
 Runs are **metered, not continuous**, and the reason is arithmetic rather than caution.
-Every seat is Opus, two at `xhigh` effort. A full fourteen-seat workup on one token costs
-roughly $0.90–1.50 in API spend, so a desk running hourly is ~$75–110/day. Forty-nine of
-those running independently would be ~$4,000/day against a one-time lease. A one-time
-payment cannot fund unlimited compute, and pretending otherwise would break either the
-promise or the owner.
+The paid seats are deliberately tiered: Scout defaults to Haiku; the evidence-shaped
+analysts, Risk and Execution to Sonnet; Red Team, PM and CEO to Opus. Effort and retained
+evidence make the cost variable, but every workup consumes metered model credit. Forty-nine
+unbounded desks cannot be funded by a one-time lease, so the product meters runs instead of
+promising unlimited compute.
 
 So: a lease includes `FREE_RUNS_WITH_LEASE` runs, and further runs cost
 `RUN_PRICE_CLAUDECO` from the same $CLAUDECO credit balance the lease was paid from. The
-tenant points their team at a token; fourteen agents work it end to end; the tenant gets a
+tenant points their team at a token; the core fourteen-seat path works it end to end; the tenant gets a
 brief and an unsigned ticket they sign themselves, or don't.
 
 ## The building
 
 | Page | Route | What it is |
 |---|---|---|
-| Website | `/` | The front door: what the desk is, who the fourteen are, what a floor costs |
+| Website | `/` | The front door: what the desk is, who the sixteen permanent seats are, what a floor costs |
 | The tower | `/tower` | All fifty floors in 3D. Click one to select it; the directory tracks it |
 | A trading floor | `/floor/:n` | One desk's isometric office, with its agents at work |
 
@@ -97,11 +108,39 @@ GitHub Pages automatically:
 Local equivalents:
 
 ```bash
-node scripts/build-viewer.mjs                 # plain static build into dist/
-INLINE_ASSETS=1 node scripts/build-viewer.mjs # artifact build: images inlined as data URIs
+npm run build                                 # plain static build into dist/
+INLINE_ASSETS=1 npm run build                 # artifact build: images inlined as data URIs
 ```
 
 A custom domain later is Settings → Pages → Custom domain, plus a CNAME at your DNS.
+
+## Deploying the API safely
+
+The hosted API is described by `render.yaml`. Render installs from the lockfile and runs
+the isolated root test suite before starting a new revision:
+
+```bash
+npm ci
+npm test
+```
+
+A failed test therefore fails the Render build instead of replacing the live process.
+Production SQLite state lives on the persistent disk at `/var/data/claude-co.db`; the
+ignored database in a local checkout is not production and must never be used as a test
+target. The test runner creates throwaway databases for this reason.
+
+Executor webhook delivery is explicitly disabled in the production blueprint with
+`EXECUTOR_WEBHOOKS_ENABLED=0`. The durable polling feed remains available for research and
+dry-run clients, but the hosted server will not push entry or exit events to executor
+URLs. Unsigned transaction preparation is also disabled with `DESK_PREPARE_TX=0`.
+The retired browser RPC endpoint always returns `410 Gone` and never contacts the upstream
+Solana RPC.
+
+After deployment, verify `/api/lease/config`, `/api/stats/overview`, and `/api/heartbeat`.
+The current production blocker is the Anthropic account's exhausted credit balance: HTTP
+health can remain available while the model seats cannot work. `/api/heartbeat` should
+report that condition as `BLOCKED`; top up the account behind `ANTHROPIC_API_KEY` before
+expecting paid research cycles to complete.
 
 ## Running it
 
@@ -112,6 +151,9 @@ cd ~/Downloads/claude-co && cp .env.example .env
 Set `ANTHROPIC_API_KEY` in `.env`. Everything else has a working default, though a private
 RPC is strongly recommended — the public one rate-limits holder queries, which costs the
 Forensics seat real confidence.
+
+An API key without available Anthropic credits is not operational. The current hosted
+deployment is blocked on that balance even though its HTTP health endpoint is reachable.
 
 ```bash
 npm run doctor
@@ -132,8 +174,10 @@ npm run desk -- --office
 | `npm run desk` | Scout the feeds, work up the shortlist |
 | `npm run watch -- 30` | Same, every 30 minutes, with the floor open |
 | `npm run ledger` | Every proposal the desk has made |
+| `npm test` | Run the isolated root regression suite used to gate Render deploys |
 | `node src/index.js office` | Serve the site, the tower and the floors |
-| `node scripts/build-viewer.mjs` | Bundle standalone pages into `dist/` with three.js inlined |
+| `npm run build` | Bundle standalone pages into `dist/` with three.js inlined |
+| `npm run check` | Run the full regression suite, then build the static site |
 
 Add `--office` to open the floor at **http://localhost:4949**. Append `?demo=1` to watch a
 scripted shift without spending anything.
@@ -158,14 +202,17 @@ does not try. Instead an approved order becomes:
 3. optionally, a real **unsigned** Jupiter transaction, if you set `DESK_WALLET_PUBKEY`.
 
 `DESK_WALLET_PUBKEY` is a **public** key. There is no code path in this project that reads,
-requests, stores or accepts a private key or seed phrase.
+requests, stores or accepts a private key or seed phrase in the hosted desk. The separate
+reference executors load a key only on the user's own machine; in this release they refuse
+live mode and may be used only with `EXECUTE=0` for dry-run decisions.
 
 ## What it costs
 
-Every LLM seat runs on `claude-opus-5` by default and the running total is printed each
-cycle. The screener is the main cost control: it is pure code and rejects most candidates
-before a single token is spent. To spend less, lower `DESK_MAX_CANDIDATES`, or set a cheaper
-model per seat (`DESK_MODEL_TECHNICAL=claude-sonnet-5`) — the mechanical seats lose least.
+Model defaults are cost-aware: Haiku scouts; Sonnet handles structured evidence work; Opus
+is reserved for Red Team, PM and CEO judgment. The running total is printed each cycle.
+The screener is the main cost control: it is pure code and rejects most candidates before
+a model call. To spend less, lower `DESK_MAX_CANDIDATES` or override an individual
+`DESK_MODEL_*` setting; deterministic seats have no model cost.
 
 ## Known limits
 
@@ -178,6 +225,9 @@ model per seat (`DESK_MODEL_TECHNICAL=claude-sonnet-5`) — the mechanical seats
   rather than estimating it.
 - **Nothing here has an edge until you have graded it.** Read the first weeks of the journal
   as a backtest you are watching forward.
+- **Live executor signing is intentionally unavailable in this release.** Both reference
+  executors exit immediately if `EXECUTE=1`, browser signer/swap code is absent, and the
+  retired browser RPC returns `410 Gone`; dry-run output is not evidence of fill quality.
 
 ## The charter
 

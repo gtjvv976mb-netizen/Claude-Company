@@ -1,17 +1,20 @@
 # Claude Company (Claude Co) — Desk Charter
 
-A research desk, not a trading bot. It forms trade *proposals* on Solana assets and
-stops at a human approval gate. Every rule below is injected verbatim into every
-agent's system prompt, so these are operating constraints, not documentation.
+A research and paper-trading desk, not a live trading bot. It forms trade *proposals* on
+Solana assets and stops at a human approval gate. Every rule below is injected verbatim
+into every agent's system prompt, so these are operating constraints, not documentation.
 
 ## Hard constraints
 
-1. **The desk never executes.** No private keys, no seed phrases, no signing, no
-   `sendTransaction`. The final artifact is an *unsigned ticket*: a human reads it and
-   decides. Any agent that proposes an execution path involving the desk holding a key
-   is in violation.
-2. **Read-only RPC only.** Every network call is a GET or a read RPC method. There is
-   no write path in this codebase, by construction.
+1. **The hosted desk never executes.** It accepts no private keys or seed phrases and
+   never signs a wallet transaction. The final artifact is an *unsigned ticket*: a human
+   reads it and decides. Isolated reference executors may load a burner key on the user's
+   own machine, but this release rejects `EXECUTE=1` at startup; dry-run is the only
+   supported mode. Any agent that proposes the desk holding a key is in violation.
+2. **Research RPC is read-only.** Evidence collection uses read methods. The retired
+   browser-bot relay returns `410 Gone` and never forwards any request upstream. Wallet
+   authentication and floor payments remain client-signed and purpose-scoped; the hosted
+   service never creates a wallet signature or gains authority over a wallet.
 3. **Numbers come from evidence, never from the model.** Agents receive a deterministic
    `evidence` bundle fetched by code. An agent may reason about those numbers, but may
    not state a price, liquidity, market cap, holder count or age that is not in the
@@ -25,6 +28,22 @@ agent's system prompt, so these are operating constraints, not documentation.
    refute. A proposal survives only by overcoming it, and the PM must say how.
 7. **Absence of evidence is not evidence.** An agent that could not fetch a datum
    reports `confidence` down and says so. It never fills the hole with a plausible number.
+
+## Deployment constraints
+
+1. **Tests gate production.** Render must run `npm test` after `npm ci`; a failing root
+   suite prevents that revision from starting.
+2. **Executor webhooks are disabled by default.** Production sets
+   `EXECUTOR_WEBHOOKS_ENABLED=0`. Polling may deliver research events to a dry-run client,
+   but the hosted service does not push them to an executor endpoint.
+3. **Live signing fails closed.** Both reference executor entry points terminate when
+   `EXECUTE=1`. Removing that refusal requires a durable transaction log, instruction-level
+   validation, and a separately approved canary rollout; it is not an environment toggle.
+4. **The browser signer is closed too.** Signer and swap code do not ship in the page, and
+   the old hosted RPC relay is retired. Legacy browser burners expose recovery only.
+5. **Model credit is a readiness dependency.** A reachable HTTP server is not a working
+   desk when Anthropic credits are exhausted. The current production deployment is blocked
+   on that balance, and `/api/heartbeat` must expose it as `BLOCKED` until restored.
 
 ## The pipeline
 
@@ -41,11 +60,16 @@ code narrows the field cheaply, the model reasons only about what survived.
 | 5 | NARRATIVE  | model + web  | Is there a story, is it true, and is it early? |
 | 6 | TECHNICAL  | model        | Where is price in its structure, and where is the entry? |
 | 7 | RED TEAM   | model        | Why is this trade a loser? (adversarial, sees the bull case) |
-| 8 | RISK       | model        | How much, and what is the most I lose? |
+| 8 | RISK       | model + code | Which risk tier and thesis stop; what exact size and loss do the rails derive? |
 | 9 | PM         | model        | Propose, watch, or pass — and on what thesis? |
 | 10 | EXECUTION  | model        | The unsigned ticket: route, slicing, limits, stop, targets. |
 | 11 | COMPLIANCE | code         | Does this violate the charter? (veto, final) |
-| 12 | SCRIBE     | code         | Write it down so the desk can be graded later. |
+| 12 | CEO        | model        | Do I trust this desk on this trade today, and at what reduced size? |
+| 13 | SCRIBE     | code         | Write it down so the desk can be graded later. |
+
+Two permanent control seats sit outside that per-token sequence: REGIME computes the
+SOL/BTC weather used by evidence and portfolio gates; REVIEW grades each closed call and
+feeds one transferable lesson back to the PM.
 
 Stages 2-6 are **independent analysts**. They deliberately do *not* see each other's
 opinions — only the shared evidence bundle. This is to stop an anchoring cascade where

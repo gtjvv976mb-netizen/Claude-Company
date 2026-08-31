@@ -918,6 +918,11 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
     flags: ev.mintAccount?.error ? null : (ev.mintAccount?.flags ?? []).map((f) => f.flag ?? f),
     liqUsd: ev.pairs?.totalLiquidityUsd ?? ev.pair?.liquidityUsd ?? null,
     rtLossPct: ev.exitProbe?.roundTripLossPct ?? null,
+    // Preserve the team's actual authorization. Floors may be more conservative,
+    // but they may never silently throw this away and size larger on their own.
+    deskSizeUsd: rec.order?.size ?? rec.ceo?.order_size_usd ?? rec.risk?.position_size_usd ?? null,
+    deskRiskUsd: rec.risk?.max_loss_usd ?? null,
+    deskEquityUsd: cfg.equityUsd,
     // Stored so a tenant's micro / low / mid sleeve filter has a number to test.
     mcapUsd: ev.pair?.marketCap ?? ev.pair?.fdv ?? null,
     reportFile: rec.reportFile ?? null,

@@ -14,6 +14,7 @@
  *   - realized-volatility sizing and trailing-return terms, later.
  */
 import db from "../lib/store.js";
+import { refreshForwardMarks } from "../evaluation.js";
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS snapshots (
@@ -39,6 +40,9 @@ export function record(universe) {
       p.txns?.h24?.buys ?? null, p.txns?.h24?.sells ?? null, p.fdv ?? null);
     n++;
   }
+  // The same free sweep that writes prices also grades every due research decision.
+  // This is signal-level and idempotent; copied tenant fills never multiply the sample.
+  refreshForwardMarks(universe, ts);
   return n;
 }
 

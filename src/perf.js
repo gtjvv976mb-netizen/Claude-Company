@@ -328,24 +328,43 @@ export function wilson(wins, n, z = 1.96) {
 }
 
 export function houseRecord() {
-  const rows = db.prepare("SELECT pnl_usd FROM results").all();
-  const wins = rows.filter((r) => r.pnl_usd > 0).length;
+  // One house call is one forecast. Ten tenants copying it are execution samples,
+  // not ten independent proofs that the signal worked.
+  const rows = db.prepare(`SELECT call_id,
+                                  AVG(pnl_usd) pnl_usd,
+                                  AVG(100.0 * pnl_usd / NULLIF(bought_usd, 0)) return_pct,
+                                  SUM(pnl_usd) total_pnl_usd
+                           FROM results GROUP BY call_id`).all();
+  const wins = rows.filter((r) => r.return_pct > 0).length;
   const n = rows.length;
   const w = wilson(wins, n);
   const pct = (x) => (x == null ? null : Math.round(x * 100));
+  const returns = rows.map((r) => Number(r.return_pct)).filter(Number.isFinite);
+  const mean = returns.length ? returns.reduce((a, b) => a + b, 0) / returns.length : null;
+  const variance = returns.length > 1
+    ? returns.reduce((s, x) => s + (x - mean) ** 2, 0) / (returns.length - 1) : null;
+  const expectancyLow95 = variance != null ? mean - 1.96 * Math.sqrt(variance / returns.length) : null;
+  const enough = n >= 100;
+  const edgeClaimable = enough && w.low > 0.5 && expectancyLow95 > 0;
   return {
     settled: n, wins, losses: n - wins,
     winRate: n ? Math.round((wins / n) * 100) : null,
-    netPnlUsd: Number(rows.reduce((a, r) => a + r.pnl_usd, 0).toFixed(2)),
-    // The bounds, and the one line that matters: may this desk claim an edge at
-    // all? Only if the interval's TOP is still above a coin flip does the sample
-    // rule out "lucky". Below that we say so, in the record itself.
+    // The research scorecard uses one representative result per call. Actual copied
+    // dollars are retained separately so commercial activity is visible without
+    // masquerading as extra statistical evidence.
+    netPnlUsd: Number(rows.reduce((a, r) => a + Number(r.pnl_usd || 0), 0).toFixed(2)),
+    tenantNetPnlUsd: Number(rows.reduce((a, r) => a + Number(r.total_pnl_usd || 0), 0).toFixed(2)),
+    // Claim only when both hit rate and net expectancy clear their conservative
+    // lower bounds on a frozen signal-level sample.
     hitRateLow: pct(w.low), hitRateHigh: pct(w.high),
-    edgeClaimable: w.high != null && w.high >= 0.5 && n >= 12,
+    expectancyPct: mean == null ? null : Number(mean.toFixed(4)),
+    expectancyLow95Pct: expectancyLow95 == null ? null : Number(expectancyLow95.toFixed(4)),
+    edgeClaimable,
     edgeNote: !n ? "no settled trades — no edge may be claimed"
-      : n < 12 ? `only ${n} settled — too few to distinguish skill from luck`
-      : w.high < 0.5 ? `hit rate could be as low as ${pct(w.low)}% — no edge demonstrated`
-      : `hit rate is between ${pct(w.low)}% and ${pct(w.high)}% at 95% confidence`,
+      : !enough ? `only ${n}/100 independent calls settled — too few to claim an edge`
+      : w.low <= 0.5 ? `95% lower hit-rate bound is ${pct(w.low)}% — no edge demonstrated`
+      : !(expectancyLow95 > 0) ? "95% lower net-expectancy bound has not cleared zero"
+      : `hit rate ${pct(w.low)}–${pct(w.high)}% and net expectancy both clear zero at 95% confidence`,
   };
 }
 

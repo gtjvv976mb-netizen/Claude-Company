@@ -1,144 +1,147 @@
 # Claude Company — Reference Executor
 
-**Auto-trade the desk's calls without ever handing over your funds.**
+## Dry-run hardening release
 
-The desk (Claude or Grok) is the **brain**: it researches and publishes calls, and
-never touches a wallet. This script is the **hands**: it runs on *your* machine, holds
-*your* burner wallet, and obeys *your* caps. The building POSTs every entry and exit
-your floor receives here as signed JSON; this verifies the signature and trades via
-Jupiter — buying on entry, selling everything on exit.
+This release does **not** trade. Both `poller.mjs` and `executor.mjs` reject
+`EXECUTE=1` at startup before a transaction can be built, signed, or submitted.
 
-## Why this is safe
-- **You keep custody.** The desk cannot reach this wallet. It only sends suggestions,
-  and each one is signed with your floor's secret — an attacker without that secret
-  cannot forge a call.
-- **Burner wallet.** Fund it only with what you're willing to lose entirely.
-- **Dry run by default.** Nothing trades until you set `EXECUTE=1`.
-- **Hard caps enforced here.** Per-trade and daily SOL limits are checked locally and
-  never trusted from anyone — the desk suggested 0.2 SOL in testing, the cap held it to 0.05.
+The executor remains available so operators can audit the code, verify their floor
+feed, exercise the shared risk policy, and run simulations while the durable
+transaction journal and instruction-level Jupiter validation are completed. Do not
+fund the generated burner wallet for auto-trading in this release.
 
-## Setup
-1. On your floor's **Calls tab → Desk settings → Your executor**, paste this machine's
-   public URL and copy the **signing secret** it shows.
-2. Make a burner wallet: `solana-keygen new -o burner.json` — fund it with a little SOL.
-3. `npm install`
-4. Run in **dry run** first and watch it decide:
-   ```bash
-   CC_SECRET=<your signing secret> KEYPAIR=./burner.json \
-   MAX_SOL_PER_TRADE=0.05 DAILY_SOL_CAP=0.5 EXECUTE=0 npm start
-   ```
-5. When you trust it, flip `EXECUTE=1`.
+The custody boundary is unchanged: the central desk publishes research calls and
+never receives a private key. The optional executor runs on the operator's machine.
 
-## Two ways to run it
+## Recommended installation
 
-**Recommended — the poller (`poller.mjs`): no public URL needed.**
-It polls your floor's calls over plain outbound HTTPS, so it runs *anywhere* — your
-laptop, a $4 VPS, a Raspberry Pi — with no tunnel and no exposed port. In the executor
-panel you can paste any https URL (even a dummy) just to mint your secret; the poller
-never receives webhooks.
-```bash
-CC_SECRET=<secret> CC_FLOOR=<your floor #> KEYPAIR=./burner.json MAX_SOL_PER_TRADE=0.05 DAILY_SOL_CAP=0.5 EXECUTE=0 node poller.mjs
-```
-Fund the burner, start it once, walk away — it trades your floor's calls hands-off.
-For 24/7 (so it trades while your laptop sleeps), put it on a tiny always-on VPS.
-
-**Alternative — the webhook receiver (`executor.mjs`): needs a public URL.**
-The building POSTs to it. Reachable via a Cloudflare tunnel
-(`cloudflared tunnel --url http://localhost:8787`) or a VPS, with the URL pasted into the
-executor panel. Same safety and caps; use this only if you'd rather receive pushes than poll.
-
-
-## The risk engine (why this is a bot, not a relay)
-
-Between the desk's entry and its exit, a naive relay is naked — if the desk's
-monitor is slow, or your box slept, or the token rugs in ninety seconds, nothing
-protects the position. The poller runs its own risk engine every poll:
-
-- **Hard stop**, checked every tick, on an *executable* Jupiter quote for the exact
-  size you hold (not a mid price) — the stop fires on what you could really sell for.
-- **Breakeven + trail**: the moment the call's target is touched, the stop lifts to
-  your entry (the trade can no longer lose), then ratchets up behind the high.
-- **The desk's exit always wins** and sells everything — it sees rugs and dead theses
-  the price hasn't shown yet.
-- **Daily loss limit** and **max open positions** — the two brakes that decide whether
-  a bot survives a bad week.
-- State is persisted, so a restart resumes managing open trades instead of orphaning them.
-
-### The parameters were tuned by simulation, not by feel
-
-`npm run tune` sweeps the settings over seeded, fat-tailed price paths. It found
-something counterintuitive and expensive: **every scale-out setting reduced mean P&L.**
-Memecoin returns are fat-tailed — the rare runners carry the entire edge — so selling
-half at target quietly destroys the thing you're being paid for. The shipped default is
-therefore *no scale-out* with a wide trail.
-
-Measured against a naive bot on identical call streams (300 runs x 60 calls):
-
-| desk win rate | naive mean | managed mean | naive bad-run (p10) | managed bad-run | naive drawdown | managed drawdown |
-|---|---|---|---|---|---|---|
-| 20% | +0.053 | **+0.056** | -0.155 | **-0.135** | -0.236 | **-0.187** |
-| 28% | +0.079 | **+0.080** | -0.151 | **-0.113** | -0.233 | **-0.187** |
-| 40% | +0.119 | +0.117 | -0.112 | **-0.090** | -0.207 | **-0.188** |
-
-Same expected return, materially smaller losses when things go wrong.
-
-### The break-even, with real trading costs
-
-Two corrections were forced by testing, and both mattered. First, the cost-free model
-flattered the strategy badly (it showed profit at a 5% hit rate, which no honest memecoin
-strategy does). Second — found by clicking the in-site test — the simulated clock never
-advanced, so the daily deploy cap filled after 10 trades and silently skipped the rest of
-every run; the samples were a tenth of what the header claimed.
-
-With calls spaced realistically over time and a 6% round trip charged:
-
-| desk win rate | risk-managed mean | runs that made money |
-|---|---|---|
-| 10% | **-0.146 SOL** | 33% |
-| 15% | **-0.055 SOL** | 39% |
-| ~18% | ~break-even | ~50% |
-| 20% | +0.058 SOL | 52% |
-| 28% | +0.201 SOL | 67% |
-| 40% | +0.411 SOL | 80% |
-
-**The desk must clear roughly 18% for this bot to make money at all.** Below that, costs
-eat the edge no matter how good the risk engine is.
-
-Against the naive bot at a 28% hit rate the engine gives up about 0.010 SOL of mean return
-and takes **15% off the worst drawdown** (-1.05 -> -0.90 SOL). That is the trade it is
-making: a little expectancy for materially smaller holes.
-
-**Read this honestly:** the simulation does NOT show this bot is profitable. It shows it is
-profitable *if* the desk's calls clear ~18%, against a price model I wrote rather than a
-backtest of real fills. Profit is a function of the desk's call quality, not of this bot.
-No bot can promise a profit on memecoins, and anyone who tells you otherwise is selling
-something. The engine's job is to stop a real edge being destroyed by one bad night.
-
-Run `npm run simulate -- --cost 0.10 --winrate 0.15` to see how quickly it turns
-negative under worse assumptions. Do that before you fund anything.
+The installer prompts for the floor secret through the terminal. It does not put the
+secret in the command line, shell history, or systemd unit.
 
 ```bash
-npm test        # 15 risk-engine cases: stops, trails, caps, desk exits
-npm run simulate    # naive vs risk-managed on the same call stream
-npm run tune        # re-sweep the parameters yourself
+curl -fsSL https://claudedotcompany.com/executor/install.sh | bash -s -- \
+  --floor <YOUR_FLOOR_NUMBER>
 ```
 
-## Knobs (env vars)
-| var | default | meaning |
-|---|---|---|
-| `CC_SECRET` | — (required) | your floor's signing secret |
-| `KEYPAIR` | `./burner.json` | path to the wallet file |
-| `EXECUTE` | `0` | `1` to actually trade |
-| `MAX_SOL_PER_TRADE` | `0.05` | ceiling per entry |
-| `DAILY_SOL_CAP` | `0.5` | ceiling per rolling 24h |
-| `SLIPPAGE_BPS` | `300` | 3% max slippage |
-| `DAILY_LOSS_LIMIT_SOL` | `0.15` | realized losses that stop new entries for the day |
-| `MAX_OPEN_POSITIONS` | `4` | most positions held at once |
-| `TRAIL_PCT` | `0.60` | trail this far under the high, once armed |
-| `SCALE_OUT_PCT` | `0` | sell this fraction at target (0 = ride the runners) |
-| `SOLANA_RPC` | public mainnet | use your own RPC for reliability |
-| `PORT` | `8787` | listen port |
+For unattended installation, prepare a secret file without printing the secret in a
+command:
 
-This is a **reference** — deliberately small and readable so you can audit every line
-before trusting it with money. Fork it, add your own logic, or point the same webhook
-at a bot you already run.
+```bash
+umask 077
+install -m 600 /dev/null ./claudeco-secret
+${EDITOR:-vi} ./claudeco-secret
+curl -fsSL https://claudedotcompany.com/executor/install.sh | bash -s -- \
+  --floor <YOUR_FLOOR_NUMBER> --secret-file ./claudeco-secret
+```
+
+The installer copies the value into
+`$HOME/claudeco-executor/.cc-executor.env`, sets that file and the burner key to mode
+`0600`, and gives systemd only an `EnvironmentFile=` reference. The service starts
+with `EXECUTE=0` and there is no supported switch to arm it in this release.
+
+Optional installer flags are `--max-sol`, `--daily-cap`, `--rpc`, `--api`, and
+`--static`. The caps are retained for policy evaluation and for a future, separately
+reviewed live release; they do not authorize transactions now.
+
+## Manual dry-run setup
+
+```bash
+npm install
+umask 077
+solana-keygen new -o ./burner.json
+chmod 600 ./burner.json
+install -m 600 /dev/null ./.cc-executor.env
+${EDITOR:-vi} ./.cc-executor.env
+set -a
+. ./.cc-executor.env
+set +a
+npm start
+```
+
+Use this shape inside `.cc-executor.env`:
+
+```dotenv
+CC_SECRET=your_floor_secret
+CC_FLOOR=your_floor_number
+KEYPAIR=/absolute/path/to/burner.json
+MAX_SOL_PER_TRADE=0.05
+DAILY_SOL_CAP=0.5
+EXECUTE=0
+```
+
+Keep the env file and keypair at mode `0600`. `CC_SECRET` authenticates the read-only
+floor feed; it is not a wallet key.
+
+## What the poller does in this release
+
+The recommended adapter is `poller.mjs`. It makes outbound HTTPS requests to the
+floor feed, ignores historic entries on first start, evaluates new entries against
+local caps, and logs dry-run decisions. No public URL is required.
+
+If an upgrade finds positions in an older state file, simulated exits retain those
+records because this release cannot perform the matching on-chain sale. Reconcile any
+real legacy holdings manually before replacing or clearing that state file.
+
+`executor.mjs` is the webhook reference adapter. It verifies signed v2 events and
+logs dry-run decisions, but live webhook execution is also intentionally disabled.
+It is not presented as a production trading service.
+
+## Shared snipe-v2 policy
+
+The server record and executor import the same `trade-policy.mjs` policy:
+
+- The desk's explicit exit always closes the position in full.
+- The authored stop is enforced.
+- At `1.35x`, the stop ratchets to breakeven.
+- At `1.5x`, a 25% trailing stop begins ratcheting behind the high.
+- Auto mode closes in full at the authored target or shared `2x` default, whichever
+  is reached first. An explicit multiple such as `10x` overrides the authored target;
+  the desk's later explicit exit still always wins.
+- An unresolved position reaches its age exit at 12 hours.
+- Snipe-v2 never emits a partial exit; legacy `SCALE_OUT_PCT` values are ignored by
+  the price policy.
+
+Position sizing still applies the stop requirement, estimated round-trip costs,
+sample-size/Kelly gate, per-name risk ceiling, book-heat ceiling, daily deployment
+cap, daily loss limit, and maximum-open-position rule. These controls are research
+logic, not evidence that the desk has a profitable edge.
+
+## Verification
+
+```bash
+npm test
+npm run test:sizing
+npm run simulate
+npm run tune
+```
+
+The strategy tests cover shared-policy identity, stops, full target exits, ratchets,
+caps, sizing, desk exits, and the age boundary. Simulations are synthetic research;
+they do not establish live expectancy or authorize enabling execution.
+
+## Configuration
+
+| Variable | Default | Meaning in this release |
+|---|---:|---|
+| `CC_SECRET` | required | Floor-feed credential; store only in the mode-0600 env file |
+| `CC_FLOOR` | required for poller | Floor number bound to the feed |
+| `KEYPAIR` | `./burner.json` | Local dry-run identity; do not fund for auto-trading |
+| `EXECUTE` | `0` | Must remain `0`; `1` is rejected at startup |
+| `MAX_SOL_PER_TRADE` | `0.05` | Local sizing ceiling used in dry-run evaluation |
+| `DAILY_SOL_CAP` | `0.5` | Local deployment ceiling used in dry-run evaluation |
+| `DAILY_LOSS_LIMIT_SOL` | `0.15` | Local realized-loss brake |
+| `MAX_OPEN_POSITIONS` | `4` | Local concurrent-position ceiling |
+| `SLIPPAGE_BPS` | `300` | Reserved transaction setting; no transaction is sent |
+| `TRAIL_PCT` | `0.25` | Trail distance after the shared 1.5x arm |
+| `MAX_AGE_HOURS` | `12` | Time exit used by snipe-v2 |
+| `JUPITER_API_BASE` | current Lite Swap API | Reserved quote/build endpoint |
+| `SOLANA_RPC` | public mainnet | RPC endpoint; a private provider is required before any future live canary |
+| `STATE_FILE` | `./.cc-state.json` | Local cursor and dry-run state |
+
+## Live activation
+
+There is no live activation procedure in this release. A future live build requires
+a durable write-ahead transaction journal, exact-once crash recovery, strict Jupiter
+transaction validation, actual-fill accounting, fault-injection tests, and an
+explicitly supervised burner-wallet canary. Changing the env file to `EXECUTE=1`
+today causes a deliberate startup failure.

@@ -33,6 +33,25 @@ export function complianceCheck({ pm, risk, redteam, ticket, ev }) {
   v(risk?.position_size_usd > cfg.equityUsd, "size_exceeds_equity",
     `position_size_usd=${risk?.position_size_usd} exceeds book equity ${cfg.equityUsd}.`);
 
+  v(risk?.position_size_usd > cfg.targetSizeUsd * 1.001, "size_exceeds_exit_probe",
+    `position_size_usd=${risk?.position_size_usd} exceeds the $${cfg.targetSizeUsd} notional actually exit-probed.`);
+
+  // Never trust three model-authored numbers to agree. Recompute loss from the actual
+  // entry, stop, size and measured round-trip friction, then compare both the budget
+  // and the claimed figure against that arithmetic.
+  const riskPx = Number(ev?.pair?.priceUsd);
+  const riskStop = Number(risk?.stop_price);
+  const riskSize = Number(risk?.position_size_usd);
+  const rtFrac = Math.max(0, Number(ev?.exitProbe?.roundTripLossPct) || 0) / 100;
+  if (riskPx > 0 && riskStop > 0 && riskStop < riskPx && riskSize > 0) {
+    const computedLoss = riskSize * (((riskPx - riskStop) / riskPx) + rtFrac);
+    v(computedLoss > maxRisk * 1.01, "computed_risk_budget_breach",
+      `entry/stop/size imply $${computedLoss.toFixed(2)} cost-adjusted loss, above $${maxRisk.toFixed(2)}.`);
+    v(Math.abs(computedLoss - Number(risk?.max_loss_usd)) > Math.max(0.02, computedLoss * 0.02),
+      "risk_arithmetic_mismatch",
+      `reported max loss $${risk?.max_loss_usd} does not match recomputed $${computedLoss.toFixed(2)}.`);
+  }
+
   /* EVERY ticket is audited, not only a proposal's.
    *
    * These checks were gated on `pm.decision === "PROPOSE"` — correct while a ticket

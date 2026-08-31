@@ -3,7 +3,7 @@
  * W_min gate, half-Kelly with rails, book heat, and the age exit.
  * `npm run test:sizing`
  */
-import { DEFAULTS, planEntry, openPosition, stepPosition, freshState } from "./strategy.mjs";
+import { DEFAULTS, POLICY_VERSION, planEntry, openPosition, stepPosition, freshState } from "./strategy.mjs";
 // Kelly machinery is tested with the fixed fund OFF: the owner's fixed-fund default
 // overrides how much is bet (never whether), and these tests are about the how-much.
 const KELLY = { ...DEFAULTS, fixedSol: 0 };
@@ -12,6 +12,7 @@ const t=(n,c,got)=>{ c?pass++:fail++; console.log(`${c?"PASS":"FAIL"}  ${n}${c?"
 const st=(o={})=>({ ...freshState(0), equitySol: 5, ...o });
 // the V1 bracket from the thesis: stop -2.8%, target +3.5%  => gross R = 1.25
 const call = { mint:"m", symbol:"T", entry_ref: 1.0, stop: 0.972, target: 1.035, size_sol: 5 };
+t("sizing uses the shared snipe-v2 strategy", POLICY_VERSION === "snipe-v2", POLICY_VERSION);
 
 // R_net with 6% costs should be far below the 1.25 gross figure
 const p1 = planEntry({ call, cfg: KELLY, state: st() });
@@ -56,9 +57,10 @@ t("fixed fund does NOT override Kelly's refusals", pfBad.action==="skip", pfBad.
 
 // the age exit
 const pos = openPosition({ call: {...wide, openedAtMs: 0}, sol: 0.05, fillPrice: 1, cfg: DEFAULTS });
-const aged = stepPosition({ pos, mark: 1.01, cfg: DEFAULTS, nowMs: 49*3600e3 });
+const ageBoundary = DEFAULTS.maxAgeHours*3600e3;
+const aged = stepPosition({ pos, mark: 1.01, cfg: DEFAULTS, nowMs: ageBoundary });
 t("age exit fires at maxAgeHours", aged.action==="sell" && /age exit/.test(aged.reason), aged);
-const young = stepPosition({ pos, mark: 1.01, cfg: DEFAULTS, nowMs: 2*3600e3 });
+const young = stepPosition({ pos, mark: 1.01, cfg: DEFAULTS, nowMs: ageBoundary-1 });
 t("and not before", young.action==="hold", young);
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail?1:0);

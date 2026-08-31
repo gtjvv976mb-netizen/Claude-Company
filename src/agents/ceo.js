@@ -2,12 +2,13 @@ import { ask } from "../lib/llm.js";
 import { z } from "zod";
 import { cfg } from "../config.js";
 import * as store from "../lib/store.js";
+import { evaluationSummary } from "../evaluation.js";
 
 export const CEOOut = z.object({
   ruling: z.enum(["APPROVE", "DECLINE", "HOLD"]),
   one_line: z.string().describe("What the CEO says to the floor, in one sentence."),
   reasoning: z.string().describe("Why, in under 100 words. Address the desk's own track record."),
-  order_size_usd: z.number().describe("Final size. May differ from the risk seat's number. 0 on DECLINE."),
+  order_size_usd: z.number().describe("Final size. May only cut the risk seat's number; 0 on DECLINE."),
   size_change_reason: z.string().describe("Empty string if unchanged from the risk seat."),
   conditions: z.array(z.string()).describe("Conditions attached to the approval."),
   questions_for_the_desk: z.array(z.string()).describe("What the desk failed to answer."),
@@ -24,7 +25,7 @@ export const CEOOut = z.object({
  * It never signs and never sends. The signature belongs to the human whose office this is.
  */
 export async function runCEO({ ev, pm, risk, redteam, ticket, compliance }) {
-  const record = store.stats();
+  const record = { activity: store.stats(), forwardPerformance: evaluationSummary() };
 
   return ask({
     seat: "CEO",

@@ -79,6 +79,12 @@ Attack in this order:
 Rules:
 - Every attack needs evidence or it is noise. An attack sourced to "inference" is allowed
   but must be labelled as your judgment.
+- Every attack must classify its fact_code and retain evidence_path, observed_value,
+  threshold_or_comparison, source_url and verification_status. A fatal refutation is
+  accepted by code only when verification_status is "verified" and the referenced
+  evidence path exists in the bundle. Social-authenticity and identity claims instead
+  require a retained HTTPS source_url. Unsupported attacks remain useful as "wounded"
+  findings but cannot become a hard refutation.
 - Flag unfalsifiable bull claims explicitly. A claim that cannot be checked must carry no
   weight in the decision, and the PM needs to know which ones those are.
 - Be honest when an attack fails. If the safety picture is genuinely clean, say it is
@@ -140,67 +146,35 @@ a tighter invalidation), or "survives" (your attacks did not land).`,
   });
 }
 
-/** RISK — sizing and the stop. Sees the red team, because size is where doubt is expressed. */
-export async function runRisk(ev, analysts, redteam, { challenge = null } = {}) {
+/** RISK — chooses a thesis stop and a bounded tier; code performs every dollar calculation. */
+export async function runRisk(ev, analysts, redteam) {
   return ask({
     seat: "Risk",
     model: cfg.models.risk,
     effort: cfg.effort.risk,
     schema: RiskOut,
-    system: `You are the RISK seat. You decide how much, and where the trade is mechanically wrong.
+    system: `You are the RISK seat. You choose the thesis stop and a bounded risk tier.
 
 Desk parameters:
 - Book equity: $${cfg.equityUsd}
 - Maximum risk on a single idea: ${cfg.maxRiskPct}% of equity ($${(cfg.equityUsd * cfg.maxRiskPct / 100).toFixed(2)})
 - The exit probe was run at $${cfg.targetSizeUsd}
 
-Method — follow it explicitly:
-1. Risk budget first, position size second. Decide the dollars you are willing to lose,
-   then derive size from the distance to the stop. Never pick a size and then find a stop
-   to justify it.
-2. The stop must be a level that means the THESIS is wrong, not merely a level that is
-   down. A stop placed at a round number is arbitrary; say what breaks at your level.
-3. Cut size for illiquidity. If the round-trip probe at $${cfg.targetSizeUsd} already cost
-   meaningful slippage, a larger position cannot be exited at the price your stop assumes,
-   and your stop is therefore fiction. Set liquidity_adjusted true when you have cut for this.
-4. Cut size for the red team. A "wounded" verdict should reduce size materially. A
-   "refuted" verdict cuts size hard — the PM must answer the attack with evidence for
-   the trade to survive, and if it does survive, it survives SMALL. Small is not zero.
+Your output contains no dollar arithmetic. Deterministic code converts the tier into
+position size, recomputes cost-adjusted loss at the stop, caps it to the measured exit
+notional, and applies the red-team and confidence multipliers. You cannot override it.
 
-   ZERO IS A MECHANICAL VERDICT, NOT A CONFIDENCE ONE. You may return
-   position_size_usd = 0 in exactly two cases, both of them facts you can point to in
-   the evidence rather than conclusions you reached:
-     (a) the exit fails at size — the round-trip probe did not complete, or it came
-         back worse than the desk's slippage ceiling; or
-     (b) a live authority can rug it — mint or freeze authority is not renounced.
-   If NEITHER of those is true, you must return a non-zero size, however small. A
-   refuted verdict on a coin that can still be bought and sold is a REASON TO BE SMALL.
-   It is not permission to abstain, and it is not a rule that "refuted means zero".
+Choose exactly one tier:
+- minimal — discovery risk; evidence is weak or the red team refuted the case.
+- quarter — clean enough to sample, but uncertainty remains material.
+- half — strong evidence with one meaningful weakness.
+- full — unusually complete evidence and a red-team case that did not land.
 
-   This is written at length because the seat got it wrong in production, verbatim:
-   "Per method rule 4, refuted means position_size_usd is 0 — not negotiable." No such
-   rule has ever existed. That single misreading sized 10 of 11 workups at zero, and a
-   zero size independently blocks the PM from proposing, suppresses the ticket, trips a
-   compliance veto and fails the mandate's stop check — so the desk published NOTHING at
-   all. The same verdict's own notes recorded "the $500 probe was clean at 0.05%
-   round-trip", which is case (a) failing to apply, on its own evidence.
-
-   If you size at zero, name which of (a) or (b) you are invoking and quote the number
-   or the authority field you are invoking it on.
-5. Volatility: a token that moves 30% a day cannot carry a 10% stop. It will be taken out
-   by noise before the thesis resolves.
-
-THE SYSTEMATIC RULE. This is a systematic book: the desk's edge is MANY small,
-stopped, invalidated positions, graded over a season — not perfection on any one
-of them. A candidate that reached your seat has already survived eight coded
-screens, five analysts and the red team. Zeroing it because it is merely
-uncertain removes a sample from the very system that makes the desk work.
-Reserve 0 for one case only: the trade is mechanically untradeable — no exit
-path at size, or no stop level that means anything. Everything else gets a size — small when uncertain, never zero.
-A clean but uncertain survivor sizes at roughly a quarter of the per-idea
-ceiling, not at nothing. Uncertainty is expressed in dollars, not in refusal.`,
-    prompt: `Size this idea for ${ev.symbol}.\n\n${bundle(ev)}\n\n${book(analysts)}\n\n=== RED TEAM ===\n${JSON.stringify(redteam)}${
-      challenge ? `\n\n=== THE DESK IS ASKING YOU TO CHECK ONE THING ===\n${challenge}` : ""}`,
+The stop must be an observable level that makes the THESIS wrong, not a round number
+chosen to manufacture a convenient size. It must be below the current evidence price.
+Set liquidity_adjusted when measured exit friction is material. Missing or contradictory
+data lowers the tier and confidence; never fill a gap with a plausible number.`,
+    prompt: `Choose the stop and risk tier for ${ev.symbol}.\n\n${bundle(ev)}\n\n${book(analysts)}\n\n=== RED TEAM ===\n${JSON.stringify(redteam)}`,
   });
 }
 

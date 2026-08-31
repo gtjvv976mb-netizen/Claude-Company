@@ -5,7 +5,7 @@
  * every output is a plain intent ({action, reason, ...}). That is what makes it
  * simulatable — simulate.mjs runs this exact code over tens of thousands of
  * synthetic price paths, so the numbers you see are produced by the same
- * function that will trade your money, not by a separate toy model.
+ * function shared with the server and executor, not by a separate toy model.
  *
  * WHAT THIS BUYS YOU, and it is the whole point:
  *   The desk publishes an entry and, later, an exit. Between those two messages
@@ -14,13 +14,10 @@
  *   This engine watches the mark every poll and acts on its own:
  *
  *     STOP        — cut at the desk's stop. Non-negotiable, checked every tick.
- *     BREAKEVEN   — the moment the call's target is touched, the stop lifts to
- *                   entry. From there the position cannot lose money.
- *     TRAIL       — and then ratchets up behind the high water mark, so a rare
- *                   10x is allowed to run instead of being round-tripped.
- *                   (An optional scale-out exists but ships OFF: the sweep in
- *                   tune.mjs showed every scale-out setting cost mean P&L,
- *                   because cutting winners kills the fat tail.)
+ *     BREAKEVEN   — at 1.35x the stop lifts to entry.
+ *     TRAIL       — at 1.5x a 25% trail starts ratcheting behind the high.
+ *     TARGET      — the authored target or the configured multiple closes in full;
+ *                   policy v2 has no partial-exit state.
  *     DESK EXIT   — the desk's own exit always wins and sells everything: it
  *                   knows things the price alone does not (creator sold, LP
  *                   pulled, thesis dead).
@@ -32,6 +29,9 @@
  * calls. This engine exists so a real edge is not destroyed by one bad night,
  * and so a bad streak cannot compound into a blown account.
  */
+import { POLICY_DEFAULTS, POLICY_VERSION, pricePolicy } from "./trade-policy.mjs";
+
+export { POLICY_VERSION };
 
 export const DEFAULTS = {
   maxSolPerTrade: 0.05,      // hard ceiling; Kelly may size well under it
@@ -65,36 +65,17 @@ export const DEFAULTS = {
   fDefault: 0.02,            // what to risk while the sample is too small to trust
   nMin: 12,                  // closed trades before an estimated W is usable at all
   bookHeatMax: 0.08,         // sum of f across open positions — correlated names share it
-  maxAgeHours: 12,           // the third exit: stop, target, or AGE. Never "close to working"
-  // TUNED BY SIMULATION, not by feel — see tune.mjs. On a fat-tailed return
-  // distribution every scale-out setting REDUCED mean P&L: cutting winners kills
-  // the runners that carry the whole edge. Zero scale-out with a wide trail
-  // matched the naive bot's mean while cutting the bad-run tail (10th pct
-  // -0.152 -> -0.118 SOL) and drawdown (-0.233 -> -0.187). Change these only
-  // with a fresh sweep, never by intuition.
-  /* TAKE THE MONEY. These three were written for riding a trend and are wrong for a
-   * snipe, which is what this desk actually does: in low, out high, do not fall in love.
-   *
-   * scaleOutPct 0 -> 0.5. Half the position comes off the moment the desk's own target
-   * prints. That is the trade paying for itself: the remainder rides to the 2x rule as
-   * a free option, and a coin that reverses immediately after has still made money.
-   *
-   * trailPct 0.60 -> 0.25. Measured, because the old number was indefensible: a 60%
-   * trail on a coin that peaked at 1.9x put the stop at 0.76 — under the breakeven
-   * floor — so the position handed back the ENTIRE gain and exited flat. At 25% the
-   * same peak keeps +42%. A memecoin moves in one impulse and the retrace that arms a
-   * wide trail is the same retrace that takes the gain away.
-   *
-   * maxAgeHours 48 -> 12. Two days is a trend-follower's horizon. A micro-cap that has
-   * not resolved within half a day is not building, it is over, and the position is
-   * occupying risk budget that the next candidate needs — one appears every half hour. */
-  scaleOutPct: 0.5,          // half off at the desk's target; the rest rides free
-  trailPct: 0.25,            // trail this far under the high water mark, once armed
+  maxAgeHours: POLICY_DEFAULTS.maxAgeHours,
+  // Kept as a compatibility field for old env/config files. Snipe-v2 never emits
+  // sell_part: the authored target and configured multiple both close in full.
+  scaleOutPct: 0,
+  trailPct: POLICY_DEFAULTS.trailPct,
+  honorDeskTarget: POLICY_DEFAULTS.honorDeskTarget,
   stopBufferPct: 0,          // widen the desk's stop by this much (0 = obey exactly)
   /* SNIPE-HOLD-SELL: take the whole position at this multiple of entry. 2 = sell at a
    * double. Checked before the trail arms, so a trail can never intercept the double
    * first. Set to 0 to disable and ride the trail instead. */
-  takeProfitX: 2.0,
+  takeProfitX: POLICY_DEFAULTS.takeProfitX,
   /* THE FIXED FUND: the same SOL size on every trade (0 = size by Kelly/flat risk).
    * Overrides how much is bet, never whether — Kelly's skip verdicts still apply. */
   fixedSol: 0.02,
@@ -190,68 +171,15 @@ export function openPosition({ call, sol, fillPrice, cfg = DEFAULTS }) {
 /**
  * The per-tick decision for ONE open position. `mark` is the current price;
  * `deskExit` is set when the desk has published an exit for this call.
- * Returns {action: hold|sell|sell_part, fraction, reason}.
+ * Returns {action: hold|sell, fraction, reason}.
  */
 export function stepPosition({ pos, mark, deskExit = null, cfg = DEFAULTS, nowMs = Date.now() }) {
-  const c = { ...DEFAULTS, ...cfg };
-
-  // The desk's own exit outranks price: it can see a rug, a creator sell or a
-  // dead thesis that the last print does not show yet.
-  if (deskExit) return { action: "sell", fraction: 1, reason: `desk exit: ${deskExit.code || "exit"}` };
-
-  // THE THIRD EXIT. Stop, target, or AGE — never "close to working". A position
-  // that has neither hit its stop nor its target by the deadline has had its
-  // thesis disproved by time, which is still disproof.
-  if (pos.openedAtMs != null && c.maxAgeHours > 0) {
-    const ageH = (nowMs - pos.openedAtMs) / 3600e3;
-    if (ageH >= c.maxAgeHours)
-      return { action: "sell", fraction: 1, reason: `age exit — ${Math.round(ageH)}h with no resolution` };
-  }
-
-  if (!(mark > 0)) return { action: "hold", reason: "no readable mark" };
-  if (mark > pos.high) pos.high = mark;
-
-  // The stop is checked first and always. This is the line that keeps one bad
-  // night from being the last night.
-  if (mark <= pos.stop)
-    return { action: "sell", fraction: 1,
-      reason: pos.scaled ? "trailing stop" : "stop loss" };
-
-  /* SNIPE - HOLD - SELL. A hard multiple, taken in full, no negotiation.
-   *
-   * The trail below is the right tool for a trend you intend to ride; it is the wrong
-   * one for a micro-cap snipe, where the move is usually one impulse and the retrace
-   * that arms the trail is the same retrace that gives the gain back. On a coin that
-   * doubles and halves inside an hour, "ride it with a 40% trail" and "sell at 2x"
-   * are not close to the same trade.
-   *
-   * So when takeProfitX is set, hitting it sells EVERYTHING at the mark. It is checked
-   * before the trail arms, so the trail can never intercept a double first. Set
-   * takeProfitX to 0 to go back to riding the trail. */
-  if (c.takeProfitX > 0 && pos.entry > 0 && mark >= pos.entry * c.takeProfitX)
-    return { action: "sell", fraction: 1,
-      reason: `take profit: ${(mark / pos.entry).toFixed(2)}x at or above the ${c.takeProfitX}x rule` };
-
-  // First touch of target ARMS the trail and lifts the stop to breakeven, so the
-  // position can no longer lose. Only sells here if a scale-out is configured —
-  // a zero fraction must never reach the wallet as a zero-size swap.
-  if (!pos.scaled && pos.target != null && mark >= pos.target) {
-    pos.scaled = true;
-    pos.stop = Math.max(pos.stop, pos.entry);      // breakeven, never worse
-    const trail = pos.high * (1 - c.trailPct);
-    if (trail > pos.stop) pos.stop = trail;
-    if (c.scaleOutPct > 0)
-      return { action: "sell_part", fraction: c.scaleOutPct, reason: "target hit — scaling out, stop to breakeven" };
-    return { action: "hold", reason: "target hit — stop to breakeven, now trailing" };
-  }
-
-  // After scaling, ratchet the stop up behind the high. Never loosen it.
-  if (pos.scaled) {
-    const trail = pos.high * (1 - c.trailPct);
-    if (trail > pos.stop) pos.stop = trail;
-  }
-
-  return { action: "hold", reason: "in trade" };
+  const d = pricePolicy({ position: pos, mark, deskExit, nowMs, config: cfg });
+  // Preserve the existing API while ensuring both server and executor use the exact
+  // same pure policy. Mutation is limited to an accepted policy state transition.
+  Object.assign(pos, d.position);
+  return { action: d.action, fraction: d.fraction, reason: d.reason,
+    policyVersion: d.policyVersion };
 }
 
 /** Roll the daily counters when the day boundary passes. */

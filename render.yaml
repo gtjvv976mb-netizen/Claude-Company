@@ -10,7 +10,8 @@ services:
     plan: starter               # required for a persistent disk
     region: oregon
     branch: main
-    buildCommand: npm ci
+    # A revision that cannot pass the isolated root suite never reaches the live process.
+    buildCommand: npm ci && npm test
     startCommand: node src/index.js office
     healthCheckPath: /api/lease/config
     disk:
@@ -30,6 +31,13 @@ services:
         value: "250000"
       - key: FREE_RUNS_WITH_LEASE
         value: "5"
+      # Push delivery to user-operated executors is fail-closed. The durable polling
+      # feed still works, but the server does not POST trading events to arbitrary hosts.
+      - key: EXECUTOR_WEBHOOKS_ENABLED
+        value: "0"
+      # The hosted app prepares research and paper tickets only.
+      - key: DESK_PREPARE_TX
+        value: "0"
       # Set these in the dashboard, not here — they are secrets or account-specific.
       - key: TREASURY_OWNER
         sync: false             # your PUBLIC address; leasing stays closed until set
