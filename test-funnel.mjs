@@ -68,6 +68,51 @@ ok("a row still WRITTEN ready is excluded once its screen is stale",
   raw.prepare("SELECT stage FROM funnel WHERE mint='DDD'").get().stage === "ready" && readyPool().length === 0,
   "decay has not run yet — the query defends itself, because this is what money follows");
 
+console.log("\nA RE-PASSED SCREEN RESTORES A VERDICT THE DESK ALREADY PAID FOR");
+/* The gap the suite missed: no test combined an EXPIRED SCREEN with a FRESH VERDICT.
+ * On the live desk `studied` and `ready` sat at exactly 0 through 300+ workups — every
+ * paid verdict thrown away the moment the free check timed out underneath it. The warm
+ * bench, which is the entire reason to build a funnel, could never exist. */
+_reset();
+observe([coin("WARM")]); recordScreen("WARM", null);
+recordStudy("WARM", { eligible: true, verdict: "PROPOSE", conviction: 0.8, thesis: "t" });
+age("WARM", "screened_at", TTL.screen + 1000);
+decay();
+ok("the expired screen still demotes it all the way to watch", census().watch === 1);
+ok("re-screening it clean puts it BACK on the bench", recordScreen("WARM", null) === "restored"
+  && readyPool()[0]?.mint === "WARM",
+  "safety was re-run this instant; only the judgement was inherited");
+
+console.log("\nSAFETY: BUT A RE-SCREEN THAT KILLS OVERRIDES ANYTHING THE DESK PAID FOR");
+_reset();
+observe([coin("RUG")]); recordScreen("RUG", null);
+recordStudy("RUG", { eligible: true, verdict: "PROPOSE", conviction: 0.95, thesis: "t" });
+age("RUG", "screened_at", TTL.screen + 1000);
+decay();
+ok("a kill holds it at watch no matter how good the verdict was",
+  recordScreen("RUG", "freeze_authority_live") === "held" && readyPool().length === 0,
+  "the expensive opinion never outranks the free safety fact");
+
+console.log("\n...AND A STALE VERDICT IS NOT RESTORED, ONLY A FRESH ONE");
+_reset();
+observe([coin("OLD2")]); recordScreen("OLD2", null);
+recordStudy("OLD2", { eligible: true, verdict: "PROPOSE", conviction: 0.8, thesis: "t" });
+age("OLD2", "screened_at", TTL.screen + 1000);
+age("OLD2", "studied_at", TTL.study + 1000);
+decay();
+ok("an aged-out verdict re-screens only as far as screened",
+  recordScreen("OLD2", null) === "promoted",
+  "it must be paid for again — the restore inherits judgement, it does not revive it");
+
+_reset();
+observe([coin("RAN", { h1: 3 })]); recordScreen("RAN", null);
+recordStudy("RAN", { eligible: true, verdict: "PROPOSE", conviction: 0.8, thesis: "t" });
+observe([coin("RAN", { h1: 3 + RESTALE_MOVE_PCT + 5 })]);
+age("RAN", "screened_at", TTL.screen + 1000);
+decay();
+ok("nor is one the price has run away from", recordScreen("RAN", null) === "promoted",
+  "a coin 20%+ from where the desk judged it is a different question");
+
 console.log("\nA VERDICT AGES OUT, BUT ONLY BACK TO SCREENED");
 _reset();
 observe([coin("EEE")]); recordScreen("EEE", null);

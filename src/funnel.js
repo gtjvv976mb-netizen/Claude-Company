@@ -67,6 +67,11 @@ CREATE INDEX IF NOT EXISTS idx_funnel_stage ON funnel(stage);
 CREATE INDEX IF NOT EXISTS idx_funnel_seen ON funnel(last_seen);
 `);
 
+/* The live table predates this column, so add it in place rather than by recreating —
+ * the funnel's whole value is the history it holds. */
+for (const [col, decl] of [["eligible", "INTEGER"]])
+  try { db.exec(`ALTER TABLE funnel ADD COLUMN ${col} ${decl}`); } catch { /* already there */ }
+
 const MIN = 60_000;
 
 /* THE CLOCKS. Every one of these is a claim about how fast a specific KIND of fact
@@ -199,7 +204,25 @@ export function dueForScreen(limit = 200) {
     ORDER BY score DESC LIMIT ?`).all(limit);
 }
 
-/** Record what the free screen decided. A kill holds the coin at `watch`, with a reason. */
+/**
+ * Record what the free screen decided. A kill holds the coin at `watch`, with a reason.
+ *
+ * A PASS RESTORES A VERDICT THE DESK HAS ALREADY PAID FOR, and that is not a softening
+ * of the safety rule — it is what makes the safety rule affordable.
+ *
+ * The two clocks are 12 minutes and 40 minutes apart for good reasons, but the first
+ * version simply demoted on the shorter one and left it there. Measured against the
+ * live desk: `studied` and `ready` sat at exactly 0 through 300+ workups, because every
+ * paid verdict was thrown away the moment the FREE check timed out underneath it. The
+ * warm bench — the entire point of building a funnel — could never exist, and the desk
+ * was buying the same answers again on a twelve-minute cycle.
+ *
+ * So a coin that re-passes the screen goes back to where its still-fresh verdict had
+ * earned it. Safety is not being inherited here: the screen was just re-run, this
+ * instant, and a kill still holds the coin at `watch` no matter what the desk paid to
+ * learn about it. What is inherited is only the JUDGEMENT, which has its own clock and
+ * its own price-move test, both re-checked below.
+ */
 export function recordScreen(mint, kill) {
   const now = Date.now();
   if (kill) {
@@ -207,10 +230,18 @@ export function recordScreen(mint, kill) {
       .run(now, String(kill), mint);
     return "held";
   }
-  db.prepare(`UPDATE funnel SET screened_at=?, screen_kill=NULL, stage='screened',
+  const row = db.prepare(
+    "SELECT studied_at, eligible, h1, h1_at_study FROM funnel WHERE mint=?").get(mint);
+
+  const verdictStillGood = row?.studied_at > now - TTL.study
+    && (row.h1_at_study == null || row.h1 == null
+        || Math.abs(row.h1 - row.h1_at_study) < RESTALE_MOVE_PCT);
+  const stage = verdictStillGood ? (row.eligible ? "ready" : "studied") : "screened";
+
+  db.prepare(`UPDATE funnel SET screened_at=?, screen_kill=NULL, stage=?,
                                 stage_since=?, promotions=promotions+1 WHERE mint=? AND stage='watch'`)
-    .run(now, now, mint);
-  return "promoted";
+    .run(now, stage, now, mint);
+  return stage === "screened" ? "promoted" : "restored";
 }
 
 /**
@@ -277,10 +308,10 @@ export function recordStudy(mint, { eligible, verdict, conviction, thesis }) {
   const row = db.prepare("SELECT h1 FROM funnel WHERE mint=?").get(mint);
   db.prepare(`
     UPDATE funnel SET studied_at=?, verdict=?, conviction=?, thesis=?, h1_at_study=?,
-                      stage=?, stage_since=?, promotions=promotions+?
+                      eligible=?, stage=?, stage_since=?, promotions=promotions+?
     WHERE mint=?`
   ).run(now, verdict ?? null, conviction ?? null, thesis ?? null, row?.h1 ?? null,
-        eligible ? "ready" : "studied", now, eligible ? 1 : 0, mint);
+        eligible ? 1 : 0, eligible ? "ready" : "studied", now, eligible ? 1 : 0, mint);
   return eligible ? "ready" : "studied";
 }
 

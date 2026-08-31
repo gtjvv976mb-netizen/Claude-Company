@@ -443,6 +443,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
              * changed and knowing it did. */
             screen: {
               minLiquidityUsd: cfg.screen.minLiquidityUsd,
+            minMarketCapUsd: cfg.screen.minMarketCapUsd,
               minVolume24hUsd: cfg.screen.minVolume24hUsd,
               minTxns24h: cfg.screen.minTxns24h,
               minPairAgeHours: cfg.screen.minPairAgeHours,

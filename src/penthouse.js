@@ -279,7 +279,7 @@ export async function warmFunnel() {
   for (const row of funnel.dueForScreen(400)) {
     const c = bySweep.get(row.mint);
     if (!c) continue;
-    if (funnel.recordScreen(row.mint, wouldSurviveScreen(c)) === "promoted") passed++; else held++;
+    if (funnel.recordScreen(row.mint, wouldSurviveScreen(c)) !== "held") passed++; else held++;
   }
 
   const shape = funnel.census();
@@ -484,7 +484,7 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
     const c = bySweep.get(row.mint);
     if (!c) continue;
     const kill = wouldSurviveScreen(c);
-    if (funnel.recordScreen(row.mint, kill) === "promoted") screenPassed++; else screenHeld++;
+    if (funnel.recordScreen(row.mint, kill) !== "held") screenPassed++; else screenHeld++;
   }
 
   const shape = funnel.census();
