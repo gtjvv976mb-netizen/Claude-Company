@@ -23,6 +23,7 @@ const t0 = Date.now();
 const ph = await import("./src/penthouse.js");
 const { openCall, closeCall, liveCalls } = await import("./src/calls.js");
 const { bookState, MAX_LIVE_CALLS } = await import("./src/mandate.js");
+const { spend } = await import("./src/lib/llm.js");
 ok("penthouse.js imported", typeof ph.runPenthouseCycle === "function", `${Date.now() - t0}ms`);
 ok("freshScan exported", typeof ph.freshScan === "function");
 ok("promoteWatches exported", typeof ph.promoteWatches === "function");
@@ -42,12 +43,17 @@ for (let i = 0; i < MAX_LIVE_CALLS; i++) {
 ok(`${MAX_LIVE_CALLS} positions are open`, held.every(Boolean) && bookState().full === true,
   `live=${bookState().live}/${MAX_LIVE_CALLS}`);
 
-// If the gate is wrong, THIS is where it shows: the cycle would proceed to sweep()
-// and then to paid workups. With no API key it would fail loudly instead of
-// returning cleanly, which is itself the signal.
-const t1 = Date.now();
-const r = await ph.runPenthouseCycle();
-const ms = Date.now() - t1;
+// A full book still refreshes the FREE funnel, but it must never cross into the paid
+// workup path. Stub only that free network boundary: wall-clock speed is a property of
+// the CI runner and DexScreener, not proof that no model call occurred.
+let warmCalls = 0;
+const beforeSpend = { calls: spend.calls, usd: spend.usd };
+const r = await ph.runPenthouseCycle({
+  warmFunnelFn: async () => {
+    warmCalls++;
+    return { swept: 7, screened: 3, ready: 2, source: "sequencing-test" };
+  },
+});
 ok("the cycle refused to run", r.skipped === "position_open", JSON.stringify(r.skipped ?? r));
 // liveCalls() is ordered newest-first, so with a full book this names the most recent
 // position rather than the first one opened. Either is a true answer to "what are you
@@ -57,8 +63,11 @@ ok("it named a position it is waiting on",
   `${r.holding?.symbol} (holding ${r.live})`);
 ok("it opened nothing", r.opened === 0);
 ok("it spent nothing", r.costUsd === 0, `$${r.costUsd}`);
-ok("and it returned immediately, so it never reached the network",
-  ms < 1500, `${ms}ms`);
+ok("it refreshed the free funnel exactly once",
+  warmCalls === 1 && r.warmed?.source === "sequencing-test", JSON.stringify(r.warmed));
+ok("and it never crossed into a paid workup",
+  r.workedUp === 0 && spend.calls === beforeSpend.calls && spend.usd === beforeSpend.usd,
+  `workedUp=${r.workedUp} calls=${spend.calls - beforeSpend.calls} usd=$${spend.usd - beforeSpend.usd}`);
 
 const fs = await ph.freshScan();
 ok("the fresh lane also stood down", fs.skipped === "position_open", JSON.stringify(fs));

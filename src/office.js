@@ -38,6 +38,7 @@ import * as identity from "./identity.js";
 import * as passes from "./passes.js";
 import { callouts } from "./whales.js";
 import { retiredBrowserRpcResponse } from "./execution-gates.js";
+import { providerCreditHealth } from "./provider-health.js";
 
 /** When THIS process started. A short uptime next to a stale event is a restart. */
 const BOOTED_AT = Date.now();
@@ -597,7 +598,8 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
         /* ── the heartbeat: is the desk alive, and if paused, why ────────── */
         if (url.pathname === "/api/heartbeat") {
           const q = (sql, ...a) => { try { return db.prepare(sql).get(...a); } catch { return null; } };
-          const dayAgo = Date.now() - 86400e3;
+          const now = Date.now();
+          const dayAgo = now - 86400e3;
           const sp = spendSince(dayAgo);
           const cap = cfg.dailyBudgetUsd;
           let state = "RUNNING", reason = null;
@@ -608,11 +610,16 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           /* An empty provider balance is different from the desk's own daily cap.
            * Surface the provider event directly so the heartbeat cannot stay green
            * while every paid seat is refusing work. */
-          const dry = q(`SELECT MAX(ts) t, COUNT(*) n FROM chronicle
-                         WHERE type='desk:out_of_credit' AND ts > ?`, Date.now() - 3600e3);
-          if (dry?.n > 0) {
+          const providerWindowMs = 6 * 3600e3;
+          const providerEvents = (() => { try {
+            return db.prepare(`SELECT type, ts, data FROM chronicle
+              WHERE type IN ('desk:out_of_credit','seat:failed','seat:done') AND ts > ?
+              ORDER BY ts DESC LIMIT 500`).all(now - providerWindowMs);
+          } catch { return []; } })();
+          const provider = providerCreditHealth(providerEvents, { nowMs: now, windowMs: providerWindowMs });
+          if (provider.blocked) {
             state = "BLOCKED";
-            reason = `the Anthropic account balance is empty (${dry.n} seat${dry.n === 1 ? "" : "s"} refused in the last hour) — ` +
+            reason = `the Anthropic account balance is empty (${provider.failures} provider-credit failure${provider.failures === 1 ? "" : "s"} in the last six hours) — ` +
               `this is the API account, NOT the desk's $${cap}/day cap, which still has $${Math.max(0, cap - sp.usd).toFixed(2)} of headroom. ` +
               `Top up the Anthropic account behind ANTHROPIC_API_KEY; free screening continues meanwhile.`;
           }
@@ -634,7 +641,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             return db.prepare(`
               SELECT json_extract(data,'$.error') e, COUNT(*) n FROM chronicle
               WHERE type='cycle:error' AND ts > ? GROUP BY e ORDER BY n DESC LIMIT 1`
-            ).get(Date.now() - 3600e3);
+            ).get(now - 3600e3);
           } catch { return null; } })();
           if (state === "RUNNING" && errRow?.e && errRow.n >= 5) {
             state = "DEGRADED";
@@ -656,7 +663,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             return db.prepare(`
               SELECT json_extract(data,'$.seat') seat, json_extract(data,'$.error') err, COUNT(*) n
               FROM chronicle WHERE type='seat:failed' AND ts > ?
-              GROUP BY seat, err ORDER BY n DESC LIMIT 5`).all(Date.now() - 6 * 3600e3);
+              GROUP BY seat, err ORDER BY n DESC LIMIT 5`).all(now - providerWindowMs);
           } catch { return []; } })();
 
           const lastEv = q("SELECT MAX(ts) t FROM chronicle")?.t ?? null;

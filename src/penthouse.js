@@ -355,7 +355,14 @@ export async function warmFunnel() {
            screened: shape.screened, ready: shape.ready, expired };
 }
 
-export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TOP_N } = {}) {
+export async function runPenthouseCycle({
+  workups = WORKUPS_PER_CYCLE,
+  topN = TOP_N,
+  // The full-book branch still refreshes the free funnel. Keeping that boundary
+  // injectable lets the regression prove sequencing without making CI depend on
+  // DexScreener latency; production callers retain the real warmFunnel default.
+  warmFunnelFn = warmFunnel,
+} = {}) {
   const cycle = new Date().toISOString().replace(/[:.]/g, "-");
 
   /* ONE TRADE AT A TIME. The mandate is "one cycle, one trade, run to completion" —
@@ -380,7 +387,7 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
      * The PAID half still does not run. The sequencing rule is a rule about money, and
      * a workup bought now is a verdict that will likely have expired before there is
      * anywhere to put it. */
-    const warmed = await warmFunnel().catch((e) => ({ error: String(e?.message || e) }));
+    const warmed = await warmFunnelFn().catch((e) => ({ error: String(e?.message || e) }));
     emit("cycle:holding", { cycle, live: book.live,
       symbol: book.holding?.symbol, mint: book.holding?.mint,
       heldHours: book.holding ? Number(((Date.now() - book.holding.opened_at) / 3.6e6).toFixed(1)) : null,

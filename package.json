@@ -5,7 +5,7 @@
   "type": "module",
   "description": "An automated Solana research desk staffed by purpose-built agents, one per stage of forming a trade. Purpose-built agents, one per stage of the trade-forming process. Proposal-only: it never signs, never sends.",
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.13.0 <23"
   },
   "scripts": {
     "test": "node scripts/test-all.mjs",
