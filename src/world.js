@@ -29,6 +29,13 @@ const ROUTINE_LINES = 3, TASK_LINES = 3, CHATTER_LINES = 8, SNACK_SCRIPTS = 8, V
 // the meeting table, the cooler, a long look out the window. Solo or duo — the
 // client owns where these places are and what gets said there.
 const AMBIENT_KINDS = ["fridge", "cook", "sofa", "meeting", "cooler", "window"];
+/* THE PRINCIPALS. The three figures with their own rooms used to sit in them
+   all day, which made the most interesting corners of the floor the deadest.
+   Now they walk: the boss takes the morale round, Codex Banks inspects the
+   work, and Grox consults one of them. Rolled here like every other world
+   event so two viewers see the same round at the same moment. */
+const PRINCIPAL_ROUNDS = ["morale", "inspect", "consult"];
+const ROUND_LINES = 4;
 const AMBIENT_DUO = new Set(["sofa", "meeting", "cooler"]);
 const AMBIENT_LINES = 4;
 
@@ -70,6 +77,10 @@ export function startWorld() {
         if (b === a) b = SEATS[(SEATS.indexOf(a) + 2) % SEATS.length];
       }
       emit("world:ambient", { kind, a, b, li: (rnd() * AMBIENT_LINES) | 0 });
+    } else if (roll < 0.86) {
+      const round = PRINCIPAL_ROUNDS[(rnd() * PRINCIPAL_ROUNDS.length) | 0];
+      const seat = SEATS[(rnd() * SEATS.length) | 0];
+      emit("world:round", { round, seat, li: (rnd() * ROUND_LINES) | 0 });
     } else {
       const seat = SEATS[(rnd() * SEATS.length) | 0];
       const r2 = rnd();

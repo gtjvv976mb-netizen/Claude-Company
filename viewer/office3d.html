@@ -1107,6 +1107,7 @@ function navPath(sx, sz, tx, tz) {
   return out;
 }
 
+const LIVE_SCREENS = [];
 function buildDesk(at, yaw, y = 0, accent = P.teal, kitId = null) {
   const g = new THREE.Group();
   g.position.set(at[0], y, at[1]);
@@ -1117,7 +1118,14 @@ function buildDesk(at, yaw, y = 0, accent = P.teal, kitId = null) {
     cyl(g, 0.045, 0.72, [dx, 0.37, dz], STEEL, 8);
   box(g, [0.06, 0.30, 0.62], [-0.22, 0.93, 0], DARK);              // monitor stand + panel
   box(g, [0.05, 0.46, 0.80], [-0.30, 1.16, 0], DARK);
-  box(g, [0.02, 0.38, 0.72], [-0.272, 1.16, 0], P.glassAqua, 0.35);   // screen faces the user, not away
+  // A dark pane of glass reads as a switched-off machine, and sixteen of them
+  // made the floor look abandoned. The screens GLOW, each on its own phase, so
+  // the room flickers like a room full of people working.
+  const scr = box(g, [0.02, 0.38, 0.72], [-0.272, 1.16, 0], 0x1d5f6b, 0.3);
+  scr.material.emissive = new THREE.Color(0x2f9fb0);
+  scr.material.emissiveIntensity = 0.85;
+  scr.userData.glow = Math.random() * 6.28;
+  LIVE_SCREENS.push(scr);
   box(g, [0.30, 0.02, 0.52], [0.16, 0.79, 0], DARK);               // keyboard
   box(g, [0.24, 0.05, 0.32], [0.10, 0.81, 0.72], P.cream, 0.9);    // paper tray
   cyl(g, 0.055, 0.11, [0.16, 0.84, -0.62], P.terracotta, 8);       // mug
@@ -2736,8 +2744,11 @@ class Worker {
       // Arms swing opposite their own leg, and the forearms trail slightly — a straight
       // arm reads as a mannequin, a bent one as someone carrying something.
       J.UpperArmL.rotation.z = -sw * 0.62;  J.UpperArmR.rotation.z = sw * 0.62;
-      J.LowerArmL.rotation.z = -0.16 - Math.max(0, -sw) * 0.28;
-      J.LowerArmR.rotation.z = -0.16 - Math.max(0, sw) * 0.28;
+      // POSITIVE bends the elbow forward. It was negative everywhere, so every
+      // hand on the floor sat behind its own elbow — measured, not guessed:
+      // a seated "typist" had hands at y 0.70 under an 0.80 desk.
+      J.LowerArmL.rotation.z = 0.34 + Math.max(0, -sw) * 0.30;
+      J.LowerArmR.rotation.z = 0.34 + Math.max(0, sw) * 0.30;
       J.Chest.rotation.y = Math.sin(w) * 0.06;
       J.Spine.rotation.z = 0.03;                       // a touch of forward lean
       this.g.position.y = this.baseY + Math.abs(Math.sin(w)) * 0.035;
@@ -2748,16 +2759,22 @@ class Worker {
       const breathe = Math.sin(t * 1.6 + this.phase) * 0.02;
       J.Chest.rotation.y = breathe;
       J.Spine.rotation.z = 0;
-      const type = this.typing ? Math.sin(t * 15 + this.phase) * 0.16 : 0;
-      J.UpperArmL.rotation.z = 0.42 * s + type;
-      J.UpperArmR.rotation.z = 0.42 * s - type;
-      J.LowerArmL.rotation.z = -0.75 * s;
-      J.LowerArmR.rotation.z = -0.75 * s;
+      /* Hands ON the desk. The forearm swings forward (positive) so the hand
+         clears the desk edge, and it MOVES: a fast tap while typing, and a slow
+         drift otherwise — nobody sits perfectly still, and a floor of statues
+         is what made the room feel dead. */
+      const type = this.typing ? Math.sin(t * 15 + this.phase) * 0.13 : 0;
+      const idle = Math.sin(t * 0.9 + this.phase * 2) * 0.05;
+      const reach = this.typing ? 0 : Math.max(0, Math.sin(t * 0.33 + this.phase)) * 0.25;
+      J.UpperArmL.rotation.z = (0.20 + idle) * s + type;
+      J.UpperArmR.rotation.z = (0.20 - idle) * s - type - reach * s;
+      J.LowerArmL.rotation.z = (1.18 - idle * 0.5) * s - type * 0.6;
+      J.LowerArmR.rotation.z = (1.18 + idle * 0.5) * s + type * 0.6 + reach * 0.5 * s;
       if (this.eating) {
         // right arm lifts to the mouth on a slow cycle, and the head dips to meet it
         const bite = (Math.sin(t * 2.2 + this.phase) + 1) / 2;
-        J.UpperArmR.rotation.z = -0.35 - bite * 0.55;
-        J.LowerArmR.rotation.z = -1.15 - bite * 0.5;
+        J.UpperArmR.rotation.z = 0.30 + bite * 0.35;
+        J.LowerArmR.rotation.z = 1.55 + bite * 0.55;      // forward and up to the face
         J.Head.rotation.z = bite * 0.12;
       } else {
         J.Head.rotation.z = 0;
@@ -4329,6 +4346,12 @@ function frame() {
     placeCamera();
   }
   separateFigures(dt);
+  // screens breathe: a slow flicker per machine, so no two are in step
+  for (let i = 0; i < LIVE_SCREENS.length; i++) {
+    const m = LIVE_SCREENS[i].material;
+    m.emissiveIntensity = 0.62 + Math.sin(elapsed * 1.7 + LIVE_SCREENS[i].userData.glow) * 0.16
+      + (Math.sin(elapsed * 11 + i) > 0.94 ? 0.22 : 0);      // the occasional repaint
+  }
   botTick(dt, elapsed);
   if (window.__grokZzz && window.__grokZzz.visible) {
     const z = window.__grokZzz;
@@ -4896,6 +4919,7 @@ const HANDLERS = {
   // burst of stale office life for when the viewer returns. The chronicle has them.
   "world:snack": (e) => { if (!document.hidden) snackBreak(e.a, e.b, e.ti); },
   "world:ambient": (e) => { if (!document.hidden) ambientRun(e); },
+  "world:round": (e) => { if (!document.hidden) roundRun(e); },
   "world:paper": (e) => {
     if (document.hidden) return;
     const a = who(e.a), h = who(e.b);
@@ -5255,6 +5279,53 @@ async function ambientRun(e) {
 }
 window.__ambient = (kind, aId, bId, li) => ambientRun({ kind, a: aId, b: bId, li: li ?? 0 });
 
+/* ═══ THE PRINCIPALS' ROUNDS ══════════════════════════════════════════════════
+   BIG C walks the floor asking how people are holding up; CODEX BANKS inspects
+   what a seat is actually working on; GROX MULDER goes to consult one of them.
+   Each is a real walk on the nav grid to a real desk, a two-line exchange, and
+   a walk home — so the three figures with the best rooms are also the three you
+   see moving most. */
+const ROUND_TALK = {
+  morale: [["How are you holding up?", "Coffee and conviction, boss."],
+           ["Anything blocking you?", "Only the market, which is normal."],
+           ["Good work on the last one.", "It was the screen that caught it, not me."],
+           ["Take a break if you need it.", "After this candidate."]],
+  inspect: [["What are you working on?", "Same candidate, third angle."],
+            ["Show me the evidence, not the story.", "Pulling the numbers now."],
+            ["Does this reproduce?", "Twice. I logged both."],
+            ["Filing that as a proposal.", "Please do — it bit me twice today."]],
+  consult: [["Second opinion on this one?", "Say the fact, not the feeling."],
+            ["The X read disagrees with the screen.", "Then one of them is measuring wrong."],
+            ["Sizing this smaller than you'd like?", "Uncertainty is what size is for."],
+            ["Worth a watch or a pass?", "A watch — with rules, not vibes."]],
+};
+const PRINCIPAL_OF = { morale: "CEO", inspect: "Codex", consult: "GrokAD" };
+
+async function roundRun({ round, seat, li = 0 }) {
+  const whoId = PRINCIPAL_OF[round];
+  const p = who(whoId), host = who(seat);
+  if (!p || !host || p === host) return;
+  if (p.typing || p.path || host.path || inSnackRoom.has(p.id) || inSnackRoom.has(host.id)) return;
+  // Grox only walks when he is actually on duty; asleep, he stays asleep.
+  if (whoId === "GrokAD" && !grokOnDuty) return;
+  const script = ROUND_TALK[round][li % ROUND_TALK[round].length];
+  inSnackRoom.add(p.id);
+  p.run(async () => {
+    const dx = host.home.x > 0 ? -1.5 : 1.5;
+    await p.moveTo(host.home.x + dx, host.home.z + 0.6);
+    p.faceWorker(host); host.faceWorker(p);
+    if (round === "inspect") puff(p, "\u2713");
+    if (round === "morale") puff(p, "\u2615");
+    p.say(script[0], 2800);
+    await pause(2600);
+    host.say(script[1], 2800);
+    await pause(2600);
+    await p.goHome();
+    inSnackRoom.delete(p.id);
+  });
+}
+window.__round = (round, seat, li) => roundRun({ round, seat, li: li ?? 0 });
+
 /** Send two agents for a snack and let them actually talk to each other. */
 function snackBreak(aId, bId, ti) {
   // With arguments this plays the server's casting — same pair, same argument, on
@@ -5306,6 +5377,14 @@ setInterval(() => {
   // While the server runs the world, the local dice stay in the drawer — every
   // viewer must see the same office. Demo mode (no desk process) keeps them.
   if (window.__worldLive) return;
+  if (Math.random() < 0.26) {
+    const rounds = ["morale", "inspect", "consult"];
+    const pool = STAFF.filter((x) => !x.claude && !x.grok && !x.codex);
+    roundRun({ round: rounds[Math.floor(Math.random() * 3)],
+               seat: pool[Math.floor(Math.random() * pool.length)].id,
+               li: Math.floor(Math.random() * 4) });
+    return;
+  }
   if (Math.random() < 0.30) {
     const kinds = ["fridge", "cook", "sofa", "meeting", "cooler", "window"];
     const kind = kinds[Math.floor(Math.random() * kinds.length)];
@@ -5318,7 +5397,9 @@ setInterval(() => {
     return;
   }
   if (Math.random() < 0.4) { snackBreak(); return; }
-  const roam = STAFF.filter((s) => !s.claude && !s.grok);   // the CEO and the AD keep their rooms
+  // The principals get their own lane (roundRun) rather than the ambient one,
+  // so they walk with PURPOSE — a round, not a wander.
+  const roam = STAFF.filter((s) => !s.claude && !s.grok && !s.codex);
   const spec = roam[Math.floor(Math.random() * roam.length)];
   const p = workers[spec.id];
   if (!p || p.typing || p.doc.visible || p.path || inSnackRoom.has(p.id)) return;
