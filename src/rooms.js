@@ -102,6 +102,60 @@ const busy = new Set();
 export const isBusy = (floorNo) => busy.has(floorNo);
 
 /**
+ * RUNS DO NOT SURVIVE A RESTART, AND THIS PROCESS RESTARTS CONSTANTLY.
+ *
+ * A run is an in-memory async function. When the host recycles — and this one recycles
+ * often enough to have killed 21 research cycles mid-flight in a single day — the
+ * workup dies where it stands. Its row keeps `finished_at = NULL` forever, so the
+ * journal shows a run that is permanently "in progress", and the in-memory busy flag
+ * that would have told the UI is gone with the process.
+ *
+ * From the outside that is indistinguishable from the run never having been started:
+ * you press the button, refresh, and there is nothing. Which is exactly what it looks
+ * like, and exactly what it is.
+ *
+ * A queue would be the real answer. Short of that, this is the honest minimum: on
+ * boot, any run left open past the point one could plausibly still be working is
+ * marked `interrupted` with a reason, so the record says what happened instead of
+ * lying quietly. RETRY_ON_BOOT re-queues the most recent one, because the person who
+ * asked for it is not watching a log to find out it died.
+ */
+const RUN_STALE_MS = Number(process.env.RUN_STALE_MINS || 12) * 60000;
+
+export function sweepInterruptedRuns({ retry = true } = {}) {
+  const cutoff = Date.now() - RUN_STALE_MS;
+  const orphans = db.prepare(
+    "SELECT id, floor_no, wallet, mint, started_at FROM runs WHERE finished_at IS NULL AND started_at < ? ORDER BY id DESC")
+    .all(cutoff);
+  if (!orphans.length) return { swept: 0, requeued: 0 };
+
+  db.prepare(`UPDATE runs SET outcome='interrupted',
+                detail='the server restarted while this run was working — it was not finished',
+                finished_at=? WHERE finished_at IS NULL AND started_at < ?`)
+    .run(Date.now(), cutoff);
+  for (const o of orphans) busy.delete(o.floor_no);
+  emit("run:interrupted", { count: orphans.length,
+    floors: [...new Set(orphans.map((o) => o.floor_no))],
+    note: "runs killed by a restart, now closed in the record rather than left open forever" });
+
+  /* Re-queue the newest one only. Retrying all of them would turn one restart into a
+   * burst of paid workups, and the oldest are no longer decisions anyone is waiting on. */
+  let requeued = 0;
+  if (retry && orphans.length) {
+    const o = orphans[0];
+    if (Date.now() - o.started_at < 6 * 3600e3) {
+      setTimeout(() => {
+        requestRun({ floorNo: o.floor_no, wallet: o.wallet, mint: o.mint, houseSeat: o.floor_no === 50 })
+          .then((r) => emit("run:requeued", { floor: o.floor_no, mint: o.mint, ok: r.ok, error: r.error ?? null }))
+          .catch(() => {});
+      }, 20_000);   // let the rest of boot settle first
+      requeued = 1;
+    }
+  }
+  return { swept: orphans.length, requeued };
+}
+
+/**
  * `houseSeat` is the HQ's owner running on floor 50.
  *
  * The route already worked this out and let them through — and then this function ran

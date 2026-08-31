@@ -311,6 +311,13 @@ async function main() {
       startWorld();            // the server runs the office; clients only watch
       startMonitoring();       // exit checks are a DUTY: they run with no key and no research
       if (process.env.ANTHROPIC_API_KEY) startGrind();   // tenant teams in grind mode
+      /* Close out any run the last restart killed mid-flight, and re-queue the newest.
+       * Without this a run that died looks, from the UI, exactly like a run that was
+       * never started: you press the button, refresh, and there is nothing. */
+      import("./rooms.js").then((r) => {
+        const sw = r.sweepInterruptedRuns({ retry: true });
+        if (sw.swept) console.log(`[runs] ${sw.swept} interrupted by a restart, ${sw.requeued} re-queued`);
+      }).catch(() => {});
       startPenthouse();        // the house team's schedule
       console.log(`${C.b}Trading floor live at ${url}${C.x}  (Ctrl-C to close)`);
       narrate();
