@@ -6155,6 +6155,27 @@ function renderCalls({ feed = [], settings, record }, { liveOnly = false } = {})
      tripwires, kills, settings — folds into labelled drawers that carry their
      own counts, so nothing is lost and nothing shouts. */
 
+  /* ── THE PHONE HANDOFF ─────────────────────────────────────────────────────
+     The Buy button's two-click path (tap → Jupiter modal pre-filled → approve)
+     assumes a wallet can hear the page. On a phone's plain browser there is no
+     extension, so the modal opens and the approve step has nobody to talk to —
+     the exact user this flow is FOR hits the one dead end. Phantom's in-app
+     browser fixes it: same page, wallet present. So when the page detects a
+     mobile browser with no injected wallet, it offers the one-tap handoff via
+     Phantom's universal link (docs.phantom.com format, verified live 2026-09-01).
+     Inside Phantom — or on desktop — the wallet object exists and this renders
+     nothing. */
+  if (/Android|iPhone|iPad/i.test(navigator.userAgent) && !(window.phantom?.solana || window.solana)) {
+    const hand = document.createElement("button");
+    hand.className = "dp-btn"; hand.type = "button";
+    hand.textContent = "\u{1F47B} Open this floor in Phantom — one tap, then Buy works";
+    hand.style.cssText = "width:100%;font-size:11px";
+    hand.onclick = () => {
+      location.href = `https://phantom.app/ul/browse/${encodeURIComponent(location.href)}?ref=${encodeURIComponent(location.origin)}`;
+    };
+    callsPanel.appendChild(hand);
+  }
+
   // 1. THE TEAM — how you manage it: shift, cadence, brain, token, pinned hunts.
   const teamBox = document.createElement("div");
   teamBox.style.cssText = "display:flex;flex-direction:column;gap:5px";
