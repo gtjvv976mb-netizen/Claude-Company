@@ -350,13 +350,13 @@ body{
   text-transform:uppercase;padding:6px 11px;border-radius:5px;border:1px solid rgba(0,0,0,.28);
   background:rgba(255,255,255,.9);color:#241c0c;cursor:pointer;text-decoration:none}
 .alertrow a:hover,.alertrow button:hover{background:#fff}
-.callspanel{flex:1;min-height:0;overflow-y:auto;padding:10px;display:none;flex-direction:column;gap:7px}
+.callspanel{flex:1;min-height:0;overflow-y:auto;padding:9px;display:none;flex-direction:column;gap:6px}
 /* the team status strip: three glanceable chips — bot, shift, brain */
-.teamstrip{display:flex;gap:6px;flex-wrap:wrap}
-.tchip{flex:1 1 30%;min-width:116px;display:flex;flex-direction:column;gap:3px;
-  padding:7px 9px;border:1px solid var(--card-line);border-radius:8px;background:var(--card)}
+.teamstrip{display:flex;gap:5px;flex-wrap:wrap}
+.tchip{flex:1 1 30%;min-width:104px;display:flex;flex-direction:column;gap:2px;
+  padding:5px 7px;border:1px solid var(--card-line);border-radius:7px;background:var(--card)}
 .tchip .tk{font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
-.tchip .tv{font-size:12px;font-weight:700;display:flex;gap:6px;align-items:center;flex-wrap:wrap;line-height:1.3}
+.tchip .tv{font-size:11.5px;font-weight:700;display:flex;gap:5px;align-items:center;flex-wrap:wrap;line-height:1.25}
 .tchip .dp-btn{font-size:9px;padding:3px 7px}
 .tchip select{font:inherit;font-size:10.5px;padding:1px 3px;background:var(--panel);color:var(--ink);
   border:1px solid var(--card-line);border-radius:5px}
@@ -5629,9 +5629,7 @@ async function renderTeamInto(el) {
     bs.running ? "◐ practice run" : "◌ stopped");
   bv.style.color = bs?.running ? (bs.live ? "var(--good,#4f8f52)" : "var(--amber,#e0ad3d)") : "";
   cBot.appendChild(bv);
-  cBot.appendChild(mk("span", "dp-note", !bs?.exists ? "set it up just below"
-    : bs.running ? "runs while this tab is open \u00b7 resumes on refresh"
-    : "manage it just below"));
+  if (bs?.running) cBot.appendChild(mk("span", "dp-note", "while this tab is open"));
   strip.appendChild(cBot);
 
   // 2. the shift — with the toggle and cadence inline
@@ -5652,9 +5650,7 @@ async function renderTeamInto(el) {
     sv.appendChild(cad);
   }
   cShift.appendChild(sv);
-  cShift.appendChild(mk("span", "dp-note", grinding
-    ? "hunts the best-ranked coin on its own (max 6 runs/day)"
-    : "works only when you say"));
+
   strip.appendChild(cShift);
 
   // 3. the brain
@@ -5668,7 +5664,7 @@ async function renderTeamInto(el) {
     bvv.appendChild(btn);
   }
   cBrain.appendChild(bvv);
-  cBrain.appendChild(mk("span", "dp-note", "same rails either way — screens, red team, no keys"));
+
   strip.appendChild(cBrain);
   el.appendChild(strip);
 
@@ -5707,8 +5703,8 @@ async function renderTeamInto(el) {
   row.append(input, go);
   fb.appendChild(row);
   const cost = R.freeRunsLeft > 0
-    ? `${R.freeRunsLeft} free run${R.freeRunsLeft === 1 ? "" : "s"} left \u00b7 then ${R.runPriceTokens.toLocaleString()} $CLAUDECO each \u00b7 credit: ${fmtTok(R.balanceBaseUnits, R.decimals)}`
-    : `${R.runPriceTokens.toLocaleString()} $CLAUDECO per run \u00b7 credit: ${fmtTok(R.balanceBaseUnits, R.decimals)}`;
+    ? `${R.freeRunsLeft} free \u00b7 then ${R.runPriceTokens.toLocaleString()} \u00b7 credit ${fmtTok(R.balanceBaseUnits, R.decimals)}`
+    : `${R.runPriceTokens.toLocaleString()} per run \u00b7 credit ${fmtTok(R.balanceBaseUnits, R.decimals)}`;
   const msg = mk("p", "dp-note", cost);
   fb.appendChild(msg);
   go.onclick = async () => {
@@ -5723,7 +5719,7 @@ async function renderTeamInto(el) {
 
   const pinWrap = mk("div", "dp-pins");
   const savePins = (next) => post({ watchlist: next });
-  if (!pins.length) pinWrap.appendChild(mk("p", "dp-note", "Pin coins the team checks FIRST each grind cycle (up to 25)."));
+  if (!pins.length) pinWrap.appendChild(mk("p", "dp-note", "Pinned coins get checked first each cycle."));
   for (const m of pins) {
     const chip = mk("div", "dp-chip");
     chip.append(mk("span", null, m.slice(0, 4) + "\u2026" + m.slice(-4)));
@@ -5882,7 +5878,12 @@ async function openSwap({ mint, symbol, sol, side = "buy" }) {
 window.__renderWatchInto = (el) => loadWatchboard(el);
 window.__renderKilledInto = (el) => loadKilled(el);
 
-async function loadCalls() {
+/* The 30-second poll used to rebuild this whole panel — controls, drawers,
+   half-typed mint addresses and all — so a tenant could not finish a sentence
+   before it was wiped. The panel is split: a SHELL that is built once (team
+   controls, bot, drawers) and a LIVE region (score + call cards) that is the
+   only thing a poll repaints. */
+async function loadCalls({ liveOnly = false } = {}) {
   if (FLOOR_N == null) { callsPanel.innerHTML = `<p class="locked">No floor in this address.</p>`; return; }
   if (!callsPanel.children.length) callsPanel.innerHTML = `<p class="locked">Loading the sheet…</p>`;
   try {
@@ -5891,7 +5892,7 @@ async function loadCalls() {
       callsPanel.innerHTML = `<p class="locked">This floor's call sheet is private to its tenant.<br><br>Lease your own floor in the tower to get calls sized to your risk.</p>`;
       return;
     }
-    renderCalls(body);
+    renderCalls(body, { liveOnly });
     window.__grokBoardUpdate?.(body.feed || []);      // Grok's own board, same book
     paintHud({ feed: body.feed, settings: body.settings, budget: BUDGET, rent: body.rent });
   } catch (e) {
@@ -5903,7 +5904,19 @@ async function loadCalls() {
   }
 }
 
-function renderCalls({ feed = [], settings, record }) {
+let liveRegion = null;
+function renderCalls({ feed = [], settings, record }, { liveOnly = false } = {}) {
+  // A poll only refreshes the score and the cards; everything a tenant TOUCHES
+  // is left exactly as they left it.
+  if (liveOnly && liveRegion && callsPanel.contains(liveRegion)) {
+    liveRegion.innerHTML = "";
+    liveRegion.appendChild(buildScoreline(record, feed));
+    const w = document.createElement("div");
+    w.style.cssText = "display:flex;flex-direction:column;gap:9px";
+    liveRegion.appendChild(w);
+    paintFeedInto(w, feed, settings);
+    return;
+  }
   callsPanel.innerHTML = "";
 
   /* ── ORDER OF ATTENTION ────────────────────────────────────────────────────
@@ -5923,13 +5936,14 @@ function renderCalls({ feed = [], settings, record }) {
   // 2. ACT — the bot that trades what the team calls.
   if (settings) callsPanel.appendChild(buildBotCard(settings));
 
-  // 2. SCORE — the whole book compressed to one readable line.
-  callsPanel.appendChild(buildScoreline(record, feed));
-
-  // 3. THE CALLS — the reason to be here.
+  // 2+3. THE LIVE REGION — score and calls. The ONLY part a poll rebuilds.
+  liveRegion = document.createElement("div");
+  liveRegion.style.cssText = "display:flex;flex-direction:column;gap:7px";
+  callsPanel.appendChild(liveRegion);
+  liveRegion.appendChild(buildScoreline(record, feed));
   const feedWrap = document.createElement("div");
-  feedWrap.style.cssText = "display:flex;flex-direction:column;gap:11px";
-  callsPanel.appendChild(feedWrap);
+  feedWrap.style.cssText = "display:flex;flex-direction:column;gap:9px";
+  liveRegion.appendChild(feedWrap);
 
   // 4. THE REST — folded, each drawer counting what is inside it.
   // The killed lane lives on the Desk now, beside the watch board — the room
@@ -5944,11 +5958,17 @@ function renderCalls({ feed = [], settings, record }) {
   if (settings) more.body.appendChild(buildControls(settings));
   callsPanel.appendChild(more.wrap);
 
+  paintFeedInto(feedWrap, feed, settings);
+}
+
+/* The call cards themselves — the one thing that genuinely changes minute to
+   minute, so it is the one thing a poll redraws. */
+function paintFeedInto(wrap, feed, settings) {
   if (!feed.length) {
     const p = document.createElement("p");
     p.className = "locked";
-    p.textContent = "The house team has not published a call yet. The watch board above shows what it is stalking; every armed rule is re-checked every five minutes.";
-    feedWrap.appendChild(p);
+    p.textContent = "No calls published yet \u2014 the Desk tab's watch board shows what the team is stalking.";
+    wrap.appendChild(p);
     return;
   }
 
@@ -6093,14 +6113,15 @@ function renderCalls({ feed = [], settings, record }) {
       act.appendChild(sell);
       el.appendChild(act);
     }
-    feedWrap.appendChild(el);
+    wrap.appendChild(el);
   }
 
   const note = document.createElement("p");
   note.className = "dp-note";
-  note.textContent = "Buy opens a swap you sign in your own wallet — the desk never holds keys, never signs, and never sees the transaction. The size is a suggestion from your floor's risk settings; your wallet shows the real numbers before anything happens.";
-  feedWrap.appendChild(note);
+  note.textContent = "Buy opens a swap you sign yourself \u2014 the desk never holds keys.";
+  wrap.appendChild(note);
 }
+
 
 /* ── the floor's own book: settled results + the sync that writes them ─────
    Settlement is computed from the tenant's wallet on-chain, never self-reported:
@@ -6296,7 +6317,7 @@ async function refreshBudget() {
     const gained = !BUDGET && !!body;          // only a real gain justifies a repaint
     BUDGET = body || null;
     paintHud({ budget: BUDGET });
-    if (gained && callsPanel.classList.contains("on")) loadCalls();
+    if (gained && callsPanel.classList.contains("on")) loadCalls({ liveOnly: true });
   } catch {}
 }
 
@@ -7480,5 +7501,6 @@ function ordC(n) {
 
 if (FLOOR_N != null) { refreshBudget(); loadCalls(); pollAlerts(); askNotify(); }
 setInterval(pollAlerts, 20000);
-setInterval(() => { if (callsPanel.classList.contains("on")) loadCalls(); }, 30000);
+setInterval(() => { if (callsPanel.classList.contains("on")) loadCalls({ liveOnly: true }); }, 30000);
+window.__pollCalls = () => loadCalls({ liveOnly: true });   // probe hook: the poll, on demand
 </script>
