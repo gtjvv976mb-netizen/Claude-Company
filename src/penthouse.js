@@ -296,15 +296,34 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
      *
      * A high-ranked coin stays high-ranked, so without this the cycle picks the same
      * few names every 45 minutes and never reaches the rest of the market. */
-    if (store.recentlyJudged(c.mint)) { repeats.push(row); continue; }
+    /* A REPEAT IS ONLY A REPEAT IF NOTHING HAS CHANGED.
+     *
+     * The guard skips anything judged in the last six hours, which was right when the
+     * desk studied three coins every 45 minutes. It now studies eight every twenty —
+     * 576 a day against a universe of about 296 — so it exhausts the fresh market in
+     * roughly half an hour and then has nothing to look at. That is exactly what
+     * studied=0 was: not refusals, an empty pool.
+     *
+     * But a coin whose price has moved 25% in an hour is not the same question it was.
+     * Something happened to it, and the answer the desk wrote down before that is
+     * about a different situation. So a material move re-opens the question, while a
+     * coin sitting still stays closed — which keeps the fix that stopped DOGE-1 being
+     * re-judged five times. */
+    const moved = Math.abs(c.pair?.priceChange?.h1 ?? 0) >= 25;
+    if (store.recentlyJudged(c.mint) && !moved) { repeats.push(row); continue; }
+    if (moved && store.recentlyJudged(c.mint)) row.rankWhy = [...row.rankWhy, "re-opened: moved 25%+ since the desk last looked"];
     scored.push(row);
   }
   // ...unless the whole market is recently judged, in which case a stale look beats no
   // look at all. Ranked order still applies; the repeats simply queue behind fresh work.
-  if (!scored.length && repeats.length) {
-    emit("cycle:all_recently_judged", { repeats: repeats.length,
-      note: "nothing unseen in the market — re-examining the best of what we have looked at" });
-    scored.push(...repeats);
+  /* TOP UP RATHER THAN IDLE. This only fired when scored was COMPLETELY empty, so a
+   * cycle with two fresh coins and eight slots studied two and wasted six. The desk
+   * would rather re-examine a coin it has seen than end the cycle with nothing. */
+  if (scored.length < workups && repeats.length) {
+    const need = workups - scored.length;
+    emit("cycle:topped_up", { fresh: scored.length, adding: Math.min(need, repeats.length),
+      note: "not enough unseen coins to fill the cycle — re-examining the best already looked at" });
+    scored.push(...repeats.slice(0, need));
   } else if (repeats.length) {
     emit("cycle:skipped_repeats", { skipped: repeats.length, fresh: scored.length,
       note: "coins judged in the last 6h were not re-bought" });
