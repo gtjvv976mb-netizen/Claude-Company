@@ -1159,50 +1159,103 @@ let monitorBusy = false;
  *
  * The two-witness high (snipe-v3) assumed witnesses ~15s apart; the server's monitor
  * writes ONE mark per pass, default ten minutes — a 40x gap that made any pump peaking
- * inside a single pass one-witness forever. Measured on an honest path: a 1.40x
- * excursion never armed breakeven and the call closed at 0.60 where the old code
- * closed at 0.95. This loop writes a consensus price for every LIVE call every few
- * dozen seconds — one free DexScreener read per call, no models, no RPC-heavy
- * gather() — so the pair rule has honest neighbours to confirm against.
+ * inside a single pass one-witness forever. This loop writes a consensus price for
+ * every LIVE call — one free DexScreener read per call, no models — so the pair rule
+ * has honest neighbours to confirm against.
  *
- * It also CONFIRMS recent close prints. Take-profit and desk-target fire on the raw
- * mark by design (the broadcast must not wait), but on the paper book that raw mark
- * became close_mark unchecked — one anomalous 6x read on a 1.05x token books a
- * manufactured win into the stats tenants choose floors by. A close is re-read once
- * shortly after; a print more than 30% from the confirming read is restated to the
- * confirmed price, with the restatement on the record.
+ * The fourth review rebuilt three parts of the first version:
+ *
+ * SINGLE-FLIGHT, MINIMUM SPACING. Office mode arms two start paths, and two identical
+ * intervals firing back-to-back wrote near-duplicate marks that satisfied the
+ * two-witness rule by racing it — one anomalous DexScreener cache interval became its
+ * own second witness. startSubTickMarks arms once per process, the loop refuses to
+ * overlap itself, and a mark is only written if the newest existing mark is at least
+ * half the cadence old — witnesses must be SEPARATED OBSERVATIONS, whoever writes them.
+ *
+ * CLOSE PRINTS ANCHOR TO THE MARK BEFORE THEM, NOT THE PRICE AFTER. The first version
+ * compared the close print to a read up to ten minutes LATER, direction-blind — so an
+ * honest stop close during a continuing dump was "restated" to the post-crash price,
+ * corrupting the very stats it was guarding. What distinguishes an anomalous print is
+ * that it disagrees with its neighbours on BOTH sides: the print is restated only when
+ * it is >30% from the last pre-close mark AND the post-close read agrees with that
+ * pre-close mark (the print is the odd one out). An honest close in a moving market
+ * agrees with its pre-close neighbour and is confirmed untouched. No pre-close mark
+ * within ten minutes -> confirm as-is; one witness cannot convict another.
+ *
+ * CONFIRMED MEANS FINISHED. Both UPDATEs carry close_confirmed IS NULL, so a settled
+ * print can never be re-opened by a later pass or an overlapping loop.
+ *
+ * Documented residual: the Colonel debrief fires once at close with the provisional
+ * print and is not re-run on a restatement — the ~45s window makes a divergence rare,
+ * and a wrong debrief narrative is recoverable where a wrong stat is not.
  */
+let _subTickArmed = false;
+let _subTickBusy = false;
+let _subTickSecs = 45;
+export function startSubTickMarks(secs = 45) {
+  if (_subTickArmed) return false;
+  _subTickArmed = true;
+  _subTickSecs = Math.max(15, Number(secs) || 45);
+  setInterval(() => { subTickMarks().catch(() => {}); }, _subTickSecs * 1000);
+  return true;
+}
+
 export async function subTickMarks() {
-  let marked = 0, confirmed = 0;
-  const live = db.prepare("SELECT id, mint FROM calls WHERE status=\'live\'").all();
-  for (const call of live) {
-    try {
-      const px = await ds.pairsFor(call.mint);
-      if (!px?.ok) continue;
-      const cons = ds.consensus(px.pairs);
-      if (cons.ok && cons.priceUsd > 0) { noteEvent(call.id, "mark", null, cons.priceUsd); marked++; }
-    } catch { /* a failed read is a missing witness, never an error */ }
-  }
-  const recent = db.prepare(`SELECT id, mint, close_mark FROM calls
-    WHERE status=\'closed\' AND close_confirmed IS NULL AND closed_at > ?`).all(Date.now() - 10 * 60e3);
-  for (const call of recent) {
-    try {
-      const px = await ds.pairsFor(call.mint);
-      if (!px?.ok) continue;
-      const cons = ds.consensus(px.pairs);
-      if (!(cons.ok && cons.priceUsd > 0)) continue;
-      const drift = call.close_mark > 0 ? Math.abs(call.close_mark - cons.priceUsd) / call.close_mark : 0;
-      if (drift > 0.30) {
-        db.prepare("UPDATE calls SET close_mark=?, close_confirmed=1 WHERE id=?").run(cons.priceUsd, call.id);
-        noteEvent(call.id, "close_restated",
-          `close print ${call.close_mark} was ${Math.round(drift * 100)}% from the confirming read — restated to ${cons.priceUsd}`);
-      } else {
-        db.prepare("UPDATE calls SET close_confirmed=1 WHERE id=?").run(call.id);
-      }
-      confirmed++;
-    } catch { /* unconfirmed stays unconfirmed; the next loop tries again */ }
-  }
-  return { marked, confirmed };
+  if (_subTickBusy) return { marked: 0, confirmed: 0, skipped: "busy" };
+  _subTickBusy = true;
+  try {
+    let marked = 0, confirmed = 0;
+    const minSpacingMs = (_subTickSecs / 2) * 1000;
+    const live = db.prepare("SELECT id, mint FROM calls WHERE status='live'").all();
+    for (const call of live) {
+      try {
+        const last = db.prepare(`SELECT MAX(ts) t FROM call_events
+          WHERE call_id=? AND mark IS NOT NULL`).get(call.id)?.t ?? 0;
+        if (Date.now() - last < minSpacingMs) continue;      // a witness must be a separate observation
+        const px = await ds.pairsFor(call.mint);
+        if (!px?.ok) continue;
+        const cons = ds.consensus(px.pairs);
+        if (cons.ok && cons.priceUsd > 0) { noteEvent(call.id, "mark", null, cons.priceUsd); marked++; }
+      } catch { /* a failed read is a missing witness, never an error */ }
+    }
+    const recent = db.prepare(`SELECT id, mint, close_mark, closed_at FROM calls
+      WHERE status='closed' AND close_confirmed IS NULL AND closed_at > ?`).all(Date.now() - 10 * 60e3);
+    for (const call of recent) {
+      try {
+        const preMark = db.prepare(`SELECT mark FROM call_events
+          WHERE call_id=? AND mark IS NOT NULL AND ts < ? AND ts > ?
+          ORDER BY ts DESC LIMIT 1`).get(call.id, call.closed_at, call.closed_at - 10 * 60e3)?.mark ?? null;
+        if (!(preMark > 0) || !(call.close_mark > 0)) {
+          db.prepare("UPDATE calls SET close_confirmed=1 WHERE id=? AND close_confirmed IS NULL").run(call.id);
+          confirmed++; continue;                             // one witness cannot convict another
+        }
+        const printDrift = Math.abs(call.close_mark - preMark) / preMark;
+        if (printDrift <= 0.30) {
+          db.prepare("UPDATE calls SET close_confirmed=1 WHERE id=? AND close_confirmed IS NULL").run(call.id);
+          confirmed++; continue;                             // the print agrees with its pre-close neighbour
+        }
+        const px = await ds.pairsFor(call.mint);
+        if (!px?.ok) continue;                               // stay provisional; try again next pass
+        const cons = ds.consensus(px.pairs);
+        if (!(cons.ok && cons.priceUsd > 0)) continue;
+        const postAgreesWithPre = Math.abs(cons.priceUsd - preMark) / preMark <= 0.30;
+        if (postAgreesWithPre) {
+          // Pre and post agree with each other; the print is the odd one out. Restate
+          // to the pre-close mark — the last honest observation AT close time.
+          const r = db.prepare("UPDATE calls SET close_mark=?, close_confirmed=1 WHERE id=? AND close_confirmed IS NULL")
+            .run(preMark, call.id);
+          if (r.changes) noteEvent(call.id, "close_restated",
+            `close print ${call.close_mark} was ${Math.round(printDrift * 100)}% from the pre-close mark ${preMark}, ` +
+            `which the post-close read ${cons.priceUsd} corroborates — restated to ${preMark}`);
+        } else {
+          // The market genuinely moved through the close; the raw print stands.
+          db.prepare("UPDATE calls SET close_confirmed=1 WHERE id=? AND close_confirmed IS NULL").run(call.id);
+        }
+        confirmed++;
+      } catch { /* unconfirmed stays unconfirmed; the next loop tries again */ }
+    }
+    return { marked, confirmed };
+  } finally { _subTickBusy = false; }
 }
 
 export async function monitorCalls() {

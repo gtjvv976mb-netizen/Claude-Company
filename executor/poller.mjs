@@ -706,7 +706,13 @@ async function manageOpen() {
     }
     const cache = S.solUsdCache;
     const maxAge = Number(process.env.SOL_USD_CACHE_MAX_AGE_MS || 30 * 60e3);
-    if (cache?.v > 0 && Date.now() - cache.ts <= maxAge) {
+    /* age >= 0: a backward clock step (RTC-less reboot, NTP correction — the same
+     * restart class the persistence exists for) makes the age negative, which passed
+     * `<= maxAge` unconditionally and voided the staleness cap for hours. The journal
+     * already defends rolling windows against backward clocks; this line holds the
+     * same standard. */
+    const cacheAge = Date.now() - (cache?.ts ?? 0);
+    if (cache?.v > 0 && cacheAge >= 0 && cacheAge <= maxAge) {
       currentSolUsd = cache.v;
       solUsdError = null;
       log(`SOL/USD leg failed — using the cached rate $${cache.v} from ${Math.round((Date.now() - cache.ts) / 60000)}m ago so stops stay armed`);

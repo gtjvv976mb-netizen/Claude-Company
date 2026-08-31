@@ -970,17 +970,18 @@ export class JupiterV2Executor {
      * the tick loop fast. One quick status read keeps the belt (the invariant could be
      * wrong) without the 30-second suspenders. Submitted attempts keep the full wait —
      * their bytes are genuinely in flight. */
+    /* The fast path exists only for the common case: nothing on chain at all. The
+     * moment ANY status is observed for a "signed" attempt, the invariant is already
+     * breached and this is no longer the case to be fast in — hand it to the full
+     * _waitFinalized, whose retry loop knows how to wait out the routine RPC race
+     * where the transaction index lags the status index. A hand-rolled mirror of its
+     * success shape dropped exactly that guard (`if (transaction)`) and turned a
+     * sub-second index lag into a permanent AMBIGUOUS latch on a landed SUCCESS. */
     const finality = attempt.state === "signed"
       ? await (async () => {
           const status = await this._status(attempt.signature);
-          const isFinalized = status?.confirmationStatus === "finalized" || (status && status.confirmations === null);
-          if (!isFinalized) return { outcome: "pending", observedStatus: !!status, observedFinalized: false };
-          // Mirror _waitFinalized's shape EXACTLY — its failed branch carries the
-          // transaction too, and downstream fee-evidence verification needs it.
-          const transaction = await this._finalizedTransaction(attempt.signature);
-          return status.err
-            ? { outcome: "failed", error: status.err, transaction, observedStatus: true, observedFinalized: true }
-            : { outcome: "finalized", transaction, observedStatus: true, observedFinalized: true };
+          if (!status) return { outcome: "pending", observedStatus: false, observedFinalized: false };
+          return this._waitFinalized(attempt.signature);
         })()
       : await this._waitFinalized(attempt.signature);
     if (finality.outcome === "failed") {
@@ -1137,8 +1138,22 @@ export class JupiterV2Executor {
      * clears the way for a fresh attempt. One getBlockHeight per resume, and only
      * bytes that can still land are ever disclosed. */
     if (attempt.state === "signed") {
-      const height = await this.connection.getBlockHeight("confirmed");
-      if (Number.isSafeInteger(height) && height > attempt.lastValidBlockHeight)
+      /* Two corrections from the fourth review. The bound is >= — _buildSigned's own
+       * convention treats expiry <= chainHeight as dead, because a transaction whose
+       * lastValidBlockHeight equals the tip can only be included in the NEXT block,
+       * where it is invalid; the strict > left a one-block boundary that disclosed
+       * un-landable bytes and recreated the AMBIGUOUS latch this guard closes. And the
+       * read is fenced: it runs mid-dump on restart, exactly when RPCs 429-storm, and
+       * an unguarded throw here held the exit hostage to the primary RPC. On failure
+       * try the secondary; if neither answers, proceed as the pre-guard code always
+       * did — the POST itself carries lastValidBlockHeight and cannot land a dead tx. */
+      let height = null;
+      try { height = await this.connection.getBlockHeight("confirmed"); }
+      catch {
+        try { height = await this.secondaryConnection?.getBlockHeight?.("confirmed") ?? null; }
+        catch { height = null; }
+      }
+      if (Number.isSafeInteger(height) && height >= attempt.lastValidBlockHeight)
         return this._reconcile(intent, attempt, attempt.execute);
     }
 
@@ -1210,9 +1225,20 @@ export class JupiterV2Executor {
      * inside the count>=maxAttempts branch meant an operator who set
      * MAX_EXIT_TX_ATTEMPTS below MAX_TX_ATTEMPTS was silently ignored for the first
      * maxAttempts fee-burning tries — their fee-exposure model wrong by exactly the
-     * bound they asked for. */
-    if (isExit && count >= exitCap)
-      throw new Error(`exit intent ${intent.id} exhausted ${exitCap} attempts — manual intervention required`);
+     * bound they asked for.
+     *
+     * And it counts FEE-BEARING attempts, not rows. The cap's whole justification is
+     * that each on-chain failure costs a real fee — but an 'expired' attempt (signed,
+     * never disclosed, aged out during a laptop sleep) cost nothing and proved
+     * nothing, and counting it let two free sleep-expiries consume a low-cap
+     * operator's entire exit budget and permanently kill a stop. Only finalized
+     * failures spend the budget; expiries retry for free, each one gated by a real
+     * blockhash lifetime so this cannot hot-loop. */
+    const exitFeeAttempts = isExit
+      ? this.journal.attempts(intent.id).filter((a) => a.state === "failed").length
+      : 0;
+    if (isExit && exitFeeAttempts >= exitCap)
+      throw new Error(`exit intent ${intent.id} exhausted ${exitCap} fee-bearing attempts — manual intervention required`);
     if (!isExit && count >= this.cfg.maxAttempts)
       throw new Error(`intent ${intent.id} exhausted ${this.cfg.maxAttempts} attempts`);
     if (isExit && count >= this.cfg.maxAttempts) {

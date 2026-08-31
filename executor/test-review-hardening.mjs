@@ -206,9 +206,11 @@ console.log("\nTHIRD-PASS CONTRACTS");
     "a wedged signed attempt must not stall every stop-evaluation tick by finalityTimeout");
 
   const exec = jup.slice(jup.indexOf("async executeIntent"), jup.indexOf("async recoverPending"));
+  /* Updated by the fourth pass: the cap still binds from attempt one, but over
+   * FEE-BEARING attempts — counting free expiries let two laptop sleeps kill a stop. */
   ok("P3-6: the exit cap binds from attempt ONE, outside the entry-cap branch",
-    /if \(isExit && count >= exitCap\)/.test(exec) &&
-    exec.indexOf("isExit && count >= exitCap") < exec.indexOf("count >= this.cfg.maxAttempts"),
+    /if \(isExit && exitFeeAttempts >= exitCap\)/.test(exec) &&
+    exec.indexOf("exitFeeAttempts >= exitCap") < exec.indexOf("count >= this.cfg.maxAttempts"),
     "an operator's MAX_EXIT_TX_ATTEMPTS below the entry cap was silently ignored");
 
   ok("P3-5: the SOL/USD cache is durable, not process-memory",
@@ -227,6 +229,54 @@ console.log("\nTHIRD-PASS CONTRACTS");
   ok("P3-4: a close print is provisional until one confirming read agrees",
     /close_restated/.test(pent) && /close_confirmed/.test(callsSrc),
     "one anomalous 6x read booked a manufactured win into the stats tenants choose floors by");
+}
+
+/* ── FOURTH-PASS FIXES (2026-09-01, twelve confirmed → eight distinct) ─────────── */
+console.log("\nFOURTH-PASS CONTRACTS");
+{
+  const fs = await import("node:fs");
+  const jup = fs.readFileSync(new URL("./jupiter.mjs", import.meta.url), "utf8");
+  const pol = fs.readFileSync(new URL("./poller.mjs", import.meta.url), "utf8");
+  const pent = fs.readFileSync(new URL("../src/penthouse.js", import.meta.url), "utf8");
+  const idx = fs.readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
+
+  const reconcile = jup.slice(jup.indexOf("async _reconcile"), jup.indexOf("async _resume"));
+  ok("P4-1: an observed status hands off to the FULL _waitFinalized, no hand-rolled mirror",
+    /return this\._waitFinalized\(attempt\.signature\)/.test(reconcile) &&
+    !/outcome: "finalized", transaction, observedStatus/.test(reconcile),
+    "a null-transaction index lag must retry, never latch a landed SUCCESS as AMBIGUOUS");
+
+  const resume = jup.slice(jup.indexOf("async _resume"), jup.indexOf("async executeIntent"));
+  ok("P4-2: the resume expiry bound matches _buildSigned's convention (>=)",
+    /height >= attempt\.lastValidBlockHeight/.test(resume),
+    "at height == lastValid the next block is lastValid+1: the bytes are already dead");
+  ok("P4-11: the chain-height read is fenced and falls back to the secondary RPC",
+    /secondaryConnection\?\.getBlockHeight/.test(resume),
+    "an unguarded read held exits hostage to the primary RPC mid-dump");
+
+  const exec = jup.slice(jup.indexOf("async executeIntent"), jup.indexOf("async recoverPending"));
+  ok("P4-4: only FEE-BEARING attempts spend the exit budget",
+    /exitFeeAttempts/.test(exec) && /state === "failed"/.test(exec),
+    "two free laptop-sleep expiries must not kill a stop forever");
+
+  ok("P4-3: the persisted SOL/USD cache age is bounded below as well as above",
+    /cacheAge >= 0/.test(pol),
+    "a backward clock step made the age negative and voided the staleness cap for hours");
+
+  ok("P4-5: sub-tick marks arm once per process with a busy guard and minimum spacing",
+    /_subTickArmed/.test(pent) && /_subTickBusy/.test(pent) && /minSpacingMs/.test(pent) &&
+    /startSubTickMarks\(/.test(idx) && !/setInterval\(\(\) => \{ subTickMarks/.test(idx),
+    "two racing intervals wrote near-duplicate marks that satisfied the pair rule");
+
+  const sub = pent.slice(pent.indexOf("export async function subTickMarks"), pent.indexOf("export async function monitorCalls"));
+  ok("P4-6: a close print is judged against the mark BEFORE it, not the price after",
+    /preMark/.test(sub) && /postAgreesWithPre/.test(sub),
+    "direction-blind post-close comparison restated honest stop closes to post-crash prices");
+  ok("P4-8: both confirm/restate UPDATEs refuse to touch an already-confirmed close",
+    (sub.match(/close_confirmed IS NULL/g) || []).length >= 4,
+    "a settled print can never be re-opened by a later pass");
+  ok("P4-6b: with no pre-close witness the print stands — one witness cannot convict another",
+    /one witness cannot convict another/.test(sub));
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
