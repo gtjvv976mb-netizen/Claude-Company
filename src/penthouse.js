@@ -12,7 +12,7 @@ import * as jup from "./data/jupiter.js";
 import { callouts, whaleScore } from "./whales.js";
 import { recordWhaleCallout } from "./identity.js";
 import { regime } from "./data/regime.js";
-import { cfg } from "./config.js";
+import { cfg, floorsFor } from "./config.js";
 import * as store from "./lib/store.js";
 import * as shadow from "./shadow.js";
 import { buildBoard, selectAcrossBoard, CAP_BANDS, COIN_TYPES } from "./categories.js";
@@ -213,9 +213,41 @@ export function wouldSurviveScreen(c) {
   const tx = (p.txns?.h24?.buys ?? 0) + (p.txns?.h24?.sells ?? 0);
   const mcap = p.marketCap ?? p.fdv ?? null;
   const age = p.ageHours ?? 0;
-  if (liq < s.minLiquidityUsd) return "thin_liquidity";
-  if (vol < s.minVolume24hUsd) return "no_volume";
-  if (tx < s.minTxns24h) return "no_participants";
+  /* Floors scaled to the coin's own size — see BAND_FLOORS. A flat floor was passing 2
+   * of 60 micro-caps and made "5 per category" impossible in the band this desk is for.
+   * The measured exit probe downstream is unchanged and still absolute. */
+  const fl = floorsFor(mcap);
+
+  /* UNKNOWN LIQUIDITY IS NOT THIN LIQUIDITY, and conflating them was excluding an
+   * entire class of coin.
+   *
+   * Measured on a live sweep of 300: 119 coins carry no liquidity figure at all. They
+   * were read as $0 and killed as "thin", and they are not thin — samples showed
+   * $26k-$239k of 24h volume across 519-6,184 transactions. A coin with that tape has a
+   * market; the free feed simply does not report a pool for it, which is what happens
+   * with pre-graduation coins whose trading is on a bonding curve rather than an AMM.
+   * Since that is most of pump.fun's early market, the desk was systematically refusing
+   * the earliest and smallest segment it exists to hunt: the micro band passed 2 of 60.
+   *
+   * THE PROXY IS NOT THE TEST. Pool depth is a cheap stand-in for the only question that
+   * matters — can this position be got out of — and the desk MEASURES that directly with
+   * a Jupiter round-trip at probe size. Four of these "thin" coins were probed: 4.53%,
+   * 5.49%, 5.58%, 3.70% round-trip against an 8% ceiling. Every one exitable.
+   *
+   * So an unreadable pool defers to that measurement instead of pre-empting it, and only
+   * when the tape independently shows a real market. A pool figure that IS readable and
+   * IS below the floor still kills here, exactly as before. Nothing downstream moves:
+   * unverified_exit still refuses a coin whose round trip cannot be measured, and
+   * cannot_exit still refuses one that measures worse than the ceiling. This trades a
+   * proxy that is wrong for a whole class of coin against a direct measurement — which
+   * is a strengthening of the safety argument, not a loosening of it. */
+  const liqUnknown = p.liquidityUsd == null && p.liquidity?.usd == null;
+  if (!liqUnknown && liq < fl.liq) return "thin_liquidity";
+  if (vol < fl.vol) return "no_volume";
+  if (tx < fl.txns) return "no_participants";
+  // An unreadable pool has to clear a HIGHER bar of real trading before the desk will
+  // spend anything measuring it — the tape is the only evidence of a market it has.
+  if (liqUnknown && (vol < fl.vol * 2 || tx < fl.txns * 2)) return "thin_liquidity";
   if (age < s.minPairAgeHours) return "too_new";
   if (s.maxMarketCapUsd > 0 && mcap != null && mcap > s.maxMarketCapUsd) return "too_big";
   if (s.minMarketCapUsd > 0 && mcap != null && mcap < s.minMarketCapUsd) return "too_small";

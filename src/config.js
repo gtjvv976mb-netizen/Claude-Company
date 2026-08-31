@@ -183,6 +183,67 @@ minLiquidityUsd: num("DESK_MIN_LIQUIDITY_USD", 12000),
   dailyBudgetUsd: Number(process.env.DESK_DAILY_BUDGET_USD || 90),
 };
 
+/**
+ * FLOORS THAT SCALE WITH THE COIN, because a flat one is a ban on small coins.
+ *
+ * Measured on a live sweep of 302: the micro band saw 60 coins and passed TWO. Forty-four
+ * of the 58 deaths were `thin_liquidity` against a flat $12,000 floor — which asks a
+ * $30k-cap coin for a liquidity-to-cap ratio of forty percent. No real micro-cap clears
+ * that, so the owner's "at least 5 per category" was arithmetically impossible in the
+ * band they most want, and the desk was quietly a large-cap desk wearing a memecoin
+ * charter.
+ *
+ * The same shape of bug has bitten before: an ABSOLUTE step applied to a quantity that
+ * spans two orders of magnitude prices the small end out entirely. Bands here run from
+ * $10k to $20m — a 2000x range — so any single number is wrong at one end or the other.
+ *
+ * WHAT THE FLOOR IS ACTUALLY FOR decides where to put it. It is a cheap proxy for "can
+ * our size get out", asked before the desk pays to measure the real thing. Round-trip
+ * cost on a constant-product pool is about 4X/L, and the desk probes at $75 while the
+ * executor trades $3-$10:
+ *
+ *     L = $5,000   $75 probe -> 6.0%   (inside the 8% ceiling)   $10 clip -> 0.8%
+ *     L = $3,000   $75 probe -> 10.0%  (over the ceiling)
+ *
+ * So ~$5k is where the probe itself stops clearing, and that is the honest floor for a
+ * micro-cap — not $12k.
+ *
+ * The floors RISE with market cap on purpose. A $30k coin with $5k of liquidity is
+ * ordinary; a $15m coin with $5k of liquidity is a fiction, and the suspicion belongs to
+ * the RATIO, which maxFdvToLiqRatio already catches independently.
+ *
+ * NONE OF THIS TOUCHES SAFETY. The measured exit probe (cannot_exit, round-trip loss
+ * against maxRoundTripSlippagePct) is unchanged and absolute, as are honeypot mechanics,
+ * live mint and freeze authority, and the unverified-is-not-safe rule. This lowers a
+ * PROXY so that more small coins reach the real test; it does not lower the real test.
+ */
+export const BAND_FLOORS = {
+  micro:     { liq: 5_000,  vol: 4_000,  txns: 25 },   // $10k-$100k
+  low:       { liq: 8_000,  vol: 8_000,  txns: 40 },   // $100k-$500k
+  medium:    { liq: 12_000, vol: 12_000, txns: 60 },   // $500k-$1m
+  high:      { liq: 15_000, vol: 15_000, txns: 60 },   // $1m-$10m
+  very_high: { liq: 25_000, vol: 20_000, txns: 80 },   // $10m-$20m
+};
+
+/**
+ * The floors that apply to THIS coin.
+ *
+ * An unreadable market cap falls back to the flat configured floors — the strictest
+ * reading — because an unknown number must never be handed the most permissive band.
+ * That is the same rule the rest of the desk follows everywhere else.
+ */
+export function floorsFor(mcap) {
+  const flat = { liq: cfg.screen.minLiquidityUsd, vol: cfg.screen.minVolume24hUsd, txns: cfg.screen.minTxns24h };
+  if (mcap == null || !(mcap > 0)) return flat;
+  const band =
+    mcap < 100_000 ? "micro" :
+    mcap < 500_000 ? "low" :
+    mcap < 1_000_000 ? "medium" :
+    mcap < 10_000_000 ? "high" :
+    mcap <= 20_000_000 ? "very_high" : null;
+  return band ? BAND_FLOORS[band] : flat;
+}
+
 /** The RPC URL embeds an API key. Never print it raw — mask it wherever it is shown. */
 export const maskRpc = (u = cfg.rpc) =>
   String(u).replace(/([?&]api-key=)[^&]+/i, "$1***").replace(/\/\/([^@/]+:)[^@]+@/, "//$1***@");

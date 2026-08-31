@@ -1,7 +1,7 @@
 import * as ds from "./dexscreener.js";
 import * as jup from "./jupiter.js";
 import * as sol from "./solana.js";
-import { cfg, MINTS } from "../config.js";
+import { cfg, MINTS, floorsFor } from "../config.js";
 import * as snapshots from "./snapshots.js";
 import { grokXRead, hasGrok } from "../lib/grok.js";
 import { emit } from "../lib/bus.js";
@@ -169,16 +169,24 @@ export function screen(ev) {
     dep?.ok ? `deployer shipped ${dep.priorLaunches}+ coins, zero ever graduated` : null);
 
   const totalLiq = ev.pairs?.totalLiquidityUsd ?? p.liquidityUsd;
-  check(totalLiq == null || totalLiq < s.minLiquidityUsd,
-    "thin_liquidity", `total liquidity across ${ev.pairs?.count} venues = ${totalLiq} < floor ${s.minLiquidityUsd}`);
+  /* The SAME band-relative floors the free pre-screen used. If these two ever diverge
+   * the desk pays for workups it was always going to refuse, so they read one source. */
+  const fl = floorsFor(p.marketCap ?? p.fdv ?? null);
+  /* Same distinction the free screen now draws: a pool that cannot be READ is not a
+   * pool that is thin. The desk does not let it through on trust — it hands it to the
+   * exit probe below, which measures the round trip directly. unverified_exit refuses
+   * anything that probe cannot measure, and cannot_exit refuses anything that measures
+   * worse than the ceiling, so an unreadable pool still has to prove it can be left. */
+  check(totalLiq != null && totalLiq < fl.liq,
+    "thin_liquidity", `total liquidity across ${ev.pairs?.count} venues = ${totalLiq} < floor ${fl.liq} for this cap band`);
   check(p.ageHours == null || p.ageHours < s.minPairAgeHours,
     "too_new", `ageHours=${p.ageHours} < floor ${s.minPairAgeHours}`);
-  check((p.volume?.h24 ?? 0) < s.minVolume24hUsd,
-    "no_volume", `volume.h24=${p.volume?.h24} < floor ${s.minVolume24hUsd}`);
+  check((p.volume?.h24 ?? 0) < fl.vol,
+    "no_volume", `volume.h24=${p.volume?.h24} < floor ${fl.vol} for this cap band`);
   // Was `s.minTxns24`, which is undefined — so `n < undefined` was always false and this
   // screen never fired once. The config key is minTxns24h.
-  check(d.txns24h < s.minTxns24h,
-    "no_participants", `txns24h=${d.txns24h} < floor ${s.minTxns24h}`);
+  check(d.txns24h < fl.txns,
+    "no_participants", `txns24h=${d.txns24h} < floor ${fl.txns} for this cap band`);
   check(d.volToLiqRatio != null && d.volToLiqRatio > s.maxVolToLiqRatio,
     "wash_suspect", `volume/liquidity=${d.volToLiqRatio} > ceiling ${s.maxVolToLiqRatio}`);
   check(d.fdvToLiqRatio != null && d.fdvToLiqRatio > s.maxFdvToLiqRatio,
@@ -283,9 +291,9 @@ export function screen(ev) {
   // observations; the spot check above still guards the young.
   {
     const held = snapshots.liqOver(ev.mint, Date.now() - 24 * 3600e3);
-    check(held.observations >= 96 && held.minLiq != null && held.minLiq < s.minLiquidityUsd,
+    check(held.observations >= 96 && held.minLiq != null && held.minLiq < fl.liq,
       "liquidity_did_not_hold",
-      `liquidity dipped to $${Math.round(held.minLiq)} inside 24h (floor $${s.minLiquidityUsd})`);
+      `liquidity dipped to $${Math.round(held.minLiq)} inside 24h (floor $${fl.liq})`);
   }
 
   return { pass: fails.length === 0, fails };

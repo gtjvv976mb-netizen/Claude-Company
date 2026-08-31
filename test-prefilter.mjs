@@ -14,35 +14,44 @@
  * thin_liquidity. The cycle never learned. This is that lesson, applied.
  */
 import { wouldSurviveScreen, selectShortlist } from "./src/penthouse.js";
-import { cfg } from "./src/config.js";
+import { cfg, floorsFor } from "./src/config.js";
 
 let pass = 0, fail = 0;
 const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  — " + d : ""}`))
                                  : (fail++, console.log(`  FAIL ${n}${d ? "  — " + d : ""}`)); };
 
 const s = cfg.screen;
+
+/* The floors are band-relative now, so the test coin's own band decides its bar. The
+ * fixture used to build an $800k coin and assert it against the FLAT config numbers,
+ * which quietly became a different claim the moment floors started scaling: $14,999 of
+ * volume is under the old flat $15,000 and comfortably over the $12,000 the medium band
+ * actually asks for. The test was right to fail — it was asserting a floor that no
+ * longer applies to the coin it built. */
+const F = floorsFor(800_000);
+
 const coin = (over = {}) => ({
   mint: "m" + Math.round(Math.abs(over.score ?? 1) * 1e6), category: "memecoin",
   score: over.score ?? 50,
   pair: {
     baseSymbol: over.sym ?? "T",
-    liquidityUsd: over.liq ?? s.minLiquidityUsd * 3,
-    volume: { h24: over.vol ?? s.minVolume24hUsd * 3 },
-    txns: { h24: { buys: over.tx ?? s.minTxns24h * 2, sells: 0 } },
+    liquidityUsd: over.liq ?? F.liq * 3,
+    volume: { h24: over.vol ?? F.vol * 3 },
+    txns: { h24: { buys: over.tx ?? F.txns * 2, sells: 0 } },
     marketCap: over.mcap ?? 800_000,
     ageHours: over.age ?? 48,
   },
 });
 
-console.log(`\nTHE FREE SCREEN, APPLIED BEFORE PAYING (floors: liq $${s.minLiquidityUsd.toLocaleString()}, vol $${s.minVolume24hUsd.toLocaleString()}, txns ${s.minTxns24h}, cap $${(s.maxMarketCapUsd||0).toLocaleString()})`);
+console.log(`\nTHE FREE SCREEN, APPLIED BEFORE PAYING (band floors for an $800k coin: liq $${F.liq.toLocaleString()}, vol $${F.vol.toLocaleString()}, txns ${F.txns}, cap $${(s.maxMarketCapUsd||0).toLocaleString()})`);
 ok("a healthy micro-cap survives", wouldSurviveScreen(coin()) === null);
 for (const [label, over, code] of [
-  ["a pool too thin to exit",      { liq: s.minLiquidityUsd - 1 }, "thin_liquidity"],
-  ["a coin nobody is trading",     { vol: s.minVolume24hUsd - 1 }, "no_volume"],
-  ["almost no participants",       { tx: s.minTxns24h - 1 },       "no_participants"],
+  ["a pool too thin to exit",      { liq: F.liq - 1 },   "thin_liquidity"],
+  ["a coin nobody is trading",     { vol: F.vol - 1 },   "no_volume"],
+  ["almost no participants",       { tx: F.txns - 1 },   "no_participants"],
   ["too big to re-rate",           { mcap: (s.maxMarketCapUsd || 3e6) + 1 }, "too_big"],
   ["minutes old",                  { age: 0.1 },                   "too_new"],
-  ["turnover implausible for depth", { vol: s.minLiquidityUsd * 3 * (s.maxVolToLiqRatio + 5) }, "wash_suspect"],
+  ["turnover implausible for depth", { vol: F.liq * 3 * (s.maxVolToLiqRatio + 5) }, "wash_suspect"],
 ]) ok(`${label} is dropped BEFORE a workup is paid for`, wouldSurviveScreen(coin(over)) === code,
       wouldSurviveScreen(coin(over)) ?? "survived");
 
