@@ -5674,9 +5674,27 @@ async function renderTeamInto(el) {
 
   /* ── HUNT TARGETS: run a token now + the pinned list, folded out of the way ── */
   const pins = Array.isArray(S.watchlist) ? S.watchlist.slice() : [];
-  const fold = window.foldSection?.("Hunt targets \u2014 run a token now \u00b7 " +
-    (pins.length ? pins.length + " pinned" : "nothing pinned"));
-  if (!fold) return;
+  /* THE RUN CONTROL MUST NOT DEPEND ON AN OPTIONAL HELPER.
+   *
+   * foldSection is defined in a DIFFERENT module block (~6099, attached to window at
+   * ~6128) from the one this render lives in (~5315-5788). It was reached through
+   * `window.foldSection?.(...)` followed by `if (!fold) return;` \u2014 so any ordering
+   * where that attachment had not run yet did not merely skip the fold, it ABANDONED
+   * THE REST OF THE RENDER. The single most important control on the page, the one
+   * that puts the desk on a coin, disappeared with no error anywhere to explain it.
+   *
+   * A missing convenience should cost the convenience, not the feature. And it now
+   * opens by default: a control nobody can find is not meaningfully shipped. */
+  const huntLabel = "Hunt targets \u2014 run a token now \u00b7 " +
+    (pins.length ? pins.length + " pinned" : "nothing pinned");
+  const fold = window.foldSection?.(huntLabel, { open: true }) ?? (() => {
+    const wrap = mk("div", "fold");
+    const h = mk("div", "dp-h");
+    h.textContent = huntLabel;
+    const body = mk("div", "");
+    wrap.append(h, body);
+    return { wrap, body };
+  })();
   el.appendChild(fold.wrap);
   const fb = fold.body;
 
