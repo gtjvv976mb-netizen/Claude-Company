@@ -57,6 +57,13 @@ ok("the live Pages workflow isolates deploy authority and pins every action",
   /deploy:[\s\S]*?permissions:\s*\n\s*pages:\s*write\s*\n\s*id-token:\s*write/.test(pagesWorkflow) &&
   [...pagesWorkflow.matchAll(/uses:\s+([^\s#]+)/g)].every(([, use]) =>
     /^actions\/(?:checkout|setup-node|upload-pages-artifact|deploy-pages)@[0-9a-f]{40}$/.test(use)));
+ok("deployments install the separately locked executor before running its safety tests",
+  pagesWorkflow.includes("executor/package-lock.json") &&
+  pagesWorkflow.includes("npm ci --prefix executor --ignore-scripts") &&
+  pagesWorkflow.indexOf("npm ci --prefix executor --ignore-scripts") <
+    pagesWorkflow.indexOf("run: npm test") &&
+  render.includes("npm ci --prefix executor --ignore-scripts") &&
+  render.indexOf("npm ci --prefix executor --ignore-scripts") < render.indexOf("npm test"));
 ok("public-repository output is encrypted and never committed or deployed",
   /codex-improvement-review\.tar\.gz\.gpg/.test(workflow) && /gpg --batch --yes --symmetric/.test(workflow) &&
   /CODEX_ARTIFACT_KEY/.test(workflow) && /Preflight review secrets/.test(workflow) &&

@@ -28,7 +28,13 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+          cache-dependency-path: |
+            package-lock.json
+            executor/package-lock.json
+      - name: Install site and isolated executor dependencies
+        run: |
+          npm ci
+          npm ci --prefix executor --ignore-scripts
       - name: Run isolated regression suite
         run: npm test
       - name: Build static site

@@ -11,7 +11,7 @@ services:
     region: oregon
     branch: main
     # A revision that cannot pass the isolated root suite never reaches the live process.
-    buildCommand: npm ci && npm test
+    buildCommand: npm ci && npm ci --prefix executor --ignore-scripts && npm test
     startCommand: node src/index.js office
     healthCheckPath: /api/lease/config
     disk:
