@@ -787,6 +787,26 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
  */
 export function publishCall(rec, { category = null, launchpad: pad = null, wx = null, toFloors = null, bestPick = null } = {}) {
   const e = eligibility(rec);
+
+  /* RECORD THE VERDICT HERE, because this is the one place EVERY lane converges.
+   *
+   * The funnel was being written only by the main cohort loop, so the hunt lane and the
+   * fresh lane paid for workups the funnel never heard about. The instrument then read
+   * studied=0 while the desk was visibly producing PM decisions — a number that was
+   * wrong in the direction of "nothing is happening", which is the worst direction for
+   * a number to be wrong in and cost an hour today already.
+   *
+   * The UPDATE is keyed on the mint and is a no-op for a coin the funnel has not seen,
+   * so recording twice for the main cohort is harmless. */
+  try {
+    funnel.recordStudy(rec?.mint, {
+      eligible: !!e.eligible,
+      verdict: rec?.pm?.decision ?? null,
+      conviction: rec?.pm?.conviction ?? null,
+      thesis: rec?.pm?.thesis ?? null,
+    });
+  } catch { /* bookkeeping must never be able to fail a publish */ }
+
   if (!e.eligible) {
     emit("call:withheld", { mint: rec?.mint, symbol: rec?.symbol,
       safety: e.safety, reason: e.reason });
