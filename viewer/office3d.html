@@ -2590,6 +2590,7 @@ class Worker {
     this.spec = spec;
     this.id = spec.id;
     this.baseY = spec.y ?? 0;
+    this.raised = spec.y != null;      // stands on a platform — height is per-position
     this.home = { x: spec.stand[0], z: spec.stand[1] };
     this.deskAt = { x: spec.desk[0], z: spec.desk[1] };
     this.x = this.home.x; this.z = this.home.z;
@@ -2717,6 +2718,8 @@ class Worker {
       this.g.position.x = this.x; this.g.position.z = this.z;
     }
     this.nameSprite.visible = true;
+
+    if (this.raised) this.baseY = window.__floorHeightAt(this.x, this.z);
 
     // seated blend
     const target = this.wantSeated && !moving ? 1 : 0;
@@ -3001,6 +3004,18 @@ const bakedBuckets = bakeStatic(room);
    signature green, and the knot laid into the floor. He is ALWAYS here (unlike
    Grox, who comes and goes with the floor's brain) because his work — reading
    the system and filing proposals — never depends on who manages the desk. */
+/* How high the floor is where you are standing. A figure with a fixed y floats
+   the moment it walks off its own dais — Codex Banks roams, so he did exactly
+   that across the whole bullpen. Every raised figure now reads its height from
+   the platform under its feet. */
+window.__floorHeightAt = (x, z) => {
+  const inBox = (b) => x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1;
+  if (inBox({ x0: -5.5, x1: 5.5, z0: -HALF_D, z1: -7.5 })) return DAIS_Y;       // the boss's suite
+  if (typeof CODEX_OFFICE !== "undefined" && inBox(CODEX_OFFICE)) return CODEX_DAIS;
+  if (typeof GROK_OFFICE !== "undefined" && inBox(GROK_OFFICE)) return GROX_DAIS;
+  return 0;
+};
+
 const CODEX_OFFICE = { x0: -9.65, x1: -5.9, z0: -12.5, z1: -8.6, cx: -7.78 };
 const CODEX_DAIS = 0.22;                         // the same junior step as Grox's
 const GPT_GREEN = 0x10a37f, GPT_INK = 0x0e0f11, GPT_EDGE = 0x2a2f2d;
@@ -3046,16 +3061,17 @@ scene.add(codexOffice);
   const deckC = document.createElement("canvas"); deckC.width = deckC.height = 512;
   const x = deckC.getContext("2d"), C = 256;
   x.fillStyle = "#101214"; x.fillRect(0, 0, 512, 512);
-  x.strokeStyle = "#10a37f"; x.lineWidth = 26; x.lineJoin = "round";
+  /* The knot, drawn the way the mark is actually built: six identical arcs on
+     circles offset from the centre, each stopping short of its neighbours, so
+     the petals interlock around a clean hexagonal hole. Tuned by eye against a
+     full-size preview rather than guessed. */
+  x.strokeStyle = "#10a37f"; x.lineWidth = 26; x.lineCap = "round";
   for (let k = 0; k < 6; k++) {
-    const a0 = (k / 6) * Math.PI * 2, a1 = ((k + 1) / 6) * Math.PI * 2, a2 = ((k + 2) / 6) * Math.PI * 2;
+    const a = (k / 6) * Math.PI * 2;
     x.beginPath();
-    x.moveTo(C + Math.cos(a0) * 150, C + Math.sin(a0) * 150);
-    x.lineTo(C + Math.cos(a1) * 150, C + Math.sin(a1) * 150);
-    x.lineTo(C + Math.cos(a2) * 150, C + Math.sin(a2) * 150);
+    x.arc(C + Math.cos(a) * 74, C + Math.sin(a) * 74, 100, a + 1.02, a + Math.PI * 2 - 1.02);
     x.stroke();
   }
-  x.beginPath(); x.arc(C, C, 62, 0, Math.PI * 2); x.stroke();
   const deckTex = new THREE.CanvasTexture(deckC);
   deckTex.colorSpace = THREE.SRGBColorSpace;
   const deck = new THREE.Mesh(new THREE.PlaneGeometry(W - 0.3, D - 0.3),
