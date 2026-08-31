@@ -6817,8 +6817,19 @@ function buildControls(settings) {
   exec_.setAttribute("aria-label", "Executor webhook URL");
   box.appendChild(exec_);
   const execNote = mk("div", "dp-note",
-    "Auto-trade this floor's calls WITHOUT giving up your keys. Run our open-source poller (executor/poller.mjs) anywhere with internet — no public URL needed — with the secret below and your own burner wallet: it fetches every entry and exit and trades them via Jupiter, within caps you set. Fund it, start it once, walk away. The desk never holds, signs, or sees your funds. (Paste any https URL below just to create your secret.)");
+    "Auto-trade this floor's calls WITHOUT giving up your keys. Run our open-source poller (executor/poller.mjs) anywhere with internet — no public URL needed — with the secret below and your own burner wallet: it fetches every entry and exit and trades them via Jupiter, within caps you set. Fund it, start it once, walk away. The desk never holds, signs, or sees your funds.");
   box.appendChild(execNote);
+  if (!settings.executor_secret) {
+    const mint = document.createElement("button");
+    mint.className = "dp-btn"; mint.textContent = "Create my signing secret";
+    mint.onclick = async () => {
+      mint.disabled = true; mint.textContent = "Creating\u2026";
+      await api(`/api/floor/${FLOOR_N}/settings`, { method: "POST",
+        body: JSON.stringify({ mintExecutorSecret: true }) });
+      loadCalls();
+    };
+    box.appendChild(mint);
+  }
   if (settings.executor_secret) {
     const sec = mk("div", "bud-addr");
     sec.textContent = "signing secret: " + settings.executor_secret;

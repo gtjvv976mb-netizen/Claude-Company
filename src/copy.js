@@ -188,6 +188,10 @@ export function saveSettings(floorNo, patch) {
     execUrl = patch.executorUrl || null;
     if (execUrl && !execSecret) execSecret = crypto.randomBytes(24).toString("hex");
   }
+  // The POLLER needs a secret but no URL — it dials out. Minting was gated on
+  // setting a webhook URL, so a tenant had to invent a fake one to get their
+  // own secret. Ask for it directly instead.
+  if (patch.mintExecutorSecret && !execSecret) execSecret = crypto.randomBytes(24).toString("hex");
   // Same empty-selection footgun the categories column already guards against: an
   // empty allow-list is stored literally and the floor never receives another call.
   // Empty means "no preference" (every pad), never "no pads".
