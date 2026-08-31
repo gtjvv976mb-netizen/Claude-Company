@@ -540,7 +540,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               /* And the three ways a cycle can end without a call at all. */
               cycleEnds: rows(`SELECT type, COUNT(*) n, MAX(ts) last_ts
                 FROM chronicle
-                WHERE type IN ('cycle:hunt_dry','cycle:holding','cycle:budget','cycle:halted','cycle:end','cycle:paced')
+                WHERE type IN ('cycle:start','cycle:hunt_dry','cycle:holding','cycle:budget','cycle:halted','cycle:end','cycle:paced','cycle:prefiltered','cycle:replaced','cycle:skipped_repeats','cycle:all_recently_judged')
                   AND ts > (strftime('%s','now') * 1000 - 604800000)
                 GROUP BY type ORDER BY n DESC`),
               pmVsRedteam: rows(`SELECT p.verdict pm, r.verdict redteam, COUNT(*) n
