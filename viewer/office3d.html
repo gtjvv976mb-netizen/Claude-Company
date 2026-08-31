@@ -292,6 +292,7 @@ body{
 .dossier .dkind.model{color:#e0ad3d; border-color:#6b5624; background:#312a17}
 .dossier .dkind.code{color:#7bbd80; border-color:#37543a; background:#1c2b1e}
 .dossier .dkind.claude{color:#d97757; border-color:#6d3b2c; background:#33211b}
+.dossier .dkind.codex{color:#9fdcff; border-color:#3f5fa8; background:#1b2a58}
 .dossier .dnote{
   margin:13px 0 0; padding-top:11px; border-top:1px dashed var(--card-line);
   font-size:12px; color:var(--ink-soft);
@@ -569,6 +570,7 @@ const P = {                       // Markets & Makers OFFICIAL_PALETTE
   metal:0x70828a, terracotta:0xbf623c, coral:0xdf7655, leaf:0x66a348,
   charcoal:0x30454a, water:0x21b8c4,
   claude:0xd97757,                // Claude's own coral — the CEO, and only the CEO
+  codex:0x6f91ff,                 // Codex pet blue — the advisory improvement engineer
   floor:0xc4b596, path:0xb2a385, wall:0x84836c, trim:0x6d5738, sky:0x243d3a,
 };
 
@@ -904,6 +906,11 @@ const STAFF = [
   { id:"Regime",     name:"MURDOCK",    role:"Reads the weather",     desk:[9.7,-5.6],  stand:[9.7,-4.1],   apron:0x4a7c9a },
   { id:"Review",     name:"COLONEL DEBRIEF", role:"Grades every landing", desk:[-11.6,-2.6], stand:[-11.6,-1.1], apron:0x6b6f45 },
   { id:"Scribe",     name:"AGENT P",     role:"Says nothing. Files everything.",    desk:[-5.5,8.2],  stand:[-5.5,6.7],   apron:0xc8863c },
+  // Codex is part of the company, but not the trade-forming line. Its workstation
+  // is a read-only improvement lab: it studies aggregate evidence, tests the system
+  // and leaves proposals for a human to review. The pet-shaped avatar uses the same
+  // shared rig, movement and portrait pipeline as every other member of staff.
+  { id:"Codex",      name:"CODEX",       role:"Improvement Engineer · advisory only", desk:[-15.4,9.0], stand:[-13.8,9.0], apron:P.codex, codex:true },
   // Gruk is NOT the boss — the boss is the tenant's own MD. Gruk Mulder is the
   // Assistant Director who works the trades, in his own suite BESIDE the boss's:
   // same architecture, smaller, X-dark. Only appears when this floor's brain is
@@ -1468,7 +1475,7 @@ function buildSpark(radius, rays, thickness, colour, emissive = 0.55) {
 
 // Scaling the root shrinks the figure without touching the rig, the walk cycle or the
 // desk it sits at. Only one seat wants it, and for that seat it is the whole point.
-const AVATAR_SCALE = { Forensics: 1.14, Liquidity: 1.04, Technical: 0.94, Narrative: 0.93, "Red Team": 1.07, Risk: 0.6, Execution: 1.09, Compliance: 1.06, Scribe: 0.8 };
+const AVATAR_SCALE = { Forensics: 1.14, Liquidity: 1.04, Technical: 0.94, Narrative: 0.93, "Red Team": 1.07, Risk: 0.6, Execution: 1.09, Compliance: 1.06, Scribe: 0.8, Codex: 0.94 };
 
 /* A tenant's Managing Director wears what the tenant picked. Costumes are palette
    work, not geometry — the same figure, dressed. Ids match the server's list. */
@@ -1539,6 +1546,38 @@ const FIGURE = {
       ["Chest", [0.030, 0.17, 0.056], [0.156, 1.275, 0], 0x7c2733],    // tie, knot to chest
       ["Spine", [0.030, 0.13, 0.048], [0.150, 1.12, 0], 0x7c2733],     // tie, tail
       ["Chest", [0.034, 0.040, 0.066], [0.158, 1.376, 0], 0x8e2f3c],   // the knot
+    ],
+  },
+
+  /* CODEX — the built-in Codex pet translated into the house's voxel rig: a
+     periwinkle cloud silhouette, dark terminal face and cyan >_ prompt. It is
+     still the same 15-joint worker underneath, so walking, sitting, typing,
+     portraits and click targets behave exactly like the rest of the crew. */
+  Codex: {
+    pal: { skin: 0x6f91ff, head: 0x6f91ff, hair: 0x6f91ff, eye: 0x8ff7ff,
+           shirt: 0x587be8, trousers: 0x4d6fd3, apron: 0x587be8, boots: 0x3450a3 },
+    drop: ["hair", "eye", "apron"],
+    body: [
+      // Stepped lobes turn the standard cube head into the pet's cloud.
+      ["Head", [0.30, 0.34, 0.46], [-0.07, 1.66, 0], 0x6f91ff],
+      ["Head", [0.28, 0.20, 0.30], [-0.05, 1.87, 0], 0x7aa0ff],
+      ["Head", [0.24, 0.22, 0.22], [-0.04, 1.80, 0.23], 0x7599f7],
+      ["Head", [0.24, 0.22, 0.22], [-0.04, 1.80, -0.23], 0x7599f7],
+      ["Head", [0.24, 0.24, 0.20], [-0.04, 1.63, 0.29], 0x6388ec],
+      ["Head", [0.24, 0.24, 0.20], [-0.04, 1.63, -0.29], 0x6388ec],
+      ["Head", [0.20, 0.18, 0.18], [-0.03, 1.48, 0.22], 0x587be8],
+      ["Head", [0.20, 0.18, 0.18], [-0.03, 1.48, -0.22], 0x587be8],
+      // Dark terminal glass, framed in blue, with the pet's glowing >_ face.
+      ["Head", [0.050, 0.31, 0.50], [0.172, 1.65, 0], 0x4265c8],
+      ["Head", [0.040, 0.25, 0.42], [0.204, 1.65, 0], 0x172451],
+      ["Head", [0.026, 0.045, 0.045], [0.228, 1.70, 0.10], 0x8ff7ff],
+      ["Head", [0.026, 0.045, 0.045], [0.228, 1.65, 0.055], 0x8ff7ff],
+      ["Head", [0.026, 0.045, 0.045], [0.228, 1.60, 0.10], 0x8ff7ff],
+      ["Head", [0.026, 0.030, 0.11], [0.228, 1.59, -0.10], 0x8ff7ff],
+      // A smaller terminal badge on the chest survives the isometric long shot.
+      ["Chest", [0.032, 0.13, 0.24], [0.137, 1.28, 0], 0x29458f],
+      ["Chest", [0.022, 0.030, 0.055], [0.156, 1.31, 0.055], 0x8ff7ff],
+      ["Chest", [0.022, 0.025, 0.070], [0.156, 1.25, -0.055], 0x8ff7ff],
     ],
   },
 
@@ -1986,6 +2025,17 @@ const TASK = {
       [[0.06, 0.24, 0.06], [0, 0.96, 0.3], 0xd9d2c0],  // quill, thickened to 0.06 and standing to y1.08
     ],
   },
+  Codex: {  // CODEX — read-only improvement review
+    glyph: "</>",
+    lines: ["Tests green. Proposal ready.", "Read-only review complete.", "Found a failing path. Writing it up."],
+    props: [
+      [[0.38, 0.025, 0.48], [0.04, 0.815, 0], 0x172451],   // live diff on the desk
+      [[0.025, 0.02, 0.32], [0.055, 0.836, 0], 0x8ff7ff],  // one cyan code line
+      [[0.025, 0.02, 0.22], [0.11, 0.836, -0.04], 0x7aa0ff],
+      [[0.09, 0.055, 0.09], [0.24, 0.84, 0.36], 0x66a348], // passing test lamp
+      [[0.20, 0.035, 0.26], [0.18, 0.82, -0.36], 0xf0e4c7],// proposal awaiting review
+    ],
+  },
 };
 
 /* The one question each seat exists to answer, and how it actually runs:
@@ -2008,6 +2058,7 @@ const SEATQ = {
   Regime:      ["code",   "Is it flying weather? SOL and BTC decide, not hope."],
   Review:      ["model",  "What did the last landing teach us?"],
   CEO:         ["claude", "Do I authorise this?"],
+  Codex:       ["codex",  "What should the system improve next, and what evidence proves it?"],
 };
 const DOSSIER = {
   Scout: {  // AUSTIN POWERZ
@@ -2135,6 +2186,13 @@ const DOSSIER = {
     method: "Model call on xAI - metered into the same daily budget as everyone else.",
     known: "The truth is in the order flow.",
     note: "Appears only on Grok-brained floors. Never leaves his room; the X on his floor is not a rug, it is a statement.",
+  },
+  Codex: {
+    brief: "The Improvement Engineer: turns the desk's accumulated evidence into testable proposals for making the system better.",
+    detail: "Works outside the trading pipeline in a read-only sandbox. It reviews the repository, exact prompt and test provenance, aggregate evaluation evidence, failures, cost and observability, then writes a small set of structured improvement proposals. A human must review every proposal through the normal branch, test and merge path.",
+    method: "Codex advisory review. Isolated from production data and unable to change the live desk.",
+    known: "Turning opinions into diffs, tests and evidence.",
+    note: "Not a trading seat. It cannot size, rank, publish, sign, patch, commit, merge or deploy, and it has no route into PM, Compliance or the CEO decision path.",
   },
 };
 
@@ -2550,10 +2608,11 @@ class Worker {
     // The boss's plate is the big one. Grox used to share it, but a long name at
     // boss scale blanketed his whole avatar in that small office — he wears a
     // smaller plate, floated higher, so the figure underneath actually shows.
-    this.nameSprite = makeSprite(spec.name || spec.id, spec.claude ? 1.12 : spec.grok ? 0.78 : 0.92,
+    this.nameSprite = makeSprite(spec.name || spec.id, spec.claude ? 1.12 : spec.grok ? 0.78 : spec.codex ? 0.88 : 0.92,
       spec.grok ? { bg: "#0d0d0f", accent: "#cfd2d6" }
-                : spec.claude ? { bg: "#8a3f22", accent: "#f0c9a0" } : undefined);
-    this.nameSprite.position.set(0, spec.grok ? 2.52 : 2.28, 0);
+                : spec.claude ? { bg: "#8a3f22", accent: "#f0c9a0" }
+                : spec.codex ? { bg: "#172451", fg: "#dffcff", accent: "#6f91ff" } : undefined);
+    this.nameSprite.position.set(0, spec.grok || spec.codex ? 2.52 : 2.28, 0);
     this.nameSprite.visible = true;
     this.g.add(this.nameSprite);
 
@@ -2852,6 +2911,16 @@ const DESK_KIT = {
                    b([0.34, 0.62, 0.40], [-0.46, 0.31, 0.62], 0x3a4a50);
                    for (let i = 0; i < 3; i++) b([0.02, 0.16, 0.30], [-0.29, 0.12 + i * 0.20, 0.62], 0x9aa7ab);
                    b([0.18, 0.03, 0.24], [0.16, 0.81, -0.52], 0xf0e4c7); },
+  // CODEX — twin code displays, a test-status stack and one proposal tray. The
+  // station reads as an engineering bench, not another market terminal.
+  Codex: (b) => { b([0.05, 0.50, 0.78], [-0.44, 1.24, 0], 0x172451);
+                  b([0.02, 0.08, 0.54], [-0.41, 1.38, 0], 0x8ff7ff);
+                  b([0.02, 0.05, 0.38], [-0.41, 1.22, 0.08], 0x6f91ff);
+                  b([0.02, 0.05, 0.26], [-0.41, 1.08, -0.12], 0x66a348);
+                  b([0.30, 0.10, 0.42], [0.12, 0.86, 0.42], 0x29458f);
+                  b([0.24, 0.02, 0.34], [0.12, 0.92, 0.42], 0x172451);
+                  for (let i = 0; i < 4; i++) b([0.05, 0.05, 0.05], [0.18, 0.84 + i * 0.06, -0.46], i < 3 ? 0x66a348 : 0xe0ad3d);
+                  for (let i = 0; i < 3; i++) b([0.22, 0.025, 0.30], [-0.10, 0.82 + i * 0.035, -0.28], 0xf0e4c7); },
 };
 
 /* ── desks and chairs ─────────────────────────────────────────────────────── */
@@ -3901,7 +3970,7 @@ window.applyIdentity = (identity) => {
 const dossierEl = document.getElementById("dossier");
 const dNameEl = document.getElementById("d-name"), dSeatEl = document.getElementById("d-seat");
 const dBodyEl = document.getElementById("d-body"), dStampEl = document.getElementById("d-stamp");
-const KIND_LABEL = { model: "Model call", code: "Code only", claude: "Claude" };
+const KIND_LABEL = { model: "Model call", code: "Code only", claude: "Claude", codex: "Codex advisory" };
 
 function openDossier(seatId) {
   const spec = seatId === "__bot"
@@ -3911,7 +3980,8 @@ function openDossier(seatId) {
   const d = DOSSIER[seatId] || {};
   const [kind, question] = SEATQ[seatId] || ["model", ""];
 
-  dStampEl.textContent = spec.claude ? "Floor 50 \u00b7 authorising seat" : "Personnel file";
+  dStampEl.textContent = spec.claude ? "Floor 50 \u00b7 authorising seat"
+    : spec.codex ? "Advisory unit \u00b7 outside the trading pipeline" : "Personnel file";
   dNameEl.textContent = spec.name || seatId;
   dSeatEl.textContent = seatId + (spec.role ? " \u00b7 " + spec.role : "");
 
@@ -4437,7 +4507,7 @@ const legendEl = document.getElementById("legend");
 const legendTiles = {};
 for (const s of STAFF) {
   const sp = document.createElement("span");
-  const hex = "#" + (s.claude ? P.claude : s.grok ? 0x17181a : s.apron).toString(16).padStart(6, "0");
+  const hex = "#" + (s.claude ? P.claude : s.grok ? 0x17181a : s.codex ? P.codex : s.apron).toString(16).padStart(6, "0");
   const i = document.createElement("i");
   i.style.background = hex;                      // the colour is the placeholder…
   legendTiles[s.id] = i;
@@ -4889,6 +4959,7 @@ const ROUTINE = {
   Regime:      { spot: "cooler",   glyph: "\u2601", lines: ["Winds are shifting.", "Clear skies. For now.", "I don't fly in that."] },
   Review:      { spot: "archive",  glyph: "\u2711", lines: ["Debrief at four.", "The report writes itself. Badly.", "Process, gentlemen. Process."] },
   Scribe:      { spot: "archive",  glyph: "\u270e", lines: ["*chatters*", "*adjusts hat*", "*files everything, says nothing*"] },
+  Codex:       { spot: "archive",  glyph: "</>", lines: ["Reading the failure logs.", "Proposal only. Human review required.", "Tests first. Opinions second."] },
 };
 const CHATTER = ["Coffee?", "Seen the volume on that?", "Mine's a pass.", "Printer's jammed again.",
   "Anything good today?", "I'd want a tighter stop.", "Liquidity's thin out there.", "Long week."];
