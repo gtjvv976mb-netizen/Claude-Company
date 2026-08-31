@@ -71,10 +71,28 @@ export function rank(c) {
   const why = [];
   let s = 0;
 
-  // A coin still on its bonding curve has no AMM depth for the exit probe to measure, so
-  // it fails `cannot_exit` at the screen anyway. Ranking it highly only burns a slot the
-  // desk was always going to refuse.
-  if (c.onCurve) { s -= 30; why.push("still on a bonding curve — no measurable exit"); }
+  /* THE BONDING-CURVE PENALTY IS GONE, because the fact it rested on is false.
+   *
+   * It read: "no AMM depth for the exit probe to measure, so it fails cannot_exit at the
+   * screen anyway." That is a checkable claim, and checking it is what the desk is
+   * supposed to do. Four on-curve coins the screen had killed as unexitable were probed
+   * through Jupiter at $75: 4.53%, 5.49%, 5.58%, 3.70% round trip, against an 8%
+   * ceiling. Every one exitable. Jupiter routes bonding curves; the ASSUMPTION that it
+   * does not was doing the work, and no measurement ever backed it.
+   *
+   * What -30 actually did: of 58 micro-cap coins on a live sweep, 38 scored zero or
+   * below and ALL 38 were on-curve. Since a zero score means the coin is never even
+   * observed, the desk was deleting the pre-graduation pump.fun segment — the earliest,
+   * smallest, highest-upside coins it was explicitly pointed at — one line above the
+   * funnel, invisibly, and it read as prudence. Sixteen coins that had PASSED the safety
+   * screen were discarded here anyway.
+   *
+   * Being early on the curve is the target state for this desk, not a defect. It is left
+   * NEUTRAL rather than made a bonus: the exit probe still has to measure it, and
+   * unverified_exit and cannot_exit still refuse it if the measurement fails or comes
+   * back too wide. Safety is unchanged; only a false premise was removed. */
+
+  const liqKnown = p.liquidityUsd != null || p.liquidity?.usd != null;
 
   const liq = p.liquidityUsd ?? 0;
   const vol24 = p.volume?.h24 ?? 0;
@@ -105,10 +123,22 @@ export function rank(c) {
     else if (mcap > 8_000_000) { s -= 12; why.push(`\$${(mcap / 1e6).toFixed(1)}m cap — needs millions of fresh money to move`); }
   }
 
-  // Turnover relative to depth: real interest, but wash above a point.
+  /* Turnover relative to depth: real interest, but wash above a point.
+   *
+   * When depth is UNREADABLE this ratio silently evaluated to 0 and the coin missed the
+   * bonus entirely — a second, quieter penalty on the same segment the line above was
+   * deleting, and one that looked like a neutral calculation rather than a judgement.
+   * A coin whose pool cannot be read is still either being traded or not, so it is
+   * scored on the tape it does have: real volume and real participants. */
   const volToLiq = liq > 0 ? vol24 / liq : 0;
-  if (volToLiq > 1 && volToLiq < 15) { s += 15; why.push("healthy turnover"); }
-  if (volToLiq >= 15) { s -= 10; why.push("turnover implausible for the depth"); }
+  if (liqKnown) {
+    if (volToLiq > 1 && volToLiq < 15) { s += 15; why.push("healthy turnover"); }
+    if (volToLiq >= 15) { s -= 10; why.push("turnover implausible for the depth"); }
+  } else {
+    const buys24 = (p.txns?.h24?.buys ?? 0) + (p.txns?.h24?.sells ?? 0);
+    if (vol24 > 25_000 && buys24 > 300) { s += 15; why.push(`real tape without a readable pool — $${Math.round(vol24 / 1000)}k over ${buys24} trades`); }
+    else if (vol24 > 8_000 && buys24 > 100) { s += 8; why.push("a working tape, pool unreadable"); }
+  }
 
   // The key discriminator.
   if (h1 > 25) { s -= 25; why.push(`already ran ${h1.toFixed(0)}% this hour`); }

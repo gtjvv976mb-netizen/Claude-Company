@@ -12,7 +12,7 @@
  * has to prove it can be exited by measurement rather than assumption.
  */
 import { floorsFor, BAND_FLOORS, cfg } from "./src/config.js";
-import { wouldSurviveScreen } from "./src/penthouse.js";
+import { wouldSurviveScreen, rank } from "./src/penthouse.js";
 import { screen } from "./src/data/evidence.js";
 
 let pass = 0, fail = 0;
@@ -93,6 +93,65 @@ ok("too_new still fires inside the migration hour",
   wouldSurviveScreen(coin({ mcap: 50_000, liq: 9_000, vol: 50_000, age: 0.5 })) === "too_new");
 ok("wash_suspect still fires on an absurd volume/depth ratio",
   wouldSurviveScreen(coin({ mcap: 50_000, liq: 6_000, vol: 6_000 * 41 })) === "wash_suspect");
+
+console.log("\nTHE BONDING-CURVE PENALTY RESTED ON A FALSE FACT");
+/* -30 for being on a curve, justified as "no AMM depth for the exit probe to measure, so
+ * it fails cannot_exit anyway". That is a checkable claim and it is wrong: four on-curve
+ * coins probed at 4.53%, 5.49%, 5.58%, 3.70% round trip against an 8% ceiling. Because a
+ * score of zero means the coin is never observed at all, this deleted 38 of 58 micro-caps
+ * on a live sweep - every one of them on-curve - one line ABOVE the funnel. */
+const curveCoin = (over = {}) => ({
+  mint: "C", onCurve: true, category: "memecoin",
+  pair: {
+    baseSymbol: "C", marketCap: 45_000, ageHours: 6,
+    volume: { h24: over.vol ?? 120_000 },
+    txns: { h24: { buys: over.buys ?? 900, sells: 400 }, h1: { buys: over.h1buys ?? 60 }, h6: { buys: over.h6buys ?? 150 } },
+    priceChange: { h1: 4, h6: 12, h24: 30 },
+    socials: [{ type: "twitter" }],
+    ...(over.liq !== undefined ? { liquidityUsd: over.liq } : {}),
+  },
+});
+
+ok("an on-curve coin with a real tape is no longer zeroed out of existence",
+  rank(curveCoin()).score > 0,
+  `score ${rank(curveCoin()).score} — it now reaches the funnel instead of vanishing above it`);
+
+ok("...and it is NOT given a bonus either — being early is neutral, not a licence",
+  !rank(curveCoin()).why.some((w) => /bonding curve/i.test(w)),
+  "the exit probe still has to measure it; unverified_exit and cannot_exit are unchanged");
+
+/* My first version of this fixture was self-contradictory - $200 of volume with the
+ * price up 30% - and it scored positive, correctly. A coin cannot be simultaneously
+ * untraded and re-rating; the momentum bonuses were reading the only live signal I had
+ * given it. Fixed to be genuinely dead. */
+const deadCurve = curveCoin({ vol: 200, buys: 4, h1buys: 0, h6buys: 1 });
+deadCurve.pair.priceChange = { h1: 0, h6: 0, h24: 0 };
+deadCurve.pair.txns.h24.sells = 3;
+ok("an on-curve coin with a genuinely dead tape still scores itself out",
+  rank(deadCurve).score <= 0,
+  `score ${rank(deadCurve).score} — removing a false penalty is not waving everything through`);
+
+/* And the case my bad fixture accidentally described - price moving with no volume
+ * behind it - is caught, just not by rank(). It is worth asserting WHERE, because
+ * "rank does not catch it" was the shape of the objection and the answer is that rank
+ * is not the thing that has to. */
+const ghostPump = curveCoin({ vol: 200, buys: 4, h1buys: 0, h6buys: 1 });
+ok("a coin up 30% on $200 of volume is killed by the SCREEN, not ranked away",
+  rank(ghostPump).score > 0 && wouldSurviveScreen(ghostPump) === "no_volume",
+  "the free screen is the net here — rank only decides what is worth screening");
+
+console.log("\nUNREADABLE DEPTH IS SCORED ON THE TAPE, NOT SILENTLY ZEROED");
+ok("a strong tape earns turnover credit even with no readable pool",
+  rank(curveCoin()).why.some((w) => /without a readable pool/i.test(w)),
+  "the ratio used to evaluate to 0 and quietly withhold the bonus");
+
+ok("a KNOWN pool still scores on the depth ratio, unchanged",
+  rank(curveCoin({ liq: 30_000, vol: 60_000 })).why.some((w) => /healthy turnover/i.test(w)),
+  "vol/liq = 2, inside the healthy band");
+
+ok("and an implausible ratio on a KNOWN pool is still penalised",
+  rank(curveCoin({ liq: 10_000, vol: 900_000 })).why.some((w) => /implausible/i.test(w)),
+  "vol/liq = 90 — wash territory");
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
