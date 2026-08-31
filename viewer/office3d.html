@@ -1107,7 +1107,55 @@ function navPath(sx, sz, tx, tz) {
   return out;
 }
 
-const LIVE_SCREENS = [];
+/* Every workstation's screen, keyed by the seat that sits at it. The floor
+   draws what the desk is ACTUALLY doing — the candidate on the wire, the seat's
+   own verdict — so a glance across the room tells you where the work is. */
+const SCREENS = {};
+const SCREEN_IDLE = {
+  Scout: ["SWEEP", "6 venues · scanning"], Screener: ["SCREEN", "8 coded floors"],
+  Forensics: ["CONTRACT", "authorities · holders"], Liquidity: ["EXIT", "round-trip probe"],
+  Flow: ["FLOW", "real traffic"], Technical: ["CHART", "levels · structure"],
+  Narrative: ["STORY", "who is telling it"], "Red Team": ["ATTACK", "break the thesis"],
+  Risk: ["SIZE", "risk at stop"], PM: ["DECIDE", "propose · watch · pass"],
+  Execution: ["TICKET", "unsigned"], Compliance: ["RULES", "code, not opinion"],
+  Scribe: ["FILE", "the record"], Regime: ["WEATHER", "risk on/off"],
+  Review: ["DEBRIEF", "grade the landing"], Codex: ["IMPROVE", "advisory only"],
+  CEO: ["THE DOOR", "approve · decline"],
+};
+function registerScreen(seat, canvas, tex) {
+  if (!seat) return;
+  SCREENS[seat] = { canvas, tex, state: null };
+  drawScreen(seat, null);
+}
+function drawScreen(seat, work) {
+  const S = SCREENS[seat]; if (!S) return;
+  const x = S.canvas.getContext("2d"), W = 256, H = 150;
+  const idle = SCREEN_IDLE[seat] || ["DESK", "working"];
+  x.fillStyle = "#0c1416"; x.fillRect(0, 0, W, H);
+  x.fillStyle = "#12242a"; x.fillRect(0, 0, W, 22);
+  x.fillStyle = work?.bad ? "#e0685c" : work?.good ? "#4ec9a5" : "#2f9fb0";
+  x.fillRect(0, 20, W, 2);
+  x.fillStyle = "#cfe8ea";
+  x.font = '700 13px "JetBrains Mono", ui-monospace, monospace';
+  x.textBaseline = "middle";
+  x.fillText((work?.title || idle[0]).slice(0, 22), 8, 11);
+  x.font = '500 12px "JetBrains Mono", ui-monospace, monospace';
+  x.fillStyle = work?.bad ? "#e0685c" : work?.good ? "#4ec9a5" : "#7fb9c2";
+  const lines = work?.lines || [idle[1]];
+  let y = 44;
+  for (const ln of lines.slice(0, 5)) { x.fillText(String(ln).slice(0, 30), 8, y); y += 20; }
+  // the working ticker: rows of code that scroll while the seat has a job
+  x.fillStyle = "#1d3b42";
+  for (let i = 0; i < 4; i++) {
+    const w = 40 + ((i * 53 + (work ? 17 : 0)) % 120);
+    x.fillRect(8, 118 - i * 9, w, 3);
+  }
+  S.state = work || null;
+  S.tex.needsUpdate = true;
+}
+window.__screen = (seat, work) => drawScreen(seat, work);
+window.__screens = SCREENS;              // probe handle: verify what a desk is showing
+
 function buildDesk(at, yaw, y = 0, accent = P.teal, kitId = null) {
   const g = new THREE.Group();
   g.position.set(at[0], y, at[1]);
@@ -1116,16 +1164,24 @@ function buildDesk(at, yaw, y = 0, accent = P.teal, kitId = null) {
   box(g, [0.78, 0.02, 1.62], [0.02, 0.785, 0], accent, 0.9);       // felt pad
   for (const [dx, dz] of [[-0.42,-0.86],[0.42,-0.86],[-0.42,0.86],[0.42,0.86]])
     cyl(g, 0.045, 0.72, [dx, 0.37, dz], STEEL, 8);
-  box(g, [0.06, 0.30, 0.62], [-0.22, 0.93, 0], DARK);              // monitor stand + panel
-  box(g, [0.05, 0.46, 0.80], [-0.30, 1.16, 0], DARK);
-  // A dark pane of glass reads as a switched-off machine, and sixteen of them
-  // made the floor look abandoned. The screens GLOW, each on its own phase, so
-  // the room flickers like a room full of people working.
-  const scr = box(g, [0.02, 0.38, 0.72], [-0.272, 1.16, 0], 0x1d5f6b, 0.3);
-  scr.material.emissive = new THREE.Color(0x2f9fb0);
-  scr.material.emissiveIntensity = 0.85;
-  scr.userData.glow = Math.random() * 6.28;
-  LIVE_SCREENS.push(scr);
+  /* ── THE MACHINE ────────────────────────────────────────────────────────
+     Was a slab with a flat aqua face. A real workstation: a weighted foot, a
+     slim neck, a bezel, and a SCREEN that shows this seat's actual work —
+     what it is looking at and what it just decided. */
+  cyl(g, 0.16, 0.02, [-0.26, 0.79, 0], 0x30343a, 12);              // weighted foot
+  box(g, [0.05, 0.22, 0.05], [-0.26, 0.90, 0], 0x30343a);          // neck
+  box(g, [0.05, 0.50, 0.86], [-0.30, 1.22, 0], 0x1a1d21);          // bezel shell
+  const sc = document.createElement("canvas"); sc.width = 256; sc.height = 150;
+  const stex = new THREE.CanvasTexture(sc);
+  stex.colorSpace = THREE.SRGBColorSpace;
+  const scr = new THREE.Mesh(BOX, new THREE.MeshBasicMaterial({ map: stex, toneMapped: false }));
+  scr.scale.set(0.02, 0.43, 0.79);
+  scr.position.set(-0.272, 1.22, 0);
+  scr.rotation.x = Math.PI / 2;                                     // the canvas faces the sitter
+  scr.rotation.z = Math.PI / 2;
+  g.add(scr);
+  box(g, [0.03, 0.03, 0.30], [-0.268, 0.965, 0], 0x2f9fb0, 0.4);   // the power bar under the glass
+  registerScreen(kitId, sc, stex);
   box(g, [0.30, 0.02, 0.52], [0.16, 0.79, 0], DARK);               // keyboard
   box(g, [0.24, 0.05, 0.32], [0.10, 0.81, 0.72], P.cream, 0.9);    // paper tray
   cyl(g, 0.055, 0.11, [0.16, 0.84, -0.62], P.terracotta, 8);       // mug
@@ -2728,6 +2784,22 @@ class Worker {
     this.nameSprite.visible = true;
 
     if (this.raised) this.baseY = window.__floorHeightAt(this.x, this.z);
+
+    /* SIT AT THE DESK. The standing spot is a stride and a half back from the
+       desk — correct for walking up to it, comically far once seated, so the
+       whole floor looked like people typing on air. Seated figures slide the
+       last 0.6 toward their own desk and slide back as they stand. */
+    if (!this.path) {
+      const dx = this.deskAt.x - this.home.x, dz = this.deskAt.z - this.home.z;
+      const d = Math.hypot(dx, dz) || 1;
+      const pull = 0.62 * this.seated;
+      const tx = this.home.x + (dx / d) * pull, tz = this.home.z + (dz / d) * pull;
+      if (Math.hypot(this.x - this.home.x, this.z - this.home.z) < 1.2) {
+        this.x += (tx - this.x) * Math.min(1, dt * 6);
+        this.z += (tz - this.z) * Math.min(1, dt * 6);
+        this.g.position.x = this.x; this.g.position.z = this.z;
+      }
+    }
 
     /* PEOPLE ARE SOLID TOO. Desks, walls and plants have blocked movement since
        the nav grid went in, but figures walked straight THROUGH each other —
@@ -4366,12 +4438,6 @@ function frame() {
     placeCamera();
   }
   separateFigures(dt);
-  // screens breathe: a slow flicker per machine, so no two are in step
-  for (let i = 0; i < LIVE_SCREENS.length; i++) {
-    const m = LIVE_SCREENS[i].material;
-    m.emissiveIntensity = 0.62 + Math.sin(elapsed * 1.7 + LIVE_SCREENS[i].userData.glow) * 0.16
-      + (Math.sin(elapsed * 11 + i) > 0.94 ? 0.22 : 0);      // the occasional repaint
-  }
   botTick(dt, elapsed);
   if (window.__grokZzz && window.__grokZzz.visible) {
     const z = window.__grokZzz;
@@ -4925,6 +4991,11 @@ const HANDLERS = {
     const p = who("Scout");
     p.run(async () => { await errand(p, SPOTS.meeting, "▤", `${e.count} worth our time`); p.carry(true); });
   },
+  // Every seat's screen picks up the candidate the moment it lands on the wire.
+  "token:evidence": (e) => {
+    const sym = e.symbol || (e.mint ? e.mint.slice(0, 6) : "?");
+    for (const id in SCREENS) drawScreen(id, { title: sym, lines: ["on the wire", "working…"] });
+  },
   "token:start": (e) => {
     tape("Floor", `── ${short(e.mint)} ${e.hook ? "— " + e.hook : ""}`, "hi");
     const s = who("Scout"), sc = who("Screener");
@@ -4986,7 +5057,10 @@ const HANDLERS = {
     if (tag && e.floorLabel && e.identity && !e.identity.isHQ)
       tag.textContent = `${e.floorLabel} \u00b7 ${e.identity.floorName || "Unnamed floor"}`;
   },
-  "seat:thinking": (e) => { const p = who(e.seat); if (p) p.run(async () => { await p.goHome(); p.busy(true); p.say("…", 2000); }); },
+  "seat:thinking": (e) => {
+    drawScreen(e.seat, { title: e.symbol || "WORKING", lines: ["thinking…"] });
+    const p = who(e.seat); if (p) p.run(async () => { await p.goHome(); p.busy(true); p.say("…", 2000); });
+  },
   "seat:searching": (e) => {
     tape(e.seat, "searching the web");
     const p = who(e.seat); if (p) p.run(async () => { p.busy(true); p.say("Searching the web…", 6000); });
@@ -5000,6 +5074,16 @@ const HANDLERS = {
   "seat:verdict": (e) => {
     const p = who(e.seat);
     const score = e.score != null ? ` ${Math.round(e.score)}/100` : "";
+    // the seat's own screen carries its own verdict, in its own words
+    drawScreen(e.seat, {
+      title: e.symbol || "VERDICT",
+      lines: [String(e.detail || "reported").slice(0, 28), score.trim()].filter(Boolean),
+      bad: !!e.kill || e.pass === false, good: e.pass === true,
+    });
+    // ...and the floor SAYS the real thing, not a canned line
+    if (p && e.detail) p.say(`${e.symbol ? e.symbol + ": " : ""}${e.detail}`.slice(0, 42), 3000);
+    LAST_WORK.symbol = e.symbol || LAST_WORK.symbol;
+    LAST_WORK.seat = e.seat; LAST_WORK.detail = e.detail || LAST_WORK.detail;
     tape(e.seat, `${e.detail || ""}${score}`.trim() || "reported",
       e.kill || e.pass === false ? "bad" : e.pass === true ? "good" : "");
     if (!p) return;
@@ -5106,6 +5190,11 @@ const HANDLERS = {
   },
 
   "token:end": (e) => {
+    LAST_WORK.symbol = e.symbol || LAST_WORK.symbol;
+    LAST_WORK.outcome = e.outcome || null;
+    for (const id in SCREENS)
+      drawScreen(id, { title: e.symbol || "DONE", lines: [String(e.outcome || "").replace(/_/g, " ")],
+        bad: /kill|screen|declin|veto/i.test(String(e.outcome)), good: /approv/i.test(String(e.outcome)) });
     const good = e.outcome === "APPROVED" || e.outcome === "PROPOSE";
     tape("Floor", `${e.symbol || short(e.mint)} → ${e.outcome}${e.detail ? " (" + e.detail + ")" : ""}`,
       good ? "good" : e.outcome === "WATCH" || e.outcome === "HELD" ? "warn" : "bad");
@@ -5305,6 +5394,9 @@ window.__ambient = (kind, aId, bId, li) => ambientRun({ kind, a: aId, b: bId, li
    Each is a real walk on the nav grid to a real desk, a two-line exchange, and
    a walk home — so the three figures with the best rooms are also the three you
    see moving most. */
+/* What the floor is actually working on, remembered from the live wire, so the
+   principals' rounds quote REAL work instead of reciting a script. */
+const LAST_WORK = { symbol: null, seat: null, detail: null, outcome: null };
 const ROUND_TALK = {
   morale: [["How are you holding up?", "Coffee and conviction, boss."],
            ["Anything blocking you?", "Only the market, which is normal."],
@@ -5328,7 +5420,16 @@ async function roundRun({ round, seat, li = 0 }) {
   if (p.typing || p.path || host.path || inSnackRoom.has(p.id) || inSnackRoom.has(host.id)) return;
   // Grox only walks when he is actually on duty; asleep, he stays asleep.
   if (whoId === "GrokAD" && !grokOnDuty) return;
-  const script = ROUND_TALK[round][li % ROUND_TALK[round].length];
+  let script = ROUND_TALK[round][li % ROUND_TALK[round].length].slice();
+  // If there is real work on the wire, the round is ABOUT it.
+  if (LAST_WORK.symbol) {
+    if (round === "inspect") script = [`What's the story on ${LAST_WORK.symbol}?`,
+      LAST_WORK.detail ? String(LAST_WORK.detail).slice(0, 40) : "Still reading it."];
+    else if (round === "consult") script = [`Your read on ${LAST_WORK.symbol}?`,
+      LAST_WORK.detail ? String(LAST_WORK.detail).slice(0, 40) : "Attention, not price."];
+    else if (LAST_WORK.outcome) script = [`How did ${LAST_WORK.symbol} land?`,
+      String(LAST_WORK.outcome).replace(/_/g, " ")];
+  }
   inSnackRoom.add(p.id);
   p.run(async () => {
     const dx = host.home.x > 0 ? -1.5 : 1.5;
