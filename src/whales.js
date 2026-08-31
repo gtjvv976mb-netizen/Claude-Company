@@ -16,7 +16,23 @@ import { emit } from "./lib/bus.js";
 export const WHALE_USD = Number(process.env.WHALE_MIN_USD || 500);
 
 /** Recent large trades in one mint, largest first. */
-export async function callouts(mint, { scan = 30, minUsd = WHALE_USD } = {}) {
+/**
+ * THE COST OF THIS FUNCTION, STATED PLAINLY.
+ *
+ * It reads one transaction at a time, sequentially, and readRpc retries each up to
+ * three times with backoff on a 12s timeout. At scan=24 the worst case is roughly
+ * fourteen MINUTES for a single coin — and the cycle calls it on nine coins in a row.
+ *
+ * That is how 21 cycles started and never finished: no cycle:end for 1.7 hours while
+ * `cycle:start` kept firing. Nothing was hung in the sense of being stuck forever; it
+ * was an unbounded sequential loop doing exactly what it was told, on obscure
+ * micro-caps that are the slowest reads of all.
+ *
+ * `deadline` is therefore not an optimisation. Whale flow ADJUSTS A SCORE and decides
+ * nothing, so it must never be able to hold the desk hostage: past the deadline it
+ * returns what it has and says how much it skipped.
+ */
+export async function callouts(mint, { scan = 30, minUsd = WHALE_USD, deadline = null } = {}) {
   const px = await ds.pairsFor(mint);
   if (!px.ok || !px.pairs.length) return { ok: false, error: px.error || "no pairs" };
 
@@ -33,9 +49,16 @@ export async function callouts(mint, { scan = 30, minUsd = WHALE_USD } = {}) {
   const decimals = pair.baseToken?.decimals ?? 6;
   const trades = [];
 
+  let skipped = 0;
   for (const s of (sigs.data || []).filter((x) => !x.err)) {
+    // Out of time: stop reading and report on what we have. A partial whale read is a
+    // slightly worse ranking nudge; an unfinished cycle is no calls at all.
+    if (deadline && Date.now() > deadline) { skipped++; continue; }
     const tx = await readRpc(cfg.rpc, "getTransaction",
-      [s.signature, { encoding: "jsonParsed", commitment: "confirmed", maxSupportedTransactionVersion: 0 }]);
+      [s.signature, { encoding: "jsonParsed", commitment: "confirmed", maxSupportedTransactionVersion: 0 }],
+      // One attempt under a deadline: the retries exist for holder concentration, which
+      // is decision-relevant. This is a nudge and does not deserve three tries.
+      deadline ? { attempts: 1 } : {});
     if (!tx.ok || !tx.data?.meta || tx.data.meta.err) continue;
     const m = tx.data.meta;
 
@@ -71,6 +94,10 @@ export async function callouts(mint, { scan = 30, minUsd = WHALE_USD } = {}) {
 
   return {
     ok: true, mint, pool, priceUsd: price, scanned: sigs.data.length,
+    // How much of the tape we did NOT read, so a thin sample is never mistaken for a
+    // quiet one. A coin with no whales and a coin we ran out of time on look identical
+    // in every field but this.
+    unread: skipped, partial: skipped > 0,
     trades: trades.slice(0, 12),
     buys: buys.length, sells: sells.length,
     boughtUsd: Number(boughtUsd.toFixed(2)),

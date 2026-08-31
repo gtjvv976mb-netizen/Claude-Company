@@ -301,9 +301,30 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
   // Whale flow is checked only on the coins already in contention. It costs ~25 RPC
   // reads per coin, so running it over all 345 would be wasteful; running it over the
   // top handful is what changes a decision.
+  /* A TIME BUDGET, BECAUSE THIS IS WHERE CYCLES GO TO DIE.
+   *
+   * Measured, not guessed: 61 cycles started and only 40 finished — 21 began and never
+   * came back, with no cycle:end for 1.7 hours while starts kept firing. The event
+   * ordering placed the hang exactly here. `cycle:skipped_repeats` (emitted just above)
+   * fired seconds ago; `cycle:prefiltered` (emitted just below) had not fired in half
+   * an hour. The cycle was alive and stuck between the two.
+   *
+   * The cause is arithmetic: callouts() costs ~25 RPC reads per coin and this loops
+   * over nine of them SEQUENTIALLY. That is ~225 calls against a public endpoint, with
+   * no ceiling on how long they may take — and the coins now reaching this loop are
+   * obscure micro-caps, which are the slowest of all to read.
+   *
+   * Whale flow is a RANKING NUDGE. It adjusts a score; it decides nothing. Letting an
+   * optional signal hold the entire desk hostage inverts its importance, so it now
+   * runs until it is done or until the budget expires, and the cycle continues with
+   * whatever it managed to gather. */
+  const whaleDeadline = Date.now() + Number(process.env.PENTHOUSE_WHALE_BUDGET_MS || 45_000);
+  let whalesRead = 0, whalesSkipped = 0;
   for (const c of scored.slice(0, Math.max(8, workups * 3))) {
+    if (Date.now() > whaleDeadline) { whalesSkipped++; continue; }
     try {
-      const w = await callouts(c.mint, { scan: 24 });
+      const w = await callouts(c.mint, { scan: 24, deadline: whaleDeadline });
+      whalesRead++;
       if (!w.ok) continue;
       const ws = whaleScore(w);
       c.whales = w;
@@ -317,6 +338,9 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
       }
     } catch {}
   }
+  if (whalesSkipped)
+    emit("cycle:whales_timeboxed", { read: whalesRead, skipped: whalesSkipped,
+      note: "whale flow is a ranking nudge, not a gate — the cycle moved on rather than stall" });
   scored.sort((a, b) => b.score - a.score);
 
   const shortlist = selectShortlist(scored, workups);
