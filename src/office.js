@@ -859,7 +859,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           const body = await readBody();
           if (action === "/settings") return json(200, rooms.saveSettings(floorNo, body || {}));
           if (action === "/run") {
-            const r = await rooms.requestRun({ floorNo, wallet: me, mint: body?.mint });
+            const r = await rooms.requestRun({ floorNo, wallet: me, mint: body?.mint, houseSeat });
             return json(r.ok ? 200 : 409, r);
           }
         }

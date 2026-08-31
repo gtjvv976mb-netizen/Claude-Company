@@ -101,14 +101,28 @@ export const freeRunsLeft = (floorNo) => Math.max(0, FREE_RUNS_WITH_LEASE - free
 const busy = new Set();
 export const isBusy = (floorNo) => busy.has(floorNo);
 
-export async function requestRun({ floorNo, wallet, mint }) {
+/**
+ * `houseSeat` is the HQ's owner running on floor 50.
+ *
+ * The route already worked this out and let them through — and then this function ran
+ * its OWN lease check, found none (floor 50 is never for sale), and answered "this
+ * floor is not leased". The button did nothing and said nothing. Two layers disagreeing
+ * about the same permission is how a control ends up dead with no error to follow.
+ *
+ * The house seat also never pays $CLAUDECO. That token is the ACCESS key for tenants;
+ * the HQ's owner is the person whose Anthropic bill the run lands on, so charging them
+ * for their own compute is a fiction with an accounting entry.
+ */
+export async function requestRun({ floorNo, wallet, mint, houseSeat = false }) {
   const lease = leaseFor(floorNo);
-  if (!lease) return { ok: false, error: "this floor is not leased" };
-  if (lease.wallet !== wallet) return { ok: false, error: "this is not your floor" };
+  if (!houseSeat) {
+    if (!lease) return { ok: false, error: "this floor is not leased" };
+    if (lease.wallet !== wallet) return { ok: false, error: "this is not your floor" };
+  }
   if (busy.has(floorNo)) return { ok: false, error: "your team is already working — one at a time" };
   if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(String(mint || ""))) return { ok: false, error: "that is not a mint address" };
 
-  const useFree = freeRunsLeft(floorNo) > 0;
+  const useFree = houseSeat || freeRunsLeft(floorNo) > 0;
   if (!useFree && balanceOf(wallet) < RUN_PRICE_BASE_UNITS) {
     return {
       ok: false, error: "not enough $CLAUDECO for a research run",
@@ -125,7 +139,10 @@ export async function requestRun({ floorNo, wallet, mint }) {
   }
   const run = db.prepare(`INSERT INTO runs (floor_no, wallet, mint, paid, free_run, started_at)
                           VALUES (?,?,?,?,?,?)`)
-    .run(floorNo, wallet, mint, paid.toString(), useFree ? 1 : 0, Date.now());
+    // A house run is neither PAID nor one of the tenant's INCLUDED runs, so it must
+    // not decrement the free-run counter the UI shows. Recording it as free_run=1
+    // would walk that number to zero on the one floor where it means nothing.
+    .run(floorNo, wallet, mint, paid.toString(), (!houseSeat && useFree) ? 1 : 0, Date.now());
   const runId = run.lastInsertRowid;
 
   busy.add(floorNo);
