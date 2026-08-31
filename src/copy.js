@@ -2,6 +2,7 @@ import db, { ensureColumn } from "./lib/store.js";
 import crypto from "node:crypto";
 import { emit } from "./lib/bus.js";
 import { CATEGORY_RISK } from "./market.js";
+import { cfg } from "./config.js";
 
 /** The pads a floor can choose between. `other` covers established coins with no pad. */
 export const LAUNCHPADS = ["pump.fun", "letsbonk.fun", "bags.fm", "moonshot", "boop.fun", "meteora-dbc", "trix", "other"];
@@ -99,13 +100,29 @@ ensureColumn("copy_settings", "take_profit_x", "REAL NOT NULL DEFAULT 0");
 ensureColumn("copy_settings", "fixed_sol", "REAL NOT NULL DEFAULT 0");
 ensureColumn("copy_settings", "mcap_tier", "TEXT NOT NULL DEFAULT 'any'");
 
-/** The market-cap sleeves a floor can subscribe to. Bounds in USD. */
-export const MCAP_TIERS = {
-  micro: { lo: 0, hi: 500_000, note: "under $500k — the sharpest moves and the sharpest rugs" },
-  low:   { lo: 500_000, hi: 3_000_000, note: "$500k-$3m — room to re-rate with a tape to read" },
-  mid:   { lo: 3_000_000, hi: 30_000_000, note: "$3m-$30m — slower, needs real money to move" },
-  any:   { lo: 0, hi: Infinity, note: "every sleeve the desk calls" },
-};
+/**
+ * The market-cap sleeves a floor can subscribe to, DERIVED from the desk's own ceiling.
+ *
+ * These were hardcoded, and the desk's ceiling moved to $3m underneath them — which
+ * left `mid` covering $3m-$30m, a band no call could ever land in. A tenant selecting
+ * it would have waited forever for a delivery that was arithmetically impossible,
+ * with nothing anywhere saying why.
+ *
+ * Deriving them means a filter can only ever offer bands the desk actually produces.
+ * Change the ceiling and the sleeves follow; there is no second number to remember.
+ */
+const usd = (n) => "$" + Math.round(n).toLocaleString();
+function buildTiers() {
+  const ceiling = cfg.screen.maxMarketCapUsd || 3_000_000;
+  const a = ceiling * 0.1, b = ceiling * (1 / 3);
+  return {
+    micro: { lo: 0, hi: a, note: `under ${usd(a)} — the sharpest moves and the sharpest rugs` },
+    low:   { lo: a, hi: b, note: `${usd(a)}-${usd(b)} — room to re-rate with a tape to read` },
+    mid:   { lo: b, hi: ceiling, note: `${usd(b)}-${usd(ceiling)} — the top of what this desk calls` },
+    any:   { lo: 0, hi: Infinity, note: "every sleeve the desk calls" },
+  };
+}
+export const MCAP_TIERS = buildTiers();
 
 export function settingsFor(floorNo) {
   let s = db.prepare("SELECT * FROM copy_settings WHERE floor_no=?").get(floorNo);

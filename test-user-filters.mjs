@@ -93,5 +93,32 @@ ok("an UNKNOWN market cap is not filtered out on a guess",
 ok("a bogus tier name falls back to a real one", (saveSettings(F, { mcapTier: "moon" }), !!MCAP_TIERS[settingsFor(F).mcap_tier]),
   settingsFor(F).mcap_tier);
 
+
+/* ── THE SLEEVES MUST TILE WHAT THE DESK ACTUALLY PRODUCES ───────────────────
+ * They were hardcoded while the desk's ceiling moved to $3m underneath them, which
+ * left `mid` covering $3m-$30m — a band no call could ever land in. A tenant who
+ * chose it would have waited forever for an arithmetically impossible delivery, with
+ * nothing anywhere explaining why. A filter that cannot match anything is worse than
+ * a missing filter, because it looks like it is working. */
+{
+  const { cfg } = await import("./src/config.js");
+  const ceiling = cfg.screen.maxMarketCapUsd;
+  console.log(`\nSLEEVES vs THE DESK CEILING ($${ceiling.toLocaleString()})`);
+  const dead = Object.entries(MCAP_TIERS).filter(([k, v]) => k !== "any" && v.lo >= ceiling);
+  ok("no sleeve sits entirely above the ceiling", dead.length === 0,
+    dead.length ? dead.map(([k]) => k).join(", ") + " can never receive a call" : "every sleeve is reachable");
+  ok("the sleeves tile the range with no gap",
+    MCAP_TIERS.micro.hi === MCAP_TIERS.low.lo && MCAP_TIERS.low.hi === MCAP_TIERS.mid.lo,
+    "micro -> low -> mid are contiguous");
+  ok("the top sleeve ends exactly at the desk's ceiling", MCAP_TIERS.mid.hi === ceiling,
+    `mid tops out at $${Math.round(MCAP_TIERS.mid.hi).toLocaleString()}`);
+  // A call at any point in the desk's range must fall in exactly one sleeve.
+  for (const mcap of [1_000, ceiling * 0.05, ceiling * 0.2, ceiling * 0.5, ceiling * 0.99]) {
+    const hits = Object.entries(MCAP_TIERS)
+      .filter(([k, v]) => k !== "any" && mcap >= v.lo && mcap < v.hi).map(([k]) => k);
+    ok(`a $${Math.round(mcap).toLocaleString()} call lands in exactly one sleeve`, hits.length === 1, hits.join(",") || "NONE");
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

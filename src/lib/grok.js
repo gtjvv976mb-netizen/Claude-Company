@@ -230,3 +230,74 @@ export async function grokXRead({ symbol, mint, hook = "" }) {
   emit("seat:verdict", { seat: "XRead", symbol, detail: `${obj.verdict ?? "?"} · ${obj.mentions_level ?? "?"} attention, ${obj.velocity ?? "?"}` });
   return { ok: true, read: obj, citations };
 }
+
+/**
+ * THE TREND SCAN — the desk's discovery running BACKWARDS.
+ *
+ * Every other lane starts on-chain: sweep the pairs that already exist, then ask Grok
+ * whether the story behind one is real. That is structurally late. By the time a coin
+ * carries enough volume and liquidity to surface on a pair feed, whatever made it
+ * interesting happened hours ago and the desk is reading an echo.
+ *
+ * The documented Grok memecoin trade worked the other way round, and the mechanism is
+ * worth stating plainly because the whole lane is built on it: a high-reach X event
+ * fires with a NAMEABLE gap, dozens of coins launch racing to claim the name, one wins
+ * the race and runs, and the rest go to zero. The tradeable fact is the RACE, and the
+ * race is visible on X before it is visible on chain.
+ *
+ * So this asks Grok the opposite question: not "is this coin's story real" but "what
+ * story is happening right now that coins will be launched for". The answer is a list
+ * of themes and the terms to hunt them by — trends.js does the hunting.
+ *
+ * The hard part is EARLINESS, not detection. Anything already saturated is worthless
+ * here: by then the winner has run and the desk would be buying the top. So the prompt
+ * spends most of its weight on stage rather than on volume.
+ */
+export async function grokTrendScan({ limit = 6 } = {}) {
+  if (!hasGrok()) return { ok: false, error: "no key" };
+  const from = new Date(Date.now() - 2 * 86400e3).toISOString().slice(0, 10);
+  const r = await xai("/responses", {
+    model: GROK_MODEL,
+    tools: [{ type: "x_search", from_date: from }],
+    input: [{
+      role: "user",
+      content:
+        `You are the scout for a Solana memecoin desk. Do NOT analyse any specific coin. ` +
+        `Answer one question: WHAT IS HAPPENING ON X RIGHT NOW THAT PEOPLE WILL LAUNCH ` +
+        `MEMECOINS FOR — in the next hours, not the last week?\n\n` +
+        `Memecoins are launched for nameable things: a viral clip or phrase, a fresh ` +
+        `meme format, a public figure doing something absurd, a breaking news moment ` +
+        `with a funny angle, an in-joke escaping its community, a season or holiday ` +
+        `arriving, a movement gathering a name. Search X broadly and read what is ` +
+        `ACCELERATING.\n\n` +
+        `EARLINESS IS THE ENTIRE VALUE. A trend everyone has already posted about is ` +
+        `worthless to us — the coins for it launched hours ago and already ran. Prefer ` +
+        `something climbing fast from a small base over something enormous and flat. Be ` +
+        `honest in "stage": most of what you find will already be peaking, and saying ` +
+        `so is more useful than dressing it up.\n\n` +
+        `For each, give the exact words a launcher would put in a ticker or name — that ` +
+        `is what we search the chain for. Short, literal, no hashtags.\n\n` +
+        `Answer with ONLY JSON:\n` +
+        `{"themes":[{` +
+        `"theme":"short name for what is happening",` +
+        `"what_happened":"one sentence, concrete and checkable",` +
+        `"stage":"just_broke|building|peaking|over",` +
+        `"reach":"niche|notable|mainstream",` +
+        `"first_seen":"roughly when it started, or null",` +
+        `"why_coinable":"why this specifically gets a token, not just posts",` +
+        `"search_terms":["2-5 literal words or tickers a launcher would use"],` +
+        `"source_handles":["accounts driving it, max 3"]` +
+        `}] (max ${limit}, strongest first)}\n\n` +
+        `An empty list is a valid and useful answer. Do not invent a trend to fill it — ` +
+        `a fabricated theme sends the desk hunting coins that do not exist.`,
+    }],
+  }, 120000);
+  if (!r.ok) return r;
+  const searches = Math.max(1, (r.data?.output ?? []).filter((o) => /search/i.test(o?.type ?? "")).length);
+  meterGrok("TrendScan", r.data?.usage, searches);
+  const obj = parseLoose(responseText(r.data));
+  const themes = Array.isArray(obj?.themes) ? obj.themes : [];
+  emit("trend:scan", { found: themes.length,
+    themes: themes.map((t) => `${t.theme} (${t.stage})`).slice(0, 6) });
+  return { ok: true, themes, citations: (r.data?.citations ?? []).slice(0, 8) };
+}
