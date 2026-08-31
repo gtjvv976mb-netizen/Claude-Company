@@ -511,6 +511,17 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
                   AND ts > (strftime('%s','now') * 1000 - 604800000)
                 GROUP BY seat, error ORDER BY n DESC LIMIT 8`),
 
+              /* WHAT DID THE RED TEAM ACTUALLY JUDGE?
+               * It has said "survives" zero times in 52 — which reads as a broken seat
+               * until you ask WHICH coins reached it. Those verdicts were collected
+               * while rank() paid up to +39 for size alone, so the desk was surfacing
+               * large, credible coins, and on a $40m coin "this will re-rate" is a weak
+               * thesis that SHOULD be refuted. A pass rate is meaningless without the
+               * population it was measured on, and the symbols are that population. */
+              redteamSubjects: rows(`SELECT symbol, verdict, ts FROM verdicts
+                WHERE seat='redteam' AND verdict IS NOT NULL AND symbol IS NOT NULL
+                ORDER BY id DESC LIMIT 20`),
+
               /* DID THE CYCLE EVER GET TO CHOOSE?
                * 14 workups were eligible under the mandate and not one was published,
                * which can mean two completely different things: the cohort step ran and
