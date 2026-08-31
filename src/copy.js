@@ -192,6 +192,10 @@ export function saveSettings(floorNo, patch) {
   // setting a webhook URL, so a tenant had to invent a fake one to get their
   // own secret. Ask for it directly instead.
   if (patch.mintExecutorSecret && !execSecret) execSecret = crypto.randomBytes(24).toString("hex");
+  // A secret that has been seen by anyone else is spent. Rotation invalidates
+  // the old one the instant it is written: any executor still holding it gets
+  // 401 on its next poll and simply stops — it can never trade on a stale key.
+  if (patch.rotateExecutorSecret) execSecret = crypto.randomBytes(24).toString("hex");
   // Same empty-selection footgun the categories column already guards against: an
   // empty allow-list is stored literally and the floor never receives another call.
   // Empty means "no preference" (every pad), never "no pads".

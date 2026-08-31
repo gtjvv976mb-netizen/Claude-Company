@@ -6892,6 +6892,19 @@ function buildControls(settings) {
   if (settings.executor_secret) {
     const sec = mk("div", "bud-addr");
     sec.textContent = "signing secret: " + settings.executor_secret;
+    const rot = document.createElement("button");
+    rot.className = "dp-btn ghost";
+    rot.style.cssText = "font-size:9.5px;padding:2px 8px;margin-left:6px";
+    rot.textContent = "Rotate";
+    rot.title = "Invalidate this secret and issue a new one — do this if it was ever pasted anywhere";
+    rot.onclick = async () => {
+      if (!confirm("Rotate the signing secret?\n\nAny executor using the old one stops working until you reinstall it with the new secret.")) return;
+      rot.disabled = true; rot.textContent = "Rotating\u2026";
+      await api(`/api/floor/${FLOOR_N}/settings`, { method: "POST",
+        body: JSON.stringify({ rotateExecutorSecret: true }) });
+      loadCalls();
+    };
+    sec.appendChild(rot);
     box.appendChild(sec);
 
     // Connect-and-go: one command that stands the poller up on any Linux box
