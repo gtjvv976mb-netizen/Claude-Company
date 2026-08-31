@@ -6883,7 +6883,7 @@ function buildControls(settings) {
     mint.className = "dp-btn"; mint.textContent = "Create my signing secret";
     mint.onclick = async () => {
       mint.disabled = true; mint.textContent = "Creating\u2026";
-      await api(`/api/floor/${FLOOR_N}/settings`, { method: "POST",
+      await api(`/api/floor/${FLOOR_N}/copy`, { method: "POST",
         body: JSON.stringify({ mintExecutorSecret: true }) });
       loadCalls();
     };
@@ -6900,7 +6900,7 @@ function buildControls(settings) {
     rot.onclick = async () => {
       if (!confirm("Rotate the signing secret?\n\nAny executor using the old one stops working until you reinstall it with the new secret.")) return;
       rot.disabled = true; rot.textContent = "Rotating\u2026";
-      await api(`/api/floor/${FLOOR_N}/settings`, { method: "POST",
+      await api(`/api/floor/${FLOOR_N}/copy`, { method: "POST",
         body: JSON.stringify({ rotateExecutorSecret: true }) });
       loadCalls();
     };

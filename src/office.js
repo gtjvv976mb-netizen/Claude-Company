@@ -845,7 +845,12 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           }
           if (!me) return json(401, { error: "sign in with your wallet first" });
           const lease = leasing.leaseFor(floorNo);
-          if (!lease || lease.wallet !== me) return json(403, { error: "this is not your floor" });
+          // Floor 50 carries no lease row — it is the house's own desk — so its
+          // owners were refused their own copy settings, executor secret
+          // included. Same house seat the room routes already honour.
+          const houseSeatCopy = floorNo === HQ_FLOOR && hqOwner(me);
+          if (!houseSeatCopy && (!lease || lease.wallet !== me))
+            return json(403, { error: "this is not your floor" });
           const body = await readBody();
           if (what === "copy") {
             if (body && "webhookUrl" in body) {
