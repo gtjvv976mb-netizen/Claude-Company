@@ -14,6 +14,8 @@ import { recordWhaleCallout } from "./identity.js";
 import { regime } from "./data/regime.js";
 import { cfg } from "./config.js";
 import * as store from "./lib/store.js";
+import * as shadow from "./shadow.js";
+import * as ds from "./data/dexscreener.js";
 import { eligibility, contenderScore, pickOne, bookState, SEQUENTIAL, MAX_LIVE_CALLS } from "./mandate.js";
 
 /**
@@ -546,6 +548,21 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
   if (!e.eligible) {
     emit("call:withheld", { mint: rec?.mint, symbol: rec?.symbol,
       safety: e.safety, reason: e.reason });
+    /* THE SHADOW BOOK. Every refusal is written down with the price it was refused at,
+     * so the desk can later be graded on what it turned DOWN. Without this, "we are
+     * being appropriately careful" and "we are missing everything" are the same
+     * observation — which is exactly the argument ZCAT started. */
+    try {
+      const ev = rec?.ev ?? {};
+      shadow.recordRefusal({
+        mint: rec?.mint, symbol: rec?.symbol ?? ev.symbol,
+        stage: rec?.outcome === "screened_out" ? "screen"
+             : rec?.outcome === "killed" ? "seat"
+             : rec?.compliance?.pass === false ? "compliance" : "mandate",
+        reason: e.reason, safety: e.safety,
+        priceUsd: ev.pair?.priceUsd, mcapUsd: ev.pair?.marketCap ?? ev.pair?.fdv,
+      });
+    } catch {}
     return { outcome: e.safety ? "unsafe" : "declined", reason: e.reason };
   }
 
@@ -782,6 +799,27 @@ export async function monitorCalls() {
   if (monitorBusy) return { skipped: "busy" };
   monitorBusy = true;
   try {
+    /* Price the SHADOW BOOK on the same tick. These are coins the desk refused; they
+     * cost nothing to follow (one free pair read each) and they are the only way to
+     * find out whether the bar is calibrated or merely expensive. Done before the open
+     * calls so an empty book does not skip it. */
+    try {
+      const shadows = shadow.openShadows(48, 12);
+      for (const sh of shadows) {
+        const px = await ds.pairsFor(sh.mint).catch(() => null);
+        if (!px?.ok) continue;
+        const cons = ds.consensus(px.pairs);
+        const now = cons.ok ? cons.priceUsd : Number(px.pairs?.[0]?.priceUsd);
+        if (now > 0) shadow.markChecked(sh.id, now);
+      }
+      if (shadows.length) {
+        const card = shadow.scorecard({ sinceH: 168 });
+        if (card.graded >= 5)
+          emit("shadow:scorecard", { graded: card.graded, wouldHaveHit2x: card.wouldHaveHit2x,
+            died: card.died, medianPeakPct: card.medianPeakPct, verdict: card.verdict });
+      }
+    } catch {}
+
     const open = liveCalls();
     if (!open.length) return { checked: 0, closed: 0 };
     let closed = 0;

@@ -28,7 +28,8 @@ import * as leasing from "./leasing.js";
 import * as rooms from "./rooms.js";
 import * as calls from "./calls.js";
 import * as mandate from "./mandate.js";
-import "./devrep.js";   // creates dev_reputation; the overview counts it
+import "./devrep.js";
+import * as shadowBook from "./shadow.js";   // creates dev_reputation; the overview counts it
 import * as copy from "./copy.js";
 import * as perf from "./perf.js";
 import * as alerts from "./alerts.js";
@@ -471,6 +472,12 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               bootedAt: BOOTED_AT,
               upMins: Math.round((Date.now() - BOOTED_AT) / 60000),
             },
+            /* THE SHADOW BOOK — what the desk's REFUSALS went on to do.
+             * The only honest answer to "we could have profited": a desk whose
+             * refusals mostly die is calibrated; one whose refusals mostly double is
+             * expensive, and this makes that a number instead of an argument. */
+            shadow: (() => { try { return shadowBook.scorecard({ sinceH: 168 }); }
+                             catch { return null; } })(),
             /* THE DEVELOPER LEDGER — what the desk remembers about who launched a coin.
              * It starts empty and fills as the desk works, so this is also the simplest
              * proof that the ledger deployed at all. */
