@@ -86,3 +86,24 @@ export const TicketOut = z.object({
   take_profit: z.array(z.object({ price: z.number(), pct_to_sell: z.number(), rationale: z.string() })),
   execution_warnings: z.array(z.string()),
 });
+
+/**
+ * THE BEST PICK — one coin chosen from a pre-vetted field.
+ *
+ * Every candidate this seat sees has already cleared the free safety screen, every
+ * analyst, the red team and compliance. So it is not being asked "is this safe" — that
+ * is settled and not its business. It is asked the only question left: of these, which
+ * one MAKES MONEY, and which would you regret.
+ */
+export const BestPickOut = z.object({
+  pick_mint: z.string().describe("The mint address of the single coin to trade. Must be one of the candidates."),
+  pick_symbol: z.string(),
+  why: z.string().describe("Why THIS one and not the others, in under 60 words. Compare, do not describe."),
+  edge: z.string().describe("The specific thing that makes it likely to move — the trend, the lore, the endorsement, the flow."),
+  runner_up_mint: z.string().nullable().describe("The next best, or null if there genuinely was no second choice."),
+  why_not_runner_up: z.string().nullable(),
+  confidence: z.number().min(0).max(1),
+  expected_move: z.enum(["2x_or_better", "50_to_100pct", "modest", "unclear"])
+    .describe("Honest read on how far this goes, not how far you hope."),
+  worst_case: z.string().describe("What kills this trade, in one sentence. Not 'the market' — the specific thing."),
+});

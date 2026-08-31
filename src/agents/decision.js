@@ -1,5 +1,5 @@
 import { ask } from "../lib/llm.js";
-import { RedTeamOut, RiskOut, PMOut, TicketOut, ScoutOut } from "./schemas.js";
+import { RedTeamOut, RiskOut, PMOut, TicketOut, ScoutOut, BestPickOut } from "./schemas.js";
 import { cfg } from "../config.js";
 import { recentLessons } from "./review.js";
 import { emit } from "../lib/bus.js";
@@ -325,5 +325,100 @@ The stop price must match the risk seat's stop exactly. You do not get to move i
       `Current price (evidence.pair.priceUsd): ${ev.pair?.priceUsd}\n` +
       `Exit probe: ${JSON.stringify(ev.exitProbe)}\n\n` +
       `=== PM DECISION ===\n${JSON.stringify(pm)}\n\n=== RISK ===\n${JSON.stringify(risk)}`,
+  });
+}
+
+/**
+ * THE BEST PICK — the seat that finally chooses.
+ *
+ * Until now the cycle's winner was arithmetic: tier x 100000 + conviction x 100 +
+ * composite. That is defensible and it is also blind. It cannot see that one coin's
+ * story is a trend three hours old while another's is a week stale, or that a real
+ * account with reach posted one of them and a bought network posted the other. Those
+ * are the things that decide a memecoin, and a weighted average of five scores cannot
+ * represent them.
+ *
+ * What makes this seat safe to trust with a forced decision is WHERE it sits. Every
+ * candidate in front of it has already cleared the free safety screen, all five
+ * analysts, the red team and compliance. It cannot admit a honeypot, an unexitable
+ * position or a launch farm, because none of those reach it. So it is not asked "is
+ * this safe" — that is settled. It is asked the only question left: of these, which
+ * one makes money.
+ *
+ * That is why "every cycle produces a trade" is a reasonable instruction here and
+ * would have been a reckless one three stages earlier.
+ */
+export async function runBestPick(candidates, { filter = null } = {}) {
+  const brief = candidates.map((c) => {
+    const ev = c.rec?.ev ?? {};
+    const x = ev.xRead ?? {};
+    return {
+      mint: c.rec?.mint,
+      symbol: c.rec?.symbol ?? ev.symbol,
+      band: c.band ?? null,
+      type: c.coinType ?? c.category ?? null,
+      marketCapUsd: ev.pair?.marketCap ?? ev.pair?.fdv ?? null,
+      liquidityUsd: ev.pairs?.totalLiquidityUsd ?? null,
+      ageHours: ev.pair?.ageHours ?? null,
+      priceChange: ev.pair?.priceChange ?? {},
+      roundTripCostPct: ev.exitProbe?.roundTripLossPct ?? null,
+      pmDecision: c.rec?.pm?.decision, conviction: c.rec?.pm?.conviction,
+      thesis: c.rec?.pm?.thesis, invalidation: c.rec?.pm?.invalidation,
+      redTeam: c.rec?.redteam?.verdict, redTeamHeadline: c.rec?.redteam?.headline,
+      compositeScore: c.rec?.weighted,
+      // The X read, which is the heaviest evidence on this desk.
+      attention: { level: x.mentions_level, velocity: x.velocity, verdict: x.verdict,
+        distinctVoices: x.distinct_voices, loreOrigin: x.lore_origin,
+        paidSigns: x.paid_or_botted_signs, summary: x.summary },
+      dev: { handle: x.dev_handle, looksReal: x.dev_looks_real, postedCA: x.dev_posted_ca,
+        engagingNow: x.dev_engaging_now, priorTokens: x.dev_prior_tokens,
+        redFlags: x.dev_red_flags, deskRecord: x.desk_record },
+      holders: { top1Pct: ev.holders?.top1Pct, bundleSuspect: ev.holders?.bundleSuspect,
+        clustered: ev.holders?.clusteredHolders, midToHead: ev.holders?.midToHead },
+    };
+  });
+
+  return ask({
+    seat: "Best Pick",
+    model: cfg.models.pm,
+    effort: cfg.effort.pm,
+    schema: BestPickOut,
+    system: `You are the seat that CHOOSES. One coin, from a field that has already been
+vetted, and the desk trades whatever you name.
+
+WHAT IS ALREADY SETTLED, so do not spend your answer on it:
+every candidate here has cleared the deterministic safety screen (no live mint or
+freeze authority, no permanent delegate, no transfer hook, an exit that measurably
+closes, no launch-farm deployer, holder concentration under the ceiling), all five
+analysts, the red team, and compliance. None of them is a honeypot and all of them can
+be sold. Telling the desk a memecoin is risky is not information.
+
+THE ONLY QUESTION IS WHICH ONE MOVES.
+
+This is a memecoin desk, so rank on what actually moves these:
+- IS THE STORY TRUE AND IS IT NOW? A traceable lore riding a live trend beats a better
+  story that peaked yesterday. Late to a real thing still loses money.
+- WHOSE ATTENTION IS IT? Distinct pre-existing accounts in their own words beat a
+  bigger number carried by one pasted script. A genuine endorsement from a real person
+  with reach is the strongest single signal on this desk.
+- IS THE DEV PRESENT? Someone who posted the contract themselves and is still replying
+  is running a coin. Someone who posted once and vanished has already left.
+- WHO IS BUYING? Distinct wallets arriving beats a few round-tripping.
+- ROOM TO RE-RATE. A $200k coin doubling needs a fraction of what a $15m coin needs.
+  Prefer the smaller cap when the story is equally real.
+
+COMPARE, DO NOT DESCRIBE. Your "why" must say why THIS one and not the one next to it.
+"Strong narrative and good liquidity" describes half the field and chooses nothing.
+
+Name a runner-up honestly, and if the field is genuinely one-deep say so with null.
+expected_move is your read, not your hope — most memecoins do not 2x, and saying
+"modest" when it is modest is what makes the number worth anything.
+
+You must pick one. Refusing is not available to this seat: the safety questions were
+answered upstairs, and a desk that never chooses never learns whether it can.`,
+    prompt:
+      (filter ? `THE FLOOR'S FILTER: ${filter}. Prefer candidates matching it, but if none do, pick the best available and say so.\n\n` : "") +
+      `CANDIDATES (${brief.length}), all pre-vetted:\n\n${JSON.stringify(brief, null, 2)}\n\n` +
+      `Choose the one most likely to make money. Compare them against each other.`,
   });
 }

@@ -18,6 +18,7 @@ import * as shadow from "./shadow.js";
 import { buildBoard, selectAcrossBoard, CAP_BANDS, COIN_TYPES } from "./categories.js";
 import * as ds from "./data/dexscreener.js";
 import { eligibility, contenderScore, pickOne, bookState, SEQUENTIAL, MAX_LIVE_CALLS } from "./mandate.js";
+import { runBestPick } from "./agents/decision.js";
 
 /**
  * THE PENTHOUSE CYCLE — the house team's working day.
@@ -454,7 +455,42 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
    * team's own PASS on top of that. What changed is that a lack of CONVICTION — the
    * CEO holding, the PM wanting one more trigger — now ranks rather than blocks. */
   const opened = [];
-  const { winner, judged } = pickOne(picks);
+  const { winner: arithmeticWinner, judged } = pickOne(picks);
+  const eligible = judged.filter((j) => j.eligibility.eligible);
+
+  /* THE SEAT THAT CHOOSES.
+   *
+   * pickOne ranks by arithmetic — tier x 100000 + conviction x 100 + composite — which
+   * is defensible and blind. It cannot see that one coin's story is a trend three hours
+   * old while another's peaked yesterday, or that a real account with reach posted one
+   * and a bought network posted the other. Those decide a memecoin, and a weighted
+   * average of five scores cannot represent them.
+   *
+   * So an agent picks, from the eligible field only. Everything in front of it has
+   * already cleared the safety screen, the analysts, the red team and compliance — it
+   * cannot admit a honeypot because none reaches it. The arithmetic winner stays as the
+   * fallback for when the seat errors or names something that is not on the list. */
+  let winner = arithmeticWinner;
+  if (eligible.length > 1) {
+    try {
+      const bp = await runFor(null, () => runBestPick(eligible));
+      const chosen = eligible.find((j) => j.rec?.mint === bp?.pick_mint);
+      if (chosen) {
+        winner = chosen;
+        winner.bestPick = bp;
+        emit("bestpick:chose", { symbol: bp.pick_symbol, mint: bp.pick_mint,
+          why: bp.why, edge: bp.edge, expected: bp.expected_move,
+          confidence: bp.confidence, runnerUp: bp.runner_up_mint,
+          overrodeArithmetic: arithmeticWinner?.rec?.mint !== bp.pick_mint });
+      } else {
+        emit("bestpick:unusable", { named: bp?.pick_mint ?? null, candidates: eligible.length,
+          note: "the seat named something not on the list — falling back to the ranking" });
+      }
+    } catch (e) {
+      emit("bestpick:failed", { error: String(e?.message || e),
+        note: "falling back to the arithmetic ranking rather than skipping the cycle" });
+    }
+  }
   for (const j of judged) {
     if (j.eligibility.eligible) continue;
     emit("cohort:declined", { mint: j.rec?.mint, symbol: j.rec?.symbol,
@@ -466,8 +502,36 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
       why: winner.eligibility.reason } : null });
 
   if (winner) {
-    const pub = publishCall(winner.rec, { category: winner.category, launchpad: winner.launchpad, wx });
+    const pub = publishCall(winner.rec, { category: winner.category, launchpad: winner.launchpad, wx,
+      bestPick: winner.bestPick ?? null });
     if (pub.callId) opened.push({ id: pub.callId, symbol: winner.rec?.symbol });
+  }
+
+  /* EVERY CYCLE ENDS IN A TRADE — and this is where that instruction is safe to obey.
+   *
+   * The eligible field has already cleared the free safety screen, all five analysts,
+   * the red team and compliance. Nothing in it is a honeypot, nothing in it is
+   * unsellable, nothing in it was launched by a farm. So if the first choice could not
+   * be published for a reason that is NOT about the coin — the book filled, a weather
+   * veto, a race with another lane — the desk takes the next eligible candidate rather
+   * than ending the cycle empty.
+   *
+   * It walks the field in order and stops at the first one that lands. What it will
+   * never do is reach past eligibility: a cycle where every candidate failed a measured
+   * safety fact ends with no call, and says so. That is not the desk refusing to
+   * decide, it is the market not having offered anything holdable. */
+  if (!opened.length && eligible.length > 1) {
+    for (const cand of eligible) {
+      if (cand === winner) continue;
+      const pub = publishCall(cand.rec, { category: cand.category, launchpad: cand.launchpad, wx });
+      if (pub.callId) {
+        opened.push({ id: pub.callId, symbol: cand.rec?.symbol });
+        emit("mandate:fellback", { symbol: cand.rec?.symbol,
+          from: winner?.rec?.symbol ?? null,
+          note: "the first choice could not be published — took the next eligible rather than ending empty" });
+        break;
+      }
+    }
   }
 
   /* THE MANDATE — every cycle ends in a call. Not by lowering the bar: by
@@ -571,7 +635,7 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
  *   stopless, refuted and PASSed candidates are refused by mandate.js before conviction
  *   is consulted at all. The mandate lowered the CONVICTION bar; it did not touch this.
  */
-export function publishCall(rec, { category = null, launchpad: pad = null, wx = null, toFloors = null } = {}) {
+export function publishCall(rec, { category = null, launchpad: pad = null, wx = null, toFloors = null, bestPick = null } = {}) {
   const e = eligibility(rec);
   if (!e.eligible) {
     emit("call:withheld", { mint: rec?.mint, symbol: rec?.symbol,
@@ -632,6 +696,12 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
     // when nothing was approved. Both are legitimate, and they are not the same
     // thing, so the difference goes on the call rather than into a footnote.
     noteEvent(call.id, "mandate", `${e.reason} (tier ${e.tier})`, call.entry_ref);
+    // Why the choosing seat picked THIS one, on the call itself — so the record shows
+    // the reasoning next to the outcome rather than only the outcome.
+    if (bestPick?.why)
+      noteEvent(call.id, "bestpick",
+        `${bestPick.why} | edge: ${bestPick.edge} | expects ${bestPick.expected_move} | worst case: ${bestPick.worst_case}`,
+        call.entry_ref);
     /* THE HOUSE TRADES ITS OWN CALLS TOO.
      *
      * `owned` alone meant floor 50 — the HQ, whose state is 'hq' because it is never
