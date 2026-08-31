@@ -266,12 +266,35 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
   // 1-3. Everything free: sweep, classify, screen.
   const universe = await sweep();
   const scored = [];
+  const repeats = [];
   for (const c of universe) {
     if (liveCallFor(c.mint)) continue;                 // already holding a call on this one
     const cat = classify(c);
     const r = rank(c);
     if (r.score <= 0) continue;
-    scored.push({ ...c, category: cat.category, categoryWhy: cat.why, score: r.score, rankWhy: r.why });
+    const row = { ...c, category: cat.category, categoryWhy: cat.why, score: r.score, rankWhy: r.why };
+    /* DO NOT RE-BUY AN ANSWER THE DESK ALREADY HAS.
+     *
+     * The hunt lane and the fresh lane have both guarded against this for a while; the
+     * main cycle never did, and it is the lane with only three slots to spend. The
+     * result is in the record: of the last twenty coins the red team judged, DOGE-1
+     * appears FIVE times and four others appear twice — roughly half the desk's most
+     * expensive seat spent re-answering questions it had already answered.
+     *
+     * A high-ranked coin stays high-ranked, so without this the cycle picks the same
+     * few names every 45 minutes and never reaches the rest of the market. */
+    if (store.recentlyJudged(c.mint)) { repeats.push(row); continue; }
+    scored.push(row);
+  }
+  // ...unless the whole market is recently judged, in which case a stale look beats no
+  // look at all. Ranked order still applies; the repeats simply queue behind fresh work.
+  if (!scored.length && repeats.length) {
+    emit("cycle:all_recently_judged", { repeats: repeats.length,
+      note: "nothing unseen in the market — re-examining the best of what we have looked at" });
+    scored.push(...repeats);
+  } else if (repeats.length) {
+    emit("cycle:skipped_repeats", { skipped: repeats.length, fresh: scored.length,
+      note: "coins judged in the last 6h were not re-bought" });
   }
   scored.sort((a, b) => b.score - a.score);
 
