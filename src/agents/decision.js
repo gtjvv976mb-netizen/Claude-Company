@@ -261,6 +261,19 @@ Build the ticket from the routing evidence, not from imagination:
 - Name the venue/aggregator from evidence.exitProbe route data.
 - Take-profit levels must sum to at most 100% of the position, and each needs a rationale
   tied to the thesis — not a round number.
+- THE FIRST TARGET MUST BE AT LEAST 5x THE MEASURED ROUND-TRIP COST. Compliance rejects
+  the entire ticket if it is not, and it has rejected eight this way — every one of them
+  a coin that had already cleared all five analysts, the red team, risk and the PM. This
+  is not a formality: a target that is a small multiple of what the trade costs to enter
+  and leave is a machine for paying the market, which is how one honestly-published live
+  run managed -1.54% across 334 trades. Read evidence.exitProbe.roundTripLossPct and do
+  the arithmetic BEFORE you write a price — at a 3% round trip your first target is at
+  least 15% above spot.
+- Size that target to the THESIS, not to a scalp. This desk trades micro-cap memecoins on
+  a claim that the coin RE-RATES; on a coin under a few million, the move being argued
+  for is a multiple, not a few percent. If the honest target is only a little above spot
+  then the thesis is not a re-rate, and the right answer is to say so in
+  execution_warnings rather than write a ticket that cannot clear its own costs.
 - execution_warnings is where you put anything that would surprise a human placing this
   manually: transfer fees, hooks, low hop-count fragility, time-of-day liquidity.
 
