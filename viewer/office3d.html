@@ -6342,8 +6342,9 @@ const ALL_PADS = ["pump.fun", "letsbonk.fun", "bags.fm", "moonshot", "boop.fun",
    10px label that did not even say "bot" — findable only by someone who already
    knew it existed. It gets its own card, always visible, at the top of Calls. */
 function buildBotCard(settings) {
-  const box = document.createElement("div");
-  box.className = "call";
+  let box = document.createElement("div");   // `let`: the paper-test drawer
+  box.className = "call";                    // reassigns this to its own body
+  const card = box;                          // ...so the CARD is returned, not the drawer
   const mk = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x) e.textContent = x; return e; };
   /* ── RUN IT HERE: the whole bot, in this tab, in two clicks ───────────────
      The VPS route is correct but it asks a lot: a server, a terminal, systemd.
@@ -6354,12 +6355,11 @@ function buildBotCard(settings) {
      The honest trade: a browser tab is not a server. It only trades while this
      page is open, so the stop is only watched while you are here. That is stated
      in the UI, not buried, and the VPS path remains for anyone who wants 24/7. */
-  // One sentence, not a paragraph: the checklist below explains itself as it goes.
-  const botNote = mk("div", "dp-note",
-    "Let the AI trade for you. A burner wallet is made in this browser and never leaves it — we never see the key.");
-  box.appendChild(botNote);
+  // No preamble at all: the tick strip and its one hint say where you are, and
+  // the key-never-leaves promise is on step 1 where it is actually relevant.
 
-  const botBox = mk("div", "bud-addr");
+  const botBox = mk("div");                 // NOT .bud-addr — that is the monospace
+  botBox.style.cssText = "margin:2px 0";    // address box, and it padded the whole checklist
   botBox.style.cssText = "font-size:11px;line-height:1.7";
   box.appendChild(botBox);
   const botRow = mk("div", "dp-row");
@@ -6455,32 +6455,41 @@ function buildBotCard(settings) {
     const stepNo = steps.findIndex((s) => !s.done);
     const allDone = stepNo === -1;
 
-    const head = mk("div", "dp-h", allDone ? "Your bot is live ✓" : `Start your bot — step ${stepNo + 1} of 4`);
-    botBox.appendChild(head);
+    /* Four steps, each with a heading and a paragraph, took SEVENTY-SEVEN
+       PERCENT of the panel — measured. A checklist only ever has one next
+       action, so that is what it shows: a tick strip for where you are, then
+       the current step alone. Finished steps that carry live data (the wallet,
+       the balance) keep a single line; the rest are a tick. */
+    const strip = mk("div");
+    strip.style.cssText = "display:flex;gap:6px;align-items:center;font-family:'JetBrains Mono',monospace;font-size:11px";
+    steps.forEach((s, i) => {
+      const t = mk("span", null, s.done ? "\u2713" : i === stepNo ? "\u25b8" : "\u25cb");
+      t.style.cssText = s.done ? "color:var(--good,#4f8f52)" : i === stepNo ? "color:var(--amber,#e0ad3d);font-weight:800" : "opacity:.4";
+      t.title = `${i + 1}. ${s.label}`;
+      strip.appendChild(t);
+    });
+    const cap = mk("span", "dp-note", allDone ? "your bot is live" : `step ${stepNo + 1} of 4 \u00b7 ${steps[stepNo].label}`);
+    cap.style.cssText = "font-size:11px;margin-left:2px";
+    strip.appendChild(cap);
+    botBox.appendChild(strip);
 
-    for (let i = 0; i < steps.length; i++) {
-      const s = steps[i];
-      const isNow = i === stepNo;
-      const row = mk("div");
-      row.style.cssText = "display:flex;gap:9px;align-items:flex-start;padding:5px 0;" +
-        (s.done || isNow ? "" : "opacity:.42");
-      const tick = mk("span", null, s.done ? "✓" : isNow ? "▸" : "○");
-      tick.style.cssText = "font-family:'JetBrains Mono',monospace;font-size:13px;width:14px;flex:none;" +
-        (s.done ? "color:var(--good,#4f8f52)" : isNow ? "color:var(--amber,#e0ad3d)" : "opacity:.6");
-      const txt = mk("div");
-      const t = mk("div", null, `${i + 1}. ${s.label}`);
-      t.style.cssText = "font-size:12.5px;" + (isNow ? "font-weight:800" : s.done ? "" : "");
-      txt.appendChild(t);
-      if (s.hint) { const h = mk("div", "dp-note", s.hint); h.style.fontSize = "11.5px"; txt.appendChild(h); }
-      row.append(tick, txt);
-      botBox.appendChild(row);
+    if (!allDone && steps[stepNo].hint) {
+      const h = mk("div", "dp-note", steps[stepNo].hint);
+      h.style.cssText = "font-size:11px;margin-top:3px";
+      botBox.appendChild(h);
+    }
+    // the two facts worth keeping visible once they exist: wallet and balance
+    if (b) {
+      const w = mk("div", "dp-note", `${b.pk.slice(0, 6)}\u2026${b.pk.slice(-4)}` +
+        (bal != null ? ` \u00b7 ${bal.toFixed(3)} SOL` : balErr ? " \u00b7 balance check failed" : ""));
+      w.style.cssText = "font-size:10.5px;font-family:'JetBrains Mono',monospace;margin-top:2px;opacity:.7";
+      botBox.appendChild(w);
     }
 
     // If the team is not working, no calls will ever arrive — say so here and
     // fix it here, instead of sending the reader to another tab.
     if (working === false) {
-      const warn = mk("div", "dp-note",
-        "⚠️ Your team is on a break, so no calls will come. The bot needs them working.");
+      const warn = mk("div", "dp-note", "\u26a0\ufe0f Team on a break \u2014 no calls will come.");
       warn.style.cssText = "margin-top:8px;color:var(--amber,#e0ad3d)";
       const go = mk("button", "dp-btn ghost", "Put my team to work");
       go.type = "button";
@@ -6696,9 +6705,12 @@ function buildBotCard(settings) {
      with, dependency-free precisely so it can also run here — and drives it over
      fat-tailed synthetic price paths with real round-trip costs charged. What you
      see is the engine's own decisions, not a mock of them. */
-  box.appendChild(mk("div", "dp-h", "Test the bot on paper"));
+  // Tried once, not watched daily — so it lives in a drawer, and `box` below
+  // means the drawer's body from here on.
+  const paperFold = window.foldSection?.("Test the bot on paper");
+  if (paperFold) { box.appendChild(paperFold.wrap); box = paperFold.body; }
   box.appendChild(mk("div", "dp-note",
-    "Runs the real risk engine (the same file the bot ships with) over simulated memecoin price paths, with 6% round-trip costs charged. No wallet, no install, no money. Use it to see how the stop, the trail and the daily brakes behave before you fund anything."));
+    "The real risk engine over simulated price paths, 6% round-trip charged. No wallet, no money."));
   const paperRow = mk("div", "dp-row");
   const wrSel = document.createElement("select");
   wrSel.className = "dp-in"; wrSel.setAttribute("aria-label", "Assumed desk win rate");
@@ -6783,7 +6795,7 @@ function buildBotCard(settings) {
     runPaper.disabled = false; runPaper.textContent = "Run 200 paper trades";
   });
 
-  return box;
+  return card;              // the CARD — `box` is the paper drawer's body by now
 }
 
 function buildControls(settings) {
@@ -6876,7 +6888,7 @@ function buildControls(settings) {
   exec_.setAttribute("aria-label", "Executor webhook URL");
   box.appendChild(exec_);
   const execNote = mk("div", "dp-note",
-    "Auto-trade this floor's calls WITHOUT giving up your keys. Run our open-source poller (executor/poller.mjs) anywhere with internet — no public URL needed — with the secret below and your own burner wallet: it fetches every entry and exit and trades them via Jupiter, within caps you set. Fund it, start it once, walk away. The desk never holds, signs, or sees your funds.");
+    "Auto-trade this floor's calls without giving up your keys. Run our open-source poller (executor/poller.mjs) anywhere with internet — no public URL needed — with the secret below and your own burner wallet: it fetches every entry and exit and trades them via Jupiter, within caps you set. Fund it, start it once, walk away. The desk never holds, signs, or sees your funds.");
   box.appendChild(execNote);
   if (!settings.executor_secret) {
     const mint = document.createElement("button");
