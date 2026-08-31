@@ -661,7 +661,8 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
            * the same treatment: group the failures and say the reason out loud. */
           const seatFails = (() => { try {
             return db.prepare(`
-              SELECT json_extract(data,'$.seat') seat, json_extract(data,'$.error') err, COUNT(*) n
+              SELECT json_extract(data,'$.seat') seat, json_extract(data,'$.error') err,
+                     COUNT(*) n, MAX(ts) last_ts
               FROM chronicle WHERE type='seat:failed' AND ts > ?
               GROUP BY seat, err ORDER BY n DESC LIMIT 5`).all(now - providerWindowMs);
           } catch { return []; } })();
@@ -677,9 +678,21 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           const settled = q("SELECT COUNT(*) n, COALESCE(SUM(pnl_usd),0) pnl, SUM(pnl_usd>0) w FROM results");
           return json(200, {
             state, reason, lastEventTs: lastEv, grokEnabled: !!process.env.XAI_API_KEY,
+            providerCredit: {
+              blocked: provider.blocked,
+              failures: provider.failures,
+              lastFailureTs: provider.lastFailureTs,
+              lastSuccessTs: provider.lastSuccessTs,
+              recoveryGraceMs: provider.recoveryGraceMs,
+            },
             /* The desk's own failures, not the market's. Anything here is the desk
              * losing paid work to its own plumbing. */
-            seatFailures6h: seatFails.map((r) => ({ seat: r.seat, n: r.n, error: String(r.err ?? "").slice(0, 160) })),
+            seatFailures6h: seatFails.map((r) => ({
+              seat: r.seat,
+              n: r.n,
+              lastTs: r.last_ts ?? null,
+              error: String(r.err ?? "").slice(0, 160),
+            })),
             withheldToday: (() => { try {
               return db.prepare(`
                 SELECT reason, COUNT(*) n FROM chronicle

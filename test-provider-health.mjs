@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { isProviderCreditError, providerCreditHealth } from "./src/provider-health.js";
 
 const now = 1_800_000_000_000;
@@ -29,15 +30,38 @@ const unrelated = providerCreditHealth([
 ], { nowMs: now });
 assert.equal(unrelated.blocked, false, "ordinary seat errors remain part of degraded health, not credit health");
 
+const concurrentCompletion = providerCreditHealth([
+  event("seat:failed", 4 * 60_000, { error: "the Anthropic balance is empty — the desk cannot think" }),
+  event("seat:done", 60_000, { seat: "technical" }),
+], { nowMs: now });
+assert.equal(concurrentCompletion.blocked, true,
+  "an in-flight seat finishing three minutes later does not falsely prove provider recovery");
+assert.equal(concurrentCompletion.recoveryGraceMs, 5 * 60_000,
+  "the default recovery grace is included in the diagnostic result");
+
 const recovered = providerCreditHealth([
+  event("seat:failed", 10 * 60_000, { error: "the Anthropic balance is empty — the desk cannot think" }),
+  event("seat:done", 60_000, { seat: "technical" }),
+], { nowMs: now });
+assert.equal(recovered.blocked, false,
+  "a successful paid seat nine minutes after the failure proves the shared account recovered");
+
+const customGrace = providerCreditHealth([
   event("seat:failed", 5_000, { error: "the Anthropic balance is empty — the desk cannot think" }),
   event("seat:done", 1_000, { seat: "technical" }),
-], { nowMs: now });
-assert.equal(recovered.blocked, false, "a later paid-seat success proves the shared provider account recovered");
+], { nowMs: now, recoveryGraceMs: 3_000 });
+assert.equal(customGrace.blocked, false, "callers can configure the recovery grace");
 
 const stale = providerCreditHealth([
   event("seat:failed", 7 * 3600e3, { error: "the Anthropic balance is empty — the desk cannot think" }),
 ], { nowMs: now });
 assert.equal(stale.blocked, false, "expired failures do not leave the desk blocked forever");
+
+const officeSource = fs.readFileSync(new URL("./src/office.js", import.meta.url), "utf8");
+assert.match(officeSource,
+  /SELECT json_extract\(data,'\$\.seat'\) seat,[\s\S]{0,180}COUNT\(\*\) n, MAX\(ts\) last_ts[\s\S]{0,100}type='seat:failed'/,
+  "heartbeat seat-failure groups retain the newest event timestamp");
+assert.match(officeSource, /lastTs:\s*r\.last_ts\s*\?\?\s*null/,
+  "heartbeat exposes the newest timestamp for every grouped seat failure");
 
 console.log("provider credit health: direct, fallback, recovery, and expiry gates pass");

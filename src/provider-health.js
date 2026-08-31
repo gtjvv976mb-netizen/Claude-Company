@@ -22,11 +22,15 @@ function eventData(event) {
  * `desk:out_of_credit` is the direct signal, but chronicle writes are deliberately
  * best-effort. The desk also records the propagated error as `seat:failed`, so that
  * durable fallback must participate in health or a fully starved desk can report green.
- * A later successful paid seat proves that the shared provider account recovered.
+ * A successful paid seat proves recovery only after a short grace period. Seats run in
+ * parallel, so one request that was already in flight can complete moments after its
+ * siblings discover the empty balance; that completion is part of the failed batch,
+ * not evidence that somebody topped the account up.
  */
 export function providerCreditHealth(events, {
   nowMs = Date.now(),
   windowMs = 6 * 60 * 60 * 1000,
+  recoveryGraceMs = 5 * 60 * 1000,
 } = {}) {
   const cutoff = nowMs - windowMs;
   let failures = 0;
@@ -50,10 +54,13 @@ export function providerCreditHealth(events, {
     if (lastFailureTs == null || ts > lastFailureTs) lastFailureTs = ts;
   }
 
+  const recovered = lastFailureTs != null && lastSuccessTs != null &&
+    lastSuccessTs - lastFailureTs >= recoveryGraceMs;
   return {
-    blocked: lastFailureTs != null && (lastSuccessTs == null || lastFailureTs >= lastSuccessTs),
+    blocked: lastFailureTs != null && !recovered,
     failures,
     lastFailureTs,
     lastSuccessTs,
+    recoveryGraceMs,
   };
 }

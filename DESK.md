@@ -42,8 +42,9 @@ into every agent's system prompt, so these are operating constraints, not docume
 4. **The browser signer is closed too.** Signer and swap code do not ship in the page, and
    the old hosted RPC relay is retired. Legacy browser burners expose recovery only.
 5. **Model credit is a readiness dependency.** A reachable HTTP server is not a working
-   desk when Anthropic credits are exhausted. The current production deployment is blocked
-   on that balance, and `/api/heartbeat` must expose it as `BLOCKED` until restored.
+   desk when Anthropic credits are exhausted. `/api/heartbeat` exposes it as `BLOCKED`
+   until a successful paid seat at least five minutes after the last credit failure proves
+   the shared provider account has recovered.
 
 ## The pipeline
 

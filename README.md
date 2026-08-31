@@ -137,10 +137,12 @@ The retired browser RPC endpoint always returns `410 Gone` and never contacts th
 Solana RPC.
 
 After deployment, verify `/api/lease/config`, `/api/stats/overview`, and `/api/heartbeat`.
-The current production blocker is the Anthropic account's exhausted credit balance: HTTP
-health can remain available while the model seats cannot work. `/api/heartbeat` should
-report that condition as `BLOCKED`; top up the account behind `ANTHROPIC_API_KEY` before
-expecting paid research cycles to complete.
+A reachable HTTP server does not prove that the model seats can work. `/api/heartbeat`
+reports `BLOCKED` when recent Anthropic credit failures have not been followed, at least
+five minutes later, by a successful paid seat. Its `providerCredit` object exposes the
+failure and success timestamps, failure count, and recovery grace used for that decision.
+`RUNNING` is acceptable after a prior credit failure only when `blocked` is false and
+`lastSuccessTs >= lastFailureTs + recoveryGraceMs`.
 
 ## Running it
 
@@ -152,8 +154,9 @@ Set `ANTHROPIC_API_KEY` in `.env`. Everything else has a working default, though
 RPC is strongly recommended — the public one rate-limits holder queries, which costs the
 Forensics seat real confidence.
 
-An API key without available Anthropic credits is not operational. The current hosted
-deployment is blocked on that balance even though its HTTP health endpoint is reachable.
+An API key without available Anthropic credits is not operational. The HTTP process may
+remain reachable in that state, so use `/api/heartbeat` rather than transport health to
+decide whether paid research is available.
 
 ```bash
 npm run doctor
