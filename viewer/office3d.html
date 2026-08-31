@@ -5563,6 +5563,18 @@ function renderRoom() {
     setTimeout(() => { save.textContent = "Save name"; loadRoom(); }, 900);
   });
 
+  // ── which build you are actually looking at. The site caches pages for ten
+  //    minutes, so "is my fix live?" was unanswerable from the page itself.
+  {
+    const b = document.querySelector('meta[name="cc-build"]')?.content;
+    if (b) {
+      const stamp = mk("p", "dp-note", `build ${b}`);
+      stamp.style.cssText = "text-align:center;opacity:.55;font-size:10px;margin-top:2px";
+      stamp.title = "Hard-refresh (\u2318\u21e7R) if this looks older than a change you expect";
+      panel.appendChild(stamp);
+    }
+  }
+
   // ── the journal: history, not a control. Its own drawer. ──
   panel = panelReal;
   const jrnFold = foldSection(ROOM.runs.length
