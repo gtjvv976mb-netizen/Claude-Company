@@ -323,11 +323,32 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
   emit("scout:shortlist", { count: shortlist.length, considered: universe.length,
     mix: shortlist.map((c) => c.category) });
 
+  /* THE RESERVE BENCH.
+   *
+   * A slot lost to `no_data` is a slot lost for nothing. gather() fails before any
+   * model is called, so an unreadable coin costs no money — but under the old loop it
+   * still consumed one of the cycle's three chances, and the cycle ended having studied
+   * one coin instead of three.
+   *
+   * That became common precisely BECAUSE of the two fixes above: skipping
+   * recently-judged coins and screen-failures pushes the cycle further down the ranked
+   * list into genuinely obscure micro-caps, which are exactly the coins with patchy
+   * data. Ten `no_data` refusals in the last few minutes, against zero before.
+   *
+   * So an unreadable coin is replaced rather than mourned. Only free failures are
+   * replaced — a coin that reached a seat and was refused has been PAID for and has
+   * legitimately used its slot. */
+  const bench = selectShortlist(
+    scored.filter((c) => !shortlist.some((s) => s.mint === c.mint)),
+    workups * 3);
+  const queue = [...shortlist];
+  let replaced = 0;
+
   // 4. Only now does anything cost money.
   const picks = [];
   let workedUp = 0;
   let stopped = null;
-  for (const c of shortlist) {
+  for (const c of queue) {
     const usedSoFar = spend.usd - startSpend;
     if (usedSoFar >= CYCLE_BUDGET_USD) {
       stopped = `budget: $${usedSoFar.toFixed(2)} of $${CYCLE_BUDGET_USD}`;
@@ -349,7 +370,19 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
       emit("cycle:error", { mint: c.mint, error: String(e.message) });
       continue;
     }
-    if (!rec || rec.outcome === "no_data") continue;
+    if (!rec || rec.outcome === "no_data") {
+      // Free failure: nothing was asked of a model, so the slot is still unspent.
+      // Pull the next coin off the bench rather than ending the cycle a candidate short.
+      const next = bench.shift();
+      if (next && queue.length < workups * 3) {
+        replaced++;
+        queue.push(next);
+        emit("cycle:replaced", { dropped: c.pair?.baseSymbol ?? c.mint?.slice(0, 6),
+          reason: "no_data", replacedWith: next.pair?.baseSymbol ?? next.mint?.slice(0, 6),
+          note: "an unreadable coin costs nothing, so it must not cost a slot either" });
+      }
+      continue;
+    }
     workedUp++;                       // paid for, whatever the verdict turned out to be
     // THE COHORT. Every workup that got a verdict is a candidate, not only the ones
     // the CEO waved through — the mandate ranks the cohort and publishes its best.
@@ -426,7 +459,7 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
   const cost = spend.usd - startSpend;
   emit("cycle:end", { cycle, count: opened.length, spendUsd: Number(cost.toFixed(4)), stopped });
   return { cycle, considered: universe.length, ranked: scored.length,
-    workedUp, approved: picks.length, opened: opened.length,
+    workedUp, approved: picks.length, opened: opened.length, replacedUnreadable: replaced,
     costUsd: Number(cost.toFixed(4)), costPerWorkup: workedUp ? Number((cost / workedUp).toFixed(2)) : null,
     stopped };
 }
