@@ -910,7 +910,10 @@ const STAFF = [
   // is a read-only improvement lab: it studies aggregate evidence, tests the system
   // and leaves proposals for a human to review. The pet-shaped avatar uses the same
   // shared rig, movement and portrait pipeline as every other member of staff.
-  { id:"Codex",      name:"CODEX",       role:"Improvement Engineer · advisory only", desk:[-15.4,9.0], stand:[-13.8,9.0], apron:P.codex, codex:true },
+  // CODEY BANKS — the teen-spy parody for the improvement engineer, in his own
+  // suite WEST of the boss (Grox mirrors him east). Advisory only: he studies
+  // the system and files proposals, and never forms a trade.
+  { id:"Codex",      name:"CODEY BANKS", role:"Improvement Engineer · advisory only", desk:[-7.78,-10.8], stand:[-7.78,-9.7], y:0.22, apron:P.codex, codex:true },
   // Gruk is NOT the boss — the boss is the tenant's own MD. Gruk Mulder is the
   // Assistant Director who works the trades, in his own suite BESIDE the boss's:
   // same architecture, smaller, X-dark. Only appears when this floor's brain is
@@ -2991,6 +2994,125 @@ function bakeStatic(root) {
 }
 const bakedBuckets = bakeStatic(room);
 
+/* ═══ CODEY BANKS'S OFFICE ════════════════════════════════════════════════════
+   The improvement engineer's own room, WEST of the boss's suite — the exact
+   mirror of Grox's on the east, so the penthouse sits between its two outside
+   minds. Where Grox is X-dark, this one is ChatGPT: near-black panelling, the
+   signature green, and the knot laid into the floor. He is ALWAYS here (unlike
+   Grox, who comes and goes with the floor's brain) because his work — reading
+   the system and filing proposals — never depends on who manages the desk. */
+const CODEX_OFFICE = { x0: -9.65, x1: -5.9, z0: -12.5, z1: -8.6, cx: -7.78 };
+const CODEX_DAIS = 0.22;                         // the same junior step as Grox's
+const GPT_GREEN = 0x10a37f, GPT_INK = 0x0e0f11, GPT_EDGE = 0x2a2f2d;
+const codexOffice = new THREE.Group();
+scene.add(codexOffice);
+(() => {
+  const O = CODEX_OFFICE;
+  const W = O.x1 - O.x0, D = O.z1 - O.z0, zc = (O.z0 + O.z1) / 2;
+  const bx = (sx, sy, sz, x, y, z, c, r = 0.7, e = null, ei = 0) => {
+    const m = new THREE.Mesh(BOX, new THREE.MeshStandardMaterial({
+      color: c, roughness: r, ...(e ? { emissive: new THREE.Color(e), emissiveIntensity: ei } : {}) }));
+    m.scale.set(sx, sy, sz); m.position.set(x, y, z);
+    m.castShadow = renderer.shadowMap.enabled; m.receiveShadow = true;
+    codexOffice.add(m); return m;
+  };
+
+  const dais = bx(W, CODEX_DAIS, D, O.cx, CODEX_DAIS / 2, zc, 0x15171a, 0.9);
+  dais.receiveShadow = true;
+  bx(W, 0.05, 0.12, O.cx, CODEX_DAIS, O.z1 - 0.02, GPT_GREEN, 0.5, GPT_GREEN, 0.25);  // green nosing
+
+  // his own back wall, carrying the board
+  bx(W - 0.16, 3.1, 0.12, O.cx, CODEX_DAIS + 1.55, O.z0 + 0.15, GPT_INK, 0.88);
+
+  // front glass flanking a doorway — the suite's language, his colours
+  const glassMat = new THREE.MeshPhysicalMaterial({
+    color: 0xa9c4bb, transmission: 0.72, transparent: true, opacity: 0.15,
+    roughness: 0.16, thickness: 0.05, metalness: 0 });
+  for (const [cx2, w] of [[O.cx - 1.29, 1.18], [O.cx + 1.29, 1.18]]) {
+    const pane = new THREE.Mesh(BOX, glassMat);
+    pane.scale.set(w, 2.5, 0.1); pane.position.set(cx2, CODEX_DAIS + 1.25, O.z1);
+    codexOffice.add(pane);
+    bx(0.12, 2.6, 0.22, cx2 - w / 2, CODEX_DAIS + 1.3, O.z1, GPT_EDGE, 0.55);
+    bx(0.12, 2.6, 0.22, cx2 + w / 2, CODEX_DAIS + 1.3, O.z1, GPT_EDGE, 0.55);
+  }
+  bx(0.14, 2.7, 0.28, O.cx - 0.7, CODEX_DAIS + 1.35, O.z1, GPT_GREEN, 0.45, GPT_GREEN, 0.18);
+  bx(0.14, 2.7, 0.28, O.cx + 0.7, CODEX_DAIS + 1.35, O.z1, GPT_GREEN, 0.45, GPT_GREEN, 0.18);
+  bx(1.68, 0.2, 0.32, O.cx, CODEX_DAIS + 2.66, O.z1, GPT_EDGE, 0.45);
+  bx(0.34, 0.45, D, O.x0, CODEX_DAIS + 0.22, zc, GPT_INK, 0.88);
+  bx(0.34, 0.45, D, O.x1, CODEX_DAIS + 0.22, zc, GPT_INK, 0.88);
+
+  // ── the floor: near-black deck with the OpenAI knot laid into it, drawn as
+  //    six spokes around a hex ring — the mark reads at a glance from above.
+  const deckC = document.createElement("canvas"); deckC.width = deckC.height = 512;
+  const x = deckC.getContext("2d"), C = 256;
+  x.fillStyle = "#101214"; x.fillRect(0, 0, 512, 512);
+  x.strokeStyle = "#10a37f"; x.lineWidth = 26; x.lineJoin = "round";
+  for (let k = 0; k < 6; k++) {
+    const a0 = (k / 6) * Math.PI * 2, a1 = ((k + 1) / 6) * Math.PI * 2, a2 = ((k + 2) / 6) * Math.PI * 2;
+    x.beginPath();
+    x.moveTo(C + Math.cos(a0) * 150, C + Math.sin(a0) * 150);
+    x.lineTo(C + Math.cos(a1) * 150, C + Math.sin(a1) * 150);
+    x.lineTo(C + Math.cos(a2) * 150, C + Math.sin(a2) * 150);
+    x.stroke();
+  }
+  x.beginPath(); x.arc(C, C, 62, 0, Math.PI * 2); x.stroke();
+  const deckTex = new THREE.CanvasTexture(deckC);
+  deckTex.colorSpace = THREE.SRGBColorSpace;
+  const deck = new THREE.Mesh(new THREE.PlaneGeometry(W - 0.3, D - 0.3),
+    new THREE.MeshStandardMaterial({ map: deckTex, roughness: 0.95 }));
+  deck.rotation.x = -Math.PI / 2;
+  deck.position.set(O.cx, CODEX_DAIS + 0.012, zc);
+  codexOffice.add(deck);
+
+  // his desk and chair, up on the dais, out of the baked room
+  const desk = buildDesk([O.cx, -10.8], -Math.PI / 2, 0, 0x1b1e1c, null);
+  const chair = buildChair([O.cx, -9.7], Math.PI / 2, 0);
+  for (const g of [desk, chair]) { room.remove(g); codexOffice.add(g); g.position.y += CODEX_DAIS; }
+
+  // ── THE BOARD: what he is for — tests, proposals, and the standing promise
+  //    that he can only advise.
+  const c = document.createElement("canvas"); c.width = 768; c.height = 448;
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const g2 = c.getContext("2d");
+  g2.fillStyle = "#0e0f11"; g2.fillRect(0, 0, 768, 448);
+  g2.fillStyle = "#141618"; g2.fillRect(0, 0, 768, 74);
+  g2.strokeStyle = "#10a37f"; g2.lineWidth = 2;
+  g2.beginPath(); g2.moveTo(0, 74); g2.lineTo(768, 74); g2.stroke();
+  g2.fillStyle = "#fafafa"; g2.textBaseline = "middle"; g2.textAlign = "left";
+  g2.font = '700 34px "JetBrains Mono", ui-monospace, monospace';
+  g2.fillText("CODEY BANKS", 26, 38);
+  g2.fillStyle = "#8a9a94";
+  g2.font = '500 19px "JetBrains Mono", ui-monospace, monospace';
+  g2.fillText("IMPROVEMENT \u00b7 ADVISORY ONLY", 268, 40);
+  const lines = [
+    ["READS", "the aggregate record \u2014 never a live trade"],
+    ["TESTS", "the system against its own claims"],
+    ["FILES", "proposals a human reviews and merges"],
+    ["NEVER", "forms a call, holds a key, or moves money"],
+  ];
+  let y = 132;
+  for (const [k, v] of lines) {
+    g2.fillStyle = "#10a37f";
+    g2.font = '700 22px "JetBrains Mono", ui-monospace, monospace';
+    g2.fillText(k, 30, y);
+    g2.fillStyle = "#c8ccd0";
+    g2.font = '500 20px "JetBrains Mono", ui-monospace, monospace';
+    g2.fillText(v, 130, y);
+    y += 46;
+  }
+  g2.fillStyle = "#6b7075";
+  g2.font = '500 17px "JetBrains Mono", ui-monospace, monospace';
+  g2.fillText("advisory bundle \u00b7 aggregate evidence only", 30, y + 18);
+  tex.needsUpdate = true;
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 1.75),
+    new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+  mesh.position.set(O.cx, CODEX_DAIS + 2.0, O.z0 + 0.32);
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(3.22, 1.97, 0.1),
+    new THREE.MeshStandardMaterial({ color: 0x1e2320, roughness: 0.7, metalness: 0.25 }));
+  frame.position.set(O.cx, CODEX_DAIS + 2.0, O.z0 + 0.24);
+  codexOffice.add(mesh, frame);
+})();
+
 /* ═══ GROX MULDER'S OFFICE ════════════════════════════════════════════════════
    The Assistant Director's own suite, BESIDE the boss's on the back wall — the
    same architecture at a junior scale: a raised dais (lower than the boss's),
@@ -3084,13 +3206,19 @@ const grokBoard = (() => {
   frame.position.set(O.cx, GROX_DAIS + 2.0, O.z0 + 0.24);
   grokOffice.add(mesh, frame);
 
+  // ── CODEY BANKS's office: the mirror of Grox's, west of the suite, ending
+  //    clear of the -11.2 window's mullion exactly as his does.
+  solidRect(-7.78, -12.35, 3.75, 0.3);          // his own back wall
+  solidRect(-9.65, -10.55, 0.34, 3.9);          // side sills
+  solidRect(-5.9, -10.55, 0.34, 3.9);
+
   // ── WALL-ST-E's junk adobe, WEST of the boss's suite (Grox mirrors it east):
   //    back rampart and two trash-cube stacks bake into the nav grid (before
   //    buildNav); his parking spot between them stays walkable so he can roll
   //    out. The adobe itself is built later, beside the pick system it needs.
-  solidRect(-8.0, -12.1, 2.0, 0.5);
-  solidRect(-8.95, -11.5, 0.55, 1.7);
-  solidRect(-7.05, -11.5, 0.55, 1.7);
+  solidRect(-12.9, -10.6, 0.5, 2.0);            // rampart to the WEST, so the
+  solidRect(-12.3, -11.55, 1.7, 0.55);          // back glazing stays clear
+  solidRect(-12.3, -9.65, 1.7, 0.55);
 
   // ── nobody walks through this room either: the whole footprint is solid on
   //    the nav grid. On Claude floors it is an invisible exclusion zone in a
@@ -3770,7 +3898,7 @@ function rebuildWorker(seatId) {
    (practice or live) he powers up and roams the floor on the same nav grid as
    everyone else, lamp amber on paper, green when the trades are real. Clicking
    him opens the Team tab, where he is managed. */
-const BOT_DEN = { x: -8.0, z: -11.3 };
+const BOT_DEN = { x: -11.75, z: -10.6 };      // beside CODEY BANKS's office
 const botFig = (() => {
   const m = (c, r = 0.6, e = null, ei = 0) => new THREE.MeshStandardMaterial({
     color: c, roughness: r, ...(e ? { emissive: new THREE.Color(e), emissiveIntensity: ei } : {}) });
@@ -3783,7 +3911,8 @@ const botFig = (() => {
   //    the back wall and two ramparts of compacted trash cubes — the ones he
   //    makes — with his trinket shelf and charging dock inside. Opening south.
   const den = new THREE.Group();
-  den.position.set(BOT_DEN.x, 0, -11.5);
+  den.position.set(BOT_DEN.x - 0.35, 0, BOT_DEN.z);
+  den.rotation.y = -Math.PI / 2;                 // opens EAST, toward Codey's door
   bx(den, 2.0, 1.9, 0.14, 0, 0.95, -0.62, m(0x6e5a3a, 0.9));         // corrugated back
   for (let i = 0; i < 5; i++)                                         // ribs on the panel
     bx(den, 0.06, 1.8, 0.05, -0.8 + i * 0.4, 0.95, -0.55, m(0x57462c, 0.9));
