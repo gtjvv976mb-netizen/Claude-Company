@@ -149,7 +149,7 @@ maxMarketCapUsd: num("DESK_MAX_MCAP_USD", 3_000_000),
    * $40 buys roughly 140 workups at the measured $0.126 each. The per-cycle ceiling
    * of $10 still bounds any single cycle, and the reserve still stops the scanner
    * taking more than 55%, so this raises the ceiling without loosening either brake. */
-  dailyBudgetUsd: Number(process.env.DESK_DAILY_BUDGET_USD || 40),
+  dailyBudgetUsd: Number(process.env.DESK_DAILY_BUDGET_USD || 90),
 };
 
 /** The RPC URL embeds an API key. Never print it raw — mask it wherever it is shown. */
