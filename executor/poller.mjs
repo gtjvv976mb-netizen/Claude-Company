@@ -79,7 +79,20 @@ const number = (name, value, { min = 0, max = Infinity } = {}) => {
 };
 
 if (!SECRET || !/^\d+$/.test(FLOOR) || Number(FLOOR) <= 0) fatal("CC_SECRET and a positive CC_FLOOR are required");
-if (!API.startsWith("https://")) fatal("CC_API must use HTTPS");
+/* HTTPS always — with one carve-out that cannot weaken live. A loopback API lets a
+ * full dry-run rehearsal run against a local office process (the only way to test the
+ * feed contract end-to-end without touching production). Loopback traffic never
+ * crosses a network, so there is nothing for TLS to protect; any OTHER plain-HTTP
+ * host still refuses, and EXECUTE=1 refuses plain HTTP unconditionally — a live
+ * canary has no business on a rehearsal feed. */
+{
+  let apiHost = "";
+  try { apiHost = new URL(API).hostname; } catch { fatal("CC_API is not a valid URL"); }
+  const loopback = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(apiHost);
+  if (!API.startsWith("https://") && !(loopback && !EXECUTE))
+    fatal(EXECUTE ? "live execution requires an HTTPS CC_API — no loopback carve-out"
+                  : "CC_API must use HTTPS (plain HTTP is allowed only for loopback dry-run rehearsals)");
+}
 if (!fs.existsSync(KEYPAIR_FILE)) fatal(`no keypair at ${KEYPAIR_FILE}`);
 
 function loadKeypair() {
