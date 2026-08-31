@@ -15,6 +15,7 @@ import { regime } from "./data/regime.js";
 import { cfg } from "./config.js";
 import * as store from "./lib/store.js";
 import * as shadow from "./shadow.js";
+import { buildBoard, selectAcrossBoard, CAP_BANDS, COIN_TYPES } from "./categories.js";
 import * as ds from "./data/dexscreener.js";
 import { eligibility, contenderScore, pickOne, bookState, SEQUENTIAL, MAX_LIVE_CALLS } from "./mandate.js";
 
@@ -41,6 +42,9 @@ export const WORKUPS_PER_CYCLE = Number(process.env.PENTHOUSE_WORKUPS || 8);
  * plus a deep mandate hunt. Smaller cycles running often beat large ones that die. */
 export const CYCLE_BUDGET_USD = Number(process.env.PENTHOUSE_CYCLE_BUDGET_USD || 8);
 export const TOP_N = Number(process.env.PENTHOUSE_TOP_N || 5);
+/* How many candidates the board shortlists per cell — the owner's "at least 5 per
+ * category". Shortlisting is free; only what selectAcrossBoard picks gets paid for. */
+export const PER_CELL = Number(process.env.PENTHOUSE_PER_CELL || 5);
 
 /**
  * The cheap ranking that decides who gets the expensive seats.
@@ -212,6 +216,7 @@ export function wouldSurviveScreen(c) {
   if (tx < s.minTxns24h) return "no_participants";
   if (age < s.minPairAgeHours) return "too_new";
   if (s.maxMarketCapUsd > 0 && mcap != null && mcap > s.maxMarketCapUsd) return "too_big";
+  if (s.minMarketCapUsd > 0 && mcap != null && mcap < s.minMarketCapUsd) return "too_small";
   if (liq > 0 && vol / liq > s.maxVolToLiqRatio) return "wash_suspect";
   if (liq > 0 && mcap != null && mcap / liq > s.maxFdvToLiqRatio) return "fdv_propped";
   return null;
@@ -350,9 +355,27 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
       note: "whale flow is a ranking nudge, not a gate — the cycle moved on rather than stall" });
   scored.sort((a, b) => b.score - a.score);
 
-  const shortlist = selectShortlist(scored, workups);
+  /* THE BOARD. Sort the whole market into cap band x coin type, shortlist the best few
+   * in each cell, then spend the paid seats ACROSS the grid rather than down whichever
+   * drawer the sweep happened to fill.
+   *
+   * The old shortlist took the top N by score, which meant a cycle could spend every
+   * workup inside one band and learn nothing about the rest of the market — and an
+   * empty cell would never even be noticed. Here an empty cell is a finding: "nothing
+   * legitimate under $100k this hour" is worth knowing and used to be invisible. */
+  const board = buildBoard(scored, { perCell: PER_CELL, viable: (c) => wouldSurviveScreen(c) === null });
+  emit("board:built", {
+    considered: universe.length, offBoard: board.offBoard,
+    cellsFilled: board.filled, cellsPossible: board.possible,
+    cells: board.cells.map((c) => ({ cell: c.key, shortlisted: c.coins.length, seen: c.total,
+      best: c.coins[0]?.pair?.baseSymbol ?? null })),
+  });
+
+  const shortlist = board.cells.length
+    ? selectAcrossBoard(board, workups)
+    : selectShortlist(scored, workups);        // board empty: fall back rather than idle
   emit("scout:shortlist", { count: shortlist.length, considered: universe.length,
-    mix: shortlist.map((c) => c.category) });
+    mix: shortlist.map((c) => c.cellKey ?? c.category) });
 
   /* THE RESERVE BENCH.
    *

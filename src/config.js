@@ -74,7 +74,10 @@ minLiquidityUsd: num("DESK_MIN_LIQUIDITY_USD", 12000),
      * can be LEFT is the liquidity floor and the exit probe, and an unknown market
      * cap never fails this check — an unreadable number must not become an
      * execution. */
-maxMarketCapUsd: num("DESK_MAX_MCAP_USD", 3_000_000),
+/* The board runs $10k to $20m. Below $10k there is not enough coin to trade and
+     * the pool is one wallet; above $20m is somebody else's business. */
+    minMarketCapUsd: num("DESK_MIN_MCAP_USD", 10_000),
+    maxMarketCapUsd: num("DESK_MAX_MCAP_USD", 20_000_000),
   },
 
   // Slippage the desk refuses to accept on a round trip at target size.

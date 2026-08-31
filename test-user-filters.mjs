@@ -77,13 +77,17 @@ const pf = planEntry({ call: c2, cfg: { ...DEFAULTS, fixedSol: 0.02 }, state: { 
 ok("a fixed fund does NOT override a refusal", pf.action === "skip", pf.reason);
 
 console.log("\nDIAL 3 — THE MARKET-CAP SLEEVE");
+// The sleeves are the desk's OWN five bands now (categories.js), so a tenant's "low"
+// and the desk's "low" are the same thing. They briefly disagreed, which is worse than
+// having no filter: the desk would call a coin low while the low sleeve refused it.
 saveSettings(F, { mcapTier: "micro" });
-ok("a $900k call is outside the micro sleeve",
+ok("a $900k call is outside micro ($10k-$100k)",
   decide(F, call({ mcap_at_call: 900_000 })).verdict === "skipped",
   decide(F, call({ mcap_at_call: 900_000 })).reason);
-ok("a $200k call is inside it", decide(F, call({ mcap_at_call: 200_000 })).verdict === "offered");
-saveSettings(F, { mcapTier: "low" });
-ok("the low sleeve takes the $900k call", decide(F, call({ mcap_at_call: 900_000 })).verdict === "offered");
+ok("a $50k call is inside micro", decide(F, call({ mcap_at_call: 50_000 })).verdict === "offered");
+saveSettings(F, { mcapTier: "medium" });
+ok("the medium sleeve ($500k-$1m) takes the $900k call",
+  decide(F, call({ mcap_at_call: 900_000 })).verdict === "offered");
 ok("...and refuses a $20m one", decide(F, call({ mcap_at_call: 20_000_000 })).verdict === "skipped");
 saveSettings(F, { mcapTier: "any" });
 ok("any takes both", decide(F, call({ mcap_at_call: 200_000 })).verdict === "offered"
@@ -110,16 +114,17 @@ ok("a bogus tier name falls back to a real one", (saveSettings(F, { mcapTier: "m
   const dead = Object.entries(MCAP_TIERS).filter(([k, v]) => k !== "any" && v.lo >= ceiling);
   ok("no sleeve sits entirely above the ceiling", dead.length === 0,
     dead.length ? dead.map(([k]) => k).join(", ") + " can never receive a call" : "every sleeve is reachable");
-  ok("the sleeves tile the range with no gap",
-    MCAP_TIERS.micro.hi === MCAP_TIERS.low.lo && MCAP_TIERS.low.hi === MCAP_TIERS.mid.lo,
-    "micro -> low -> mid are contiguous");
-  ok("the top sleeve ends exactly at the desk's ceiling", MCAP_TIERS.mid.hi === ceiling,
-    `mid tops out at $${Math.round(MCAP_TIERS.mid.hi).toLocaleString()}`);
-  // A call at any point in the desk's range must fall in exactly one sleeve.
-  for (const mcap of [1_000, ceiling * 0.05, ceiling * 0.2, ceiling * 0.5, ceiling * 0.99]) {
+  const bands = ["micro", "low", "medium", "high", "very_high"];
+  ok("the sleeves tile the board with no gap",
+    bands.slice(0, -1).every((b, i) => MCAP_TIERS[b].hi === MCAP_TIERS[bands[i + 1]].lo),
+    bands.join(" -> "));
+  ok("the top sleeve ends exactly at the desk's ceiling", MCAP_TIERS.very_high.hi === ceiling,
+    `very_high tops out at $${Math.round(MCAP_TIERS.very_high.hi).toLocaleString()}`);
+  // A call anywhere on the board must fall in exactly one sleeve.
+  for (const mcap of [50_000, 250_000, 750_000, 5_000_000, 15_000_000]) {
     const hits = Object.entries(MCAP_TIERS)
       .filter(([k, v]) => k !== "any" && mcap >= v.lo && mcap < v.hi).map(([k]) => k);
-    ok(`a $${Math.round(mcap).toLocaleString()} call lands in exactly one sleeve`, hits.length === 1, hits.join(",") || "NONE");
+    ok(`a $${mcap.toLocaleString()} call lands in exactly one sleeve`, hits.length === 1, hits.join(",") || "NONE");
   }
 }
 

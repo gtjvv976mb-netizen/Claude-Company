@@ -208,7 +208,11 @@ export function screen(ev) {
   const mcap = p.marketCap ?? p.fdv ?? null;
   check(s.maxMarketCapUsd > 0 && mcap != null && mcap > s.maxMarketCapUsd,
     "too_big", `market cap $${Math.round(mcap ?? 0).toLocaleString()} is over the ` +
-      `$${Math.round(s.maxMarketCapUsd || 0).toLocaleString()} ceiling — a holding, not a memecoin trade`);
+      `$${Math.round(s.maxMarketCapUsd || 0).toLocaleString()} ceiling — above the board`);
+  // Below the board's floor there is not enough coin to trade and the pool is one wallet.
+  check(s.minMarketCapUsd > 0 && mcap != null && mcap < s.minMarketCapUsd,
+    "too_small", `market cap $${Math.round(mcap ?? 0).toLocaleString()} is under the ` +
+      `$${Math.round(s.minMarketCapUsd || 0).toLocaleString()} floor — too little coin to trade`);
 
   check(ev.exitProbe?.roundTripLossPct != null && ev.exitProbe.roundTripLossPct > cfg.maxRoundTripSlippagePct,
     "cannot_exit", `round-trip loss ${ev.exitProbe.roundTripLossPct}% > ceiling ${cfg.maxRoundTripSlippagePct}% at $${cfg.targetSizeUsd}`);
