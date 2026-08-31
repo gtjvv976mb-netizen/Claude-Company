@@ -297,7 +297,13 @@ export function decide(floorNo, call) {
     return { verdict: "skipped",
       reason: `$${Math.round(mcap).toLocaleString()} cap is outside this floor's ${s.mcap_tier} sleeve (${tier.note})` };
 
-  if (call.conviction != null && call.conviction < s.preset.minConviction)
+  /* A published house call has already cleared the desk's mandate and safety gates.
+   * Applying the HQ copy preset here was a second, contradictory conviction vote:
+   * the house could publish a 30-conviction mandate pick and then refuse to deliver
+   * it to its own executor because the aggressive copy bar is 40. Floor 50 bypasses
+   * only this tenant preference; platform, category, liquidity, sleeve, sizing and
+   * open-book brakes above and below remain identical. Tenant floors keep their bar. */
+  if (floorNo !== 50 && call.conviction != null && call.conviction < s.preset.minConviction)
     return { verdict: "skipped", reason: `conviction ${Math.round(call.conviction)} is under this floor's bar of ${s.preset.minConviction}` };
 
   const open = openCount(floorNo);

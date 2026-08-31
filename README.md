@@ -4,17 +4,16 @@ A fifty-floor building. Every floor is one automated Solana research desk. Its c
 decision path has fourteen seats including the CEO; the standing Regime and Review seats
 bring the permanent team to sixteen. Grok floors may add an alternate PM brain.
 
-Floor 50 is the headquarters. Floors 1–49 are tenancies at 50 USDC, one-time.
+Floor 50 is the headquarters. Floors 1–49 are tenancies paid once in $CLAUDECO.
 
-**This release is research and paper trading only.** The hosted desk never receives a
-private key, never signs a wallet transaction, and produces an unsigned order slip and a
-GMGN link. This repository also contains isolated, user-operated reference executors, but
-they are deliberately fail-closed in this release: setting `EXECUTE=1` makes either
-executor exit before it can trade. `EXECUTE=0` dry-run is the only supported mode until a
-durable transaction log, instruction validation, and canary testing are complete.
-The browser executor is gated too: no signer code ships in the page and the old hosted RPC
-relay returns `410 Gone` without contacting Solana. A legacy browser burner can export its
-recovery key, but must be imported into a trusted wallet to recover any remaining funds.
+**The hosted desk is research and paper accounting only.** It never receives a private
+key, never signs a wallet transaction, and produces an unsigned order slip and a GMGN
+link. This repository also contains WALL-ST-E, an isolated polling executor that runs on
+the user's own Linux host. It defaults to paper mode; an explicitly armed, supervised
+live canary can sign from a dedicated local burner only after the durable journal,
+transaction validation, two-private-RPC, freshness, fee, slippage, and risk gates pass.
+The legacy webhook executor remains dry-run-only. Browser signing is absent and the old
+hosted RPC relay returns `410 Gone` without contacting Solana.
 
 ---
 
@@ -44,6 +43,12 @@ Two permanent seats sit outside that per-token sequence: **Regime** computes the
 SOL/BTC weather used by the evidence and portfolio gates, while **Review** grades each
 closed call and gives one transferable lesson to the next PM decision.
 
+Codex is available as a separate **Improvement Engineer**, not a trading seat. It reviews
+the repository, exact prompt/test provenance, and aggregate house evaluation evidence in
+a read-only sandbox during a manually dispatched GitHub Actions run, then emits at most
+five structured proposals for human review. It has no route into Risk, PM, Execution,
+Compliance, CEO, call publication, wallets, or deploys.
+
 Stages 2–6 run **in parallel and blind to each other**. Five analysts who read each other's
 notes produce one opinion wearing five hats; the desk needs five actual opinions.
 
@@ -57,9 +62,11 @@ isn't "is this a good trade" — the PM already answered that — but "do I trus
 
 ## What a tenant actually rents
 
-A floor is a rented desk, not a window onto someone else's. Each floor has its own
-settings, its own journal, and its own research runs, which its tenant triggers and pays
-for. The building is the interface; the desk is the product.
+A floor has two complementary paths. House calls are copied to it at no model cost only
+when they clear that floor's deterministic mandate. A tenant can also dispatch a metered
+full-team workup against a mint; that run has its own journal and, if it clears the same
+publication gauntlet, can publish a call only to that floor. Settings, deliveries, runs,
+and floor-only calls remain tenant-scoped.
 
 Runs are **metered, not continuous**, and the reason is arithmetic rather than caution.
 The paid seats are deliberately tiered: Scout defaults to Haiku; the evidence-shaped
@@ -70,8 +77,9 @@ promising unlimited compute.
 
 So: a lease includes `FREE_RUNS_WITH_LEASE` runs, and further runs cost
 `RUN_PRICE_CLAUDECO` from the same $CLAUDECO credit balance the lease was paid from. The
-tenant points their team at a token; the core fourteen-seat path works it end to end; the tenant gets a
-brief and an unsigned ticket they sign themselves, or don't.
+tenant points their team at a token; the core fourteen-seat path works it end to end; the
+tenant gets a brief and an unsigned ticket they sign themselves, hand to the optional
+local executor under its own gates, or decline.
 
 ## The building
 
@@ -102,8 +110,8 @@ GitHub Pages automatically:
 
 1. Create the empty GitHub repo and `git push -u origin main`.
 2. In the repo: **Settings → Pages → Source: GitHub Actions** (one time).
-3. Every push to `main` then builds `dist/` and publishes it. The workflow sets `SITE_URL`
-   so link-preview images resolve absolutely.
+3. Every push to `main` then builds `dist/` and publishes it. The workflow supplies the
+   custom-domain `SITE_URL` and API base so link-preview images and API calls resolve.
 
 Local equivalents:
 
@@ -130,13 +138,19 @@ ignored database in a local checkout is not production and must never be used as
 target. The test runner creates throwaway databases for this reason.
 
 Executor webhook delivery is explicitly disabled in the production blueprint with
-`EXECUTOR_WEBHOOKS_ENABLED=0`. The durable polling feed remains available for research and
-dry-run clients, but the hosted server will not push entry or exit events to executor
-URLs. Unsigned transaction preparation is also disabled with `DESK_PREPARE_TX=0`.
+`EXECUTOR_WEBHOOKS_ENABLED=0`. The authenticated polling feed remains available to local
+paper or explicitly armed canary executors, but the hosted server will not push entry or
+exit events to executor URLs. Unsigned transaction preparation is also disabled with
+`DESK_PREPARE_TX=0`.
 The retired browser RPC endpoint always returns `410 Gone` and never contacts the upstream
 Solana RPC.
 
-After deployment, verify `/api/lease/config`, `/api/stats/overview`, and `/api/heartbeat`.
+After deployment, verify `/api/lease/config`, `/api/stats/overview`, `/api/heartbeat`, and
+`/api/improvements/status`.
+A ready improvement service reports `bundleAuthConfigured: true`, and its `sourceCommit`
+must equal the exact 40-character commit SHA deployed by Render before an improvement
+review is dispatched. The public status response is deliberately coarse; the review
+bundle itself is not public.
 A reachable HTTP server does not prove that the model seats can work. `/api/heartbeat`
 reports `BLOCKED` when recent Anthropic credit failures have not been followed, at least
 five minutes later, by a successful paid seat. Its `providerCredit` object exposes the
@@ -177,6 +191,7 @@ npm run desk -- --office
 | `npm run desk` | Scout the feeds, work up the shortlist |
 | `npm run watch -- 30` | Same, every 30 minutes, with the floor open |
 | `npm run ledger` | Every proposal the desk has made |
+| `npm run improvement:bundle` | Print a local, content-addressed aggregate review bundle for diagnostics |
 | `npm test` | Run the isolated root regression suite used to gate Render deploys |
 | `node src/index.js office` | Serve the site, the tower and the floors |
 | `npm run build` | Bundle standalone pages into `dist/` with three.js inlined |
@@ -184,6 +199,59 @@ npm run desk -- --office
 
 Add `--office` to open the floor at **http://localhost:4949**. Append `?demo=1` to watch a
 scripted shift without spending anything.
+
+## Codex Improvement Engineer
+
+The improvement service is deliberately split in two:
+
+1. The live API exposes a coarse public status at `/api/improvements/status`. The full
+   `/api/improvements/review-bundle` is protected by a dedicated bearer token and returns
+   house-only aggregates, evaluation scorecards, prompt/policy hashes, and the exact test
+   manifest. It contains no symbols, mints, workup prose, tenant rows, wallets, sessions,
+   executor configuration, provider URLs, or credentials.
+2. The manually dispatched **Codex improvement review** GitHub Actions workflow is the
+   only supported worker environment. It verifies the bundle's `sourceCommit` against
+   the exact checked-out `GITHUB_SHA`, verifies both manifests and the content digest,
+   runs Codex with a read-only sandbox, approvals and agent networking disabled, and
+   writes JSON and Markdown proposals. It never runs inside Render's trading process and
+   never receives the production database or trading secrets.
+
+To activate it, configure a high-entropy `CODEX_REVIEW_TOKEN` in Render and set the
+GitHub Actions secret of the same name to the **exact same value**. Also configure these
+repository Actions secrets:
+
+- `OPENAI_API_KEY` — project-scoped credential used only by the isolated worker.
+- `CODEX_REVIEW_TOKEN` — read-only bearer credential matching Render.
+- `CODEX_ARTIFACT_KEY` — a separate random passphrase of at least 32 characters.
+
+Redeploy Render, request `/api/improvements/status`, and confirm
+`bundleAuthConfigured` is `true` and `sourceCommit` is the exact commit SHA the workflow
+will check out. A missing Render token leaves the full endpoint unavailable; a missing or
+mismatched GitHub token cannot fetch it. Dispatch the workflow only after Render is on
+that exact commit, because the worker rejects stale or differently built bundles.
+
+The workflow uploads only `codex-improvement-review.tar.gz.gpg`, encrypted with GPG and
+retained for seven days. Download it and decrypt it without putting the passphrase in
+shell history:
+
+```bash
+read -rs CODEX_ARTIFACT_KEY
+printf '%s' "$CODEX_ARTIFACT_KEY" | gpg --batch --yes --pinentry-mode loopback \
+  --passphrase-fd 0 --output codex-improvement-review.tar.gz \
+  --decrypt codex-improvement-review.tar.gz.gpg
+unset CODEX_ARTIFACT_KEY
+mkdir codex-improvement-review
+tar -xzf codex-improvement-review.tar.gz -C codex-improvement-review
+```
+
+Keep the artifact key outside the repository and rotate it periodically and immediately
+after suspected exposure. If old artifacts still matter, retain their prior key securely
+until their seven-day retention window expires. An artifact is advice, never a patch or
+approval: the service cannot auto-apply, commit, push, merge, deploy, or trade. Every
+proposal still requires a human-owned branch, full tests, review, and explicit merge. The
+worker also rejects policy-change proposals until there are at least 100 distinct,
+actually published assets with comparable 24-hour signals from the current decision
+manifest and at least 80% resolved-mark coverage.
 
 ## The trading floor
 
@@ -198,16 +266,17 @@ The CEO's office is the one room no other agent enters.
 ## How an order reaches you
 
 GMGN sits behind Cloudflare bot protection, so this desk **cannot** reach it server-side and
-does not try. Instead an approved order becomes:
+does not try. Instead a published call becomes:
 
 1. an order slip in `reports/` — ruling, size, stop, conditions, and what the desk got wrong;
 2. a **GMGN deep link** you open in your own browser, where your wallet lives;
 3. optionally, a real **unsigned** Jupiter transaction, if you set `DESK_WALLET_PUBKEY`.
 
-`DESK_WALLET_PUBKEY` is a **public** key. There is no code path in this project that reads,
-requests, stores or accepts a private key or seed phrase in the hosted desk. The separate
-reference executors load a key only on the user's own machine; in this release they refuse
-live mode and may be used only with `EXECUTE=0` for dry-run decisions.
+`DESK_WALLET_PUBKEY` is a **public** key. The hosted desk never reads, requests, stores, or
+accepts a private key or seed phrase. WALL-ST-E loads a dedicated burner only on the
+user's machine; paper mode is the default, and the sole live-capable path is the local
+polling canary documented in `executor/README.md`. The legacy webhook adapter remains
+dry-run-only.
 
 ## What it costs
 
@@ -228,9 +297,10 @@ a model call. To spend less, lower `DESK_MAX_CANDIDATES` or override an individu
   rather than estimating it.
 - **Nothing here has an edge until you have graded it.** Read the first weeks of the journal
   as a backtest you are watching forward.
-- **Live executor signing is intentionally unavailable in this release.** Both reference
-  executors exit immediately if `EXECUTE=1`, browser signer/swap code is absent, and the
-  retired browser RPC returns `410 Gone`; dry-run output is not evidence of fill quality.
+- **The live executor is an experimental local canary, not evidence of an edge.** It is
+  Metis exact-in/classic-SPL-only, hard-capped, and requires operator-owned infrastructure;
+  browser and webhook signing remain disabled. Dry runs, simulations, and successful fills
+  do not establish positive expectancy.
 
 ## The charter
 

@@ -5,8 +5,9 @@ import { POLICY_DEFAULTS, POLICY_VERSION, pricePolicy } from "../executor/trade-
 /**
  * THE CALL SHEET — what the house team is actually doing.
  *
- * There is ONE trading team, in the penthouse. A floor is a seat that copies it, not a
- * separate team, so this costs the same whether one tenant is watching or fifty.
+ * The penthouse publishes the shared house sheet once, and deterministic floor filters
+ * copy it without another model bill. A paid tenant workup can also publish a scoped call
+ * to its source floor; source_floor/source_scope preserve which path produced each row.
  *
  * A call is research plus an unsigned ticket. The desk never signs, never sends, never
  * holds a key. "Exit" here means the house has published an exit call — never that
@@ -20,6 +21,9 @@ CREATE TABLE IF NOT EXISTS calls (
   symbol        TEXT,
   category      TEXT,
   launchpad     TEXT,
+  source_floor  INTEGER,
+  source_scope  TEXT NOT NULL DEFAULT 'unattributed',
+  source_attributed INTEGER NOT NULL DEFAULT 0,
   status        TEXT NOT NULL DEFAULT 'live',   -- live | closed
   conviction    REAL,
   entry_ref     REAL,          -- the mark when the call was published
@@ -69,6 +73,15 @@ ensureColumn("calls", "desk_size_usd", "REAL");
 ensureColumn("calls", "desk_risk_usd", "REAL");
 ensureColumn("calls", "desk_equity_usd", "REAL");
 ensureColumn("calls", "policy_version", "TEXT");
+// Historical calls were not stamped at publication, so NULL cannot safely be called
+// house evidence. Only new, explicitly attributed rows enter improvement scorecards.
+ensureColumn("calls", "source_floor", "INTEGER");
+ensureColumn("calls", "source_scope", "TEXT NOT NULL DEFAULT 'unattributed'");
+ensureColumn("calls", "source_attributed", "INTEGER NOT NULL DEFAULT 0");
+db.exec(`CREATE INDEX IF NOT EXISTS idx_calls_provenance
+         ON calls(source_attributed,source_scope,opened_at,closed_at)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_calls_closed_provenance
+         ON calls(source_attributed,source_scope,closed_at)`);
 
 export function openCall(c) {
   // Every pump.fun-origin call carries the one invalidation the research pass
@@ -79,11 +92,13 @@ export function openCall(c) {
   }
   try {
     const info = db.prepare(`
-      INSERT INTO calls (mint,symbol,category,launchpad,image_url,conviction,entry_ref,entry_lo,entry_hi,stop,target,
+      INSERT INTO calls (mint,symbol,category,launchpad,source_floor,source_scope,source_attributed,image_url,conviction,entry_ref,entry_lo,entry_hi,stop,target,
                          thesis,invalidation,flags_at_call,liq_at_call,rt_loss_at_call,mcap_at_call,
                          desk_size_usd,desk_risk_usd,desk_equity_usd,policy_version,opened_at,report_file,last_verified_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-      c.mint, c.symbol ?? null, c.category ?? null, c.launchpad ?? null, c.imageUrl ?? null, c.conviction ?? null,
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      c.mint, c.symbol ?? null, c.category ?? null, c.launchpad ?? null,
+      c.sourceFloor ?? null, c.sourceScope ?? "unattributed", c.sourceAttributed === true ? 1 : 0,
+      c.imageUrl ?? null, c.conviction ?? null,
       c.entryRef ?? null, c.entryLo ?? null, c.entryHi ?? null, c.stop ?? null, c.target ?? null,
       c.thesis ?? null, c.invalidation ?? null,
       c.flags == null ? null : JSON.stringify(c.flags), c.liqUsd ?? null, c.rtLossPct ?? null, c.mcapUsd ?? null,

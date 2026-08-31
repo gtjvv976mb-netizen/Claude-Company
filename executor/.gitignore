@@ -1,1 +1,7 @@
 node_modules/
+burner.json
+.cc-executor.env
+.cc-executor.sqlite*
+.cc-executor.lock
+PAUSE_ENTRIES
+HARD_STOP

@@ -74,7 +74,7 @@ function runOne({ managed, calls, rand, cfg, deskLag }) {
     const call = { mint: "m" + n, symbol: "C" + n, size_sol: cfg.maxSolPerTrade, stop, target, ts: n };
 
     // Calls arrive over TIME. Feeding the engine a fake never-rolling day meant the
-    // 0.5 SOL daily deploy cap filled after 10 trades and silently skipped the rest
+    // 0.5 SOL rolling deploy cap filled after 10 trades and skipped the rest
     // of the run — the sample was a tenth of what the header claimed. Space calls
     // CALL_GAP_H apart and roll the day properly.
     const now = n * CALL_GAP_H * 3600e3;

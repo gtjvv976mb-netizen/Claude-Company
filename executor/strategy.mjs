@@ -87,7 +87,7 @@ export function planEntry({ call, cfg = DEFAULTS, state }) {
   if (state.openCount >= c.maxOpenPositions)
     return { action: "skip", reason: `already holding ${state.openCount} of max ${c.maxOpenPositions}` };
   if (state.realizedTodaySol <= -Math.abs(c.dailyLossLimitSol))
-    return { action: "skip", reason: `daily loss limit hit (${state.realizedTodaySol.toFixed(3)} SOL)` };
+    return { action: "skip", reason: `rolling 24h loss limit hit (${state.realizedTodaySol.toFixed(3)} SOL)` };
 
   // A call with no stop cannot be risk-managed; refuse it rather than hold
   // something with no floor under it.
@@ -99,6 +99,8 @@ export function planEntry({ call, cfg = DEFAULTS, state }) {
   const stopFrac = (entry - Number(call.stop)) / entry;
   const targetFrac = call.target != null ? (Number(call.target) - entry) / entry : null;
   if (!(stopFrac > 0)) return { action: "skip", reason: "stop is at or above entry" };
+  const observedFriction = Math.max(0, Number(c.measuredRoundTripLossPct) || 0) / 100;
+  const effectiveStopFrac = Math.min(1, stopFrac + observedFriction);
 
   // ── R_net, with costs on BOTH sides. A bracket that looks like 1.25R gross is
   //    often under 1.0 once the round trip is paid for. ──
@@ -127,14 +129,11 @@ export function planEntry({ call, cfg = DEFAULTS, state }) {
     why = `half-Kelly ${(f * 100).toFixed(2)}% (W ${(W * 100).toFixed(0)}%, R_net ${rNet.toFixed(2)})`;
   }
 
-  // ── book heat: correlated names share one budget ──
-  const heat = state.bookHeat ?? 0;
-  if (heat + f > c.bookHeatMax)
-    return { action: "skip", reason: `book heat ${(heat * 100).toFixed(1)}% + ${(f * 100).toFixed(1)}% exceeds ${(c.bookHeatMax * 100).toFixed(0)}%` };
-
   // ── translate risk into position size, then obey the flat caps ──
   const equity = state.equitySol ?? c.dailySolCap;
-  let want = (f * equity) / stopFrac;
+  if (!Number.isFinite(Number(equity)) || Number(equity) <= 0)
+    return { action: "skip", reason: "equity is unavailable for risk sizing" };
+  let want = (f * equity) / effectiveStopFrac;
   /* THE FIXED FUND (owner's rule): when fixedSol is set, every trade is the same
    * size, full stop. Kelly still ran above for a reason — its SKIP verdicts (bad
    * bracket, hit rate under break-even, book too hot) still refuse the trade. The
@@ -144,13 +143,27 @@ export function planEntry({ call, cfg = DEFAULTS, state }) {
   want = Math.min(want, c.maxSolPerTrade);
   if (call.size_sol != null) want = Math.min(want, Number(call.size_sol));
 
-  if (state.deployedTodaySol + want > c.dailySolCap)
-    return { action: "skip", reason: `daily deploy cap (${state.deployedTodaySol.toFixed(3)}/${c.dailySolCap} SOL)` };
-  if (state.spendableSol != null && want > state.spendableSol)
+  // Fixed notional is subordinate to the risk rails. Recompute the fraction from
+  // the final capped size (plus worst-case entry/exit network fees), then enforce
+  // both the per-name and aggregate heat limits on the exposure actually proposed.
+  const feeReserve = Math.max(0, Number(c.networkFeeReserveSol) || 0);
+  const actualF = (want * effectiveStopFrac + 2 * feeReserve) / Number(equity);
+  if (!Number.isFinite(actualF) || actualF < 0)
+    return { action: "skip", reason: "actual risk fraction is invalid" };
+  if (actualF > c.fNameMax)
+    return { action: "skip", reason: `actual stop risk ${(actualF * 100).toFixed(2)}% exceeds per-name cap ${(c.fNameMax * 100).toFixed(2)}%` };
+  const heat = state.bookHeat ?? 0;
+  if (heat + actualF > c.bookHeatMax)
+    return { action: "skip", reason: `book heat ${(heat * 100).toFixed(1)}% + ${(actualF * 100).toFixed(1)}% exceeds ${(c.bookHeatMax * 100).toFixed(0)}%` };
+
+  if (state.deployedTodaySol + want + feeReserve > c.dailySolCap)
+    return { action: "skip", reason: `rolling 24h deploy cap (${state.deployedTodaySol.toFixed(3)}/${c.dailySolCap} SOL)` };
+  if (state.spendableSol != null && want + feeReserve > state.spendableSol)
     return { action: "skip", reason: "insufficient balance after the fee reserve" };
   if (!(want > 0.0005)) return { action: "skip", reason: "the sized position rounds to nothing" };
 
-  return { action: "buy", sol: want, f, rNet, wMin, reason: why };
+  return { action: "buy", sol: want, f: actualF, estimatedF: f, rNet, wMin,
+    reason: `${why}; actual stop risk ${(actualF * 100).toFixed(2)}%` };
 }
 
 /** Fresh position record, created after a fill. */
@@ -182,17 +195,9 @@ export function stepPosition({ pos, mark, deskExit = null, cfg = DEFAULTS, nowMs
     policyVersion: d.policyVersion };
 }
 
-/** Roll the daily counters when the day boundary passes. */
-export function rollDay(state, now, dayMs = 86400e3) {
-  if (now - state.dayStart >= dayMs) {
-    state.dayStart = now;
-    state.deployedTodaySol = 0;
-    state.realizedTodaySol = 0;
-  }
-  return state;
-}
-
 export const freshState = (now = 0) => ({
+  // These compatibility names are rolling 24-hour values derived from the durable
+  // risk_events ledger. They are never reset at a day boundary.
   dayStart: now, deployedTodaySol: 0, realizedTodaySol: 0,
   openCount: 0, spendableSol: null,
   // the sizing inputs: the closed sample, the equity Kelly is a fraction OF,

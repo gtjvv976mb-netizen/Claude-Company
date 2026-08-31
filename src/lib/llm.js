@@ -1,18 +1,28 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
-import { emit } from "./bus.js";
-import { CHARTER } from "../config.js";
-import db from "./store.js";
+import { emit, runContext } from "./bus.js";
+import { CHARTER, cfg } from "../config.js";
+import db, { ensureColumn } from "./store.js";
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS llm_spend (
   id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  floor    INTEGER,
+  floor_attributed INTEGER NOT NULL DEFAULT 0,
+  evidence_scope TEXT NOT NULL DEFAULT 'unattributed',
   seat     TEXT, model TEXT, effort TEXT,
   in_tok   INTEGER, out_tok INTEGER, cached_tok INTEGER,
   usd      REAL, ts INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_spend_ts ON llm_spend(ts);
 `);
+ensureColumn("llm_spend", "floor", "INTEGER");
+// Existing nulls predate floor attribution and may contain tenant spend. Keep them out
+// of house-only improvement evidence rather than laundering unknown provenance as HQ.
+ensureColumn("llm_spend", "floor_attributed", "INTEGER NOT NULL DEFAULT 0");
+ensureColumn("llm_spend", "evidence_scope", "TEXT NOT NULL DEFAULT 'unattributed'");
+db.exec(`CREATE INDEX IF NOT EXISTS idx_spend_floor_ts
+         ON llm_spend(floor_attributed,evidence_scope,floor,ts)`);
 
 /** Billing failures are terminal for a cycle: retrying just burns time. */
 export class OutOfCredit extends Error {}
@@ -69,8 +79,14 @@ export const HOURLY_BURST = Math.max(1, Number(process.env.DESK_HOURLY_BURST || 
 /** Throws before any tokens are spent if this lane's share of the last 24h is gone. */
 export function assertDailyBudget(capUsd, { lane = "cycle" } = {}) {
   if (!capUsd || capUsd <= 0) return;
-  const spent = spendSince(Date.now() - 24 * 3600e3).usd;
+  const totalSpent = spendSince(Date.now() - 24 * 3600e3).usd;
+  const spent = spendSince(Date.now() - 24 * 3600e3,
+    { evidenceScope: "house", includeUnattributed: true }).usd;
   const yields = OPPORTUNISTIC.has(lane);
+  if (totalSpent >= capUsd) {
+    throw new BudgetExhausted(
+      `daily provider budget spent: $${totalSpent.toFixed(2)} of $${capUsd} in 24h`);
+  }
 
   // Pace first: it is the brake that keeps the desk alive at 3am, and it binds long
   // before the daily cap does. The tenant's own paid run never waits on it.
@@ -85,7 +101,8 @@ export function assertDailyBudget(capUsd, { lane = "cycle" } = {}) {
      * llm.js is below penthouse in the graph and must not reach back up. */
     const cycleBudget = Number(process.env.PENTHOUSE_CYCLE_BUDGET_USD || 4);
     const hourCap = Math.max((capUsd / 24) * HOURLY_BURST, cycleBudget * 1.25);
-    const spentHour = spendSince(Date.now() - 3600e3).usd;
+    const spentHour = spendSince(Date.now() - 3600e3,
+      { evidenceScope: "house", includeUnattributed: true }).usd;
     if (spentHour >= hourCap) {
       emit("cycle:paced", { lane, spentHourUsd: spentHour, hourCapUsd: Number(hourCap.toFixed(2)),
         dayUsd: spent, capUsd });
@@ -93,6 +110,13 @@ export function assertDailyBudget(capUsd, { lane = "cycle" } = {}) {
         `hourly pace reached: $${spentHour.toFixed(2)} of $${hourCap.toFixed(2)} this hour ` +
         `— the desk paces $${capUsd} across the day so it is still working tonight; monitoring continues`);
     }
+  }
+
+  // Paid floor work skips pacing and the house reserve, but it cannot spend past the
+  // provider-account hard ceiling. The caller's existing failure path handles refunding
+  // a run that dies before a model is asked.
+  if (lane === "floor") {
+    return;
   }
 
   const laneCap = yields ? capUsd * OPPORTUNISTIC_SHARE : capUsd;
@@ -117,29 +141,124 @@ const PRICE = {
   "claude-haiku-4-5":{ in: 1.0,  out: 5.0  },
 };
 
+// Reservations use deliberately conservative rates, not the selected model's best
+// case. This covers server-side fallback, cache-write premiums, and concurrent seats.
+const PROVIDER_RESERVATION_PRICE = {
+  // $20/MTok covers the most expensive configured model's 1-hour cache-write
+  // rate. This checkout only requests 5-minute cache entries, but reservations
+  // are a ceiling, not an estimate.
+  anthropic: { in: 20, out: 50, search: 0.01, inputOverhead: 4096,
+    serverToolContextTokens: 1_000_000 },
+  // Grok 4.6 doubles token rates above its long-context threshold.
+  xai: { in: 4, out: 12, search: 0.005, inputOverhead: 2048,
+    serverToolContextTokens: 500_000 },
+};
+let reservedProviderUsd = 0;
+let unpersistedProviderUsd = 0;
+
+const rawProviderSpendUsd = (sinceMs) => Number(db.prepare(
+  "SELECT COALESCE(SUM(usd),0) usd FROM llm_spend WHERE ts>=?").get(sinceMs)?.usd || 0) +
+  unpersistedProviderUsd;
+
+export function noteUnpersistedProviderSpend(usd) {
+  unpersistedProviderUsd += Math.max(0, Number(usd) || 0);
+}
+
+/** Reserve a worst-case model call before it starts. The synchronous check/increment
+ * makes parallel analyst launches atomic within the process, so five calls cannot all
+ * observe the same last dollar and overshoot it together. */
+export function reserveProviderBudget({ provider = "anthropic", maxTokens = 16000,
+  maxSearches = 0, payload = "", capUsd = cfg.dailyBudgetUsd } = {}) {
+  if (!(capUsd > 0)) return { usd: 0, release() {} };
+  const price = PROVIDER_RESERVATION_PRICE[provider];
+  if (!price) throw new Error(`unknown provider budget: ${provider}`);
+  let serialized;
+  try { serialized = typeof payload === "string" ? payload : JSON.stringify(payload); }
+  catch { serialized = String(payload); }
+  // One token can never contain less than one source byte, so bytes are a safe upper
+  // bound on input tokens; fixed overhead covers request/tool framing not in payload.
+  const requestInputCeiling = Buffer.byteLength(serialized || "", "utf8") + price.inputOverhead;
+  // Server-side search results are injected after the request leaves this process, so
+  // payload bytes cannot reserve them. When tools are enabled, reserve a complete
+  // model context at the provider's highest applicable input/cache-write rate.
+  const inputTokenCeiling = Math.max(requestInputCeiling,
+    maxSearches > 0 ? price.serverToolContextTokens : 0);
+  const outputTokenCeiling = Math.max(1, Math.min(100_000, Number(maxTokens) || 16000));
+  const searchCeiling = Math.max(0, Math.min(10_000, Number(maxSearches) || 0));
+  const usd = inputTokenCeiling / 1e6 * price.in +
+    outputTokenCeiling / 1e6 * price.out + searchCeiling * price.search;
+  const spent = rawProviderSpendUsd(Date.now() - 24 * 3600e3);
+  if (spent + reservedProviderUsd + usd > capUsd) {
+    throw new BudgetExhausted(
+      `metered provider ceiling: $${spent.toFixed(2)} spent + $${reservedProviderUsd.toFixed(2)} reserved; ` +
+      `next call needs up to $${usd.toFixed(2)} of the $${capUsd.toFixed(2)} limit`);
+  }
+  reservedProviderUsd += usd;
+  let released = false;
+  return { usd, release() {
+    if (released) return;
+    released = true;
+    reservedProviderUsd = Math.max(0, reservedProviderUsd - usd);
+  } };
+}
+
+export async function withProviderBudget(options, fn) {
+  const reservation = reserveProviderBudget(options);
+  try { return await fn(); }
+  finally { reservation.release(); }
+}
+
 export const spend = { usd: 0, calls: 0, inTok: 0, outTok: 0, cachedTok: 0 };
 
-function meter(model, usage, seat, effort) {
-  const p = PRICE[model] || PRICE["claude-opus-5"];
-  const i = usage?.input_tokens ?? 0;
-  const o = usage?.output_tokens ?? 0;
-  const cached = usage?.cache_read_input_tokens ?? 0;
-  spend.usd += (i / 1e6) * p.in + (o / 1e6) * p.out;
+/** Cost one completed Anthropic response from provider-reported usage. Cache fields
+ * are separate from input_tokens. Cache writes are charged at the maximum supported
+ * 2x duration and reads at their documented 0.1x rate, so a future duration change
+ * cannot make the local hard brake optimistic. */
+export function anthropicUsageCost(requestedModel, message) {
+  const model = message?.model || requestedModel;
+  const p = PRICE[model] || { in: 10, out: 50 };
+  const usage = message?.usage || {};
+  const uncached = Math.max(0, Number(usage.input_tokens) || 0);
+  const cacheWrite = Math.max(0, Number(usage.cache_creation_input_tokens) || 0);
+  const cacheRead = Math.max(0, Number(usage.cache_read_input_tokens) || 0);
+  const output = Math.max(0, Number(usage.output_tokens) || 0);
+  const searches = Math.max(0, Number(usage.server_tool_use?.web_search_requests) || 0);
+  const usd = uncached / 1e6 * p.in + cacheWrite / 1e6 * p.in * 2 +
+    cacheRead / 1e6 * p.in * 0.1 + output / 1e6 * p.out + searches * 0.01;
+  return { model, uncached, cacheWrite, cacheRead, output, searches, usd };
+}
+
+export function meterAnthropicUsage(requestedModel, message, seat, effort) {
+  const cost = anthropicUsageCost(requestedModel, message);
+  const { model, uncached, cacheWrite, cacheRead, output, usd } = cost;
+  const totalInput = uncached + cacheWrite + cacheRead;
+  spend.usd += usd;
   spend.calls += 1;
-  spend.inTok += i;
-  spend.outTok += o;
-  spend.cachedTok += cached;
-  const usd = (i / 1e6) * p.in + (o / 1e6) * p.out;
+  spend.inTok += totalInput;
+  spend.outTok += output;
+  spend.cachedTok += cacheRead;
+  const context = runContext.getStore();
+  const floor = context?.floor ?? null;
+  const evidenceScope = context?.evidenceScope ??
+    (floor == null || Number(floor) === 50 ? "house" : "tenant");
   try {
-    db.prepare("INSERT INTO llm_spend (seat,model,effort,in_tok,out_tok,cached_tok,usd,ts) VALUES (?,?,?,?,?,?,?,?)")
-      .run(seat ?? null, model, effort ?? null, i, o, cached, usd, Date.now());
-  } catch {}   // metering must never break a run
+    db.prepare("INSERT INTO llm_spend (floor,floor_attributed,evidence_scope,seat,model,effort,in_tok,out_tok,cached_tok,usd,ts) VALUES (?,1,?,?,?,?,?,?,?,?,?)")
+      .run(floor, evidenceScope, seat ?? null, model, effort ?? null,
+        totalInput, output, cacheRead, usd, Date.now());
+  } catch { noteUnpersistedProviderSpend(usd); } // preserve the brake even if the ledger is unavailable
+  return cost;
 }
 
 /** What the desk has actually spent, from the database rather than a live process. */
-export function spendSince(sinceMs) {
-  const row = db.prepare("SELECT COUNT(*) calls, COALESCE(SUM(usd),0) usd, COALESCE(SUM(in_tok),0) inTok, COALESCE(SUM(out_tok),0) outTok FROM llm_spend WHERE ts >= ?")
-    .get(sinceMs ?? 0);
+export function spendSince(sinceMs, { evidenceScope, includeUnattributed = false } = {}) {
+  const scoped = evidenceScope == null ? ""
+    : includeUnattributed
+      ? " AND ((floor_attributed=1 AND evidence_scope=?) OR floor_attributed=0)"
+      : " AND floor_attributed=1 AND evidence_scope=?";
+  const row = db.prepare(`SELECT COUNT(*) calls, COALESCE(SUM(usd),0) usd,
+    COALESCE(SUM(in_tok),0) inTok, COALESCE(SUM(out_tok),0) outTok
+    FROM llm_spend WHERE ts >= ?${scoped}`)
+    .get(...(evidenceScope == null ? [sinceMs ?? 0] : [sinceMs ?? 0, evidenceScope]));
   return { ...row, usd: Number(row.usd.toFixed(4)) };
 }
 
@@ -211,10 +330,12 @@ export async function ask({
         req.betas = ["server-side-fallback-2026-07-01"];
         req.fallbacks = "default";
       }
-      const stream = client.beta.messages.stream(req);
-      const res = await stream.finalMessage();
-
-      meter(model, res.usage, seat, effort);
+      const res = await withProviderBudget({ provider: "anthropic", maxTokens, payload: req }, async () => {
+        const stream = client.beta.messages.stream(req);
+        const message = await stream.finalMessage();
+        meterAnthropicUsage(model, message, seat, effort);
+        return message;
+      });
 
       if (res.stop_reason === "max_tokens") {
         throw new Error(`${seat}: ran out of tokens before answering (effort ${effort}, cap ${maxTokens})`);
@@ -274,7 +395,7 @@ export async function askWithWeb({ seat, model, effort, schema, prompt, system, 
   // charter forbids. Retry, then say plainly that the tool failed.
   let research = null, searchError = null;
   for (let attempt = 1; attempt <= 3; attempt++) {
-    research = await client.messages.create({
+    const req = {
       model,
       max_tokens: maxTokens,
       system: SHARED_RULES + (system ? `\n\n${system}` : ""),
@@ -283,8 +404,13 @@ export async function askWithWeb({ seat, model, effort, schema, prompt, system, 
       tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 2 }],
       output_config: { effort },
       messages: [{ role: "user", content: prompt }],
+    };
+    research = await withProviderBudget({ provider: "anthropic", maxTokens,
+      maxSearches: 2, payload: req }, async () => {
+      const message = await client.messages.create(req);
+      meterAnthropicUsage(model, message, seat, effort);
+      return message;
     });
-    meter(model, research.usage, seat, effort);
 
     const errs = research.content
       .filter((b) => b.type === "web_search_tool_result" && !Array.isArray(b.content))

@@ -30,6 +30,10 @@ const SITE_URL = (process.env.SITE_URL || "https://claudedotcompany.com").replac
 // Where the API lives. Empty means "same origin", which is right for local dev and wrong
 // for a static host — Pages cannot run the scanner or the database.
 const API_BASE = (process.env.API_BASE || "").replace(/\/$/, "");
+const SOURCE_COMMIT = /^[0-9a-f]{40}$/i.test(String(
+  process.env.SOURCE_COMMIT || process.env.GITHUB_SHA || process.env.RENDER_GIT_COMMIT || "",
+)) ? String(process.env.SOURCE_COMMIT || process.env.GITHUB_SHA || process.env.RENDER_GIT_COMMIT).toLowerCase()
+  : "<PUBLISHED_COMMIT_SHA>";
 
 const { source: THREE_SRC, exportCount } = inlineThree();
 const THREE_REV = JSON.parse(
@@ -47,9 +51,15 @@ fs.copyFileSync(path.join(ROOT, "token", "claudeco-64.png"), path.join(OUT, "ass
 
 // The self-hosted executor, served static so the one-command install resolves.
 fs.mkdirSync(path.join(OUT, "executor"), { recursive: true });
-for (const f of ["poller.mjs", "install.sh", "executor.mjs", "README.md", "strategy.mjs", "trade-policy.mjs", "simulate.mjs"]) {
+const EXECUTOR_FILES = [
+  "poller.mjs", "journal.mjs", "jupiter.mjs", "install.sh", "executor.mjs",
+  "README.md", "strategy.mjs", "trade-policy.mjs", "simulate.mjs",
+  "package.json", "package-lock.json",
+];
+for (const f of EXECUTOR_FILES) {
   const src = path.join(ROOT, "executor", f);
-  if (fs.existsSync(src)) fs.copyFileSync(src, path.join(OUT, "executor", f));
+  if (!fs.existsSync(src)) throw new Error(`missing executor artifact: ${f}`);
+  fs.copyFileSync(src, path.join(OUT, "executor", f));
 }
 
 // GitHub Pages reads dist/CNAME to bind the custom domain.
@@ -62,6 +72,7 @@ for (const { src: name, out } of PAGES) {
   const src = path.join(VIEWER, name);
   if (!fs.existsSync(src)) continue;
   let html = fs.readFileSync(src, "utf8");
+  html = html.replaceAll("__CLAUDE_COMPANY_SOURCE_COMMIT__", SOURCE_COMMIT);
   const srcClosers = (html.match(/<\/script/gi) || []).length;
 
   if (IMPORT_LINE.test(html)) {

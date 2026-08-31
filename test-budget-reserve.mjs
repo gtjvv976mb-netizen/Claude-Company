@@ -12,7 +12,16 @@
  * still go through.
  */
 import db from "./src/lib/store.js";
-import { assertDailyBudget, BudgetExhausted, OPPORTUNISTIC_SHARE, spendSince } from "./src/lib/llm.js";
+import { grokUsageCost } from "./src/lib/grok.js";
+import {
+  anthropicUsageCost,
+  assertDailyBudget,
+  BudgetExhausted,
+  meterAnthropicUsage,
+  OPPORTUNISTIC_SHARE,
+  reserveProviderBudget,
+  spendSince,
+} from "./src/lib/llm.js";
 
 let pass = 0, fail = 0;
 const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  — " + d : ""}`))
@@ -72,6 +81,78 @@ ok("and the cycle can still afford a full mandate hunt", allowed(CAP, "cycle"),
 const huntable = Math.floor((CAP - spent) / PER_WORKUP);
 ok("which is more than one cycle's shortlist plus a deep hunt", huntable >= 20,
   `${huntable} workups available to the publisher`);
+
+console.log("\nEVERY MODEL CALL RESERVES THE WORST CASE BEFORE IT STARTS");
+setSpend(0);
+const reservationOptions = { provider: "anthropic", maxTokens: 8000,
+  payload: "small fixture", capUsd: 0.7 };
+const firstReservation = reserveProviderBudget(reservationOptions);
+let parallelBlocked = false;
+try { reserveProviderBudget(reservationOptions); }
+catch (error) { parallelBlocked = error instanceof BudgetExhausted; }
+ok("a parallel seat cannot spend the same remaining budget", parallelBlocked,
+  `first seat reserved up to $${firstReservation.usd.toFixed(2)}`);
+firstReservation.release();
+let afterRelease = null;
+try { afterRelease = reserveProviderBudget(reservationOptions); } catch {}
+ok("a completed seat releases unused headroom", Boolean(afterRelease));
+afterRelease?.release();
+
+setSpend(0.4);
+ok("a paid floor can begin below the cap", allowed(0.7, "floor"));
+let floorCallBlocked = false;
+try { reserveProviderBudget(reservationOptions); }
+catch (error) { floorCallBlocked = error instanceof BudgetExhausted; }
+ok("but its next provider call cannot cross the metered ceiling", floorCallBlocked);
+
+setSpend(0);
+const webReservation = reserveProviderBudget({ provider: "anthropic", maxTokens: 16_000,
+  maxSearches: 2, payload: "small web fixture", capUsd: 25 });
+ok("a web seat reserves provider-generated search context before launch",
+  webReservation.usd >= 20.8, `$${webReservation.usd.toFixed(2)} reserved`);
+let parallelWebBlocked = false;
+try {
+  reserveProviderBudget({ provider: "anthropic", maxTokens: 16_000,
+    maxSearches: 2, payload: "second web fixture", capUsd: 25 });
+} catch (error) { parallelWebBlocked = error instanceof BudgetExhausted; }
+ok("parallel web seats cannot both consume the same unmetered search headroom", parallelWebBlocked);
+webReservation.release();
+
+console.log("\nCOMPLETED CALLS REPLACE RESERVATIONS WITH CONSERVATIVE ACTUAL COST");
+setSpend(0);
+const fallbackMessage = {
+  model: "claude-fable-5",
+  usage: {
+    input_tokens: 1_000,
+    cache_creation_input_tokens: 100_000,
+    cache_read_input_tokens: 50_000,
+    output_tokens: 2_000,
+    server_tool_use: { web_search_requests: 2 },
+  },
+};
+const priced = anthropicUsageCost("claude-opus-5", fallbackMessage);
+ok("the provider's actual fallback model sets the rate", priced.model === "claude-fable-5");
+ok("cache writes, cache reads, output, and searches are all charged",
+  Math.abs(priced.usd - 2.18) < 1e-9, `$${priced.usd.toFixed(2)}`);
+meterAnthropicUsage("claude-opus-5", fallbackMessage, "budget-test", "low");
+const metered = db.prepare("SELECT model,in_tok,cached_tok,usd FROM llm_spend ORDER BY id DESC LIMIT 1").get();
+ok("the durable ledger keeps actual model and total provider-reported input",
+  metered.model === "claude-fable-5" && metered.in_tok === 151_000 &&
+    metered.cached_tok === 50_000 && Math.abs(metered.usd - 2.18) < 1e-9,
+  JSON.stringify(metered));
+let sequentialBlocked = false;
+try { reserveProviderBudget({ ...reservationOptions, capUsd: 2.6 }); }
+catch (error) { sequentialBlocked = error instanceof BudgetExhausted; }
+ok("a sequential call sees the completed cached/fallback charge", sequentialBlocked);
+
+const grokCost = grokUsageCost({
+  model: "grok-4.6-actual",
+  usage: { input_tokens: 999_999, output_tokens: 999_999,
+    input_tokens_details: { cached_tokens: 123 }, cost_in_usd_ticks: 37_756_000 },
+}, 50);
+ok("xAI uses the provider's exact all-in cost instead of a token/tool estimate",
+  grokCost.exact && grokCost.model === "grok-4.6-actual" && grokCost.cached === 123 &&
+    Math.abs(grokCost.usd - 0.0037756) < 1e-12, JSON.stringify(grokCost));
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

@@ -5,7 +5,7 @@ import { openCall, liveCalls, liveCallFor, evaluateExit, closeCall, noteEvent } 
 import { broadcast } from "./copy.js";
 import { announceExit } from "./alerts.js";
 import { listFloors, HQ_FLOOR } from "./tower.js";
-import { emit, runFor } from "./lib/bus.js";
+import { emit, runFor, runForEvidence } from "./lib/bus.js";
 import db from "./lib/store.js";
 import { spend, OutOfCredit, spendSince } from "./lib/llm.js";
 import * as jup from "./data/jupiter.js";
@@ -20,6 +20,7 @@ import * as funnel from "./funnel.js";
 import * as ds from "./data/dexscreener.js";
 import { eligibility, contenderScore, pickOne, bookState, SEQUENTIAL, MAX_LIVE_CALLS } from "./mandate.js";
 import { runBestPick } from "./agents/decision.js";
+import { linkPublishedCall } from "./evaluation.js";
 
 /**
  * THE PENTHOUSE CYCLE — the house team's working day.
@@ -854,7 +855,8 @@ export async function runPenthouseCycle({
  *   stopless, refuted and PASSed candidates are refused by mandate.js before conviction
  *   is consulted at all. The mandate lowered the CONVICTION bar; it did not touch this.
  */
-export function publishCall(rec, { category = null, launchpad: pad = null, wx = null, toFloors = null, bestPick = null } = {}) {
+export function publishCall(rec, { category = null, launchpad: pad = null, wx = null,
+  toFloors = null, bestPick = null, sourceFloor = null } = {}) {
   const e = eligibility(rec);
 
   /* RECORD THE VERDICT HERE, because this is the one place EVERY lane converges.
@@ -915,6 +917,9 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
   const ev = rec.ev ?? {};
   const call = openCall({
     mint: rec.mint, symbol: rec.symbol ?? ev.symbol, category, launchpad: pad,
+    sourceFloor,
+    sourceScope: sourceFloor == null || Number(sourceFloor) === 50 ? "house" : "tenant",
+    sourceAttributed: true,
     conviction: rec.pm?.conviction ?? null,
     imageUrl: ev.pair?.imageUrl ?? null,
     entryRef: ev.pair?.priceUsd ?? null,
@@ -935,6 +940,16 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
     reportFile: rec.reportFile ?? null,
   });
   if (call) {
+    const evidenceLinked = linkPublishedCall(rec.decisionRunId, call.id, { floorNo: sourceFloor });
+    if (evidenceLinked) {
+      noteEvent(call.id, "evidence", "linked to immutable decision evidence", call.entry_ref);
+    } else {
+      // Direct/manual callers may not carry a decision row. Keep the call operational,
+      // but exclude it from policy-learning evidence and make the gap visible.
+      noteEvent(call.id, "evidence_unlinked",
+        "not eligible for strategy scorecards: no matching attributed decision", call.entry_ref);
+      emit("call:evidence-unlinked", { callId: call.id, sourceFloor });
+    }
     // The record shows HOW FAR DOWN the desk reached for this one. A tier-4 call is
     // an approval; a tier-1 call is the mandate taking the cohort's best available
     // when nothing was approved. Both are legitimate, and they are not the same
@@ -1230,7 +1245,10 @@ export async function monitorCalls() {
           closeCall(call.id, exit.code, now.mark);
           // COLONEL DEBRIEF grades the landing — fire and forget; exits never wait.
           const landing = { ...call, closed_at: Date.now(), close_mark: now.mark, close_reason: exit.code };
-          import("./agents/review.js").then((r) => r.runDebrief(landing)).catch(() => {});
+          import("./agents/review.js").then((r) => runForEvidence({
+            floor: call.source_floor ?? null,
+            evidenceScope: call.source_attributed ? call.source_scope : "unattributed",
+          }, () => r.runDebrief(landing))).catch(() => {});
           emit("call:exit", { callId: call.id, symbol: call.symbol, code: exit.code,
             urgency: exit.urgency, detail: exit.detail, mark: now.mark });
           // Durable, per-floor, regardless of arrears — and never awaited: thirty

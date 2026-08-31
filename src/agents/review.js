@@ -78,6 +78,19 @@ never a restatement of what happened.`,
 }
 
 /** The PM's reading: the last few lessons, newest first. */
-export function recentLessons(n = 5) {
-  return db.prepare("SELECT symbol, grade, lesson FROM lessons ORDER BY id DESC LIMIT ?").all(n);
+export function recentLessons(n = 5, { evidenceScope, floorNo } = {}) {
+  if (evidenceScope === "house") {
+    return db.prepare(`SELECT l.symbol,l.grade,l.lesson FROM lessons l
+      JOIN calls c ON c.id=l.call_id
+      WHERE c.source_attributed=1 AND c.source_scope='house'
+      ORDER BY l.id DESC LIMIT ?`).all(n);
+  }
+  if (evidenceScope === "tenant" && Number.isInteger(floorNo)) {
+    return db.prepare(`SELECT l.symbol,l.grade,l.lesson FROM lessons l
+      JOIN calls c ON c.id=l.call_id
+      WHERE c.source_attributed=1 AND c.source_scope='tenant' AND c.source_floor=?
+      ORDER BY l.id DESC LIMIT ?`).all(floorNo, n);
+  }
+  // Unscoped historical feedback is not safe to mix across clients.
+  return [];
 }

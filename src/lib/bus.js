@@ -1,4 +1,4 @@
-import db from "./store.js";
+import db, { ensureColumn } from "./store.js";
 import { EventEmitter } from "node:events";
 import { AsyncLocalStorage } from "node:async_hooks";
 
@@ -9,6 +9,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
  */
 export const runContext = new AsyncLocalStorage();
 export const runFor = (floor, fn) => runContext.run({ floor }, fn);
+export const runForEvidence = ({ floor = null, evidenceScope = "unattributed" }, fn) =>
+  runContext.run({ floor, evidenceScope }, fn);
 
 // The desk narrates itself. The office view subscribes to this and turns each
 // event into a person walking somewhere and doing something.
@@ -20,6 +22,8 @@ CREATE TABLE IF NOT EXISTS chronicle (
   id    INTEGER PRIMARY KEY AUTOINCREMENT,
   ts    INTEGER NOT NULL,
   floor INTEGER,
+  floor_attributed INTEGER NOT NULL DEFAULT 0,
+  evidence_scope TEXT NOT NULL DEFAULT 'unattributed',
   type  TEXT NOT NULL,
   data  TEXT NOT NULL
 );
@@ -33,6 +37,10 @@ CREATE INDEX IF NOT EXISTS idx_chronicle_floor ON chronicle(floor, id DESC);
 -- behind any outage, which is the claim it was briefly asked to support.
 CREATE INDEX IF NOT EXISTS idx_chronicle_type_ts ON chronicle(type, ts);
 `);
+ensureColumn("chronicle", "floor_attributed", "INTEGER NOT NULL DEFAULT 0");
+ensureColumn("chronicle", "evidence_scope", "TEXT NOT NULL DEFAULT 'unattributed'");
+db.exec(`CREATE INDEX IF NOT EXISTS idx_chronicle_provenance
+         ON chronicle(floor_attributed,evidence_scope,type,ts)`);
 
 const RING = [];
 const RING_MAX = 400;
@@ -75,13 +83,27 @@ export function chroniclePrune(keep = 200_000, keepWorld = 5_000) {
 }
 
 export function emit(type, payload = {}) {
-  const floor = runContext.getStore()?.floor ?? null;
-  const ev = { type, ts: Date.now(), ...(floor != null ? { floor } : {}), ...payload };
+  const context = runContext.getStore();
+  // Older floor-specific producers use floorNo while the room stream uses floor.
+  // Canonicalize both before persistence/backlog filtering; otherwise a tenant fill,
+  // result, or alert becomes a floorless house event visible to every room.
+  const payloadFloor = Number.isInteger(payload?.floor) ? payload.floor
+    : Number.isInteger(payload?.floorNo) ? payload.floorNo : null;
+  // A destination-specific alert/fill/result may be emitted while a house publication
+  // context is still alive, so its explicit floor outranks the producer's run context.
+  // Generic stage events carry no floor and correctly inherit the run instead.
+  const floor = payloadFloor ?? context?.floor ?? null;
+  const evidenceScope = payloadFloor != null
+    ? (Number(floor) === 50 ? "house" : "tenant")
+    : context?.evidenceScope ?? (floor == null || Number(floor) === 50 ? "house" : "tenant");
+  const { floor: _ignoredFloor, ...rest } = payload || {};
+  const ev = { type, ts: Date.now(), ...rest, ...(floor != null ? { floor } : {}) };
   RING.push(ev);
   if (RING.length > RING_MAX) RING.shift();
   try {
-    db.prepare("INSERT INTO chronicle (ts, floor, type, data) VALUES (?,?,?,?)")
-      .run(ev.ts, ev.floor ?? null, type, JSON.stringify(ev));
+    db.prepare(`INSERT INTO chronicle
+      (ts,floor,floor_attributed,evidence_scope,type,data) VALUES (?,?,1,?,?,?)`)
+      .run(ev.ts, ev.floor ?? null, evidenceScope, type, JSON.stringify(ev));
   } catch {}                       // the record must never break the live stream
   bus.emit("event", ev);
   return ev;

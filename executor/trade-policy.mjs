@@ -37,6 +37,42 @@ export function policyConfigForPosition(position, baseConfig = {}) {
   };
 }
 
+/** Bind an entry to a recent independently monitored USD mark before local signing.
+ * The position policy itself remains dimensionless; ratios are anchored to this
+ * verified mark so an old authored stop cannot silently widen after a price gap. */
+export function validateEntryReference(event, {
+  nowMs = Date.now(), maxMarkAgeMs = 15 * 60_000, maxDeviationPct = 10,
+} = {}) {
+  const mark = Number(event?.current_mark);
+  const markAt = Number(event?.current_mark_at);
+  const reference = Number(event?.entry_ref);
+  const stop = Number(event?.stop);
+  if (!(mark > 0) || !Number.isFinite(markAt) || markAt <= 0)
+    throw new Error("entry has no current monitored market mark");
+  if (markAt > nowMs + 5 * 60_000 || nowMs - markAt > maxMarkAgeMs)
+    throw new Error("entry market mark is stale");
+  if (!(reference > 0) || !(stop > 0)) throw new Error("entry reference or stop is invalid");
+  const fallbackBand = Math.max(0, Number(maxDeviationPct)) / 100;
+  const low = Number(event?.entry_lo) > 0 ? Number(event.entry_lo) : reference * (1 - fallbackBand);
+  const high = Number(event?.entry_hi) > 0 ? Number(event.entry_hi) : reference * (1 + fallbackBand);
+  if (!(high >= low && low > 0)) throw new Error("authored entry zone is invalid");
+  if (mark < low || mark > high)
+    throw new Error(`current mark ${mark} is outside authored entry zone ${low}-${high}`);
+  if (mark <= stop) throw new Error(`current mark ${mark} has already breached stop ${stop}`);
+  const target = event?.target == null ? null : Number(event.target);
+  if (target != null && !(target > 0)) throw new Error("authored target is invalid");
+  if (target != null && target <= mark)
+    throw new Error(`current mark ${mark} has already reached authored target ${target}`);
+  return {
+    marketMark: mark,
+    marketMarkAt: markAt,
+    stopRatio: stop / mark,
+    targetRatio: target == null ? null : target / mark,
+    entryLow: low,
+    entryHigh: high,
+  };
+}
+
 /** Pure price-policy decision shared byte-for-byte by the server record and executor. */
 export function pricePolicy({ position, mark, deskExit = null, nowMs = Date.now(), config = {} }) {
   const c = { ...POLICY_DEFAULTS, ...config };

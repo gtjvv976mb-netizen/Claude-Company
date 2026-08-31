@@ -1,8 +1,15 @@
 import { ask } from "../lib/llm.js";
 import { z } from "zod";
 import { cfg } from "../config.js";
-import * as store from "../lib/store.js";
-import { evaluationSummary } from "../evaluation.js";
+import { runContext } from "../lib/bus.js";
+import {
+  EVALUATION_VERSION,
+  POLICY_VERSION,
+  evidenceScopeFor,
+  evaluationSummary,
+  runtimeBehaviorFingerprint,
+} from "../evaluation.js";
+import { decisionManifest } from "../provenance.js";
 
 export const CEOOut = z.object({
   ruling: z.enum(["APPROVE", "DECLINE", "HOLD"]),
@@ -24,8 +31,24 @@ export const CEOOut = z.object({
  *
  * It never signs and never sends. The signature belongs to the human whose office this is.
  */
-export async function runCEO({ ev, pm, risk, redteam, ticket, compliance }) {
-  const record = { activity: store.stats(), forwardPerformance: evaluationSummary() };
+export async function runCEO({ ev, pm, risk, redteam, ticket, compliance }, opts = {}) {
+  const floorNo = runContext.getStore()?.floor ?? null;
+  const evidenceScope = evidenceScopeFor(floorNo);
+  const record = { forwardPerformance: evaluationSummary({
+    evidenceScope,
+    ...(evidenceScope === "tenant" ? { floorNo } : {}),
+    promptManifestHash: decisionManifest().hash,
+    evaluationVersion: EVALUATION_VERSION,
+    policyVersion: POLICY_VERSION,
+    behaviorFingerprint: runtimeBehaviorFingerprint({
+      runKind: opts.lane ?? "cycle",
+      pmProvider: opts.pmProvider ?? "claude",
+    }),
+    // The mandate may publish a HELD/PROPOSE/WATCH winner after every deterministic
+    // safety gate clears. Show the CEO the desk's actual published record, not the
+    // cleaner subset of decisions the CEO previously approved.
+    decisionCohort: "published",
+  }) };
 
   return ask({
     seat: "CEO",

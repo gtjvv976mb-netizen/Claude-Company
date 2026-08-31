@@ -39,9 +39,71 @@ import * as passes from "./passes.js";
 import { callouts } from "./whales.js";
 import { retiredBrowserRpcResponse } from "./execution-gates.js";
 import { providerCreditHealth } from "./provider-health.js";
+import { currentImprovementBundle, improvementServiceStatus } from "./improvement-bundle.js";
+import {
+  eventVisibleOnFloor,
+  mayReadEventStream,
+  requestedEventFloor,
+} from "./event-stream-policy.js";
 
 /** When THIS process started. A short uptime next to a stale event is a restart. */
 const BOOTED_AT = Date.now();
+
+/** Build the authenticated poller's response after the route has checked its secret. */
+export function executorFeedPayload(floorNo, rawAfter = 0) {
+  // A malformed cursor must not bind as NaN — SQLite compares everything to NULL as
+  // false, so the bot would poll a permanently empty feed at HTTP 200 and never trade.
+  const parsedAfter = Number(rawAfter);
+  const after = Number.isFinite(parsedAfter) && parsedAfter >= 0 ? Math.floor(parsedAfter) : 0;
+  const rows = db.prepare(`
+    SELECT a.id, a.call_id, a.kind, a.mint, a.urgency, a.created_at,
+           c.symbol, c.category, c.launchpad, c.conviction,
+           c.entry_ref, c.entry_lo, c.entry_hi, c.stop, c.target, c.close_reason, c.status, c.opened_at,
+           c.liq_at_call, c.rt_loss_at_call, c.policy_version,
+           COALESCE((SELECT e.mark FROM call_events e
+                     WHERE e.call_id=c.id AND e.mark IS NOT NULL
+                     ORDER BY e.id DESC LIMIT 1), c.entry_ref) AS current_mark,
+           COALESCE((SELECT MAX(e.ts) FROM call_events e
+                     WHERE e.call_id=c.id AND e.mark IS NOT NULL), c.opened_at) AS current_mark_at,
+           (SELECT size_sol FROM deliveries d WHERE d.call_id=a.call_id AND d.floor_no=a.floor_no) AS size_sol
+    FROM alerts a LEFT JOIN calls c ON c.id=a.call_id
+    WHERE a.floor_no=? AND a.id > ? AND a.kind IN ('entry','exit')
+      -- Never hand a bot an ENTRY for a call that has already closed. After any
+      -- downtime the backlog would otherwise become instructions to market-buy
+      -- coins the desk has already exited.
+      AND NOT (a.kind = 'entry' AND c.status = 'closed')
+    ORDER BY a.id LIMIT 50`).all(floorNo, after);
+  const latestId = db.prepare(`SELECT MAX(a.id) id FROM alerts a
+    LEFT JOIN calls c ON c.id=a.call_id
+    WHERE a.floor_no=? AND a.kind IN ('entry','exit')
+      AND NOT (a.kind='entry' AND c.status='closed')`).get(floorNo)?.id ?? after;
+  /* THE FLOOR'S OWN RULES RIDE WITH THE CALL.
+   * The bot must not have to be reconfigured when a tenant changes their mind
+   * in the UI: the take-profit multiple travels on every event, so a floor
+   * switching from "sell at 2x" to "ride to 10x" takes effect on the next
+   * poll rather than on the next redeploy of somebody's VPS. 0 means auto —
+   * the bot then honours the desk's own authored target. */
+  const floorSettings = copy.settingsFor(floorNo);
+  return { cluster: "mainnet-beta", latest_id: latestId,
+    next_cursor: rows.length ? rows[rows.length - 1].id : after,
+    rules: { take_profit_x: floorSettings.take_profit_x ?? 0,
+             fixed_sol: floorSettings.fixed_sol ?? 0,
+             mcap_tier: floorSettings.mcap_tier ?? "any" },
+    events: rows.map((r) => ({
+      id: r.id, event_id: `${floorNo}:${r.kind}:${r.id}`, call_id: r.call_id,
+      type: r.kind, mint: r.mint, symbol: r.symbol,
+      side: r.kind === "entry" ? "buy" : "sell",
+      size_sol: r.size_sol ?? null, entry_ref: r.entry_ref,
+      entry_lo: r.entry_lo, entry_hi: r.entry_hi, stop: r.stop, target: r.target,
+      current_mark: r.current_mark, current_mark_at: r.current_mark_at,
+      conviction: r.conviction, category: r.category, launchpad: r.launchpad,
+      liq_at_call: r.liq_at_call, rt_loss_at_call: r.rt_loss_at_call,
+      policy_version: r.policy_version,
+      take_profit_x: floorSettings.take_profit_x ?? 0,
+      fixed_sol: floorSettings.fixed_sol ?? 0,
+      code: r.close_reason ?? null, urgency: r.urgency, ts: r.created_at,
+    })) };
+}
 
 /** Serves the trading floor and streams the desk's real events to it. */
 export function startOffice(port = Number(process.env.PORT) || 4949) {
@@ -62,26 +124,28 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
         "cache-control": "no-cache",
         connection: "keep-alive",
       });
-      // ?floor=N gives a tenant only their own desk's work; no argument is the house view.
-      const wantFloor = url.searchParams.has("floor") ? Number(url.searchParams.get("floor")) : null;
+      // ?floor=N gives a tenant only their own desk's work. No argument means HQ,
+      // never the internal all-floors backlog: a tenant must not turn a missing query
+      // parameter into a subscription to every other tenant's private stream.
+      const wantFloor = requestedEventFloor(url);
       // EventSource cannot send headers, so the tenant's token rides the query
       // string (same-origin HTTPS). A visitor to a leased floor is told plainly
       // and the stream ends — the client runs its demo shift instead.
       {
         const sid = url.searchParams.get("sid");
         const who = sid ? auth.walletFor(sid) : null;
-        // ONE wallet owns the HQ — the deed on floor 50, nobody else. Not the
-        // treasury, not a list. See tower.hqOwnerWallet().
-        const isHq = (w) => tower.isHqOwner(w);
-        let allowed;
-        if (wantFloor == null || wantFloor === 50) allowed = isHq(who) || (!!who && !!leasing.leaseOf(who));
-        else {
-          const l = leasing.leaseFor(wantFloor);
-          allowed = !!l && !!who && (l.wallet === who || !!passes.passFor(wantFloor, who));
-        }
+        const lease = wantFloor != null && wantFloor !== 50
+          ? leasing.leaseFor(wantFloor) : null;
+        const allowed = mayReadEventStream({
+          floor: wantFloor,
+          wallet: who,
+          hqOwner: tower.hqOwnerWallet(),
+          leaseWallet: lease?.wallet,
+          hasPass: Boolean(lease && who && passes.passFor(wantFloor, who)),
+        });
         if (!allowed) {
-          const l = wantFloor != null && wantFloor !== 50 ? leasing.leaseFor(wantFloor) : true;
-          res.write(`event: hello\ndata: ${JSON.stringify({ private: true, hq: wantFloor == null || wantFloor === 50, vacant: !l, floor: wantFloor })}\n\n`);
+          const exists = wantFloor === 50 || Boolean(lease);
+          res.write(`event: hello\ndata: ${JSON.stringify({ private: true, hq: wantFloor === 50, vacant: !exists, floor: wantFloor })}\n\n`);
           res.end();
           return;
         }
@@ -91,7 +155,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
       // for every visitor) and that floor's own activity. Filtering strictly to the floor
       // hid the house team entirely, so every room looked idle while the desk was busy.
       const onEvent = (ev) => {
-        if (wantFloor != null && ev.floor != null && ev.floor !== wantFloor) return;
+        if (!eventVisibleOnFloor(wantFloor, ev)) return;
         res.write(`data: ${JSON.stringify(ev)}\n\n`);
       };
       bus.on("event", onEvent);
@@ -172,14 +236,36 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
       });
 
       try {
+        /* ── CODEX IMPROVEMENT ENGINEER ─────────────────────────────────────
+         * This endpoint is intentionally aggregate-only and read-only. A separate
+         * trusted worker may inspect this exact build and produce a proposal artifact;
+         * the public trading process never starts Codex, accepts a patch, or exposes a
+         * route that can apply/commit/deploy one. */
+        if (url.pathname === "/api/improvements/status") {
+          if (req.method !== "GET") return json(405, { error: "method not allowed" });
+          return json(200, improvementServiceStatus());
+        }
+        if (url.pathname === "/api/improvements/review-bundle") {
+          if (req.method !== "GET") return json(405, { error: "method not allowed" });
+          const expected = process.env.CODEX_REVIEW_TOKEN || "";
+          if (!expected) return json(503, { error: "improvement review bundle is not configured" });
+          const supplied = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+          let authorized = false;
+          try { authorized = Boolean(supplied) && cryptoTimingEqual(supplied, expected); } catch {}
+          if (!authorized) return json(401, { error: "bad or missing review token" });
+          res.setHeader("cache-control", "no-store");
+          return json(200, currentImprovementBundle());
+        }
+
         /* ── THE EXECUTOR FEED — a poller's read-only view of its floor's calls ──
            A tenant's OWN executor (their machine, their keys) polls this to
            learn what to trade. Authenticated by the floor's executor secret,
            compared in constant time. Read-only: this endpoint never trades,
            never signs, never touches a key — it just hands the bot the calls
            the desk already published, with everything a trade needs. This is
-           how a tenant can rehearse the same policy without handing us custody:
-           this release's poller is deliberately dry-run only. */
+           how a tenant can use the same policy without handing us custody. The
+           local poller defaults to paper mode and alone may run the explicit,
+           independently gated live canary. */
         const feedMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/executor\/feed$/);
         if (feedMatch) {
           const floorNo = Number(feedMatch[1]);
@@ -189,44 +275,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             try { return cryptoTimingEqual(auth, secret); } catch { return false; }
           })();
           if (!okAuth) return json(401, { error: "bad or missing executor secret" });
-          // A malformed cursor must not bind as NaN — SQLite compares everything to
-          // NULL as false, so the bot would poll a permanently empty feed at HTTP 200
-          // and silently never trade again.
-          const rawAfter = Number(url.searchParams.get("after") || 0);
-          const after = Number.isFinite(rawAfter) && rawAfter >= 0 ? Math.floor(rawAfter) : 0;
-          const rows = db.prepare(`
-            SELECT a.id, a.kind, a.mint, a.urgency, a.created_at,
-                   c.symbol, c.entry_ref, c.stop, c.target, c.close_reason, c.status,
-                   (SELECT size_sol FROM deliveries d WHERE d.call_id=a.call_id AND d.floor_no=a.floor_no) AS size_sol
-            FROM alerts a LEFT JOIN calls c ON c.id=a.call_id
-            WHERE a.floor_no=? AND a.id > ? AND a.kind IN ('entry','exit')
-              -- Never hand a bot an ENTRY for a call that has already closed. After any
-              -- downtime the backlog would otherwise become instructions to market-buy
-              -- coins the desk has already exited.
-              AND NOT (a.kind = 'entry' AND c.status = 'closed')
-            ORDER BY a.id LIMIT 50`).all(floorNo, after);
-          const latestId = db.prepare(`SELECT MAX(a.id) id FROM alerts a
-            LEFT JOIN calls c ON c.id=a.call_id
-            WHERE a.floor_no=? AND a.kind IN ('entry','exit')
-              AND NOT (a.kind='entry' AND c.status='closed')`).get(floorNo)?.id ?? after;
-          /* THE FLOOR'S OWN RULES RIDE WITH THE CALL.
-           * The bot must not have to be reconfigured when a tenant changes their mind
-           * in the UI: the take-profit multiple travels on every event, so a floor
-           * switching from "sell at 2x" to "ride to 10x" takes effect on the next
-           * poll rather than on the next redeploy of somebody's VPS. 0 means auto —
-           * the bot then honours the desk's own authored target. */
-          const fs = copy.settingsFor(floorNo);
-          return json(200, { cluster: "mainnet-beta", latest_id: latestId,
-            next_cursor: rows.length ? rows[rows.length - 1].id : after,
-            rules: { take_profit_x: fs.take_profit_x ?? 0, fixed_sol: fs.fixed_sol ?? 0,
-                     mcap_tier: fs.mcap_tier ?? "any" },
-            events: rows.map((r) => ({
-              id: r.id, event_id: `${floorNo}:${r.kind}:${r.id}`, type: r.kind, mint: r.mint, symbol: r.symbol,
-              side: r.kind === "entry" ? "buy" : "sell",
-              size_sol: r.size_sol ?? null, entry_ref: r.entry_ref, stop: r.stop, target: r.target,
-              take_profit_x: fs.take_profit_x ?? 0, fixed_sol: fs.fixed_sol ?? 0,
-              code: r.close_reason ?? null, urgency: r.urgency, ts: r.created_at,
-            })) });
+          return json(200, executorFeedPayload(floorNo, url.searchParams.get("after") || 0));
         }
 
         /* ── RETIRED BROWSER RPC LANE ─────────────────────────────────────────

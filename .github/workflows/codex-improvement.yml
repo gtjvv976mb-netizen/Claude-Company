@@ -1,0 +1,87 @@
+name: Codex improvement review
+
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_url:
+        description: Aggregate review bundle from the live API
+        required: true
+        default: https://claude-company-api.onrender.com/api/improvements/review-bundle
+        type: string
+      model:
+        description: Optional Codex model override
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codex-improvement-review
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Preflight review secrets
+        shell: bash
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CODEX_REVIEW_TOKEN: ${{ secrets.CODEX_REVIEW_TOKEN }}
+          CODEX_ARTIFACT_KEY: ${{ secrets.CODEX_ARTIFACT_KEY }}
+        run: |
+          if [[ -z "$OPENAI_API_KEY" || -z "$CODEX_REVIEW_TOKEN" ]]; then
+            echo "Configure OPENAI_API_KEY and CODEX_REVIEW_TOKEN before running this review."
+            exit 2
+          fi
+          if [[ ${#CODEX_ARTIFACT_KEY} -lt 32 ]]; then
+            echo "Configure CODEX_ARTIFACT_KEY with at least 32 random characters."
+            exit 2
+          fi
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            services/codex-improvement/package-lock.json
+      - name: Install production and isolated worker dependencies
+        run: |
+          npm ci
+          npm --prefix services/codex-improvement ci
+      - name: Produce read-only Codex proposal artifact
+        shell: bash
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CODEX_REVIEW_TOKEN: ${{ secrets.CODEX_REVIEW_TOKEN }}
+          BUNDLE_URL: ${{ inputs.bundle_url }}
+          CODEX_MODEL: ${{ inputs.model }}
+          CODEX_BUNDLE_HOSTS: claude-company-api.onrender.com
+        run: |
+          args=(--bundle-url "$BUNDLE_URL" --output-dir "$RUNNER_TEMP/codex-improvement")
+          if [[ -n "$CODEX_MODEL" ]]; then args+=(--model "$CODEX_MODEL"); fi
+          npm run improvement:codex -- "${args[@]}"
+      - name: Encrypt proposal artifact
+        shell: bash
+        env:
+          CODEX_ARTIFACT_KEY: ${{ secrets.CODEX_ARTIFACT_KEY }}
+        run: |
+          umask 077
+          tar -C "$RUNNER_TEMP/codex-improvement" -czf "$RUNNER_TEMP/codex-improvement.tar.gz" .
+          printf '%s' "$CODEX_ARTIFACT_KEY" | gpg --batch --yes --symmetric \
+            --cipher-algo AES256 --pinentry-mode loopback --passphrase-fd 0 \
+            --output "$RUNNER_TEMP/codex-improvement-review.tar.gz.gpg" \
+            "$RUNNER_TEMP/codex-improvement.tar.gz"
+          node --input-type=module -e 'import fs from "node:fs"; import path from "node:path"; const root=process.env.RUNNER_TEMP; fs.rmSync(path.join(root,"codex-improvement"),{recursive:true,force:true}); fs.rmSync(path.join(root,"codex-improvement.tar.gz"),{force:true});'
+      - name: Upload encrypted proposal for human review
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: codex-improvement-review
+          path: ${{ runner.temp }}/codex-improvement-review.tar.gz.gpg
+          if-no-files-found: error
+          retention-days: 7

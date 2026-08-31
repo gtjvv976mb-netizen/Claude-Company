@@ -9,3 +9,4 @@ dist/
 claude-co.db
 claude-co.db-*
 reports/*.md
+.codex-artifacts/

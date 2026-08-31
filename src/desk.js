@@ -43,6 +43,13 @@ export async function buildUniverse() {
  * a result the desk wants written down, not a silent drop.
  */
 export async function workup(cycle, mint, hook = "", opts = {}) {
+  // Evaluation provenance must retain the spending/trigger lane. It is evidence about
+  // how a signal was produced, not merely a label for the live scheduler.
+  const recordEvaluation = (record) => evaluation.recordDecision(cycle, {
+    ...record,
+    runKind: opts.lane ?? "cycle",
+    pmProvider: record?.pm?._provider ?? "none",
+  });
   // Both spenders — the penthouse cycle and a tenant's floor run — pass through here,
   // so this is where the daily cap bites. Before the free stages, deliberately: a
   // workup that cannot afford its model stages should not pretend to start.
@@ -56,7 +63,7 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
   if (!ev.ok) {
     emit("token:end", { mint, outcome: "no_data", detail: ev.error });
     const rec = { mint, outcome: "no_data", error: ev.error, finalDecision: "no_data" };
-    evaluation.recordDecision(cycle, rec);
+    recordEvaluation(rec);
     return rec;
   }
   store.touchSeen(mint, ev.symbol);
@@ -73,7 +80,7 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
     rec.reportFile = writeReport(cycle, rec);
     emit("token:end", { mint, symbol: ev.symbol, outcome: "screened_out",
       detail: sc.fails.map((f) => f.code).join(", "), report: rec.reportFile });
-    evaluation.recordDecision(cycle, rec);
+    recordEvaluation(rec);
     return rec;
   }
 
@@ -114,7 +121,7 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
     emit("token:end", { mint, symbol: ev.symbol, outcome: "insufficient_coverage" });
     const rec = { mint, symbol: ev.symbol, outcome: "insufficient_coverage", seatFailures, ev, analysts,
       finalDecision: "insufficient_coverage" };
-    evaluation.recordDecision(cycle, rec);
+    recordEvaluation(rec);
     return rec;
   }
 
@@ -125,7 +132,7 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
     rec.reportFile = writeReport(cycle, rec);
     emit("token:end", { mint, symbol: ev.symbol, outcome: "killed",
       detail: `${killer[0]}: ${killer[1].kill_reason}`, report: rec.reportFile });
-    evaluation.recordDecision(cycle, rec);
+    recordEvaluation(rec);
     return rec;
   }
 
@@ -233,7 +240,8 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
   // --- Stage 12: the CEO. Only a clean proposal reaches the door. ---
   if (finalDecision === "PROPOSE") {
     emit("stage", { stage: "ceo", mint, symbol: ev.symbol });
-    const modelCeo = await runCEO({ ev, pm, risk, redteam, ticket, compliance: comp });
+    const modelCeo = await runCEO({ ev, pm, risk, redteam, ticket, compliance: comp },
+      { ...opts, pmProvider: pm._provider ?? "claude" });
     const ceo = enforceCeoRails({ ceo: modelCeo, risk });
     if (ceo.rail_notes?.length) emit("seat:adjusted", { seat: "CEO", mint, symbol: ev.symbol,
       detail: ceo.rail_notes.join("; "), modelSize: modelCeo.order_size_usd,
@@ -256,7 +264,9 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
   emit("token:end", { mint, symbol: ev.symbol, outcome: finalDecision, conviction: pm.conviction,
     thesis: pm.thesis, size: record.order?.size ?? risk.position_size_usd, stop: ticket?.stop_price,
     gmgn: record.order?.links?.gmgn, report: file });
-  evaluation.recordDecision(cycle, record);
+  // Publication happens later in the penthouse. Carry only the immutable row id so the
+  // call sheet can link the strategy actually selected back to this exact evidence.
+  record.decisionRunId = recordEvaluation(record);
   return record;
 }
 

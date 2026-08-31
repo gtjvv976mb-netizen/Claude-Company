@@ -1,340 +1,810 @@
 /**
- * CLAUDE COMPANY — POLLING EXECUTOR (dry-run hardening release)
+ * WALL-ST-E — CLAUDE COMPANY'S SELF-HOSTED POLLING EXECUTOR
  *
- * Runs anywhere with outbound internet and no public URL. It polls YOUR floor's
- * calls over HTTPS, evaluates local caps, and logs decisions. EXECUTE=1 is rejected
- * until the durable transaction engine is complete and separately canary-tested.
- *
- * It does not just relay the desk. Between the desk's entry and its exit it runs
- * its own risk engine (strategy.mjs, tuned by simulation in tune.mjs):
- *
- *   - a hard STOP checked every poll, so a rug at 3am does not wait for the desk
- *   - a TRAIL that arms at 1.5x and ratchets up behind
- *     the high, so a runner is not round-tripped
- *   - the DESK'S OWN EXIT always wins and sells everything
- *   - DAILY LOSS LIMIT and MAX OPEN POSITIONS, the two brakes that decide whether
- *     a bot survives a bad week
- *
- * Marks are taken from an executable Jupiter quote for the exact size held — not
- * a mid price — so the stop fires on what you could actually sell for.
- *
- * State (positions, daily counters, cursor) is persisted, so a restart resumes
- * managing open trades instead of orphaning them.
- *
- * SAFETY: this release is DRY RUN only and rejects EXECUTE=1 until the durable
- * transaction engine is complete. Caps remain local and are never trusted from wire.
- *
- * SETUP
- *   1) Floor's Calls tab -> Desk settings -> Your executor: copy the signing secret.
- *   2) solana-keygen new -o burner.json   (or let install.sh make one). Do not fund it.
- *   3) npm install
- *   4) CC_SECRET=<secret> CC_FLOOR=<n> KEYPAIR=./burner.json EXECUTE=0 node poller.mjs
+ * Default: paper decisions. EXECUTE=1 enables real mainnet swaps only after every
+ * local gate below passes. The central desk remains keyless: this process polls a
+ * read-only feed and signs with a dedicated burner that never leaves this machine.
+ * First startup primes at the latest feed id and never replays old calls.
  */
 import fs from "node:fs";
-import { Connection, Keypair, VersionedTransaction, PublicKey } from "@solana/web3.js";
-import { DEFAULTS, planEntry, openPosition, stepPosition, rollDay, freshState } from "./strategy.mjs";
-import { policyConfigForPosition, resolveTakeProfitRule } from "./trade-policy.mjs";
+import path from "node:path";
+import { Connection, Keypair, PublicKey } from "@solana/web3.js";
+import { ExecutionJournal, acquireProcessLock, positionEntryBlock, trackedBalanceDecision } from "./journal.mjs";
+import {
+  JupiterV2Executor, TOKEN_PROGRAM, WSOL, associatedTokenAddress,
+  classicWalletTokenAmount, priceImpactPercent,
+} from "./jupiter.mjs";
+import { DEFAULTS, planEntry, openPosition, stepPosition, freshState } from "./strategy.mjs";
+import { policyConfigForPosition, resolveTakeProfitRule, validateEntryReference } from "./trade-policy.mjs";
+
+process.umask(0o077);
 
 const API = (process.env.CC_API || "https://claude-company-api.onrender.com").replace(/\/$/, "");
 const SECRET = process.env.CC_SECRET || "";
 const FLOOR = process.env.CC_FLOOR || "";
 const EXECUTE = process.env.EXECUTE === "1";
-const SLIPPAGE_BPS = Number(process.env.SLIPPAGE_BPS || 300);
-const POLL_MS = Number(process.env.POLL_MS || 15000);
+const POLL_MS = Number(process.env.POLL_MS || 15_000);
 const FEE_RESERVE = Number(process.env.FEE_RESERVE_SOL || 0.01);
-const PRIORITY_FEE = Number(process.env.PRIORITY_FEE_LAMPORTS || 200000);
-const MAX_CALL_AGE_MS = Number(process.env.MAX_CALL_AGE_MIN || 45) * 60000;
+const MAX_CALL_AGE_MS = Number(process.env.MAX_CALL_AGE_MIN || 45) * 60_000;
+const MAX_FUTURE_SKEW_MS = Number(process.env.MAX_FUTURE_SKEW_MIN || 5) * 60_000;
+const MAX_ENTRY_MARK_AGE_MS = Number(process.env.MAX_ENTRY_MARK_AGE_MIN || 15) * 60_000;
+const MAX_ENTRY_DEVIATION_PCT = Number(process.env.MAX_ENTRY_DEVIATION_PCT || 10);
 const RPC = process.env.SOLANA_RPC || "https://api.mainnet-beta.solana.com";
-const WSOL = "So11111111111111111111111111111111111111112";
-const STATE_FILE = process.env.STATE_FILE || "./.cc-state.json";
-const LAMPORTS = 1e9;
+const SECONDARY_RPC = process.env.SOLANA_RPC_SECONDARY || "https://api.mainnet-beta.solana.com";
+const JUPITER_API_KEY = process.env.JUPITER_API_KEY || "";
+const JUPITER_API_BASE = (process.env.JUPITER_API_BASE || "https://api.jup.ag/swap/v2").replace(/\/$/, "");
+const KEYPAIR_FILE = path.resolve(process.env.KEYPAIR || "./burner.json");
+const STATE_DB = path.resolve(process.env.STATE_DB || "./.cc-executor.sqlite");
+const LOCK_FILE = path.resolve(process.env.LOCK_FILE || `${STATE_DB}.lock`);
+const PAUSE_ENTRIES_FILE = path.resolve(process.env.PAUSE_ENTRIES_FILE || `${STATE_DB}.pause-entries`);
+const HARD_STOP_FILE = path.resolve(process.env.HARD_STOP_FILE || `${STATE_DB}.hard-stop`);
+const LAMPORTS = 1_000_000_000;
+const MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
+const LIVE_LIMITS = Object.freeze({
+  maxSolPerTrade: 0.005,
+  dailySolCap: 0.01,
+  dailyLossLimitSol: 0.01,
+  maxOpenPositions: 4,
+  slippageBps: 300,
+  maxPriceImpactPct: 5,
+  maxExitPriceImpactPct: 50,
+  maxFeeBps: 100,
+  maxNetworkFeeLamports: 500_000,
+  maxNetworkFeePct: 10,
+  maxRentLamports: 3_000_000,
+  maxEntryRoundTripLossPct: 12,
+  maxAttempts: 3,
+});
+const log = (...args) => console.log(new Date().toISOString(), "WALL-ST-E", ...args);
+const fatal = (message) => { console.error(new Date().toISOString(), "WALL-ST-E REFUSES:", message); process.exit(1); };
 
-// This release hardens the research/paper path but does not yet ship the durable
-// transaction WAL and instruction-level Jupiter validation required for unattended
-// custody. Fail closed instead of presenting an experimental signer as production.
+const number = (name, value, { min = 0, max = Infinity } = {}) => {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < min || n > max) fatal(`${name} must be between ${min} and ${max}`);
+  return n;
+};
+
+if (!SECRET || !/^\d+$/.test(FLOOR) || Number(FLOOR) <= 0) fatal("CC_SECRET and a positive CC_FLOOR are required");
+if (!API.startsWith("https://")) fatal("CC_API must use HTTPS");
+if (!fs.existsSync(KEYPAIR_FILE)) fatal(`no keypair at ${KEYPAIR_FILE}`);
+
+function loadKeypair() {
+  const st = fs.lstatSync(KEYPAIR_FILE);
+  if (!st.isFile() || st.isSymbolicLink()) fatal("KEYPAIR must be a regular, non-symlink file");
+  if (EXECUTE) {
+    if ((st.mode & 0o077) !== 0) fatal(`live keypair permissions must be 0600 (chmod 600 ${KEYPAIR_FILE})`);
+    if (typeof process.getuid === "function" && st.uid !== process.getuid()) fatal("live keypair must be owned by the service user");
+  }
+  let bytes;
+  try { bytes = JSON.parse(fs.readFileSync(KEYPAIR_FILE, "utf8")); }
+  catch { fatal("KEYPAIR is not a readable Solana JSON keypair"); }
+  try { return Keypair.fromSecretKey(new Uint8Array(bytes)); }
+  catch { fatal("KEYPAIR does not contain a valid Solana secret key"); }
+}
+
+const kp = loadKeypair();
+const WALLET = kp.publicKey.toBase58();
+const pauseEntries = () => fs.existsSync(PAUSE_ENTRIES_FILE);
+const hardStop = () => fs.existsSync(HARD_STOP_FILE);
+
 if (EXECUTE) {
-  console.error("LIVE execution is intentionally disabled in this release; run with EXECUTE=0 while the durable transaction engine is completed and canary-tested.");
-  process.exit(1);
+  if (process.env.LIVE_TRADING_ACK !== WALLET)
+    fatal(`LIVE_TRADING_ACK must exactly equal this burner public key: ${WALLET}`);
+  if (!JUPITER_API_KEY) fatal("JUPITER_API_KEY is required for live execution");
+  if (!process.env.SOLANA_RPC || !RPC.startsWith("https://")) fatal("live execution requires an explicit private HTTPS SOLANA_RPC");
+  if (!process.env.SOLANA_RPC_SECONDARY)
+    fatal("live execution requires an explicit independent SOLANA_RPC_SECONDARY");
+  let primaryRpcUrl, secondaryRpcUrl;
+  try {
+    primaryRpcUrl = new URL(RPC);
+    secondaryRpcUrl = new URL(SECONDARY_RPC);
+  } catch { fatal("both live RPC endpoints must be valid HTTPS URLs"); }
+  const primaryHost = primaryRpcUrl.hostname.toLowerCase().replace(/\.$/, "");
+  const secondaryHost = secondaryRpcUrl.hostname.toLowerCase().replace(/\.$/, "");
+  if (primaryRpcUrl.protocol !== "https:" || secondaryRpcUrl.protocol !== "https:")
+    fatal("both live RPC endpoints must use HTTPS");
+  if (primaryHost === "api.mainnet-beta.solana.com" || secondaryHost === "api.mainnet-beta.solana.com")
+    fatal("the rate-limited public Solana RPC is not accepted for either live endpoint");
+  if (primaryHost === secondaryHost)
+    fatal("SOLANA_RPC_SECONDARY must use an independent provider hostname");
+  if (!JUPITER_API_BASE.startsWith("https://")) fatal("JUPITER_API_BASE must use HTTPS");
+  const legacy = path.resolve(process.env.STATE_FILE || "./.cc-state.json");
+  if (fs.existsSync(legacy)) {
+    let old;
+    try { old = JSON.parse(fs.readFileSync(legacy, "utf8")); }
+    catch { fatal(`legacy state is unreadable: ${legacy}`); }
+    if (Object.keys(old?.positions || {}).length)
+      fatal(`legacy JSON contains unproven positions; reconcile them manually before live mode (${legacy})`);
+  }
+  if (!fs.existsSync(STATE_DB) && process.env.LIVE_STATE_INIT_ACK !== WALLET)
+    fatal(`live journal is missing; initialize it once with LIVE_STATE_INIT_ACK=${WALLET} and INIT_ONLY=1`);
 }
 
 const CFG = {
   ...DEFAULTS,
-  maxSolPerTrade: Number(process.env.MAX_SOL_PER_TRADE || DEFAULTS.maxSolPerTrade),
-  dailySolCap: Number(process.env.DAILY_SOL_CAP || DEFAULTS.dailySolCap),
-  dailyLossLimitSol: Number(process.env.DAILY_LOSS_LIMIT_SOL || DEFAULTS.dailyLossLimitSol),
-  maxOpenPositions: Number(process.env.MAX_OPEN_POSITIONS || DEFAULTS.maxOpenPositions),
-  trailPct: Number(process.env.TRAIL_PCT || DEFAULTS.trailPct),
-  // the sizing rails, tunable without a deploy so they can be tightened as the
-  // wallet grows and the sample arrives
-  fDefault: Number(process.env.F_DEFAULT || DEFAULTS.fDefault),
-  fNameMax: Number(process.env.F_NAME_MAX || DEFAULTS.fNameMax),
-  bookHeatMax: Number(process.env.BOOK_HEAT_MAX || DEFAULTS.bookHeatMax),
-  maxAgeHours: Number(process.env.MAX_AGE_HOURS || DEFAULTS.maxAgeHours),
-  scaleOutPct: Number(process.env.SCALE_OUT_PCT ?? DEFAULTS.scaleOutPct),
+  maxSolPerTrade: number("MAX_SOL_PER_TRADE",
+    process.env.MAX_SOL_PER_TRADE || (EXECUTE ? LIVE_LIMITS.maxSolPerTrade : DEFAULTS.maxSolPerTrade),
+    { min: 0.000001, max: EXECUTE ? LIVE_LIMITS.maxSolPerTrade : 100 }),
+  dailySolCap: number("DAILY_SOL_CAP",
+    process.env.DAILY_SOL_CAP || (EXECUTE ? LIVE_LIMITS.dailySolCap : DEFAULTS.dailySolCap),
+    { min: 0.000001, max: EXECUTE ? LIVE_LIMITS.dailySolCap : 1000 }),
+  dailyLossLimitSol: number("DAILY_LOSS_LIMIT_SOL",
+    process.env.DAILY_LOSS_LIMIT_SOL || (EXECUTE ? LIVE_LIMITS.dailyLossLimitSol : DEFAULTS.dailyLossLimitSol),
+    { min: 0.000001, max: EXECUTE ? LIVE_LIMITS.dailyLossLimitSol : 1000 }),
+  maxOpenPositions: number("MAX_OPEN_POSITIONS",
+    process.env.MAX_OPEN_POSITIONS || DEFAULTS.maxOpenPositions,
+    { min: 1, max: EXECUTE ? LIVE_LIMITS.maxOpenPositions : 100 }),
+  trailPct: number("TRAIL_PCT", process.env.TRAIL_PCT || DEFAULTS.trailPct, { min: 0.01, max: 0.95 }),
+  fDefault: number("F_DEFAULT", process.env.F_DEFAULT || DEFAULTS.fDefault, { min: 0.00001, max: 1 }),
+  fNameMax: number("F_NAME_MAX", process.env.F_NAME_MAX || DEFAULTS.fNameMax, { min: 0.00001, max: 1 }),
+  bookHeatMax: number("BOOK_HEAT_MAX", process.env.BOOK_HEAT_MAX || DEFAULTS.bookHeatMax, { min: 0.00001, max: 1 }),
+  maxAgeHours: number("MAX_AGE_HOURS", process.env.MAX_AGE_HOURS || DEFAULTS.maxAgeHours, { min: 0.01, max: 720 }),
+  scaleOutPct: 0,
 };
 
-if (!SECRET || !FLOOR) { console.error("CC_SECRET and CC_FLOOR are required"); process.exit(1); }
-const kp = (() => {
-  const p = process.env.KEYPAIR || "./burner.json";
-  if (!fs.existsSync(p)) { console.error(`no keypair at ${p} — solana-keygen new -o ${p}`); process.exit(1); }
-  return Keypair.fromSecretKey(new Uint8Array(JSON.parse(fs.readFileSync(p, "utf8"))));
+// Parse every transaction rail before INIT_ONLY can exit. This makes the
+// installer validate the exact persistent environment that systemd will use.
+const JUPITER_CFG = {
+  slippageBps: number("SLIPPAGE_BPS", process.env.SLIPPAGE_BPS || LIVE_LIMITS.slippageBps,
+    { min: 1, max: EXECUTE ? LIVE_LIMITS.slippageBps : 1_000 }),
+  maxPriceImpactPct: number("MAX_PRICE_IMPACT_PCT",
+    process.env.MAX_PRICE_IMPACT_PCT || LIVE_LIMITS.maxPriceImpactPct,
+    { min: 0.01, max: EXECUTE ? LIVE_LIMITS.maxPriceImpactPct : 50 }),
+  maxExitPriceImpactPct: number("MAX_EXIT_PRICE_IMPACT_PCT",
+    process.env.MAX_EXIT_PRICE_IMPACT_PCT || LIVE_LIMITS.maxExitPriceImpactPct,
+    { min: 0.01, max: EXECUTE ? LIVE_LIMITS.maxExitPriceImpactPct : 100 }),
+  maxFeeBps: number("MAX_JUPITER_FEE_BPS", process.env.MAX_JUPITER_FEE_BPS || LIVE_LIMITS.maxFeeBps,
+    { min: 0, max: EXECUTE ? LIVE_LIMITS.maxFeeBps : 500 }),
+  maxNetworkFeeLamports: number("MAX_NETWORK_FEE_LAMPORTS",
+    process.env.MAX_NETWORK_FEE_LAMPORTS || LIVE_LIMITS.maxNetworkFeeLamports,
+    { min: 5_000, max: EXECUTE ? LIVE_LIMITS.maxNetworkFeeLamports : 100_000_000 }),
+  maxNetworkFeePct: number("MAX_NETWORK_FEE_PCT",
+    process.env.MAX_NETWORK_FEE_PCT || LIVE_LIMITS.maxNetworkFeePct,
+    { min: 0.1, max: EXECUTE ? LIVE_LIMITS.maxNetworkFeePct : 25 }),
+  maxRentLamports: number("MAX_RENT_LAMPORTS",
+    process.env.MAX_RENT_LAMPORTS || LIVE_LIMITS.maxRentLamports,
+    { min: 0, max: EXECUTE ? LIVE_LIMITS.maxRentLamports : 10_000_000 }),
+  maxEntryRoundTripLossPct: number("MAX_ENTRY_ROUND_TRIP_LOSS_PCT",
+    process.env.MAX_ENTRY_ROUND_TRIP_LOSS_PCT || LIVE_LIMITS.maxEntryRoundTripLossPct,
+    { min: 0.1, max: EXECUTE ? LIVE_LIMITS.maxEntryRoundTripLossPct : 50 }),
+  maxAttempts: number("MAX_TX_ATTEMPTS", process.env.MAX_TX_ATTEMPTS || LIVE_LIMITS.maxAttempts,
+    { min: 1, max: EXECUTE ? LIVE_LIMITS.maxAttempts : 10 }),
+  finalityTimeoutMs: number("FINALITY_TIMEOUT_MS", process.env.FINALITY_TIMEOUT_MS || 30_000,
+    { min: 1_000, max: 120_000 }),
+};
+
+number("POLL_MS", POLL_MS, { min: 1_000, max: 3_600_000 });
+number("FEE_RESERVE_SOL", FEE_RESERVE, { min: 0, max: 100 });
+number("MAX_CALL_AGE_MIN", MAX_CALL_AGE_MS / 60_000, { min: 1, max: 10_080 });
+number("MAX_FUTURE_SKEW_MIN", MAX_FUTURE_SKEW_MS / 60_000, { min: 0.1, max: 60 });
+number("MAX_ENTRY_MARK_AGE_MIN", MAX_ENTRY_MARK_AGE_MS / 60_000, { min: 1, max: 60 });
+number("MAX_ENTRY_DEVIATION_PCT", MAX_ENTRY_DEVIATION_PCT, { min: 0.1, max: 50 });
+
+const releaseLock = (() => {
+  try { return acquireProcessLock(LOCK_FILE); }
+  catch (error) { fatal(error.message); }
 })();
-const conn = new Connection(RPC, "confirmed");
-const log = (...a) => console.log(new Date().toISOString(), ...a);
-
-/* ── persisted state: cursor, positions, daily counters ───────────────────── */
-let S = { cursor: 0, positions: {}, state: freshState(Date.now()), primed: false };
-if (fs.existsSync(STATE_FILE)) {
-  try { S = { ...S, ...JSON.parse(fs.readFileSync(STATE_FILE, "utf8")) }; }
-  catch (e) {
-    console.error(`state file is unreadable; refusing to overwrite it: ${e.message}`);
-    process.exit(1);
-  }
+let journal;
+try {
+  journal = new ExecutionJournal(STATE_DB, {
+    wallet: WALLET,
+    create: !EXECUTE || fs.existsSync(STATE_DB) || process.env.LIVE_STATE_INIT_ACK === WALLET,
+  });
+} catch (error) {
+  releaseLock();
+  fatal(error.message);
 }
+
+let S = journal.snapshot();
 S.state = { ...freshState(Date.now()), ...(S.state || {}) };
-const save = () => {
-  const tmp = `${STATE_FILE}.tmp-${process.pid}`;
-  try {
-    fs.writeFileSync(tmp, JSON.stringify(S, null, 2), { mode: 0o600 });
-    fs.renameSync(tmp, STATE_FILE);
-    try { fs.chmodSync(STATE_FILE, 0o600); } catch {}
-  } catch (e) {
-    try { fs.unlinkSync(tmp); } catch {}
-    throw new Error(`state save failed: ${e.message}`);
-  }
+Object.assign(S.state, journal.rollingRisk(Date.now()));
+S.positions ||= {};
+const save = () => journal.saveRuntime(S);
+save();
+if (process.env.INIT_ONLY === "1") {
+  log(`initialized journal for ${WALLET} at ${STATE_DB}; no network request or trade was made`);
+  journal.close();
+  releaseLock();
+  process.exit(0);
+}
+
+let shuttingDown = false;
+const shutdown = (signal) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  log(`stopping on ${signal}`);
+  try { journal.close(); } catch {}
+  releaseLock();
+  process.exit(0);
 };
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("exit", releaseLock);
+
+const conn = new Connection(RPC, "confirmed");
+const secondaryConn = EXECUTE ? new Connection(SECONDARY_RPC, "confirmed") : null;
+if (EXECUTE) {
+  let genesis, secondaryGenesis;
+  try { [genesis, secondaryGenesis] = await Promise.all([conn.getGenesisHash(), secondaryConn.getGenesisHash()]); }
+  catch (error) { fatal(`RPC mainnet check failed: ${error.message}`); }
+  if (genesis !== MAINNET_GENESIS) fatal(`RPC is not Solana mainnet-beta (genesis ${genesis})`);
+  if (secondaryGenesis !== MAINNET_GENESIS)
+    fatal(`secondary RPC is not Solana mainnet-beta (genesis ${secondaryGenesis})`);
+}
+
+const jupiter = JUPITER_API_KEY ? new JupiterV2Executor({
+  connection: conn,
+  secondaryConnection: secondaryConn,
+  keypair: kp,
+  journal,
+  apiKey: JUPITER_API_KEY,
+  baseUrl: JUPITER_API_BASE,
+  hardStop,
+  submissionGate: (intent) => entrySubmissionGate(intent),
+  log,
+  config: JUPITER_CFG,
+}) : null;
+
 const openList = () => Object.values(S.positions);
+async function heldRaw(mint, connection = conn) {
+  const ata = associatedTokenAddress(WALLET, mint, TOKEN_PROGRAM);
+  const account = await connection.getAccountInfo(new PublicKey(ata), "confirmed");
+  return classicWalletTokenAmount(account, {
+    mint, wallet: WALLET, allowMissing: true, label: `canonical ATA ${ata}`,
+  });
+}
+async function solBalance() { return (await conn.getBalance(kp.publicKey, "confirmed")) / LAMPORTS; }
 
-/* ── Jupiter ──────────────────────────────────────────────────────────────── */
-const JUP = (process.env.JUPITER_API_BASE || "https://lite-api.jup.ag/swap/v1").replace(/\/$/, "");
-const JUP_HEADERS = process.env.JUPITER_API_KEY ? { "x-api-key": process.env.JUPITER_API_KEY } : {};
-async function quote(inputMint, outputMint, amountRaw) {
-  const qs = new URLSearchParams({ inputMint, outputMint, amount: String(amountRaw), slippageBps: String(SLIPPAGE_BPS) });
-  const r = await fetch(`${JUP}/quote?${qs}`, { headers: JUP_HEADERS, redirect: "error", signal: AbortSignal.timeout(10000) });
-  if (!r.ok) throw new Error(`quote ${r.status}`);
-  const q = await r.json();
-  if (!q?.outAmount) throw new Error("no route");
-  return q;
-}
-async function swap(q) {
-  const r = await fetch(`${JUP}/swap`, { method: "POST", headers: { "content-type": "application/json", ...JUP_HEADERS },
-    redirect: "error", signal: AbortSignal.timeout(15000),
-    body: JSON.stringify({ quoteResponse: q, userPublicKey: kp.publicKey.toBase58(), wrapAndUnwrapSol: true,
-      // Without a priority fee a swap frequently never lands under congestion —
-      // and an exit that never lands is a position you still own.
-      prioritizationFeeLamports: PRIORITY_FEE, dynamicComputeUnitLimit: true }) });
-  const s = await r.json();
-  if (!r.ok) throw new Error(`swap build ${r.status}`);
-  if (s?.simulationError) throw new Error(`Jupiter simulation failed: ${JSON.stringify(s.simulationError)}`);
-  if (!s?.swapTransaction) throw new Error("no swap tx");
-  if (!Number.isFinite(Number(s.lastValidBlockHeight))) throw new Error("swap response omitted lastValidBlockHeight");
-  const tx = VersionedTransaction.deserialize(Buffer.from(s.swapTransaction, "base64"));
-  tx.sign([kp]);
-  const sig = await conn.sendRawTransaction(tx.serialize(), { maxRetries: 3 });
-  // sendRawTransaction returns as soon as the RPC ACCEPTS the bytes — it says
-  // nothing about whether the swap succeeded. A slippage breach lands on-chain as
-  // a FAILED transaction and still yields a signature, so logging "BOUGHT" here
-  // (and charging the daily cap) would report trades that never happened.
-  const st = await conn.confirmTransaction(
-    { signature: sig, blockhash: tx.message.recentBlockhash,
-      lastValidBlockHeight: Number(s.lastValidBlockHeight) }, "confirmed");
-  if (st?.value?.err) throw new Error(`swap failed on-chain: ${JSON.stringify(st.value.err)}`);
-  return sig;
-}
-async function heldRaw(mint) {
-  const r = await conn.getParsedTokenAccountsByOwner(kp.publicKey, { mint: new PublicKey(mint) });
-  return r.value.reduce((a, v) => a + BigInt(v.account.data.parsed.info.tokenAmount.amount), 0n);
-}
-async function solBalance() {
-  return (await conn.getBalance(kp.publicKey)) / LAMPORTS;
+async function inspectTrackedBalance(pos) {
+  const tracked = BigInt(String(pos.qtyRaw || "0"));
+  if (tracked <= 0n) return { verified: false, reason: "durable tracked balance is invalid",
+    trackedRaw: tracked.toString(), primaryRaw: null, secondaryRaw: null };
+  let primaryHeld;
+  try { primaryHeld = await heldRaw(pos.mint); }
+  catch (error) {
+    return { verified: false, reason: `primary canonical-ATA balance unavailable: ${error.message}`,
+      trackedRaw: tracked.toString(), primaryRaw: null, secondaryRaw: null };
+  }
+  let secondaryHeld = null;
+  if (primaryHeld < tracked && secondaryConn) {
+    try { secondaryHeld = await heldRaw(pos.mint, secondaryConn); }
+    catch (error) { log(`${pos.symbol}: secondary canonical-ATA balance check failed: ${error.message}`); }
+  }
+  return trackedBalanceDecision({
+    trackedRaw: tracked.toString(), primaryRaw: primaryHeld.toString(),
+    secondaryRaw: secondaryHeld?.toString() ?? null,
+  });
 }
 
-/* ── entries ──────────────────────────────────────────────────────────────── */
+function persistBalanceBlock(pos, balance) {
+  pos.balanceReconciliationRequired = true;
+  pos.balanceReconciliationReason = balance.reason;
+  pos.balanceObservedAt = Date.now();
+  pos.balanceObservedPrimaryRaw = balance.primaryRaw ?? null;
+  pos.balanceObservedSecondaryRaw = balance.secondaryRaw ?? null;
+  save();
+}
+
+function clearBalanceBlock(pos) {
+  delete pos.balanceReconciliationRequired;
+  delete pos.balanceReconciliationReason;
+  delete pos.balanceObservedAt;
+  delete pos.balanceObservedPrimaryRaw;
+  delete pos.balanceObservedSecondaryRaw;
+}
+
+function latchExit(pos, why, intentId) {
+  if (!EXECUTE) return;
+  pos.exitExecutionRequired = true;
+  pos.exitExecutionReason ||= String(why || "risk exit");
+  pos.exitExecutionIntentId ||= intentId;
+  pos.exitExecutionObservedAt ||= Date.now();
+  save();
+}
+
+function validEntryEvent(ev) {
+  try { new PublicKey(ev.mint); } catch { throw new Error("invalid Solana mint in feed event"); }
+  if (!Number.isFinite(Number(ev.ts)) || Number(ev.ts) <= 0) throw new Error("entry event has no valid timestamp");
+  if (Number(ev.ts) > Date.now() + MAX_FUTURE_SKEW_MS) throw new Error("entry event timestamp is too far in the future");
+}
+
+function entrySubmissionGate(intent) {
+  if (intent?.kind !== "entry") return;
+  if (pauseEntries()) throw new Error("PAUSE ENTRIES file appeared before submission");
+  const event = intent.context?.event;
+  validEntryEvent(event);
+  if (Date.now() - Number(event.ts) > MAX_CALL_AGE_MS)
+    throw new Error("entry call became stale before submission");
+  validateEntryReference(event, {
+    nowMs: Date.now(), maxMarkAgeMs: MAX_ENTRY_MARK_AGE_MS,
+    maxDeviationPct: MAX_ENTRY_DEVIATION_PCT,
+  });
+}
+
+function confirmedAmounts(intent, label) {
+  if (!intent || intent.state !== "confirmed")
+    throw new Error(`${label} intent is not confirmed`);
+  const input = String(intent.actualInputRaw ?? "");
+  const output = String(intent.actualOutputRaw ?? "");
+  const exactIn = String(intent.amountRaw ?? "");
+  if (!/^\d+$/.test(input) || !/^\d+$/.test(output) || BigInt(input) <= 0n || BigInt(output) <= 0n)
+    throw new Error(`${label} confirmed without positive actual fill totals`);
+  if (!/^\d+$/.test(exactIn) || BigInt(input) !== BigInt(exactIn))
+    throw new Error(`${label} actual input does not match its durable exact-in amount`);
+  const networkFee = String(intent.networkFeeLamports ?? "");
+  if (!/^\d+$/.test(networkFee)) throw new Error(`${label} confirmed without an exact network fee`);
+  return { input, output, networkFee };
+}
+
+function recoveryRuntime(context) {
+  const next = structuredClone(S);
+  if (context?.riskStateBefore && typeof context.riskStateBefore === "object")
+    next.state = structuredClone(context.riskStateBefore);
+  return next;
+}
+
+/**
+ * Finish the local half of a confirmed buy. This deliberately reads the event,
+ * sizing decision and immutable take-profit rule from the intent journal rather
+ * than from a replayed feed row or today's environment. markAccounted commits the
+ * intent transition and the full runtime snapshot in one SQLite transaction; S is
+ * replaced only after that commit succeeds, so a disk error cannot double-count.
+ */
+function applyConfirmedEntry(intent) {
+  if (intent?.state === "accounted") return false;
+  if (intent?.kind !== "entry") throw new Error(`intent ${intent?.id || "?"} is not an entry`);
+  const { input, output, networkFee } = confirmedAmounts(intent, "entry");
+  const context = intent.context || {};
+  const event = context.event;
+  const plan = context.plan;
+  if (context.wallet && context.wallet !== WALLET)
+    throw new Error(`entry intent ${intent.id} belongs to a different wallet context`);
+  if (intent.inputMint !== WSOL || intent.outputMint !== intent.mint)
+    throw new Error(`entry intent ${intent.id} has an invalid durable mint route`);
+  if (!event || String(event.mint || "") !== String(intent.mint))
+    throw new Error(`entry intent ${intent.id} has no matching durable event context`);
+  if (!plan || !Number.isFinite(Number(plan.sol)) || Number(plan.sol) <= 0)
+    throw new Error(`entry intent ${intent.id} has no durable sizing context`);
+
+  const costBasisLamports = BigInt(input) + BigInt(networkFee);
+  const paidSol = Number(costBasisLamports) / LAMPORTS;
+  const existing = S.positions[intent.mint];
+  if (existing) {
+    if (existing.entryIntentId !== intent.id || String(existing.qtyRaw) !== output ||
+        String(existing.costBasisLamports) !== costBasisLamports.toString() ||
+        Math.abs(Number(existing.paidSol) - paidSol) > 1e-12)
+      throw new Error(`entry intent ${intent.id} conflicts with the recorded position`);
+    const next = structuredClone(S);
+    journal.markAccounted(intent.id, next);
+    S = next;
+    return true;
+  }
+
+  const rule = context.takeProfitRule || {};
+  const takeProfitX = Number(rule.takeProfitX);
+  if (!Number.isFinite(takeProfitX) || takeProfitX <= 0 || typeof rule.honorDeskTarget !== "boolean")
+    throw new Error(`entry intent ${intent.id} has no durable take-profit rule`);
+  const stopBufferPct = Number(context.positionConfig?.stopBufferPct);
+  const entryReference = context.entryReference;
+  if (!entryReference || !(Number(entryReference.stopRatio) > 0) || Number(entryReference.stopRatio) >= 1 ||
+      (entryReference.targetRatio != null && !(Number(entryReference.targetRatio) > 0)))
+    throw new Error(`entry intent ${intent.id} has no valid durable market reference`);
+  const pos = openPosition({
+    call: {
+      ...event,
+      stop: Number(entryReference.stopRatio),
+      target: entryReference.targetRatio == null ? null : Number(entryReference.targetRatio),
+    },
+    sol: paidSol,
+    fillPrice: 1,
+    cfg: { stopBufferPct: Number.isFinite(stopBufferPct) ? stopBufferPct : CFG.stopBufferPct },
+  });
+  pos.qtyRaw = output;
+  pos.paidSol = paidSol;
+  pos.costBasisLamports = costBasisLamports.toString();
+  pos.entryInputLamports = input;
+  pos.riskF = Number.isFinite(Number(plan.f)) ? Number(plan.f) : null;
+  const durableOpenedAt = Number(context.openedAtMs ?? intent.createdAt);
+  pos.openedAtMs = Number.isFinite(durableOpenedAt) && durableOpenedAt > 0
+    ? durableOpenedAt : Date.now();
+  pos.entryIntentId = intent.id;
+  pos.takeProfitX = takeProfitX;
+  pos.honorDeskTarget = rule.honorDeskTarget;
+  pos.marketMarkAtEntry = Number(entryReference.marketMark);
+  pos.marketMarkObservedAt = Number(entryReference.marketMarkAt);
+  const solUsdAtEntry = Number(context.entryPreflight?.solUsd);
+  if (!Number.isFinite(solUsdAtEntry) || solUsdAtEntry <= 0)
+    throw new Error(`entry intent ${intent.id} has no durable SOL/USD reference`);
+  pos.solUsdAtEntry = solUsdAtEntry;
+
+  const next = recoveryRuntime(context);
+  next.positions[intent.mint] = pos;
+  next.state.openCount = Object.keys(next.positions).length;
+  next.state.bookHeat = Object.values(next.positions)
+    .reduce((sum, position) => sum + (Number(position.riskF) || 0), 0);
+  journal.markAccounted(intent.id, next);
+  S = next;
+  log(`BOUGHT ${event.symbol || intent.mint.slice(0, 6)} — ${paidSol.toFixed(6)} SOL → ${output} raw — https://solscan.io/tx/${intent.signature}`);
+  return true;
+}
+
+/** Apply a confirmed sell from its pre-submit position snapshot, never a balance read. */
+function applyConfirmedExit(intent) {
+  if (intent?.state === "accounted") return false;
+  if (!intent || !["desk_exit", "risk_exit"].includes(intent.kind))
+    throw new Error(`intent ${intent?.id || "?"} is not an exit`);
+  const { input, output, networkFee } = confirmedAmounts(intent, "exit");
+  if (intent.context?.wallet && intent.context.wallet !== WALLET)
+    throw new Error(`exit intent ${intent.id} belongs to a different wallet context`);
+  if (intent.inputMint !== intent.mint || intent.outputMint !== WSOL)
+    throw new Error(`exit intent ${intent.id} has an invalid durable mint route`);
+  const before = intent.context?.position;
+  if (!before || String(before.mint || "") !== String(intent.mint))
+    throw new Error(`exit intent ${intent.id} has no matching durable position context`);
+  const beforeRaw = BigInt(String(before.qtyRaw || "0"));
+  const soldRaw = BigInt(input);
+  if (beforeRaw <= 0n || soldRaw > beforeRaw)
+    throw new Error(`exit intent ${intent.id} fill exceeds its durable position`);
+  const current = S.positions[intent.mint];
+  if (current && (String(current.qtyRaw) !== String(before.qtyRaw) ||
+      (before.entryIntentId && current.entryIntentId !== before.entryIntentId)))
+    throw new Error(`exit intent ${intent.id} conflicts with the recorded position`);
+
+  const basisBeforeRaw = BigInt(String(before.costBasisLamports || "0"));
+  if (basisBeforeRaw <= 0n) throw new Error(`exit intent ${intent.id} has invalid durable cost basis`);
+  const paidPortionRaw = soldRaw >= beforeRaw ? basisBeforeRaw : basisBeforeRaw * soldRaw / beforeRaw;
+  const netProceedsRaw = BigInt(output) - BigInt(networkFee);
+  const netRaw = netProceedsRaw - paidPortionRaw;
+  const outSol = Number(netProceedsRaw) / LAMPORTS;
+  const net = Number(netRaw) / LAMPORTS;
+  const fraction = Number(intent.context?.fraction ?? 1);
+  if (!Number.isFinite(fraction) || fraction <= 0 || fraction > 1)
+    throw new Error(`exit intent ${intent.id} has invalid durable sell fraction`);
+  const fullExit = fraction >= 1 || soldRaw >= beforeRaw;
+  const next = recoveryRuntime(intent.context);
+  if (fullExit) {
+    delete next.positions[intent.mint];
+    if (net >= 0) next.state.wins = (Number(next.state.wins) || 0) + 1;
+    else next.state.losses = (Number(next.state.losses) || 0) + 1;
+  } else {
+    next.positions[intent.mint] = {
+      ...structuredClone(before),
+      qtyRaw: String(beforeRaw - soldRaw),
+      costBasisLamports: String(basisBeforeRaw - paidPortionRaw),
+      paidSol: Number(basisBeforeRaw - paidPortionRaw) / LAMPORTS,
+      entryInputLamports: String(BigInt(before.entryInputLamports) -
+        (soldRaw >= beforeRaw ? BigInt(before.entryInputLamports) :
+          BigInt(before.entryInputLamports) * soldRaw / beforeRaw)),
+    };
+  }
+  next.state.openCount = Object.keys(next.positions).length;
+  next.state.bookHeat = Object.values(next.positions)
+    .reduce((sum, position) => sum + (Number(position.riskF) || 0), 0);
+  journal.markAccounted(intent.id, next);
+  S = next;
+  const symbol = before.symbol || intent.mint.slice(0, 6);
+  log(`${fullExit ? "SOLD" : "SCALED"} ${symbol} for ${outSol.toFixed(6)} SOL` +
+    `${fullExit ? ` (${net >= 0 ? "+" : ""}${net.toFixed(6)})` : ""} — https://solscan.io/tx/${intent.signature}`);
+  return true;
+}
+
+function accountConfirmedIntents() {
+  let count = 0;
+  for (const intent of journal.pendingIntents()) {
+    if (intent.state !== "confirmed") continue;
+    if (intent.kind === "entry") applyConfirmedEntry(intent);
+    else if (["desk_exit", "risk_exit"].includes(intent.kind)) applyConfirmedExit(intent);
+    else throw new Error(`confirmed intent ${intent.id} has unsupported kind ${intent.kind}`);
+    count++;
+  }
+  return count;
+}
+
 async function onEntry(ev) {
+  const intentId = `entry:${ev.event_id || `${FLOOR}:${ev.id}`}`;
+  const existingIntent = journal.getIntent(intentId);
+  if (existingIntent?.state === "confirmed") {
+    applyConfirmedEntry(existingIntent);
+    return;
+  }
+  if (existingIntent?.state === "accounted") return log(`ENTRY ${ev.symbol} already accounted`);
+  validEntryEvent(ev);
   if (S.positions[ev.mint]) return log(`SKIP ${ev.symbol}: already holding`);
-  // A backlog is not a trading opportunity. After downtime the feed replays every
-  // entry since the cursor, and market-buying a call published hours ago means
-  // buying a move that already happened — or a coin that is already dead.
-  const age = Date.now() - (ev.ts || 0);
-  if (ev.ts && age > MAX_CALL_AGE_MS)
-    return log(`SKIP ${ev.symbol}: call is ${Math.round(age / 60000)}m old (max ${MAX_CALL_AGE_MS / 60000}m)`);
-  rollDay(S.state, Date.now());
-  S.state.openCount = openList().length;
-  S.state.spendableSol = EXECUTE ? Math.max(0, (await solBalance()) - FEE_RESERVE) : Infinity;
-  // Kelly needs an equity base, a closed sample, and the risk the book already
-  // carries. Equity is the wallet itself — the only honest number here.
-  S.state.equitySol = EXECUTE ? await solBalance() : (S.state.equitySol ?? CFG.dailySolCap);
-  S.state.wins = S.wins ?? 0;
-  S.state.losses = S.losses ?? 0;
-  S.state.bookHeat = openList().reduce((a, p) => a + (p.riskF || 0), 0);
+  const unresolvedPosition = openList().find((position) => positionEntryBlock(position));
+  if (unresolvedPosition)
+    return log(`SKIP ${ev.symbol}: ${unresolvedPosition.symbol} blocks new exposure — ${positionEntryBlock(unresolvedPosition)}`);
+  const age = Date.now() - Number(ev.ts);
+  if (age > MAX_CALL_AGE_MS)
+    return log(`SKIP ${ev.symbol}: call is ${Math.round(age / 60_000)}m old (max ${MAX_CALL_AGE_MS / 60_000}m)`);
+  if (pauseEntries()) return log(`SKIP ${ev.symbol}: PAUSE ENTRIES file is present`);
+  if (hardStop()) return log(`SKIP ${ev.symbol}: HARD STOP file is present`);
+  const history = journal.riskHistoryStatus(Date.now());
+  if (!history.complete)
+    return log(`SKIP ${ev.symbol}: rolling risk history is quarantined until ${new Date(history.incompleteUntil).toISOString()}`);
 
-  /* THE FLOOR'S OWN RULE, AS OF THIS POLL.
-   *
-   * take_profit_x rides on the event rather than living in this process's env, so a
-   * tenant switching "sell at 2x" to "ride to 10x" in the UI takes effect on the next
-   * poll instead of on the next redeploy of their VPS. 0 means auto — use the
-   * shared snipe-v2 default 2x rule and honor the authored target. An explicit
-   * multiple overrides the target; the desk's explicit exit always still wins. */
+  Object.assign(S.state, journal.rollingRisk(Date.now()));
+  S.state.openCount = openList().length;
+  S.state.spendableSol = EXECUTE ? Math.max(0, (await solBalance()) - FEE_RESERVE) : null;
+  S.state.equitySol = EXECUTE ? await solBalance() : (S.state.equitySol ?? CFG.dailySolCap);
+  S.state.bookHeat = openList().reduce((sum, pos) => sum + (pos.riskF || 0), 0);
+
+  const entryReference = validateEntryReference(ev, {
+    nowMs: Date.now(), maxMarkAgeMs: MAX_ENTRY_MARK_AGE_MS,
+    maxDeviationPct: MAX_ENTRY_DEVIATION_PCT,
+  });
+
   const takeProfitRule = resolveTakeProfitRule(ev.take_profit_x, CFG.takeProfitX);
-  const { takeProfitX: tpx, honorDeskTarget } = takeProfitRule;
-  const explicitTpx = !honorDeskTarget;
-  const fixed = Number(ev.fixed_sol) > 0
-    ? Math.min(Number(ev.fixed_sol), CFG.maxSolPerTrade) : CFG.fixedSol;
-  const perCall = { ...CFG, ...takeProfitRule, fixedSol: fixed };
-  const plan = planEntry({ call: ev, cfg: perCall, state: S.state });
+  const fixed = Number(ev.fixed_sol) > 0 ? Math.min(Number(ev.fixed_sol), CFG.maxSolPerTrade) : CFG.fixedSol;
+  const perCall = { ...CFG, ...takeProfitRule, fixedSol: fixed,
+    networkFeeReserveSol: EXECUTE ? jupiter.cfg.maxNetworkFeeLamports / LAMPORTS : 0 };
+  const normalizedCall = { ...ev, entry_ref: 1, stop: entryReference.stopRatio,
+    target: entryReference.targetRatio };
+  let plan = planEntry({ call: normalizedCall, cfg: perCall, state: S.state });
   if (plan.action !== "buy") return log(`SKIP ${ev.symbol}: ${plan.reason}`);
 
-  log(`ENTRY ${ev.symbol} — ${plan.sol} SOL | stop ${ev.stop} target ${ev.target}` +
-      (explicitTpx ? ` | explicit full exit at ${tpx}x`
-        : ` | auto full exit at ${tpx}x or the desk target, whichever comes first`));
-  if (!EXECUTE) return log("  DRY RUN");
+  if (!EXECUTE) {
+    log(`ENTRY ${ev.symbol} — ${plan.sol} SOL | stop ${ev.stop} target ${ev.target}`);
+    return log("PAPER — no transaction signed");
+  }
+  if (!jupiter) throw new Error("Jupiter client is unavailable");
 
-  const q = await quote(WSOL, ev.mint, Math.round(plan.sol * LAMPORTS));
-  const sig = await swap(q);
-  // Marks are normalised to the entry (entry = 1.0), so the engine compares
-  // executable value against value and never has to know token decimals.
-  const pos = openPosition({
-    call: { ...ev, stop: ev.entry_ref ? ev.stop / ev.entry_ref : 0.62,
-            target: ev.entry_ref && ev.target ? ev.target / ev.entry_ref : null },
-    sol: plan.sol, fillPrice: 1, cfg: perCall,
+  const preliminaryAmountRaw = BigInt(Math.floor(plan.sol * LAMPORTS));
+  const preflight = await jupiter.preflightEntry(WSOL, ev.mint, preliminaryAmountRaw.toString());
+  entrySubmissionGate({ kind: "entry", context: { event: ev } });
+  const executableReturnRatio = Number(BigInt(preflight.reverse.outAmount) * 1_000_000n /
+    preliminaryAmountRaw) / 1_000_000;
+  const worstFeeRatio = 2 * jupiter.cfg.maxNetworkFeeLamports / Number(preliminaryAmountRaw);
+  const slippageHaircut = (1 - jupiter.cfg.slippageBps / 10_000) ** 2;
+  const conservativeReturnRatio = executableReturnRatio * slippageHaircut - worstFeeRatio;
+  if (conservativeReturnRatio <= entryReference.stopRatio)
+    throw new Error(`entry round trip plus worst-case fees is already at/below the authored stop`);
+  const conservativeLossPct = Math.max(preflight.lossPct, (1 - conservativeReturnRatio) * 100);
+  plan = planEntry({ call: normalizedCall,
+    cfg: { ...perCall, measuredRoundTripLossPct: conservativeLossPct }, state: S.state });
+  if (plan.action !== "buy") return log(`SKIP ${ev.symbol} after executable-cost check: ${plan.reason}`);
+  const amountRaw = BigInt(Math.floor(plan.sol * LAMPORTS));
+  log(`ENTRY ${ev.symbol} — ${plan.sol} SOL | stop ${ev.stop} target ${ev.target}`);
+  const openedAtMs = Date.now();
+  const fill = await jupiter.executeIntent({
+    id: intentId,
+    kind: "entry",
+    eventId: ev.event_id || null,
+    feedId: ev.id,
+    mint: ev.mint,
+    inputMint: WSOL,
+    outputMint: ev.mint,
+    amountRaw: amountRaw.toString(),
+    context: {
+      event: ev, plan, takeProfitRule, openedAtMs, entryReference,
+      entryPreflight: {
+        forwardOutputRaw: String(preflight.forward.outAmount),
+        reverseOutputRaw: String(preflight.reverse.outAmount),
+        roundTripLossPct: preflight.lossPct,
+        solUsd: preflight.solUsd,
+        observedAt: openedAtMs,
+      },
+      positionConfig: { stopBufferPct: perCall.stopBufferPct },
+      riskStateBefore: structuredClone(S.state),
+    },
   });
-  pos.qtyRaw = String(q.outAmount);
-  pos.paidSol = plan.sol;
-  pos.riskF = plan.f ?? null;              // this name's share of book heat
-  pos.openedAtMs = Date.now();
-  /* The rule IN FORCE WHEN THIS OPENED, remembered on the position. A trade should be
-   * closed by the rule it was entered under: someone changing their mind at 1.9x must
-   * not retroactively rewrite a position already on its way to a double. */
-  Object.assign(pos, takeProfitRule);
-  S.positions[ev.mint] = pos;
-  S.state.deployedTodaySol += plan.sol;
-  save();
-  log(`  BOUGHT ${ev.symbol} — https://solscan.io/tx/${sig}`);
+  applyConfirmedEntry(fill);
 }
 
-/* ── exits: the desk's, and our own ───────────────────────────────────────── */
-async function sellAll(pos, why, fraction = 1) {
-  // An operator may upgrade with an old state file that still represents a real
-  // holding. This dry-run-only release must never retire that state without the
-  // corresponding on-chain sale; preserve it for explicit manual reconciliation.
-  if (!EXECUTE) return log(`DRY RUN EXIT ${pos.symbol} — ${why} — position retained; no transaction sent`);
+async function sellAll(pos, why, fraction = 1, suppliedIntentId = null) {
+  const intentId = suppliedIntentId || `risk-exit:${pos.entryIntentId || `${pos.mint}:${pos.openedAtMs || pos.openedAt}`}`;
+  latchExit(pos, why, intentId);
+  const existingIntent = journal.getIntent(intentId);
+  if (existingIntent?.state === "confirmed") {
+    applyConfirmedExit(existingIntent);
+    return;
+  }
+  if (existingIntent?.state === "accounted") return log(`EXIT ${pos.symbol} already accounted`);
+  if (!EXECUTE) return log(`PAPER EXIT ${pos.symbol} — ${why} — position retained; no transaction sent`);
+  if (hardStop()) throw new Error("HARD STOP is present — automated exits are blocked; manage the wallet manually");
 
-  const held = await heldRaw(pos.mint);
-  // Never liquidate tokens that predated this call. The tracked position is the
-  // maximum this executor is authorized to sell, even if the burner holds more.
   const tracked = BigInt(pos.qtyRaw || 0);
-  const scoped = held < tracked ? held : tracked;
-  const amt = fraction >= 1 ? scoped : (scoped * BigInt(Math.round(fraction * 1e6))) / 1000000n;
-  if (amt <= 0n) {
-    // Do NOT drop the position here. "Balance reads zero" is not the same as "we
-    // own nothing": the buy may be a slot away from confirmation, or the RPC may
-    // be flaky. Dropping it would remove the bag from the stop/trail engine and
-    // leave a real position unmanaged and unsellable. Keep it and retry next tick;
-    // only retire it once the chain has repeatedly said empty.
-    pos.emptyReads = (pos.emptyReads || 0) + 1;
-    if (pos.emptyReads >= 3) { delete S.positions[pos.mint]; log(`  ${pos.symbol}: empty on 3 reads — retiring`); }
-    save();
-    return log(`  nothing held in ${pos.symbol} (read ${pos.emptyReads}/3) — keeping the position`);
+  const balance = await inspectTrackedBalance(pos);
+  if (!balance.verified) {
+    persistBalanceBlock(pos, balance);
+    return log(`AMBIGUOUS ${pos.symbol}: ${balance.reason} — durable position retained; manual reconciliation required`);
   }
-  pos.emptyReads = 0;
+  clearBalanceBlock(pos);
+  const amount = fraction >= 1 ? tracked :
+    (tracked * BigInt(Math.round(fraction * 1_000_000))) / 1_000_000n;
+  if (amount <= 0n) throw new Error(`${pos.symbol} durable exit amount rounded to zero`);
   log(`EXIT ${pos.symbol} — ${why}`);
-
-  const q = await quote(pos.mint, WSOL, amt.toString());
-  const outSol = Number(q.outAmount) / LAMPORTS;
-  const sig = await swap(q);
-  if (fraction >= 1) {
-    const net = outSol - (pos.paidSol || 0);
-    S.state.realizedTodaySol += net;
-    // the closed sample Kelly reads next time
-    if (net >= 0) S.wins = (S.wins || 0) + 1; else S.losses = (S.losses || 0) + 1;
-    delete S.positions[pos.mint];
-    log(`  SOLD ${pos.symbol} for ${outSol.toFixed(4)} SOL (${net >= 0 ? "+" : ""}${net.toFixed(4)}) — https://solscan.io/tx/${sig}`);
-  } else {
-    pos.qtyRaw = String(BigInt(pos.qtyRaw) - amt);
-    log(`  SCALED ${pos.symbol} — https://solscan.io/tx/${sig}`);
-  }
-  save();
+  const fill = await jupiter.executeIntent({
+    id: intentId,
+    kind: suppliedIntentId?.startsWith("desk-exit:") ? "desk_exit" : "risk_exit",
+    eventId: suppliedIntentId?.startsWith("desk-exit:") ? suppliedIntentId.slice(10) : null,
+    mint: pos.mint,
+    inputMint: pos.mint,
+    outputMint: WSOL,
+    amountRaw: amount.toString(),
+    context: {
+      position: structuredClone(pos), why, fraction,
+      riskStateBefore: structuredClone(S.state),
+    },
+  });
+  applyConfirmedExit(fill);
 }
 
-/** The risk pass: price every open position and let the engine decide. */
 async function manageOpen() {
+  let currentSolUsd = null;
+  let solUsdError = null;
+  if (EXECUTE && openList().length && jupiter) {
+    try { currentSolUsd = await jupiter.solUsdPrice(); }
+    catch (error) { solUsdError = error; }
+  }
   for (const pos of openList()) {
     try {
-      let mark = null;
-      if (pos.qtyRaw && BigInt(pos.qtyRaw) > 0n) {
-        const q = await quote(pos.mint, WSOL, pos.qtyRaw).catch(() => null);
-        // value now, against value paid — an executable mark, not a mid price
-        if (q) mark = (Number(q.outAmount) / LAMPORTS) / (pos.paidSol || 1);
+      if (EXECUTE) {
+        const wasBlocked = pos.balanceReconciliationRequired;
+        const balance = await inspectTrackedBalance(pos);
+        if (!balance.verified) {
+          persistBalanceBlock(pos, balance);
+          log(`AMBIGUOUS ${pos.symbol}: ${balance.reason} — position management remains disarmed`);
+          continue;
+        }
+        clearBalanceBlock(pos);
+        save();
+        if (wasBlocked) log(`${pos.symbol}: full canonical-ATA balance verified again — custody gate re-armed`);
       }
-      // Judged by the rule it was opened under, not whatever the UI says right now.
-      const d = stepPosition({ pos, mark, deskExit: null,
-        cfg: policyConfigForPosition(pos, CFG) });
-      if (d.action === "sell") await sellAll(pos, d.reason);
-      else if (d.action === "sell_part") await sellAll(pos, d.reason, d.fraction);
-      else save();                       // persist trail/stop ratchets
-    } catch (e) { log(`manage ${pos.symbol}: ${e.message}`); }
+      if (pos.accountingIncomplete) {
+        log(`${pos.symbol}: legacy accounting/SOL-USD basis is incomplete — automatic price exits remain disarmed`);
+        continue;
+      }
+      let mark = null;
+      if (jupiter && pos.qtyRaw && BigInt(pos.qtyRaw) > 0n) {
+        let quote = null;
+        try { quote = await jupiter.quote(pos.mint, WSOL, pos.qtyRaw); }
+        catch (error) {
+          pos.riskDataUnavailable = true;
+          pos.riskDataUnavailableReason = `mark/exit quote unavailable: ${error.message}`;
+          pos.riskDataUnavailableAt = Date.now();
+          save();
+          log(`mark ${pos.symbol}: ${error.message} — new entries blocked`);
+        }
+        if (quote) {
+          priceImpactPercent(quote);
+          if (solUsdError || !(currentSolUsd > 0)) {
+            pos.riskDataUnavailable = true;
+            pos.riskDataUnavailableReason = `SOL/USD mark unavailable: ${solUsdError?.message || "invalid quote"}`;
+            pos.riskDataUnavailableAt = Date.now();
+            save();
+          } else {
+            const entryInputSol = Number(BigInt(pos.entryInputLamports)) / LAMPORTS;
+            mark = ((Number(BigInt(quote.outAmount)) / LAMPORTS) / entryInputSol) *
+              (currentSolUsd / Number(pos.solUsdAtEntry));
+            delete pos.riskDataUnavailable;
+            delete pos.riskDataUnavailableReason;
+            delete pos.riskDataUnavailableAt;
+            save();
+          }
+        }
+      }
+      const decision = stepPosition({ pos, mark, deskExit: null, cfg: policyConfigForPosition(pos, CFG) });
+      if (pos.exitExecutionRequired) {
+        await sellAll(pos, pos.exitExecutionReason || decision.reason, 1, pos.exitExecutionIntentId || null);
+      } else if (decision.action === "sell") await sellAll(pos, decision.reason);
+      else if (decision.action === "sell_part") await sellAll(pos, decision.reason, decision.fraction);
+      else save();
+    } catch (error) {
+      if (pos.exitExecutionRequired) {
+        pos.exitExecutionLastError = error.message;
+        pos.exitExecutionLastAttemptAt = Date.now();
+        if (/price impact .* exceeds cap/i.test(error.message)) {
+          pos.manualExitRequired = true;
+          pos.manualExitReason = error.message;
+          pos.manualExitObservedAt = Date.now();
+        }
+        save();
+        log(`EXIT BLOCKED ${pos.symbol}: ${error.message} — fired exit remains latched; new entries blocked`);
+      } else {
+        pos.riskDataUnavailable = true;
+        pos.riskDataUnavailableReason = `position management failed: ${error.message}`;
+        pos.riskDataUnavailableAt = Date.now();
+        save();
+        log(`manage ${pos.symbol}: ${error.message} — new entries blocked`);
+      }
+    }
   }
 }
 
-/* ── the loop ─────────────────────────────────────────────────────────────── */
 let ticking = false;
 async function tick() {
-  // A slow tick (confirmations, many positions) must not overlap the next one:
-  // the second would re-fetch from the stale cursor and buy the same call twice.
-  if (ticking) return;
+  if (ticking || shuttingDown) return;
   ticking = true;
   try {
+    if (EXECUTE) await jupiter.recoverPending();
+    accountConfirmedIntents();
+    // Existing risk outranks new opportunity. A stop, age exit, balance ambiguity, or
+    // emergency-impact block must update the durable book before an entry from this
+    // feed tick can pass sizing and loss gates.
+    await manageOpen();
     try {
-      const r = await fetch(`${API}/api/floor/${FLOOR}/executor/feed?after=${S.cursor}`,
-        { headers: { authorization: "Bearer " + SECRET }, signal: AbortSignal.timeout(10000) });
-      if (r.status === 401) log("auth rejected — check CC_SECRET / CC_FLOOR");
-      else if (r.ok) {
-        const payload = await r.json();
-        const events = payload.events || [];
-        // FIRST RUN adopts the server's true latest id, not merely the first 50-row
-        // page. Otherwise a large history can leak into later polls as fresh entries.
+      const response = await fetch(`${API}/api/floor/${FLOOR}/executor/feed?after=${S.cursor}`, {
+        headers: { authorization: `Bearer ${SECRET}` }, redirect: "error", signal: AbortSignal.timeout(10_000),
+      });
+      if (response.status === 401) log("feed authentication rejected — check CC_SECRET / CC_FLOOR");
+      else if (!response.ok) log(`feed HTTP ${response.status}`);
+      else {
+        const payload = await response.json();
+        if (payload.cluster !== "mainnet-beta") throw new Error("feed cluster is not mainnet-beta");
+        if (!Array.isArray(payload.events)) throw new Error("feed omitted its events array");
+        const events = payload.events;
+        const latestId = Number(payload.latest_id);
+        if (!Number.isSafeInteger(latestId) || latestId < 0)
+          throw new Error("feed omitted a safe non-negative latest_id");
+        const returnedIds = events.map((event) => Number(event?.id));
+        let previousId = S.cursor;
+        for (const id of returnedIds) {
+          if (!Number.isSafeInteger(id) || id <= previousId || id > latestId)
+            throw new Error("feed event ids are not strictly increasing above the cursor or exceed latest_id");
+          previousId = id;
+        }
         if (!S.primed) {
-          const previousCursor = S.cursor;
           S.primed = true;
-          S.cursor = Math.max(S.cursor, Number(payload.latest_id) || 0);
-          log(`primed at cursor ${S.cursor} — ${events.length} historic event(s) skipped, trading forward only`);
-          try { save(); }
-          catch (e) { S.primed = false; S.cursor = previousCursor; throw e; }
+          S.cursor = Math.max(S.cursor, latestId);
+          save();
+          log(`primed at cursor ${S.cursor} — ${events.length} historic event(s) skipped; trading forward only`);
         } else {
+          // Exit safety is not held hostage by an earlier bad entry. Pre-latch/process
+          // every exit in the validated batch before the sequential cursor pass.
+          for (const ev of events.filter((event) => event.type === "exit")) {
+            const pos = S.positions[ev.mint];
+            if (!pos) continue;
+            try {
+              await sellAll(pos, `desk exit (${ev.code || "exit"})`, 1,
+                `desk-exit:${ev.event_id || `${FLOOR}:${ev.id}`}`);
+            } catch (error) {
+              log(`EXIT PREPASS ${ev.symbol || ev.id}: ${error.message} — exit remains latched`);
+            }
+          }
+          const blockingIntent = journal.hasBlockingIntent();
+          if (blockingIntent) {
+            log(`journal intent ${blockingIntent} is unresolved — exits stay latched and new exposure is frozen`);
+            return;
+          }
           for (const ev of events) {
             try {
               if (ev.type === "entry") await onEntry(ev);
               else if (ev.type === "exit") {
                 const pos = S.positions[ev.mint];
-                if (pos) await sellAll(pos, `desk exit (${ev.code || "exit"})`);
+                if (pos) await sellAll(pos, `desk exit (${ev.code || "exit"})`, 1,
+                  `desk-exit:${ev.event_id || `${FLOOR}:${ev.id}`}`);
                 else log(`EXIT ${ev.symbol} — not held`);
               } else throw new Error(`unknown event type ${ev.type}`);
-              // Cursor is an acknowledgement: advance only after the action succeeded
-              // or deliberately skipped. A thrown buy/sell remains retryable.
-              const previousCursor = S.cursor;
-              S.cursor = Math.max(S.cursor, ev.id);
-              try { save(); }
-              catch (e) { S.cursor = previousCursor; throw e; }
-            } catch (e) {
-              log(`ERROR on ${ev.symbol}: ${e.message} — event remains pending`);
+              S.cursor = Math.max(S.cursor, Number(ev.id));
+              save();
+            } catch (error) {
+              const intent = ev.type === "entry"
+                ? journal.getIntent(`entry:${ev.event_id || `${FLOOR}:${ev.id}`}`) : null;
+              if (ev.type === "entry" && (!intent || ["planned", "failed", "expired"].includes(intent.state))) {
+                // New exposure is optional; a permanently unsafe or pre-sign failed
+                // entry must not become a head-of-line denial of every later exit.
+                log(`SKIP ${ev.symbol || ev.id}: ${error.message} — entry acknowledged without a trade`);
+                S.cursor = Number(ev.id);
+                save();
+                continue;
+              }
+              log(`ERROR on ${ev.symbol || ev.id}: ${error.message} — event remains pending`);
               break;
             }
           }
         }
       }
-    } catch (e) { log("poll error:", e.message); }
-    try { await manageOpen(); }          // auth/feed failure never disables local stops
-    catch (e) { log("manage error:", e.message); }
+    } catch (error) { log(`poll error: ${error.message}`); }
+  } catch (error) {
+    log(`tick safety stop: ${error.message}`);
   } finally {
-    ticking = false;                     // every return/error releases the next tick
+    ticking = false;
   }
 }
 
-log(`poller up — floor ${FLOOR} — wallet ${kp.publicKey.toBase58()} — ${EXECUTE ? "LIVE" : "DRY RUN"}`);
-log(`  caps: ${CFG.maxSolPerTrade} SOL/trade, ${CFG.dailySolCap}/day deploy, ` +
-    `${CFG.dailyLossLimitSol} daily loss limit, ${CFG.maxOpenPositions} open max`);
-log(`  risk: full exit at desk target/default ${CFG.takeProfitX}x, breakeven at 1.35x, ` +
-    `${(CFG.trailPct * 100).toFixed(0)}% trail from 1.5x, no partial exits`);
-log(`  resuming ${openList().length} open position(s) from cursor ${S.cursor}`);
+log(`up — floor ${FLOOR} — wallet ${WALLET} — ${EXECUTE ? "LIVE MAINNET" : "PAPER"}`);
+log(`caps: ${CFG.maxSolPerTrade} SOL/trade, ${CFG.dailySolCap} SOL/rolling 24h deploy, ${CFG.dailyLossLimitSol} SOL/rolling 24h loss, ${CFG.maxOpenPositions} open`);
+log(`journal: ${STATE_DB}; entries pause: ${PAUSE_ENTRIES_FILE}; hard stop: ${HARD_STOP_FILE}`);
+log(`resuming ${openList().length} position(s) from cursor ${S.cursor}`);
 await tick();
 setInterval(tick, POLL_MS);

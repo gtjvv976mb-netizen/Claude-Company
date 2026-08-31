@@ -3,7 +3,7 @@
  * Every case here is a way a trading bot loses money by accident.
  */
 import { DEFAULTS, POLICY_VERSION, planEntry, openPosition, stepPosition, freshState } from "./strategy.mjs";
-import { policyConfigForPosition, resolveTakeProfitRule } from "./trade-policy.mjs";
+import { policyConfigForPosition, resolveTakeProfitRule, validateEntryReference } from "./trade-policy.mjs";
 let pass=0, fail=0;
 const t=(name,cond,got)=>{ cond?pass++:fail++; console.log(`${cond?"PASS":"FAIL"}  ${name}${cond?"":"  -> got "+JSON.stringify(got)}`); };
 const call={ mint:"m", symbol:"T", size_sol:0.05, stop:0.62, target:1.9, ts:0 };
@@ -13,9 +13,9 @@ t("executor and server share snipe-v2", POLICY_VERSION === "snipe-v2", POLICY_VE
 let st=freshState(0); st.openCount=4;
 t("max open positions blocks entry", planEntry({call,cfg:DEFAULTS,state:st}).action==="skip");
 st=freshState(0); st.realizedTodaySol=-0.2;
-t("daily loss limit blocks entry", planEntry({call,cfg:DEFAULTS,state:st}).action==="skip");
+t("rolling 24h loss limit blocks entry", planEntry({call,cfg:DEFAULTS,state:st}).action==="skip");
 st=freshState(0); st.deployedTodaySol=0.4999;
-t("daily deploy cap blocks entry", planEntry({call,cfg:DEFAULTS,state:st}).action==="skip");
+t("rolling 24h deploy cap blocks entry", planEntry({call,cfg:DEFAULTS,state:st}).action==="skip");
 st=freshState(0);
 t("clean state allows entry", planEntry({call,cfg:DEFAULTS,state:st}).action==="buy");
 // The desk's number is now a CEILING, not the size. We size off risk-at-stop and
@@ -82,5 +82,20 @@ t("desk exit sells everything", stepPosition({pos:p,mark:9.9,deskExit:{code:"rug
 // unreadable mark must not be treated as zero
 p=openPosition({call,sol:0.05,fillPrice:1,cfg:DEFAULTS});
 t("unreadable mark holds (never a false stop)", stepPosition({pos:p,mark:null,cfg:DEFAULTS}).action==="hold");
+
+const markNow = 1_000_000;
+const freshEntry = { entry_ref: 1, entry_lo: 0.9, entry_hi: 1.1, stop: 0.8,
+  target: 1.5, current_mark: 1.05, current_mark_at: markNow };
+const reference = validateEntryReference(freshEntry, { nowMs: markNow });
+t("entry bracket is normalized to the current monitored mark",
+  Math.abs(reference.stopRatio - 0.8 / 1.05) < 1e-12, reference);
+t("a stale-but-under-call-age 40% gap is refused before signing", (() => {
+  try { validateEntryReference({ ...freshEntry, current_mark: 0.6 }, { nowMs: markNow }); return false; }
+  catch (error) { return /outside authored entry zone|breached stop/.test(error.message); }
+})());
+t("an already-hit authored target is never bought", (() => {
+  try { validateEntryReference({ ...freshEntry, current_mark: 1.5, entry_hi: 2 }, { nowMs: markNow }); return false; }
+  catch (error) { return /already reached authored target/.test(error.message); }
+})());
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail?1:0);

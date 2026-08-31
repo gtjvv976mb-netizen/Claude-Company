@@ -1,6 +1,6 @@
-// Every outbound call in this codebase goes through here. It is GET-only by
-// construction: there is no write path to any venue, which is what makes the
-// charter's "never executes" rule structural rather than aspirational.
+// Hosted research-desk market-data requests use these helpers. Execution is not
+// routed through this module: the only signing path lives in the separately run,
+// user-operated polling executor under executor/.
 export async function getJson(url, { headers = {}, timeoutMs = 12000, label } = {}) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);

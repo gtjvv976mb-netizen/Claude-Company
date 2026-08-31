@@ -44,6 +44,10 @@ services:
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: XAI_API_KEY
-        sync: false             # required for the agents to actually run
+        sync: false             # optional; enables the alternate Grok PM brain
       - key: SOLANA_RPC
         sync: false             # a Helius/Triton URL; the public RPC is rate-limited
+      # Dedicated read-only credential for the aggregate Codex review bundle. Do not
+      # reuse a wallet/session/executor secret.
+      - key: CODEX_REVIEW_TOKEN
+        sync: false

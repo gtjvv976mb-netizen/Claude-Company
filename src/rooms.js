@@ -209,7 +209,7 @@ export async function requestRun({ floorNo, wallet, mint, houseSeat = false }) {
         // 'floor' is deliberately NOT an opportunistic lane: the tenant already paid
         // 250,000 $CLAUDECO for this run, so it draws on the full daily cap. Throttling
         // work someone has bought is not budgeting, it is keeping the money.
-        { lane: "floor", ...(brain ? { pmProvider: brain } : {}) }));
+        { lane: houseSeat ? "house-floor" : "floor", ...(brain ? { pmProvider: brain } : {}) }));
       db.prepare("UPDATE runs SET symbol=?, outcome=?, detail=?, finished_at=? WHERE id=?")
         .run(res?.symbol ?? null, res?.outcome ?? "done", res?.detail ?? null, Date.now(), runId);
 
@@ -235,7 +235,7 @@ export async function requestRun({ floorNo, wallet, mint, houseSeat = false }) {
           const c = { mint, pair: res?.ev?.pair };
           category = classify(c).category; pad = launchpad(c);
         } catch {}
-        const pub = publishCall(res, { category, launchpad: pad, toFloors: [floorNo] });
+        const pub = publishCall(res, { category, launchpad: pad, toFloors: [floorNo], sourceFloor: floorNo });
         if (pub?.callId) {
           db.prepare("UPDATE runs SET detail=? WHERE id=?")
             .run(`${res?.detail ?? res?.finalDecision ?? "decided"} · published as call #${pub.callId}`, runId);

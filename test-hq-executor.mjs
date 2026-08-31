@@ -15,7 +15,9 @@
  */
 import db from "./src/lib/store.js";
 import { openCall, closeCall, liveCalls } from "./src/calls.js";
-import { broadcast, settingsFor, saveSettings } from "./src/copy.js";
+import { announceEntry } from "./src/alerts.js";
+import { broadcast, decide, settingsFor, saveSettings } from "./src/copy.js";
+import { executorFeedPayload } from "./src/office.js";
 import { listFloors, HQ_FLOOR } from "./src/tower.js";
 
 let pass = 0, fail = 0;
@@ -47,12 +49,30 @@ ok("a feed secret exists without any webhook URL being set",
 for (const c of liveCalls()) closeCall(c.id, "test_reset", 1);
 const call = openCall({
   mint: "HQtest1111111111111111111111111111111111111", symbol: "HOUSE",
-  category: "memecoin", launchpad: "pump.fun", conviction: 62,
+  // Mandate picks may be published below every tenant preset's conviction bar. The
+  // authoring house must still receive its own approved call; tenant preferences must
+  // not be silently weakened to make that happen.
+  category: "memecoin", launchpad: "pump.fun", conviction: 30,
   entryRef: 0.0010, stop: 0.00062, target: 0.0019,
   thesis: "the house backs its own call", invalidation: "deployer sells",
-  liqUsd: 90_000, rtLossPct: 3.1,
+  liqUsd: 90_000, rtLossPct: 3.1, policyVersion: "test-policy-v42",
 });
 ok("a call was published", !!call, `id=${call?.id}`);
+
+const tenantFloor = 49;
+saveSettings(tenantFloor, { appetite: "aggressive" });
+const tenantDecision = decide(tenantFloor, call);
+ok("an aggressive tenant still enforces its conviction threshold",
+  tenantDecision.verdict === "skipped" && /conviction 30.*bar of 40/.test(tenantDecision.reason),
+  `${tenantDecision.verdict} — ${tenantDecision.reason}`);
+
+// The exception is not a blanket HQ override: a configured liquidity gate still wins.
+saveSettings(HQ_FLOOR, { minLiqUsd: 100_000 });
+const hqLiquidityDecision = decide(HQ_FLOOR, call);
+ok("the HQ exception bypasses only conviction, not its other copy gates",
+  hqLiquidityDecision.verdict === "skipped" && /liquidity/.test(hqLiquidityDecision.reason),
+  `${hqLiquidityDecision.verdict} — ${hqLiquidityDecision.reason}`);
+saveSettings(HQ_FLOOR, { minLiqUsd: null });
 
 const res = broadcast(call.id, targets);
 ok("the broadcast succeeded", res.ok, `offered=${res.offered} skipped=${res.skipped}`);
@@ -73,6 +93,21 @@ for (const forbidden of ["secretKey", "privateKey", "seed", "mnemonic", "keypair
 ok("the payload carries what a bot actually needs (stop + entry)",
   payload.includes("0.00062") && payload.includes("0.001"),
   "stop and entry reference present");
+
+// The exact response builder used after the route authenticates the floor must retain
+// the facts a local executor uses to bind an intent and enforce policy before signing.
+await announceEntry(call);
+const feed = executorFeedPayload(HQ_FLOOR, 0);
+const event = feed.events?.find((item) => item.call_id === call.id && item.type === "entry");
+ok("the executor feed serves the HQ entry", !!event,
+  `events=${feed.events?.length ?? 0}`);
+ok("the executor event is bound to the durable call id", event?.call_id === call.id,
+  `call_id=${event?.call_id}`);
+ok("the executor feed carries the call's research and risk metadata",
+  event?.conviction === 30 && event?.category === "memecoin" && event?.launchpad === "pump.fun" &&
+    event?.liq_at_call === 90_000 && event?.rt_loss_at_call === 3.1 &&
+    event?.policy_version === "test-policy-v42",
+  JSON.stringify(event));
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

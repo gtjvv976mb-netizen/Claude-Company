@@ -1,0 +1,15 @@
+{
+  "name": "claude-company-codex-improvement-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0 <23"
+  },
+  "scripts": {
+    "improve": "node run.mjs"
+  },
+  "dependencies": {
+    "@openai/codex-sdk": "0.151.0"
+  }
+}

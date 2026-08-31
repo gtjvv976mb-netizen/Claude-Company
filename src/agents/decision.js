@@ -2,7 +2,7 @@ import { ask } from "../lib/llm.js";
 import { RedTeamOut, RiskOut, PMOut, TicketOut, ScoutOut, BestPickOut } from "./schemas.js";
 import { cfg } from "../config.js";
 import { recentLessons } from "./review.js";
-import { emit } from "../lib/bus.js";
+import { emit, runContext } from "../lib/bus.js";
 
 // Compact on purpose: 2-space pretty-printing inflated every downstream prompt
 // ~25% for nothing a model needs. The PM and Risk read ~20k tokens per run of
@@ -231,15 +231,19 @@ Two publication rules, absolute:
 - Never propose into a spike. If the price is vertical right now, the people copying
   this call minutes from now are the exit liquidity. Wait or pass.`;
 
-const pmPrompt = (ev, analysts, redteam, risk, weightedScore) =>
-      `Decide on ${ev.symbol} (${ev.mint}).\n\n` +
+const pmPrompt = (ev, analysts, redteam, risk, weightedScore) => {
+  const floorNo = runContext.getStore()?.floor ?? null;
+  const lessonScope = floorNo == null || Number(floorNo) === 50 ? "house" : "tenant";
+  const lessons = recentLessons(5, { evidenceScope: lessonScope, floorNo });
+  return `Decide on ${ev.symbol} (${ev.mint}).\n\n` +
       `=== LESSONS FROM CLOSED CALLS (Colonel Debrief) ===\n` +
-      `${recentLessons(5).map((l) => `[${l.grade}] ${l.symbol}: ${l.lesson}`).join("\n") || "(no closed calls yet)"}\n\n` +
+      `${lessons.map((l) => `[${l.grade}] ${l.symbol}: ${l.lesson}`).join("\n") || "(no closed calls yet)"}\n\n` +
       `${bundle(ev)}\n\n${book(analysts)}\n\n` +
       `=== RED TEAM ===\n${JSON.stringify(redteam)}\n\n` +
       `=== RISK ===\n${JSON.stringify(risk)}\n\n` +
       `=== WEIGHTED ANALYST COMPOSITE ===\n${weightedScore.toFixed(1)} / 100 ` +
       `(weights: ${JSON.stringify(cfg.weights)})`;
+};
 
 export async function runPM(ev, analysts, redteam, risk, weightedScore, opts = {}) {
   // A tenant floor may hire Grok as its Managing Director: the PM seat of that
@@ -263,10 +267,13 @@ export async function runPM(ev, analysts, redteam, risk, weightedScore, opts = {
         `"watch_rules":{"price_above_usd":number|null,"buys_h1_at_least":number|null,"liq_at_least_usd":number|null,"hours":1-72} or null}`,
       validate: PMOut,
     });
-    if (g.ok) { emit("seat:verdict", { seat: "PM", detail: "thinking on Grok" }); return g.out; }
+    if (g.ok) {
+      emit("seat:verdict", { seat: "PM", detail: "thinking on Grok" });
+      return { ...g.out, _provider: "grok" };
+    }
     emit("seat:failed", { seat: "PM(grok)", error: g.error + " — falling back to the Claude seat" });
   }
-  return ask({
+  const out = await ask({
     seat: "PM",
     model: cfg.models.pm,
     effort: cfg.effort.pm,
@@ -274,6 +281,7 @@ export async function runPM(ev, analysts, redteam, risk, weightedScore, opts = {
     system: PM_SYSTEM,
     prompt: pmPrompt(ev, analysts, redteam, risk, weightedScore),
   });
+  return { ...out, _provider: opts.pmProvider === "grok" ? "grok->claude" : "claude" };
 }
 
 /** EXECUTION — turns a decision into an unsigned ticket a human can act on. */

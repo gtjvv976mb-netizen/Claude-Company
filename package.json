@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "An automated Solana research desk staffed by purpose-built agents, one per stage of forming a trade. Purpose-built agents, one per stage of the trade-forming process. Proposal-only: it never signs, never sends.",
+  "description": "An automated, proposal-only Solana research desk with an optional user-operated local execution canary.",
   "engines": {
     "node": ">=22.13.0 <23"
   },
@@ -16,6 +16,8 @@
     "watch": "node src/index.js watch",
     "ledger": "node src/index.js ledger",
     "doctor": "node src/index.js doctor",
+    "improvement:bundle": "node scripts/improvement-bundle.mjs",
+    "improvement:codex": "npm --prefix services/codex-improvement run improve --",
     "treasury:check": "node scripts/check-treasury.mjs"
   },
   "dependencies": {

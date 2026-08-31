@@ -2174,11 +2174,11 @@ const DOSSIER = {
     note: "A yes authorises a ticket, not a trade. The seat can approve; it cannot sign.",
   },
   __bot: {  // WALL-ST-E
-    brief: "Your paper executor. He does not decide anything — he rehearses what the desk called, inside your caps.",
-    detail: "This hardening release is research and paper-only. Browser transaction broadcast and both standalone signing paths are fail-closed. WALL-ST-E can inspect calls and rehearse policy decisions, but cannot spend SOL. A future live release requires a durable transaction journal, instruction validation, recovery tests and a supervised canary.",
+    brief: "Your self-hosted autotrader. He does not choose trades — he works the calls your floor accepted, inside your local caps.",
+    detail: "WALL-ST-E is the local poller, not a wallet hidden in this website. Dry run is the default; live mode must be armed explicitly on your own machine, where the burner key stays. The central desk only publishes calls and never receives a private key. Browser and webhook signing remain disabled. On first start he begins at the newest feed item and never replays old calls.",
     method: "Code only — no model call, no monthly cost. He is the hands, not the brain.",
     known: "Compacting the day's trades into neat little cubes.",
-    note: "The desk cannot sign and never holds a key. This release only rehearses the shared policy; it never builds or broadcasts a transaction.",
+    note: "This page has no local-executor telemetry, so it never claims WALL-ST-E is live. Confirm his mode and fills on the machine running the poller.",
   },
   GrokAD: {  // GROX MULDER
     brief: "The Assistant Director from the other agency. When a floor hires the Grok brain, he moves into the suite beside the boss and works the trades himself.",
@@ -3974,7 +3974,7 @@ const KIND_LABEL = { model: "Model call", code: "Code only", claude: "Claude", c
 
 function openDossier(seatId) {
   const spec = seatId === "__bot"
-    ? { id: "__bot", name: "WALL-ST-E", role: "Your paper executor \u00b7 signing disabled" }
+    ? { id: "__bot", name: "WALL-ST-E", role: "Your self-hosted autotrader \u00b7 local custody" }
     : STAFF.find((x) => x.id === seatId);
   if (!spec) return;
   const d = DOSSIER[seatId] || {};
@@ -4524,7 +4524,7 @@ for (const s of STAFF) {
   legendTiles["__bot"] = i;
   sp.append(i, document.createTextNode("WALL-ST-E"));
   sp.style.cursor = "pointer";
-  sp.title = "Your paper executor — live signing is disabled";
+  sp.title = "Your autotrader — the poller and wallet key stay on your machine";
   sp.onclick = () => openDossier("__bot");
   legendEl.appendChild(sp);
 }
@@ -5199,8 +5199,9 @@ if (location.search.includes("demo")) {
   // The tenant's token rides the stream URL so the server can tell owner from
   // visitor; the token comes from the same origin the stream goes to.
   const sid = (() => { try { return localStorage.getItem("cc_token"); } catch { return null; } })();
+  const streamFloor = floorParam || "50";
   const streamUrl = (window.__API_BASE__ || "") +
-    (floorParam ? `/events?floor=${floorParam}${sid ? "&sid=" + encodeURIComponent(sid) : ""}` : "/events");
+    `/events?floor=${streamFloor}${sid ? "&sid=" + encodeURIComponent(sid) : ""}`;
   let es = new EventSource(streamUrl);
   let ok = false;
   let backfilled = false;
@@ -5707,15 +5708,11 @@ async function renderTeamInto(el) {
   const strip = mk("div", "teamstrip");
 
   // 1. the bot
-  const bs = window.__botStatus?.() ?? null;
   const cBot = mk("div", "tchip");
-  cBot.append(mk("span", "tk", "WALL-ST-E \u00b7 your bot"));
-  const bv = mk("span", "tv",
-    !bs || !bs.exists ? "○ not set up" : bs.live && bs.running ? "● LIVE" :
-    bs.running ? "◐ practice run" : "◌ stopped");
-  bv.style.color = bs?.running ? (bs.live ? "var(--good,#4f8f52)" : "var(--amber,#e0ad3d)") : "";
+  cBot.append(mk("span", "tk", "WALL-ST-E \u00b7 autotrader"));
+  const bv = mk("span", "tv", "○ local status not linked");
   cBot.appendChild(bv);
-  if (bs?.running) cBot.appendChild(mk("span", "dp-note", "while this tab is open"));
+  cBot.appendChild(mk("span", "dp-note", "Check the machine running the poller"));
   strip.appendChild(cBot);
 
   // 2. the shift — with the toggle and cadence inline
@@ -6410,24 +6407,26 @@ async function refreshBudget() {
 /* ── the tenant's own settings: appetite, bankroll, and which platforms ──── */
 const ALL_PADS = ["pump.fun", "letsbonk.fun", "bags.fm", "moonshot", "boop.fun", "meteora-dbc", "trix", "other"];
 
-/* ── THE PAPER-EXECUTOR CARD ──────────────────────────────────────────────────
-   Keep the release gate visible at the top of Calls. A legacy browser burner can
-   export its key for recovery, but no browser signing code ships in this page. */
+/* ── THE WALL-ST-E EXECUTOR CARD ──────────────────────────────────────────────
+   A legacy browser burner can export its key for recovery, but no browser signing
+   code ships in this page. Live-capable execution is local and polling-only. */
 function buildBotCard(settings) {
   let box = document.createElement("div");   // `let`: the paper-test drawer
   box.className = "call";                    // reassigns this to its own body
   const card = box;                          // ...so the CARD is returned, not the drawer
   const mk = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x) e.textContent = x; return e; };
 
-  /* RELEASE GATE — do not initialize the legacy browser signer. The API relay also
-     rejects transaction broadcast, so this UI check is defense in depth rather than
-     the only brake. Keep recovery access for anyone who funded a burner before the
-     gate shipped; ownership of those funds must not be stranded by a safety release. */
+  /* CUSTODY GATE — do not initialize the legacy browser signer. The API relay also
+     rejects transaction broadcast. Keep recovery access for anyone who funded a
+     browser burner before the gate shipped; those funds must not be stranded. */
   const releaseGate = mk("div");
-  releaseGate.appendChild(mk("div", "dp-h", "Paper executor · live signing disabled"));
+  releaseGate.appendChild(mk("div", "dp-h", "WALL-ST-E · self-hosted autotrader"));
   releaseGate.appendChild(mk("div", "dp-note",
-    "This release can deliver and rehearse calls, but it cannot build, sign, or broadcast a trade. " +
-    "Live execution stays closed until durable transaction recovery and instruction validation pass a supervised canary."));
+    "Claude Company is noncustodial: the central site publishes calls but never receives a wallet key or signs a trade. " +
+    "Browser and webhook signing stay disabled. WALL-ST-E can trade only from the local poller after you explicitly arm it."));
+  releaseGate.appendChild(mk("div", "dp-note",
+    "This page has no telemetry from your machine, so it cannot say whether WALL-ST-E is armed, paused or live. " +
+    "First start begins at the newest feed item and skips every older call."));
   let legacyBot = null;
   const legacyKey = `cc_bot_${FLOOR_N}`;
   try { legacyBot = JSON.parse(localStorage.getItem(legacyKey) || "null"); } catch {}
@@ -6450,7 +6449,7 @@ function buildBotCard(settings) {
   }
   const docs = document.createElement("a");
   docs.href = "/executor/README.md"; docs.target = "_blank"; docs.rel = "noopener";
-  docs.textContent = "Read the dry-run executor and live-readiness gates";
+  docs.textContent = "Read WALL-ST-E setup, safety controls and recovery";
   releaseGate.appendChild(docs);
   card.appendChild(releaseGate);
   return card;
@@ -6538,20 +6537,21 @@ function buildControls(settings) {
   box.appendChild(hook);
   box.appendChild(mk("div", "dp-note", "Exit calls are pushed here too, so you hear them with the tab closed. Discord, Telegram and Slack only."));
 
-  box.appendChild(mk("div", "dp-h", "Your dry-run executor"));
+  box.appendChild(mk("div", "dp-h", "WALL-ST-E · your local autotrader"));
   const exec_ = document.createElement("input");
   exec_.className = "dp-in"; exec_.type = "url";
-  exec_.placeholder = "Push delivery disabled — polling only";
+  exec_.placeholder = "Browser/webhook execution disabled — local polling only";
   exec_.value = "";
   exec_.disabled = true;
   exec_.setAttribute("aria-label", "Executor webhook URL");
   box.appendChild(exec_);
   const execNote = mk("div", "dp-note",
-    "Run the open-source poller to inspect the authenticated feed and rehearse the shared policy on your own machine. This release rejects EXECUTE=1, executor webhooks are off, and the browser relay cannot broadcast transactions. Do not fund its burner identity for auto-trading.");
+    "Run the open-source poller on a machine you control. It defaults to dry run and can trade only after an explicit local --live setup. " +
+    "Its dedicated burner key stays there; this site and the disabled webhook adapter never receive it. First run skips feed history.");
   box.appendChild(execNote);
   if (!settings.executor_secret) {
     const mint = document.createElement("button");
-    mint.className = "dp-btn"; mint.textContent = "Create my signing secret";
+    mint.className = "dp-btn"; mint.textContent = "Create my executor feed secret";
     mint.onclick = async () => {
       mint.disabled = true; mint.textContent = "Creating\u2026";
       await api(`/api/floor/${FLOOR_N}/copy`, { method: "POST",
@@ -6562,14 +6562,14 @@ function buildControls(settings) {
   }
   if (settings.executor_secret) {
     const sec = mk("div", "bud-addr");
-    sec.textContent = "signing secret: " + settings.executor_secret;
+    sec.textContent = "executor feed secret: " + settings.executor_secret;
     const rot = document.createElement("button");
     rot.className = "dp-btn ghost";
     rot.style.cssText = "font-size:9.5px;padding:2px 8px;margin-left:6px";
     rot.textContent = "Rotate";
-    rot.title = "Invalidate this secret and issue a new one — do this if it was ever pasted anywhere";
+    rot.title = "Invalidate this feed secret and issue a new one — do this if it was ever pasted anywhere";
     rot.onclick = async () => {
-      if (!confirm("Rotate the signing secret?\n\nAny executor using the old one stops working until you reinstall it with the new secret.")) return;
+      if (!confirm("Rotate the executor feed secret?\n\nAny poller using the old one stops receiving calls until you reinstall it with the new secret.")) return;
       rot.disabled = true; rot.textContent = "Rotating\u2026";
       await api(`/api/floor/${FLOOR_N}/copy`, { method: "POST",
         body: JSON.stringify({ rotateExecutorSecret: true }) });
@@ -6578,12 +6578,14 @@ function buildControls(settings) {
     sec.appendChild(rot);
     box.appendChild(sec);
 
-    // The installer prompts through /dev/tty so the feed secret never lands in argv
-    // or shell history. It creates a mode-0600 EnvironmentFile and stays dry-run-only.
-    box.appendChild(mk("div", "dp-h", "Install the dry-run poller"));
+    // Install from the exact source commit that built this page. The installer prompts
+    // through /dev/tty so the feed secret never lands in argv or shell history.
+    box.appendChild(mk("div", "dp-h", "Install WALL-ST-E · dry run by default"));
     box.appendChild(mk("div", "dp-note",
-      "Paste this into a Linux terminal. The installer asks for the signing secret privately, stores it in a mode-0600 file, and starts a dry-run service. There is no live activation procedure in this release."));
-    const cmd = `curl -fsSL https://claudedotcompany.com/executor/install.sh | bash -s -- --floor ${FLOOR_N}`;
+      "Clone and inspect the exact release below on a Linux host. The installer reads the executor feed secret privately, stores credentials and the burner key in mode-0600 files, and starts without trading."));
+    const releaseCommit = "__CLAUDE_COMPANY_SOURCE_COMMIT__";
+    const checkout = `git clone https://github.com/gtjvv976mb-netizen/Claude-Company.git\ncd Claude-Company\ngit checkout --detach ${releaseCommit}`;
+    const cmd = `${checkout}\nbash executor/install.sh --floor ${FLOOR_N}`;
     const box2 = mk("div", "bud-addr");
     box2.style.cssText = "white-space:pre-wrap;word-break:break-all;font-size:10px;line-height:1.5";
     box2.textContent = cmd;
@@ -6596,8 +6598,28 @@ function buildControls(settings) {
       setTimeout(() => (copyBtn.textContent = "Copy the command"), 1500);
     };
     box.appendChild(copyBtn);
+
+    box.appendChild(mk("div", "dp-h", "Optional · supervised live canary"));
     box.appendChild(mk("div", "dp-note",
-      "Prefer your own machine? The same dry-run poller runs locally — see /executor/README.md. Do not fund it for auto-trading; EXECUTE=1 deliberately fails."));
+      "Only after reviewing the dry run: put two private HTTPS Solana RPC URLs from independent providers and the Jupiter API key in separate mode-0600 files. " +
+      "The installer shows the new burner address and arms only when you retype that public key in the terminal. " +
+      "This first live release is hard-capped at 0.005 SOL per trade and 0.01 SOL in each rolling 24-hour window."));
+    const liveCmd = `${checkout}\nbash executor/install.sh --floor ${FLOOR_N} --live --expected-commit ${releaseCommit} --max-sol 0.005 --daily-cap 0.01 --rpc-file /absolute/path/to/primary-rpc --secondary-rpc-file /absolute/path/to/secondary-rpc --jupiter-key-file /absolute/path/to/jupiter-api-key`;
+    const liveBox = mk("div", "bud-addr");
+    liveBox.style.cssText = "white-space:pre-wrap;word-break:break-all;font-size:10px;line-height:1.5";
+    liveBox.textContent = liveCmd;
+    box.appendChild(liveBox);
+    const copyLive = mk("button", "dp-btn ghost", "Copy the live-canary command");
+    copyLive.type = "button";
+    copyLive.onclick = async () => {
+      try { await navigator.clipboard.writeText(liveCmd); copyLive.textContent = "Copied ✓"; }
+      catch { liveBox.style.userSelect = "all"; copyLive.textContent = "Select it above"; }
+      setTimeout(() => (copyLive.textContent = "Copy the live-canary command"), 1500);
+    };
+    box.appendChild(copyLive);
+    box.appendChild(mk("div", "dp-note",
+      "The browser cannot see or control that service. Verify its mode, wallet, journal and fills on the host itself. " +
+      "On its first start WALL-ST-E skips all existing calls and waits for the next one. See /executor/README.md before funding the dedicated burner."));
   }
 
   const save = mk("button", "dp-btn", "Save settings");

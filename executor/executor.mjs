@@ -1,14 +1,14 @@
 /**
  * CLAUDE COMPANY — REFERENCE EXECUTOR
  *
- * The missing half of auto-trading without custody. The desk (Claude or Grok)
+ * Legacy inbound-webhook adapter. The desk (Claude or Grok)
  * is the BRAIN: it researches and publishes calls, and never touches a wallet.
  * This script is the HANDS: it runs on YOUR machine, holds YOUR burner wallet,
- * and obeys YOUR caps. The building POSTs signed JSON here on every entry and
- * exit your floor receives; this verifies the signature and trades via Jupiter.
+ * and obeys YOUR caps. This retired design accepts signed JSON for dry-run logging;
+ * it never trades. The durable outbound polling service is poller.mjs.
  *
  * SAFETY MODEL:
- *   - This hardening release is DRY RUN ONLY and rejects EXECUTE=1 at startup.
+ *   - This legacy webhook path is DRY RUN ONLY and rejects EXECUTE=1 at startup.
  *   - Use an unfunded BURNER identity; do not fund it for auto-trading.
  *   - Per-trade and daily SOL caps are enforced here, not trusted from anyone.
  *   - The desk cannot reach this wallet: it only sends suggestions, signed, and
@@ -41,7 +41,7 @@ const RPC = process.env.SOLANA_RPC || "https://api.mainnet-beta.solana.com";
 const WSOL = "So11111111111111111111111111111111111111112";
 
 if (EXECUTE) {
-  console.error("LIVE webhook execution is disabled; use the polling executor in dry-run while the durable transaction engine is completed.");
+  console.error("LIVE webhook execution is disabled; use the reviewed polling executor for paper mode or the explicit local canary.");
   process.exit(1);
 }
 

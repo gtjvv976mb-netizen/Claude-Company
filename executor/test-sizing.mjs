@@ -23,7 +23,8 @@ t("costs kill a 1.25R gross bracket", p1.action==="skip", p1);
 const wide = { ...call, stop: 0.60, target: 2.0 };            // -40% / +100%
 const p2 = planEntry({ call: wide, cfg: KELLY, state: st() });
 t("a wide bracket is accepted", p2.action==="buy", p2);
-t("small sample uses the flat default, not Kelly", Math.abs(p2.f - DEFAULTS.fDefault) < 1e-9, p2.f);
+t("small sample uses the flat default before final size caps", Math.abs(p2.estimatedF - DEFAULTS.fDefault) < 1e-9, p2);
+t("recorded f is the actual capped stop risk", Math.abs(p2.f - (p2.sol * 0.4 / 5)) < 1e-12, p2.f);
 console.log("    ->", p2.reason, "| size", p2.sol.toFixed(4), "SOL");
 
 // with a real sample, Kelly applies and is capped
@@ -54,6 +55,13 @@ const pf = planEntry({ call: wide, cfg: DEFAULTS, state: st({wins:20, losses:10}
 t("fixed fund sizes every trade identically", /fixed fund/.test(pf.reason) && Math.abs(pf.sol-DEFAULTS.fixedSol)<1e-9, pf.reason);
 const pfBad = planEntry({ call: wide, cfg: DEFAULTS, state: st({wins:3, losses:29}) });
 t("fixed fund does NOT override Kelly's refusals", pfBad.action==="skip", pfBad.reason);
+const unsafeFixed = planEntry({ call: wide, cfg: { ...DEFAULTS, maxSolPerTrade: 0.02 },
+  state: st({ equitySol: 0.05 }) });
+t("fixed fund cannot exceed the per-name risk rail on a small burner",
+  unsafeFixed.action==="skip" && /actual stop risk/.test(unsafeFixed.reason), unsafeFixed);
+const frictionSized = planEntry({ call: wide, cfg: { ...KELLY, measuredRoundTripLossPct: 5 }, state: st() });
+t("measured round-trip friction is included in actual stop risk",
+  frictionSized.action==="buy" && frictionSized.sol <= p2.sol && frictionSized.f >= 0, frictionSized);
 
 // the age exit
 const pos = openPosition({ call: {...wide, openedAtMs: 0}, sol: 0.05, fillPrice: 1, cfg: DEFAULTS });

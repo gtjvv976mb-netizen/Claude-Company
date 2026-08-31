@@ -16,8 +16,8 @@
  * daily brake sees Grok dollars too.
  */
 import db from "./store.js";
-import { spend } from "./llm.js";
-import { emit } from "./bus.js";
+import { noteUnpersistedProviderSpend, spend, withProviderBudget } from "./llm.js";
+import { emit, runContext } from "./bus.js";
 
 const BASE = process.env.XAI_BASE_URL || "https://api.x.ai/v1";
 export const GROK_MODEL = process.env.DESK_MODEL_GROK || "grok-4.6";
@@ -26,15 +26,36 @@ export const hasGrok = () => !!process.env.XAI_API_KEY;
 // $/M tokens (grok-4.6 list) + a flat estimate per x_search tool invocation.
 const PRICE = { in: 2, out: 6, perSearch: 0.005 };
 
-function meterGrok(seat, usage, searches = 0) {
+export function grokUsageCost(data, searches = 0) {
+  const usage = data?.usage || {};
   const i = usage?.input_tokens ?? usage?.prompt_tokens ?? 0;
   const o = usage?.output_tokens ?? usage?.completion_tokens ?? 0;
-  const usd = (i / 1e6) * PRICE.in + (o / 1e6) * PRICE.out + searches * PRICE.perSearch;
+  const cached = usage?.input_tokens_details?.cached_tokens ??
+    usage?.prompt_tokens_details?.cached_tokens ?? 0;
+  const ticks = Number(usage?.cost_in_usd_ticks);
+  // Current xAI responses report the exact all-in billed amount, including every
+  // server-side tool turn. Keep the token estimate only for older response shapes.
+  const usd = Number.isFinite(ticks) && ticks >= 0
+    ? ticks / 10_000_000_000
+    : (i / 1e6) * PRICE.in + (o / 1e6) * PRICE.out + searches * PRICE.perSearch;
+  return { model: data?.model || GROK_MODEL, i, o, cached, usd,
+    exact: Number.isFinite(ticks) && ticks >= 0 };
+}
+
+function meterGrok(seat, data, searches = 0) {
+  const { model, i, o, cached, usd } = grokUsageCost(data, searches);
   spend.usd += usd; spend.calls += 1; spend.inTok += i; spend.outTok += o;
+  spend.cachedTok += cached;
+  const context = runContext.getStore();
+  const floor = context?.floor ?? null;
+  const evidenceScope = context?.evidenceScope ??
+    (floor == null || Number(floor) === 50 ? "house" : "tenant");
   try {
-    db.prepare("INSERT INTO llm_spend (seat,model,effort,in_tok,out_tok,cached_tok,usd,ts) VALUES (?,?,?,?,?,?,?,?)")
-      .run(seat, GROK_MODEL, null, i, o, 0, usd, Date.now());
-  } catch {}
+    db.prepare(`INSERT INTO llm_spend
+      (floor,floor_attributed,evidence_scope,seat,model,effort,in_tok,out_tok,cached_tok,usd,ts)
+      VALUES (?,1,?,?,?,?,?,?,?,?,?)`)
+      .run(floor, evidenceScope, seat, model, null, i, o, cached, usd, Date.now());
+  } catch { noteUnpersistedProviderSpend(usd); }
 }
 
 /** Pull the first JSON object out of model text, tolerant of fences and prose. */
@@ -72,22 +93,29 @@ function responseText(r) {
   return r?.choices?.[0]?.message?.content ?? null;
 }
 
-async function xai(path, body, timeoutMs = 90000) {
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${BASE}${path}`, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${process.env.XAI_API_KEY}` },
-      body: JSON.stringify(body),
-      signal: ctl.signal,
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok) return { ok: false, error: `xai ${res.status}: ${JSON.stringify(data?.error ?? data).slice(0, 200)}` };
-    return { ok: true, data };
-  } catch (e) {
-    return { ok: false, error: String(e.message || e) };
-  } finally { clearTimeout(t); }
+async function xai(path, body, timeoutMs = 90000,
+  { seat, maxTokens = 8000, maxSearches = 0, minSearches = 0 } = {}) {
+  return withProviderBudget({ provider: "xai", maxTokens, maxSearches, payload: body }, async () => {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${BASE}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${process.env.XAI_API_KEY}` },
+        body: JSON.stringify(body),
+        signal: ctl.signal,
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) return { ok: false,
+        error: `xai ${res.status}: ${JSON.stringify(data?.error ?? data).slice(0, 200)}` };
+      const searches = Math.max(minSearches,
+        (data?.output ?? []).filter((item) => /search/i.test(item?.type ?? "")).length);
+      meterGrok(seat, data, searches);
+      return { ok: true, data };
+    } catch (e) {
+      return { ok: false, error: String(e.message || e) };
+    } finally { clearTimeout(t); }
+  });
 }
 
 /**
@@ -106,9 +134,8 @@ export async function grokAsk({ seat, system, prompt, shape, validate, maxTokens
       { role: "system", content: system + `\n\nAnswer with ONLY a JSON object of exactly this shape:\n${shape}` },
       { role: "user", content: prompt },
     ],
-  });
+  }, 90000, { seat, maxTokens });
   if (!r.ok) return r;
-  meterGrok(seat, r.data?.usage);
   const obj = parseLoose(r.data?.choices?.[0]?.message?.content);
   if (!obj) return { ok: false, error: "grok returned no parseable JSON" };
   if (validate) {
@@ -129,6 +156,8 @@ export async function grokXRead({ symbol, mint, hook = "" }) {
   const from = new Date(Date.now() - 7 * 86400e3).toISOString().slice(0, 10);
   const r = await xai("/responses", {
     model: GROK_MODEL,
+    max_output_tokens: 8000,
+    max_turns: 5,
     tools: [{ type: "x_search", from_date: from }],
     input: [{
       role: "user",
@@ -219,11 +248,8 @@ export async function grokXRead({ symbol, mint, hook = "" }) {
         `Say null rather than guessing. An invented follower count or an imagined prior ` +
         `rug is worse than admitting you could not find the account.`,
     }],
-  }, 120000);
+  }, 120000, { seat: "XRead", maxTokens: 8000, maxSearches: 50, minSearches: 1 });
   if (!r.ok) return r;
-  // tool invocations are billed per call; count what the response reports, floor 1
-  const searches = Math.max(1, (r.data?.output ?? []).filter((o) => /search/i.test(o?.type ?? "")).length);
-  meterGrok("XRead", r.data?.usage, searches);
   const obj = parseLoose(responseText(r.data));
   if (!obj) return { ok: false, error: "x-read returned no parseable JSON" };
   const citations = (r.data?.citations ?? []).slice(0, 8);
@@ -258,6 +284,8 @@ export async function grokTrendScan({ limit = 6 } = {}) {
   const from = new Date(Date.now() - 2 * 86400e3).toISOString().slice(0, 10);
   const r = await xai("/responses", {
     model: GROK_MODEL,
+    max_output_tokens: 6000,
+    max_turns: 5,
     tools: [{ type: "x_search", from_date: from }],
     input: [{
       role: "user",
@@ -291,10 +319,8 @@ export async function grokTrendScan({ limit = 6 } = {}) {
         `An empty list is a valid and useful answer. Do not invent a trend to fill it — ` +
         `a fabricated theme sends the desk hunting coins that do not exist.`,
     }],
-  }, 120000);
+  }, 120000, { seat: "TrendScan", maxTokens: 6000, maxSearches: 50, minSearches: 1 });
   if (!r.ok) return r;
-  const searches = Math.max(1, (r.data?.output ?? []).filter((o) => /search/i.test(o?.type ?? "")).length);
-  meterGrok("TrendScan", r.data?.usage, searches);
   const obj = parseLoose(responseText(r.data));
   const themes = Array.isArray(obj?.themes) ? obj.themes : [];
   emit("trend:scan", { found: themes.length,
