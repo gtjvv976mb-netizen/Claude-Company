@@ -16,6 +16,7 @@ import { cfg } from "./config.js";
 import * as store from "./lib/store.js";
 import * as shadow from "./shadow.js";
 import { buildBoard, selectAcrossBoard, CAP_BANDS, COIN_TYPES } from "./categories.js";
+import * as funnel from "./funnel.js";
 import * as ds from "./data/dexscreener.js";
 import { eligibility, contenderScore, pickOne, bookState, SEQUENTIAL, MAX_LIVE_CALLS } from "./mandate.js";
 import { runBestPick } from "./agents/decision.js";
@@ -249,6 +250,49 @@ export function selectShortlist(scored, workups) {
   return picked.sort((a, b) => b.score - a.score);
 }
 
+/**
+ * ADVANCE THE FUNNEL WITHOUT SPENDING A CENT.
+ *
+ * Sweep, rank, observe, expire, screen — every stage here is arithmetic against data
+ * the desk already fetches, and not one model is called. That is what makes it safe to
+ * run while a position is open, and while the daily money brake is on: the two states
+ * in which the old desk did nothing at all and arrived at the next opportunity cold.
+ *
+ * It returns the shape of the pipe, because the drop-off between stages is how you tell
+ * "the market offered nothing" from "the desk is strangling itself" — two failures that
+ * look identical from outside and cost a full day to separate by hand once already.
+ */
+export async function warmFunnel() {
+  const universe = await sweep();
+  const scored = [];
+  for (const c of universe) {
+    if (liveCallFor(c.mint)) continue;
+    const r = rank(c);
+    if (r.score <= 0) continue;
+    scored.push({ ...c, category: classify(c).category, score: r.score });
+  }
+  funnel.observe(scored);
+  const expired = funnel.decay();
+
+  const bySweep = new Map(scored.map((c) => [c.mint, c]));
+  let passed = 0, held = 0;
+  for (const row of funnel.dueForScreen(400)) {
+    const c = bySweep.get(row.mint);
+    if (!c) continue;
+    if (funnel.recordScreen(row.mint, wouldSurviveScreen(c)) === "promoted") passed++; else held++;
+  }
+
+  const shape = funnel.census();
+  emit("funnel:warmed", {
+    swept: universe.length, ranked: scored.length, screenPassed: passed, screenHeld: held,
+    watch: shape.watch, screened: shape.screened, studied: shape.studied, ready: shape.ready,
+    expired,
+    note: "free — the screen narrows the market whether or not the desk can trade right now",
+  });
+  return { swept: universe.length, screenPassed: passed, screenHeld: held,
+           screened: shape.screened, ready: shape.ready, expired };
+}
+
 export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TOP_N } = {}) {
   const cycle = new Date().toISOString().replace(/[:.]/g, "-");
 
@@ -258,11 +302,29 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
    * lever here, and a cycle that cannot publish must not be allowed to spend. */
   const book = bookState();
   if (book.full) {
+    /* HOLDING IS NOT A REASON TO STOP LOOKING.
+     *
+     * This branch used to return here, which meant that through a twelve-hour hold the
+     * desk did no research at all — and then, the instant the position closed, began a
+     * cold sweep and needed four minutes to reach a decision. The single most valuable
+     * moment in the desk's day was the one it was least prepared for.
+     *
+     * So the FREE half of the funnel keeps running while a position works: sweep, rank,
+     * observe, expire, screen. Not a compromise — it costs nothing, no model is
+     * involved, and it is most of the narrowing. When the slot opens there is a
+     * standing pool of coins that have already passed a current safety screen, instead
+     * of an empty table.
+     *
+     * The PAID half still does not run. The sequencing rule is a rule about money, and
+     * a workup bought now is a verdict that will likely have expired before there is
+     * anywhere to put it. */
+    const warmed = await warmFunnel().catch((e) => ({ error: String(e?.message || e) }));
     emit("cycle:holding", { cycle, live: book.live,
       symbol: book.holding?.symbol, mint: book.holding?.mint,
       heldHours: book.holding ? Number(((Date.now() - book.holding.opened_at) / 3.6e6).toFixed(1)) : null,
-      note: "a call is still working — the next cycle starts when it closes" });
-    return { cycle, skipped: "position_open", live: book.live, opened: 0, workedUp: 0,
+      warmed,
+      note: "a call is still working — but the free screen keeps narrowing, so the next slot opens onto a warm bench" });
+    return { cycle, skipped: "position_open", live: book.live, opened: 0, workedUp: 0, warmed,
       holding: book.holding ? { id: book.holding.id, symbol: book.holding.symbol, mint: book.holding.mint,
         openedAt: book.holding.opened_at } : null, costUsd: 0 };
   }
@@ -391,10 +453,65 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
       best: c.coins[0]?.pair?.baseSymbol ?? null })),
   });
 
-  const shortlist = board.cells.length
-    ? selectAcrossBoard(board, workups)
-    : selectShortlist(scored, workups);        // board empty: fall back rather than idle
+  /* THE FUNNEL — where the desk stopped starting from nothing every pass.
+   *
+   * Until now this cycle was stateless: sweep, rank, screen, pay for eight workups,
+   * publish or refuse, throw all of it away, and begin again from zero. On a slow asset
+   * that is merely wasteful. On memecoins it is the wrong shape, for one reason that
+   * costs money — when a position finally closed, the desk had NOTHING ready. It began
+   * a cold sweep and arrived at a decision four minutes later, in a market whose moves
+   * are measured in minutes. It was perpetually researching the market it had missed.
+   *
+   * So coins live in a standing population now and each pass advances them, rather than
+   * recreating them. The division of labour between the two halves is deliberate:
+   *
+   *   the FUNNEL supplies memory   — what has been screened, what has been studied,
+   *                                  what is researched and ready to trade right now
+   *   the SWEEP supplies freshness — the live price, liquidity and volume
+   *
+   * Which is why only coins in the CURRENT sweep are eligible below. The funnel is
+   * allowed to remember a verdict; it is never allowed to supply the numbers that
+   * verdict gets acted on. A remembered price is exactly how a desk buys a pool that
+   * was drained ten minutes ago. */
+  funnel.observe(scored);
+  const decayed = funnel.decay();
+
+  // The free screen, run over the standing watch list rather than only over this
+  // sweep's arrivals. Costs nothing and no model is involved.
+  const bySweep = new Map(scored.map((c) => [c.mint, c]));
+  let screenPassed = 0, screenHeld = 0;
+  for (const row of funnel.dueForScreen(400)) {
+    const c = bySweep.get(row.mint);
+    if (!c) continue;
+    const kill = wouldSurviveScreen(c);
+    if (funnel.recordScreen(row.mint, kill) === "promoted") screenPassed++; else screenHeld++;
+  }
+
+  const shape = funnel.census();
+  emit("funnel:shape", {
+    watch: shape.watch, screened: shape.screened, studied: shape.studied, ready: shape.ready,
+    screenPassed, screenHeld,
+    expired: { screen: decayed.screenExpired, verdict: decayed.studyExpired,
+               moved: decayed.movedOut, lostSight: decayed.dropped },
+    note: `${shape.ready} researched and ready before a slot even opens`,
+  });
+
+  /* PICK FROM THE STANDING POOL, not from the last ninety seconds of sweeping.
+   *
+   * A good name screened twenty minutes ago is still a candidate here. Under the old
+   * selection it had been forgotten and was re-discovered from scratch, at full price,
+   * every single pass. The board is kept as the fallback for a cold funnel — a first
+   * boot, or a wiped database — because an empty funnel must not mean an idle desk. */
+  const fromFunnel = funnel.dueForStudy(workups)
+    .map((r) => bySweep.get(r.mint))
+    .filter(Boolean);
+
+  const shortlist = fromFunnel.length ? fromFunnel
+    : board.cells.length ? selectAcrossBoard(board, workups)
+    : selectShortlist(scored, workups);        // board empty too: fall back rather than idle
   emit("scout:shortlist", { count: shortlist.length, considered: universe.length,
+    source: fromFunnel.length ? "funnel" : board.cells.length ? "board (funnel cold)" : "flat ranking",
+    padMix: fromFunnel.length ? `${fromFunnel.filter((c) => c.launchpad === "pump.fun").length}/${fromFunnel.length} pump.fun` : null,
     mix: shortlist.map((c) => c.cellKey ?? c.category) });
 
   /* THE RESERVE BENCH.
@@ -510,7 +627,19 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
         note: "falling back to the arithmetic ranking rather than skipping the cycle" });
     }
   }
+  /* Write every paid verdict back, so the next pass INHERITS it instead of re-buying
+   * it. This is the half of the funnel that actually saves money — the screen is free,
+   * the workup is not, and until now the desk paid for the same answer about the same
+   * coin every time it came round again. */
   for (const j of judged) {
+    try {
+      funnel.recordStudy(j.rec?.mint, {
+        eligible: !!j.eligibility.eligible,
+        verdict: j.rec?.pm?.decision ?? null,
+        conviction: j.rec?.pm?.conviction ?? j.eligibility.score ?? null,
+        thesis: j.rec?.pm?.thesis ?? null,
+      });
+    } catch { /* bookkeeping must never be able to fail a cycle */ }
     if (j.eligibility.eligible) continue;
     emit("cohort:declined", { mint: j.rec?.mint, symbol: j.rec?.symbol,
       safety: j.eligibility.safety, reason: j.eligibility.reason });
@@ -524,6 +653,8 @@ export async function runPenthouseCycle({ workups = WORKUPS_PER_CYCLE, topN = TO
     const pub = publishCall(winner.rec, { category: winner.category, launchpad: winner.launchpad, wx,
       bestPick: winner.bestPick ?? null });
     if (pub.callId) opened.push({ id: pub.callId, symbol: winner.rec?.symbol });
+    // Out of the ready pool: the desk is holding this one, not still shopping for it.
+    try { funnel.retire(winner.rec?.mint, "published as a call"); } catch {}
   }
 
   /* EVERY CYCLE ENDS IN A TRADE — and this is where that instruction is safe to obey.

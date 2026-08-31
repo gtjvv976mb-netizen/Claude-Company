@@ -13,6 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { ROOT } from "./config.js";
 import { bus, backlog, emit, runFor, chronicleRead } from "./lib/bus.js";
+import { census as funnelCensus } from "./funnel.js";
 import { spend, spendSince } from "./lib/llm.js";
 import { cfg } from "./config.js";
 import * as store from "./lib/store.js";
@@ -472,32 +473,16 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               bootedAt: BOOTED_AT,
               upMins: Math.round((Date.now() - BOOTED_AT) / 60000),
             },
-            /* THE FUNNEL. The desk is a narrowing pipe and its shape is the whole
-             * story: hundreds swept for free, most killed by a screen that costs
-             * nothing, a handful bought, one traded. Reading the drop-off at each
-             * stage is how you tell "the market offered nothing" from "the desk is
-             * strangling itself" — two failures that look identical from the outside
-             * and cost a full day to separate by hand. */
+            /* THE FUNNEL, read from the funnel itself.
+             *
+             * This was briefly derived by summing chronicle events over a six-hour
+             * window — a reasonable estimate of a pipeline that ran and emptied. The
+             * desk now keeps a standing population instead, so the real counts exist
+             * and can simply be read. Two sources for one truth is how they drift
+             * apart, which has already cost a day once here. */
             funnel: (() => {
-              try {
-                const ev = (t, since) => q(`SELECT COUNT(*) n FROM chronicle WHERE type='${t}' AND ts > ${since}`);
-                const since = Date.now() - 6 * 3600e3;
-                const j = (t, path) => { try {
-                  return db.prepare(`SELECT COALESCE(SUM(CAST(json_extract(data,'$.${path}') AS INTEGER)),0) n
-                                     FROM chronicle WHERE type=? AND ts > ?`).get(t, since)?.n ?? 0;
-                } catch { return 0; } };
-                return {
-                  windowHours: 6,
-                  swept: j("board:built", "considered"),
-                  offBoardBySize: j("board:built", "offBoard"),
-                  cellsFilled: j("board:built", "cellsFilled"),
-                  shortlisted: j("scout:shortlist", "count"),
-                  studied: j("cohort:ranked", "studied"),
-                  eligible: j("cohort:ranked", "eligible"),
-                  published: q(`SELECT COUNT(*) n FROM calls WHERE opened_at > ${since}`),
-                  cyclesRun: ev("cycle:end", since),
-                };
-              } catch { return null; }
+              try { return funnelCensus(); }
+              catch (e) { return { error: String(e?.message || e) }; }
             })(),
 
             /* THE SHADOW BOOK — what the desk's REFUSALS went on to do.
