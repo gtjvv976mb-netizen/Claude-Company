@@ -51,8 +51,11 @@ ok("auto is expressible", Number(settingsFor(F).take_profit_x) === 0);
 console.log("\n...and it reaches the bot, per position");
 const c2 = { mint: "m", symbol: "T", entry_ref: 1, stop: 0.6, target: 2.0, size_sol: 5 };
 const st = { ...freshState(0), equitySol: 5 };
+// scaleOutPct is off here so each case tests the TAKE-PROFIT rule alone. With the
+// default half-off scale, a 2x mark also trips the desk's own target and banks half,
+// which is correct but would mask what this loop is checking.
 for (const [x, mark, want] of [[2, 2.0, "sell"], [10, 2.0, "hold"], [10, 10.0, "sell"]]) {
-  const cfg = { ...DEFAULTS, takeProfitX: x, fixedSol: 0 };
+  const cfg = { ...DEFAULTS, takeProfitX: x, fixedSol: 0, scaleOutPct: 0 };
   const p = openPosition({ call: c2, sol: 0.05, fillPrice: 1, cfg });
   const d = stepPosition({ pos: p, mark, cfg });
   ok(`at ${x}x rule, a ${mark}x mark => ${want}`, d.action === want, d.reason);

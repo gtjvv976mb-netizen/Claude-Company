@@ -32,14 +32,24 @@ t("STOPS at the stop", stepPosition({pos:p,mark:0.61,cfg:DEFAULTS}).action==="se
 p=openPosition({call,sol:0.05,fillPrice:1,cfg:DEFAULTS});
 const at2x=stepPosition({pos:p,mark:2.0,cfg:DEFAULTS});
 t("2x sells the whole position (takeProfitX default)", at2x.action==="sell"&&at2x.fraction===1, at2x);
-t("just under 2x still holds",
-  stepPosition({pos:openPosition({call,sol:0.05,fillPrice:1,cfg:DEFAULTS}),mark:1.99,cfg:DEFAULTS}).action==="hold");
+// Just under the 2x rule the position is NOT closed — but with the default half-off
+// scale it does take profit at the desk's target on the way past. Both matter, so
+// assert both rather than the old "hold", which only held because nothing was banked.
+const near2x=stepPosition({pos:openPosition({call,sol:0.05,fillPrice:1,cfg:DEFAULTS}),mark:1.99,cfg:DEFAULTS});
+t("just under 2x does not close the position", near2x.action!=="sell", near2x);
+t("...and half comes off at the desk's target on the way", near2x.action==="sell_part"&&near2x.fraction===0.5, near2x);
 
 // breakeven + trail — the RIDE path, opt-in via takeProfitX: 0
 const RIDE={...DEFAULTS, takeProfitX:0};
 p=openPosition({call,sol:0.05,fillPrice:1,cfg:RIDE});
 const atTarget=stepPosition({pos:p,mark:2.0,cfg:RIDE});
-t("target does NOT emit a zero-size swap", atTarget.action==="hold", atTarget);
+// THE INVARIANT, not the default: a zero scale-out must never reach the wallet as a
+// zero-size swap. This asserted it by way of scaleOutPct happening to be 0; now that
+// the default banks half, the guard is tested where it actually lives.
+const NOSCALE={...DEFAULTS, takeProfitX:0, scaleOutPct:0};
+const noScaleAtTarget=stepPosition({pos:openPosition({call,sol:0.05,fillPrice:1,cfg:NOSCALE}),mark:2.0,cfg:NOSCALE});
+t("scaleOutPct 0 never emits a zero-size swap", noScaleAtTarget.action==="hold", noScaleAtTarget);
+t("and the default DOES bank half at the target", atTarget.action==="sell_part"&&atTarget.fraction===0.5, atTarget);
 t("stop lifted to breakeven-or-better at target", p.stop>=1, p.stop);
 stepPosition({pos:p,mark:5.0,cfg:RIDE});
 t("trail ratchets up behind the high", p.stop>=5.0*(1-RIDE.trailPct)-1e-9, p.stop);
