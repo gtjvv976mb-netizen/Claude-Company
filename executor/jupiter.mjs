@@ -812,39 +812,49 @@ export class JupiterV2Executor {
       throw new Error(`order expiry ${claimedExpiry} is ${claimedExpiry - chainHeight} blocks ahead of the chain ` +
         `(cap ${this.cfg.blockHeightWindow ?? 600}) — an unbounded expiry wedges the journal and disarms every exit`);
 
+    /* SIMULATE BEFORE SIGNING — the invariant that dissolves a whole class of bug.
+     *
+     * Two designs failed here before this one. The original simulated AFTER signing
+     * and BEFORE journaling: an RPC that broadcast what it was asked to simulate (or
+     * a crash inside the call) produced an on-chain buy the journal never heard of.
+     * The first repair journaled the signed bytes before simulating and marked a
+     * refused simulation "submitted" — and the re-review proved that WORSE: _resume
+     * treats any submitted attempt without an execute response as a transport retry
+     * and BROADCASTS it, so every transaction the simulation refused was sent anyway
+     * one tick later, converting the refusal into a send trigger.
+     *
+     * The root cause of both was the same: broadcastable bytes existed in a state the
+     * journal could not express. So the bytes are now never broadcastable during the
+     * simulation at all — the transaction is simulated UNSIGNED (sigVerify:false; the
+     * signature does not change execution, only authorizes it), and a refusal of any
+     * kind costs nothing, journals nothing, and retries with a fresh quote next tick.
+     * Signing happens only after the chain has agreed with the quote, and the FIRST
+     * disclosure of broadcastable bytes anywhere is the /execute POST, which happens
+     * strictly after recordSigned and markSubmitted — the states the reconciliation
+     * machinery was built to fence. "signed" once again truly means "undisclosed". */
+    await this._simulateUnsigned({ tx, observedAddresses, preAccounts, validation, order, intent });
+
     tx.sign([this.keypair]);
     const signed = Buffer.from(tx.serialize());
     if (signed.length > 1232) throw new Error(`serialized transaction is ${signed.length} bytes (Solana max 1232)`);
     const signature = bs58.encode(Buffer.from(tx.signatures[0]));
-
-    /* NOTHING EXTERNAL HAS SEEN THESE BYTES YET — and that is now the contract.
-     * The simulation used to run right here, which sent the fully signed, broadcastable
-     * transaction to the primary RPC BEFORE the journal had any record of it. An RPC
-     * that broadcast what it was only asked to simulate (or a crash inside that call)
-     * produced an on-chain buy the journal never knew existed: unmanaged, unstopped,
-     * and invisible to the daily-cap accounting. The absence-proof machinery cannot
-     * protect an attempt it never heard of. So _buildSigned now STOPS at the signed
-     * bytes; executeIntent journals them first and only then runs _simulateSigned. */
     return {
-      record: {
-        requestId: order.requestId,
-        signedTx: signed,
-        signature,
-        blockhash: tx.message.recentBlockhash,
-        lastValidBlockHeight: Number(order.lastValidBlockHeight),
-        quotedOutputRaw: String(order.outAmount),
-        minOutputRaw: String(order.otherAmountThreshold),
-        order,
-      },
-      sim: { tx, observedAddresses, preAccounts, validation, order, intent },
+      requestId: order.requestId,
+      signedTx: signed,
+      signature,
+      blockhash: tx.message.recentBlockhash,
+      lastValidBlockHeight: Number(order.lastValidBlockHeight),
+      quotedOutputRaw: String(order.outAmount),
+      minOutputRaw: String(order.otherAmountThreshold),
+      order,
     };
   }
 
-  /** The pre-submission simulation, run only AFTER the signed bytes are journaled —
-   * this call is itself a disclosure of broadcastable bytes to the primary RPC. */
-  async _simulateSigned({ tx, observedAddresses, preAccounts, validation, order, intent }) {
+  /** Pre-signing simulation of the UNSIGNED transaction — nothing disclosed here can
+   * be broadcast, so a refusal is free and safe to retry with a fresh quote. */
+  async _simulateUnsigned({ tx, observedAddresses, preAccounts, validation, order, intent }) {
     const simulation = await this.connection.simulateTransaction(tx, {
-      commitment: "processed", sigVerify: true, replaceRecentBlockhash: false,
+      commitment: "processed", sigVerify: false, replaceRecentBlockhash: false,
       accounts: { encoding: "base64", addresses: observedAddresses },
       innerInstructions: true,
     });
@@ -1172,21 +1182,14 @@ export class JupiterV2Executor {
     if (this.hardStop()) throw new Error("HARD STOP is present — no new submission");
     if (intent.kind === "entry") this.submissionGate(intent);
 
-    /* Journal BEFORE the simulation discloses the bytes; see _buildSigned. A failed
-     * simulation is marked SUBMITTED, not failed — the primary RPC has already seen
-     * broadcastable bytes, so the attempt must ride the absence-proof reconciliation
-     * (two RPCs agreeing the signature never landed, past its now-bounded expiry)
-     * before any replacement may be signed. Marking it failed would let recordSigned
-     * attach a fresh signature while the first could still land: the double-buy. */
-    const built = await this._buildSigned(intent);
-    attempt = this.journal.recordSigned(intent.id, { ...built.record, attempt: count + 1 });
-    try {
-      await this._simulateSigned(built.sim);
-    } catch (error) {
-      this.journal.markSubmitted(intent.id, attempt.attempt);
-      throw new Error(`refused after signing: ${error.message} — the signed bytes were disclosed to the RPC, ` +
-        `so the attempt is held for absence-proof reconciliation instead of being retried blind`);
-    }
+    /* _buildSigned simulates the UNSIGNED transaction before it ever signs, so a
+     * refusal here (quote-vs-chain shortfall, output floors, plain simulation error)
+     * has disclosed nothing broadcastable, journals nothing, and costs nothing — the
+     * next tick retries with a fresh quote. Only a transaction the chain has already
+     * agreed with reaches recordSigned, and the first broadcastable disclosure
+     * anywhere is the /execute POST inside _resume, which the journal fences. */
+    const signed = await this._buildSigned(intent);
+    attempt = this.journal.recordSigned(intent.id, { ...signed, attempt: count + 1 });
     intent = this.journal.getIntent(intent.id);
     return this._resume(intent, attempt);
   }

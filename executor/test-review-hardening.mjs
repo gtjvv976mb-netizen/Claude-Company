@@ -115,24 +115,37 @@ console.log("\nSIGNING-PATH CONTRACTS (asserted structurally — the live tests 
   const src = await import("node:fs").then((fs) =>
     fs.readFileSync(new URL("./jupiter.mjs", import.meta.url), "utf8"));
 
-  const buildEnd = src.indexOf("async _simulateSigned");
-  const buildBody = src.slice(src.indexOf("async _buildSigned"), buildEnd);
+  const buildBody = src.slice(src.indexOf("async _buildSigned"), src.indexOf("async _simulateUnsigned"));
   ok("F2: the order expiry is bounded against the chain before signing",
     /getBlockHeight\("confirmed"\)/.test(buildBody) && /blockHeightWindow/.test(buildBody),
     "an unbounded lastValidBlockHeight wedged the journal and disarmed every exit");
-  ok("F3: _buildSigned no longer simulates — the bytes stop at signing",
-    !/simulateTransaction/.test(buildBody),
-    "simulation moved behind the journal write");
+
+  /* F3/F5, THIRD design — the re-review killed the second. Journal-then-simulate
+   * marked a refused simulation "submitted", and _resume treats any submitted attempt
+   * without an execute response as a transport retry: every refused transaction was
+   * BROADCAST one tick later, converting the refusal into a send trigger, and the
+   * "signed" state during simulation dodged the expiry fence (double-buy). The root
+   * cause both times: broadcastable bytes in a state the journal cannot express. Now
+   * nothing broadcastable exists until after the chain agrees: the simulation runs on
+   * the UNSIGNED transaction (a signature authorizes, it does not change execution),
+   * a refusal costs nothing and journals nothing, and the first broadcastable
+   * disclosure anywhere is the /execute POST — behind recordSigned and markSubmitted,
+   * the states the reconciliation machinery actually fences. */
+  ok("F3: the simulation runs on the UNSIGNED transaction, before tx.sign",
+    buildBody.indexOf("_simulateUnsigned") !== -1 &&
+    buildBody.indexOf("_simulateUnsigned") < buildBody.indexOf("tx.sign([this.keypair])"),
+    "nothing disclosed during simulation can be broadcast");
+  ok("F3: the simulation verifies no signature, because there is none yet",
+    /sigVerify: false/.test(src.slice(src.indexOf("async _simulateUnsigned"))),
+    "sigVerify:true would reject the unsigned bytes");
 
   const exec = src.slice(src.indexOf("async executeIntent"), src.indexOf("async recoverPending"));
-  const recordAt = exec.indexOf("recordSigned");
-  const simulateAt = exec.indexOf("_simulateSigned");
-  ok("F3: executeIntent journals the signed bytes BEFORE the simulation discloses them",
-    recordAt !== -1 && simulateAt !== -1 && recordAt < simulateAt,
-    "an RPC that broadcasts what it was asked to simulate now broadcasts a JOURNALED attempt");
-  ok("F5: a failed simulation is held as possibly-leaked, never retried blind",
-    /markSubmitted\(intent\.id, attempt\.attempt\)/.test(exec) && /absence-proof/.test(exec),
-    "marking it failed would let a fresh signature race the leaked one: the double-buy");
+  ok("F5: a refused simulation journals NOTHING — no state for _resume to broadcast",
+    !/markSubmitted\(intent\.id, attempt\.attempt\)/.test(exec) && !/refused after signing/.test(exec),
+    "the second design's markSubmitted turned every refusal into a next-tick send");
+  ok("F5: recordSigned runs only after the chain has agreed with the quote",
+    exec.indexOf("_buildSigned") < exec.indexOf("recordSigned"),
+    "only a simulation-approved transaction is ever signed and journaled");
   ok("F6: exits may retry past the entry cap",
     /maxExitAttempts/.test(exec) && /cooling down/.test(exec),
     "a stop that failed three times during the dump that fired it is no longer dead forever");

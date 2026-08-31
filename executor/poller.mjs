@@ -670,13 +670,19 @@ async function manageOpen() {
    * every open position at once, and the only backstop was the 12h age exit selling
    * the remnant. SOL/USD moves single-digit percent in hours while these stops care
    * about 20%+ token moves, so a cached rate is overwhelmingly better than no stop.
-   * The cache is used for up to SOL_USD_CACHE_MAX_AGE_MS (default 24h) with the
-   * staleness logged; past that, the old fail-closed hold applies. */
+   * The cache is used for up to SOL_USD_CACHE_MAX_AGE_MS with the staleness logged;
+   * past that, the old fail-closed hold applies.
+   *
+   * The window was 24h and the re-review caught why that is too generous: in a
+   * combined SOL crash + quote-route outage, a day-old rate misprices every mark by
+   * SOL's full daily move — which can be 20%+, the size of the very moves the stops
+   * exist to catch. Thirty minutes still covers the routine outage while bounding
+   * the mispricing to SOL's half-hour drift, normally low single digits. */
   if (currentSolUsd > 0) {
     S.solUsdCache = { v: currentSolUsd, ts: Date.now() };
   } else if (solUsdError || !(currentSolUsd > 0)) {
     const cache = S.solUsdCache;
-    const maxAge = Number(process.env.SOL_USD_CACHE_MAX_AGE_MS || 24 * 3600e3);
+    const maxAge = Number(process.env.SOL_USD_CACHE_MAX_AGE_MS || 30 * 60e3);
     if (cache?.v > 0 && Date.now() - cache.ts <= maxAge) {
       currentSolUsd = cache.v;
       solUsdError = null;

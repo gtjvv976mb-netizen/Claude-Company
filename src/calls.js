@@ -142,10 +142,22 @@ export function closeCall(id, reason, mark) {
  * they are facts, not prices; price-based triggers need confirmation so one thin print
  * cannot close a call.
  */
-/** The call's best price since it opened, from the marks the monitor already
- * writes. The trailing rules ride this; it costs one indexed query. */
+/** The call's best CONFIRMED price since it opened, from the marks the monitor
+ * already writes.
+ *
+ * MAX(mark) was a one-witness ratchet: a single anomalous mark entered history and
+ * set the high-water mark forever, arming trails and breakeven stops off a price
+ * that never traded twice — the exact defect the shared policy's two-witness rule
+ * (snipe-v3) exists to prevent, which this pre-computed high was quietly bypassing
+ * on the server path. The confirmed high is the best MIN of two CONSECUTIVE marks:
+ * a spike flanked by honest neighbours contributes only its neighbour, while a real
+ * run confirms one observation later. Same invariant as pricePolicy's pendingHigh,
+ * derived from history instead of carried state. */
 export function highWaterMark(callId) {
-  const r = db.prepare("SELECT MAX(mark) hwm FROM call_events WHERE call_id=? AND mark IS NOT NULL").get(callId);
+  const r = db.prepare(`SELECT MAX(pairLow) hwm FROM (
+      SELECT MIN(mark, LAG(mark) OVER (ORDER BY id)) pairLow
+      FROM call_events WHERE call_id=? AND mark IS NOT NULL
+    )`).get(callId);
   return r?.hwm ?? null;
 }
 
@@ -175,7 +187,11 @@ export function evaluateExit(call, now) {
   /* ONE VERSIONED PRICE POLICY. The server's paper record and the user's executor
    * import this same pure function, so a target/stop/expiry has one meaning. Chain
    * failures above still outrank price because only the desk can observe them. */
-  const policyHwm = Math.max(highWaterMark(call.id) ?? 0, mark ?? 0, call.entry_ref ?? 0);
+  /* Do NOT pre-max the current mark into the high — that hands pricePolicy a high
+   * that already contains the unconfirmed sample, making its two-witness staging dead
+   * code on this path. The current mark goes in as `mark`, where the policy stages
+   * it; history confirms it on the next monitor pass via highWaterMark's pair rule. */
+  const policyHwm = Math.max(highWaterMark(call.id) ?? 0, call.entry_ref ?? 0);
   const policy = pricePolicy({
     position: { entry: call.entry_ref, stop: call.stop, target: call.target,
       high: policyHwm, openedAtMs: call.opened_at },
