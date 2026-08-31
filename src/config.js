@@ -114,11 +114,22 @@ minLiquidityUsd: num("DESK_MIN_LIQUIDITY_USD", 12000),
    * buyers are people or one wallet in a wig, and the chart keeps a token weight
    * rather than none: a coin that has already gone vertical is still worth knowing
    * about, and zero would mean never hearing it. */
+  /* THE SEATS NOW ASK MEMECOIN QUESTIONS, SO THE WEIGHTS FOLLOW THEM.
+   *
+   * forensics stopped being the mint/freeze seat — those are deterministic kills in the
+   * free screen now, and a paid model re-checking a boolean is waste. What it asks
+   * instead is who owns the float and would they sell it out from under you: bundling,
+   * the middle of the book, and the creator's record. That is a harder question and a
+   * more decisive one, so it holds its weight rather than losing it.
+   *
+   * liquidity keeps a small share because on this desk it mostly confirms what the
+   * screen measured. It matters when a pool can be DRAINED, not when a whale would
+   * move it — the bot trades $3 to $10. */
   weights: {
     narrative: 0.38,   // lore, trend, endorsement — on a memecoin this IS the asset
-    forensics: 0.26,   // can it be used against a holder by design
-    flow: 0.24,        // real wallets arriving, or a few round-tripping
-    liquidity: 0.09,   // can it be exited; micro-caps are thin by definition
+    forensics: 0.26,   // who owns the float, and have they rugged before
+    flow: 0.24,        // a crowd, or a machine wearing one
+    liquidity: 0.09,   // can it be exited at OUR size; the screen already measured it
     technical: 0.03,   // the chart, which on a 6-hour-old coin is attention redrawn
   },
 
