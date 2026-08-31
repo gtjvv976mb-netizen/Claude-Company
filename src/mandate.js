@@ -90,7 +90,13 @@ export function eligibility(rec) {
   /* ---- SAFETY. Absolute. Checked before anything else so no later branch can
      ever reach past one of these. ---- */
   if (rec.outcome === "no_data")
-    return decline("no data — the desk cannot reason about a coin it cannot read", true);
+    /* gather() fails two very different ways and this reason threw away which:
+     * `dexscreener:` is the feed refusing us (rate limit, outage) and is OUR problem;
+     * `pricing:` is the coin's own pools disagreeing so badly that no honest price
+     * exists, which is a fact about the coin. One is fixed by backing off, the other
+     * by walking away, and a single generic string made them indistinguishable while
+     * this became the desk's most frequent refusal. */
+    return decline(`no data — ${rec.error ?? "the desk cannot read this coin"}`, true);
   if (rec.outcome === "error")
     return decline(`the workup errored: ${rec.error ?? "unknown"}`, true);
   if (rec.outcome === "screened_out")
