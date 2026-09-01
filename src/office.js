@@ -214,6 +214,17 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
        * which handed the house desk's settings and its executor secret to several
        * wallets at once. It is now the deed alone, asserted on every boot. */
       const hqOwner = (w) => tower.isHqOwner(w);
+      /* Does THIS wallet hold THIS floor? A lease for a leased floor; ownership
+         of the house for floor 50, which carries no lease row by design. This
+         was written longhand on six routes and three forgot the penthouse — so
+         on the house floor "Got it" on an alert answered 403 and the yellow bar
+         would not go away. One helper now; a new route cannot forget. */
+      const holdsFloor = (floorNo) => {
+        if (!me) return false;
+        if (floorNo === tower.HQ_FLOOR && hqOwner(me)) return true;
+        const l = leasing.leaseFor(floorNo);
+        return !!l && l.wallet === me;
+      };
       // Live data is for people with standing: the HQ's owner anywhere, a tenant
       // on their own floor. Everyone else — every floor, the HQ included — gets
       // the demo shift. The 3D office is the showroom; the data is the product.
@@ -634,8 +645,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           const floorNo = Number(idMatch[1]);
           if (req.method === "GET") return json(200, { identity: identity.identityFor(floorNo), costumes: identity.COSTUMES });
           if (!me) return json(401, { error: "sign in with your wallet first" });
-          const lease = leasing.leaseFor(floorNo);
-          if (!lease || lease.wallet !== me) return json(403, { error: "this is not your floor" });
+          if (!holdsFloor(floorNo)) return json(403, { error: "this is not your floor" });
           const body = await readBody();
           const r = identity.setIdentity(floorNo, body || {});
           // Everyone watching this floor sees the new nameplate now, not on reload.
@@ -918,8 +928,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             return json(200, { unread: alerts.unreadFor(floorNo), recent: alerts.recentFor(floorNo) });
           }
           if (!me) return json(401, { error: "sign in with your wallet first" });
-          const lease = leasing.leaseFor(floorNo);
-          if (!lease || lease.wallet !== me) return json(403, { error: "this is not your floor" });
+          if (!holdsFloor(floorNo)) return json(403, { error: "this is not your floor" });
           const body = await readBody();
           return json(200, { acknowledged: alerts.acknowledge(floorNo, body?.ids) });
         }
@@ -930,8 +939,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           if (perfMatch[2] === "record") return json(200, perf.recordFor(floorNo));
           // sync: follow the owner's own wallet and record any fills on their calls
           if (!me) return json(401, { error: "sign in with your wallet first" });
-          const lease = leasing.leaseFor(floorNo);
-          if (!lease || lease.wallet !== me) return json(403, { error: "this is not your floor" });
+          if (!holdsFloor(floorNo)) return json(403, { error: "this is not your floor" });
           const taken = copy.feedFor(floorNo, 40).filter((d) => d.verdict === "offered");
           let scanned = 0, settled = 0;
           for (const d of taken) {
@@ -977,9 +985,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           // Floor 50 carries no lease row — it is the house's own desk — so its
           // owners were refused their own copy settings, executor secret
           // included. Same house seat the room routes already honour.
-          const houseSeatCopy = floorNo === HQ_FLOOR && hqOwner(me);
-          if (!houseSeatCopy && (!lease || lease.wallet !== me))
-            return json(403, { error: "this is not your floor" });
+          if (!holdsFloor(floorNo)) return json(403, { error: "this is not your floor" });
           const body = await readBody();
           if (what === "copy") {
             if (body && "webhookUrl" in body) {
@@ -1006,18 +1012,17 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           const action = roomMatch[2];
           // The penthouse is never LEASED — it is the house's own desk, and its
           // owners (treasury, the dev wallet, the deed) sit in it as tenants do.
-          const houseSeat = floorNo === HQ_FLOOR && hqOwner(me);
-          if (!action) return json(200, rooms.roomState(floorNo, me, { houseSeat }));
+
+          if (!action) return json(200, rooms.roomState(floorNo, me, { houseSeat: holdsFloor(floorNo) }));
 
           if (!me) return json(401, { error: "sign in with your wallet first" });
           const lease = leasing.leaseFor(floorNo);
-          if (!houseSeat && (!lease || lease.wallet !== me))
-            return json(403, { error: "this is not your floor" });
+          if (!holdsFloor(floorNo)) return json(403, { error: "this is not your floor" });
 
           const body = await readBody();
           if (action === "/settings") return json(200, rooms.saveSettings(floorNo, body || {}));
           if (action === "/run") {
-            const r = await rooms.requestRun({ floorNo, wallet: me, mint: body?.mint, houseSeat });
+            const r = await rooms.requestRun({ floorNo, wallet: me, mint: body?.mint, houseSeat: holdsFloor(floorNo) });
             return json(r.ok ? 200 : 409, r);
           }
         }

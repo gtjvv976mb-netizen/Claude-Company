@@ -516,6 +516,7 @@ select.dp-in{cursor:pointer}
     <button class="dtab" id="tab-tape" role="tab" aria-selected="false">Tape<span class="dot" id="tape-dot"></span></button>
     <button class="dtab" id="tab-inbox" role="tab" aria-selected="false">Big C</button>
     <button class="dtab" id="tab-calls" role="tab" aria-selected="false">Team</button>
+    <button class="dtab" id="tab-live" role="tab" aria-selected="false">Calls<span class="dot" id="live-dot"></span></button>
     <button class="dtab" id="tab-desk" role="tab" aria-selected="false">Desk</button>
     <button class="dtab" id="tab-crew" role="tab" aria-selected="false">Crew</button>
     <button class="dtab" id="tab-whales" role="tab" aria-selected="false">Whales<span class="dot" id="whale-dot"></span></button>
@@ -534,6 +535,7 @@ select.dp-in{cursor:pointer}
     <div class="inbox" id="inbox"></div>
     <div class="deskpanel" id="deskpanel"></div>
     <div class="callspanel" id="callspanel"></div>
+    <div class="callspanel" id="livepanel"></div>
     <div class="datapanel" id="whalespanel"></div>
     <div class="datapanel" id="statspanel"></div>
     <div class="datapanel" id="rankspanel"></div>
@@ -5779,9 +5781,11 @@ const tapeEl2 = document.getElementById("tape");
 
 const RAIL = document.getElementById("rail");
 const RAIL_TITLE = document.getElementById("rail-title");
-const PANE_TITLE = { tape: "The Tape", inbox: "Big C", desk: "My Desk", calls: "The Trading Team", crew: "The Aye-Team",
+const PANE_TITLE = { tape: "The Tape", inbox: "Big C", desk: "My Desk", calls: "Your Trading Team",
+  live: "Live Calls", crew: "The Aye-Team",
   whales: "Whale Callouts", stats: "The Building's Books", ranks: "The Leaderboard", ledger: "The Record Book" };
-const PANE_TABS = { tape: "tab-tape", inbox: "tab-inbox", desk: "tab-desk", calls: "tab-calls", crew: "tab-crew",
+const PANE_TABS = { tape: "tab-tape", inbox: "tab-inbox", desk: "tab-desk", calls: "tab-calls",
+  live: "tab-live", crew: "tab-crew",
   whales: "tab-whales", stats: "tab-stats", ranks: "tab-ranks", ledger: "tab-ledger" };
 let openPane = null;
 
@@ -5792,6 +5796,7 @@ function showPane(which) {
   inboxEl2.classList.toggle("on", which === "inbox");
   panel.classList.toggle("on", which === "desk");
   document.getElementById("callspanel").classList.toggle("on", which === "calls");
+  document.getElementById("livepanel").classList.toggle("on", which === "live");
   document.getElementById("crewpanel").classList.toggle("on", which === "crew");
   for (const pane of ["whales", "stats", "ranks", "ledger"])
     document.getElementById(pane + "panel").classList.toggle("on", which === pane);
@@ -6268,6 +6273,7 @@ const callsPanel = document.getElementById("callspanel");
 const tabCalls = document.getElementById("tab-calls");
 
 tabCalls.addEventListener("click", () => togglePane("calls", loadCalls));
+document.getElementById("tab-live").addEventListener("click", () => togglePane("live", loadCalls));
 
 /* ── buying a call, without ever touching the transaction ──────────────────
    The desk's whole security story is that it cannot sign, so the buy path must
@@ -6336,6 +6342,7 @@ async function loadCalls({ liveOnly = false } = {}) {
       return;
     }
     renderCalls(body, { liveOnly });
+    renderLive(body);
     window.__grokBoardUpdate?.(body.feed || []);      // Grok's own board, same book
     paintHud({ feed: body.feed, settings: body.settings, budget: BUDGET, rent: body.rent });
   } catch (e) {
@@ -6351,15 +6358,7 @@ let liveRegion = null;
 function renderCalls({ feed = [], settings, record }, { liveOnly = false } = {}) {
   // A poll only refreshes the score and the cards; everything a tenant TOUCHES
   // is left exactly as they left it.
-  if (liveOnly && liveRegion && callsPanel.contains(liveRegion)) {
-    liveRegion.innerHTML = "";
-    liveRegion.appendChild(buildScoreline(record, feed));
-    const w = document.createElement("div");
-    w.style.cssText = "display:flex;flex-direction:column;gap:7px";
-    liveRegion.appendChild(w);
-    paintFeedInto(w, feed, settings);
-    return;
-  }
+  if (liveOnly) return;                      // the poll repaints the Calls tab via renderLive
   callsPanel.innerHTML = "";
 
   /* ── ORDER OF ATTENTION ────────────────────────────────────────────────────
@@ -6391,39 +6390,72 @@ function renderCalls({ feed = [], settings, record }, { liveOnly = false } = {})
     callsPanel.appendChild(hand);
   }
 
-  // 1. THE TEAM — how you manage it: shift, cadence, brain, token, pinned hunts.
+  /* ═══ THE TEAM TAB — three numbered steps, in the order a tenant needs them:
+     who they are and whether they are working, what they are allowed to hunt,
+     and how to switch the bot on. Everything a tenant reads only occasionally
+     folds away. The live book moved to its own CALLS tab. */
+  const step = (n, title, why) => {
+    const h = document.createElement("div");
+    h.style.cssText = "display:flex;align-items:baseline;gap:7px;margin-top:2px";
+    const num = document.createElement("span");
+    num.textContent = String(n);
+    num.style.cssText = "font:700 11px 'JetBrains Mono',monospace;width:17px;height:17px;flex:none;" +
+      "border-radius:50%;background:var(--amber,#e0ad3d);color:#2a2018;display:grid;place-content:center";
+    const t = document.createElement("div");
+    t.innerHTML = `<div class="dp-h" style="margin:0">${title}</div>`;
+    const w = document.createElement("p");
+    w.className = "dp-note"; w.textContent = why; w.style.fontSize = "10.5px";
+    t.appendChild(w);
+    h.append(num, t);
+    callsPanel.appendChild(h);
+  };
+
+  // 1 — the team itself
+  step(1, "Your team", "Turn them on, and choose whose brain runs the desk.");
   const teamBox = document.createElement("div");
   teamBox.style.cssText = "display:flex;flex-direction:column;gap:5px";
   callsPanel.appendChild(teamBox);
   window.__renderTeamInto?.(teamBox);
 
-  // 2. ACT — the bot that trades what the team calls.
+  // 2 — the rules they hunt by, OPEN, not buried in a drawer
+  step(2, "What they may trade", "Your risk appetite, the size of your book, and which coins qualify.");
+  if (settings) callsPanel.appendChild(buildControls(settings));
+
+  // 3 — the bot
+  step(3, "Auto-trade it", "Optional. A bot in your browser (or on a server) places the calls for you.");
   if (settings) callsPanel.appendChild(buildBotCard(settings));
 
-  // 2+3. THE LIVE REGION — score and calls. The ONLY part a poll rebuilds.
+  // everything read only occasionally
+  const more = window.foldSection?.("Budget \u00b7 spend \u00b7 self-hosted executor");
+  if (more) { more.body.appendChild(buildBudget()); callsPanel.appendChild(more.wrap); }
+  return;
+}
+
+/* ═══ THE CALLS TAB — the book, and nothing to configure ══════════════════ */
+function renderLive({ feed = [], settings, record }) {
+  const el = document.getElementById("livepanel");
+  el.innerHTML = "";
   liveRegion = document.createElement("div");
   liveRegion.style.cssText = "display:flex;flex-direction:column;gap:5px";
-  callsPanel.appendChild(liveRegion);
+  el.appendChild(liveRegion);
   liveRegion.appendChild(buildScoreline(record, feed));
   const feedWrap = document.createElement("div");
   feedWrap.style.cssText = "display:flex;flex-direction:column;gap:7px";
   liveRegion.appendChild(feedWrap);
 
-  // 4. THE REST — folded, each drawer counting what is inside it.
-  // The killed lane lives on the Desk now, beside the watch board — the room
-  // shows what the desk stalked and what it shot; the Team tab manages the team.
-  // These two endpoints are tenant-gated and answer 403 to anyone else. An empty
-  // body therefore means "not yours to see" as often as it means "none" — so the
-  // label must not claim "nothing armed" when the truth is "refused".
-  // The watch board lives on the Desk tab now — the room shows what the desk stalks.
-
-  const more = foldSection("More: risk settings \u00b7 budget \u00b7 self-hosted executor");
-  more.body.appendChild(buildBudget());
-  if (settings) more.body.appendChild(buildControls(settings));
-  callsPanel.appendChild(more.wrap);
-
+  const kill = window.foldSection?.("Killed \u2014 the trades that did not happen");
+  if (kill) {
+    el.appendChild(kill.wrap);
+    window.__renderKilledInto?.(kill.body).then((ok) => {
+      const n = kill.body.querySelectorAll(".killrow").length;
+      kill.label.textContent = n ? `Killed \u2014 ${n} shown`
+        : ok === false ? "Killed \u2014 tenants only" : "Killed \u2014 nothing yet";
+      kill.body.querySelector(".dp-h")?.remove();
+    });
+  }
   paintFeedInto(feedWrap, feed, settings);
 }
+
 
 /* The call cards themselves — the one thing that genuinely changes minute to
    minute, so it is the one thing a poll redraws. */
@@ -6935,8 +6967,18 @@ function buildControls(settings) {
     mint.className = "dp-btn"; mint.textContent = "Create my executor feed secret";
     mint.onclick = async () => {
       mint.disabled = true; mint.textContent = "Creating\u2026";
-      await api(`/api/floor/${FLOOR_N}/copy`, { method: "POST",
+      const { status, body } = await api(`/api/floor/${FLOOR_N}/copy`, { method: "POST",
         body: JSON.stringify({ mintExecutorSecret: true }) });
+      if (status !== 200 || !body?.executor_secret) {
+        mint.disabled = false; mint.textContent = "Create my signing secret";
+        const why = document.createElement("p");
+        why.className = "dp-note"; why.style.color = "var(--bad,#b0503f)";
+        why.textContent = status === 401 ? "Not signed in on this device — connect your wallet first."
+          : status === 403 ? "This wallet does not own this floor."
+          : (body?.error || `the desk answered ${status}`);
+        box.appendChild(why);
+        return;
+      }
       loadCalls();
     };
     box.appendChild(mint);
@@ -6952,8 +6994,23 @@ function buildControls(settings) {
     rot.onclick = async () => {
       if (!confirm("Rotate the executor feed secret?\n\nAny poller using the old one stops receiving calls until you reinstall it with the new secret.")) return;
       rot.disabled = true; rot.textContent = "Rotating\u2026";
-      await api(`/api/floor/${FLOOR_N}/copy`, { method: "POST",
+      // A silent failure here looked exactly like a slow success: the panel
+      // reloaded showing the SAME secret and no reason why.
+      const { status, body } = await api(`/api/floor/${FLOOR_N}/copy`, { method: "POST",
         body: JSON.stringify({ rotateExecutorSecret: true }) });
+      if (status !== 200 || !body?.executor_secret) {
+        rot.disabled = false; rot.textContent = "Rotate";
+        const why = document.createElement("p");
+        why.className = "dp-note";
+        why.style.color = "var(--bad,#b0503f)";
+        why.textContent = status === 401
+          ? "Not signed in on this device — connect your wallet in the tower, then try again."
+          : status === 403
+            ? "This wallet does not own this floor. Connect the wallet that leases it (or the treasury/dev wallet for floor 50)."
+            : (body?.error || `the desk answered ${status}`);
+        sec.parentElement?.appendChild(why);
+        return;
+      }
       loadCalls();
     };
     sec.appendChild(rot);

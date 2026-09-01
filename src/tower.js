@@ -59,7 +59,16 @@ db.prepare("UPDATE floors SET state='hq', owner=? WHERE n=? AND (owner IS NULL O
 export function hqOwnerWallet() {
   return db.prepare("SELECT owner FROM floors WHERE n=?").get(HQ_FLOOR)?.owner || HQ_OWNER_WALLET;
 }
-export const isHqOwner = (w) => !!w && w === hqOwnerWallet();
+/* The penthouse answers to the HOUSE: the dev wallet on the deed AND the
+   treasury. The owner asked for both; a later refactor narrowed it to one, and
+   the treasury quietly lost its own floor. Read the treasury from env directly
+   rather than importing leasing — tower is imported by it. */
+export const isHqOwner = (w) => {
+  if (!w) return false;
+  if (w === hqOwnerWallet()) return true;
+  const t = (process.env.TREASURY_OWNER || "").trim();
+  return !!t && w === t;
+};
 
 export function listFloors() {
   return db.prepare("SELECT n, state, owner, name, md_name FROM floors ORDER BY n").all();
