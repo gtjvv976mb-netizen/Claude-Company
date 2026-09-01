@@ -717,8 +717,22 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             /* Name WHICH provider wall was hit: an empty balance is topped up, a
              * metered ceiling is raised. Telling an operator to add credit when the
              * account has credit and a cap is what stopped them wastes the outage. */
-            const ceiling = /metered provider ceiling|spend (?:cap|ceiling|limit)/i.test(provider.lastFailureError || "");
-            reason = ceiling
+            /* "metered provider ceiling" is THE DESK'S OWN pre-flight refusal —
+               reserveProviderBudget() measuring the next call against
+               DESK_DAILY_BUDGET_USD — not a provider error at all. The old text
+               sent operators to the Anthropic Console to raise a limit that was
+               never the constraint, while the fix was one env var on our own
+               service. Name the right knob. */
+            const ownCeiling = /metered provider ceiling/i.test(provider.lastFailureError || "");
+            const ceiling = ownCeiling
+              || /spend (?:cap|ceiling|limit)|usage limit/i.test(provider.lastFailureError || "");
+            reason = ownCeiling
+              ? `THIS DESK'S OWN daily budget is exhausted, not the provider's — ` +
+                `$${sp.usd.toFixed(2)} of the $${cap} DESK_DAILY_BUDGET_USD cap, and the next call needs more headroom than is left ` +
+                `(${provider.failures} pre-flight refusal${provider.failures === 1 ? "" : "s"} in the last six hours). ` +
+                `Nothing is wrong with the API account. Raise DESK_DAILY_BUDGET_USD on the service and the desk resumes at once; ` +
+                `free screening, monitoring and watch checks continue meanwhile.`
+              : ceiling
               ? `the provider SPEND CEILING is reached (${provider.failures} refusal${provider.failures === 1 ? "" : "s"} in the last six hours) — ` +
                 `the account has credit, but a configured limit is refusing new calls. Analyst seats fail individually, so calls get withheld ` +
                 `as "fewer than three analysts returned" when the real cause is billing. Raise the limit in the Anthropic Console ` +
