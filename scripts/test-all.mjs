@@ -28,7 +28,13 @@ for (const test of tests) {
   const args = test === path.join("executor", "test-install.mjs") ? [test, "."] : [test];
   const run = spawnSync(process.execPath, args, {
     cwd: root,
-    stdio: "inherit",
+    // Keep stderr available for a GitHub check annotation while preserving the
+    // ordinary local/CI transcript. Public Actions logs may require authentication;
+    // the annotation makes the exact failed test and assertion visible on the
+    // commit's public check result without weakening the test gate.
+    stdio: ["inherit", "inherit", "pipe"],
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
     timeout: 120_000,
     env: {
       ...process.env,
@@ -43,12 +49,18 @@ for (const test of tests) {
       EXECUTE: "0",
     },
   });
+  if (run.stderr) process.stderr.write(run.stderr);
   fs.rmSync(sandbox, { recursive: true, force: true });
 
   if (run.status !== 0) {
     failed++;
     const why = run.error?.message || run.signal || `exit ${run.status}`;
     console.error(`FAIL ${test} (${why})`);
+    if (process.env.GITHUB_ACTIONS === "true") {
+      const detail = String(run.stderr || why).slice(-4_000)
+        .replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
+      console.error(`::error file=${test},title=Regression failed::${detail}`);
+    }
   }
 }
 
