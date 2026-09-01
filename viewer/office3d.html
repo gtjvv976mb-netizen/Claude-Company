@@ -4575,7 +4575,7 @@ function fmtTape(e) {
     case "cycle:start":     return ["Floor", `Cycle ${String(e.cycle).slice(0, 16)} opened`, "hi"];
     case "cycle:end":       return ["Floor", `Cycle closed — ${e.count ?? 0} calls, $${e.spendUsd ?? 0}${e.stopped ? " (" + e.stopped + ")" : ""}`, "hi"];
     case "cycle:halted":    return ["Floor", `Cycle halted — ${e.reason}`, "bad"];
-    case "cycle:budget":    return ["Floor", `Budget: $${e.usedUsd} of $${e.capUsd}`, "warn"];
+    case "cycle:budget":    return ["Floor", `Budget: $${Number(e.usedUsd).toFixed(2)} of $${Number(e.capUsd).toFixed(2)}`, "warn"];
     /* THE MANDATE'S OWN TAPE. Under one-trade-at-a-time the desk is idle for most
      * of the day BY DESIGN — it is holding a position, not broken. An idle desk that
      * says nothing is indistinguishable from a dead one, so it narrates the wait. */
@@ -4741,9 +4741,13 @@ async function loadInboxHistory() {
         inboxEl.appendChild(memoNode({
           symbol: e.symbol || (e.mint ? e.mint.slice(0, 6) : "?"), decision: e.outcome,
           thesis: e.thesis || e.detail || "Filed to the journal.",
-          conviction: e.conviction ?? null, size: e.size ?? null, stop: e.stop ?? null, gmgn: null }));
+          conviction: e.conviction ?? null, size: e.size ?? null, stop: e.stop ?? null, gmgn: e.gmgn ?? null }));
+        // Count history into the pinned bar, the same way live memos count.
+        __inboxSeen++;
+        if (e.outcome === "APPROVED" || e.outcome === "PROPOSE") approvedCount++;
       } catch {}
     }
+    paintInboxSummary();
     inboxEl.querySelector(".empty")?.remove();
     if (inboxDone) {
       const end = document.createElement("p");
@@ -4794,6 +4798,7 @@ function memo(spec) {
   inboxEl.querySelector(".empty")?.remove();
   inboxEl.prepend(m);
   if (decision === "APPROVED" || decision === "PROPOSE") approvedCount++;
+  __inboxSeen++;
   paintInboxSummary(spec.symbol);
 }
 
@@ -4801,8 +4806,11 @@ function memo(spec) {
    One pinned line answers the two questions a tenant actually has: has anything
    been authorised, and what was the last thing to cross his desk. */
 let __inboxSeen = 0;
+/* The tally lives with the memos it counts, not with the painter. Incrementing inside
+ * paintInboxSummary meant history — hundreds of memos, many authorised — was appended
+ * without ever being counted, so the pinned bar read "Nothing authorised yet · 1 memo
+ * on the desk" directly above a pile that said otherwise. */
 function paintInboxSummary(lastSym) {
-  __inboxSeen++;
   let bar = document.getElementById("inbox-sum");
   if (!bar) {
     bar = document.createElement("div");
@@ -5701,7 +5709,17 @@ if (location.search.includes("demo")) {
       window.loadChronicle?.().then(() => { tapeEl.scrollTop = tapeEl.scrollHeight; }); }
     tape("Floor", "Connected to the desk."); });
   let lastBeat = Date.now();
-  es.onmessage = (m) => { lastBeat = Date.now(); try { handle(JSON.parse(m.data)); } catch {} };
+  es.onmessage = (m) => {
+    lastBeat = Date.now();
+    try {
+      const ev = JSON.parse(m.data);
+      // Advance the gap-fill mark from LIVE events too: the reconnect fetch asks for
+      // everything since this id, and if streaming never moved it the tape duplicated
+      // its whole session on every reconnect.
+      if (Number(ev.id) > newestChron) newestChron = Number(ev.id);
+      handle(ev);
+    } catch {}
+  };
   es.onerror = () => {
     if (!ok) { es.close(); goSim("no desk process on this origin"); return; }
     // Connected once, then dropped: EventSource retries on its own, but the
@@ -5988,7 +6006,7 @@ function renderRoom() {
     window.__renderKilledInto(kf.body).then((ok) => {
       const n = kf.body.querySelectorAll(".killrow").length;
       kf.label.textContent = n ? `Killed \u2014 ${n} shown`
-        : ok === false ? "Killed \u2014 tenants only" : "Killed \u2014 nothing yet";
+        : ok === false ? "Killed \u2014 tenants only" : (ok === null ? "Killed \u2014 could not reach the desk" : "Killed \u2014 nothing yet");
       kf.body.querySelector(".dp-h")?.remove();
     });
   }
@@ -6370,13 +6388,52 @@ window.__renderKilledInto = (el) => loadKilled(el);
    before it was wiped. The panel is split: a SHELL that is built once (team
    controls, bot, drawers) and a LIVE region (score + call cards) that is the
    only thing a poll repaints. */
-async function loadCalls({ liveOnly = false } = {}) {
-  if (FLOOR_N == null) { callsPanel.innerHTML = `<p class="locked">No floor in this address.</p>`; return; }
-  if (!callsPanel.children.length) callsPanel.innerHTML = `<p class="locked">Loading the sheet…</p>`;
+/** The single source of truth for how the bot's pulse is worded, wherever it appears. */
+function updateBotHb(settings) {
+  const el = document.getElementById("bot-hb");
+  if (!el) return;
+  let hb = null;
+  try { hb = JSON.parse(settings?.executor_heartbeat || "null"); } catch {}
+  window.__botHeartbeat = hb;                      // also wakes the robot in the 3D scene
+  const age = hb?.seenAt ? Date.now() - hb.seenAt : null;
+  if (hb && age != null && age < 3 * 60e3) {
+    el.style.color = "var(--good,#4f8f52)";
+    el.textContent = `● WALL-ST-E self-reports: ${(hb.mode || "?").toUpperCase()}` +
+      ` · ${hb.open ?? 0} open · heartbeat ${Math.max(1, Math.round(age / 1000))}s ago` +
+      ` (reported by your machine, not verified by this site)`;
+  } else if (hb && age != null) {
+    el.style.color = "var(--bad,#b0503f)";
+    el.textContent = `○ WALL-ST-E's last heartbeat was ${Math.round(age / 60e3)}m ago` +
+      ` (${(hb.mode || "?").toUpperCase()}) — the poller may be stopped or offline.`;
+  } else {
+    el.style.color = "";
+    el.textContent = "This page has no telemetry from your machine, so it cannot say whether " +
+      "WALL-ST-E is armed, paused or live. First start begins at the newest feed item and skips every older call.";
+  }
+}
+
+async function loadCalls({ liveOnly = false, hudOnly = false } = {}) {
+  if (FLOOR_N == null) {
+    if (!hudOnly) callsPanel.innerHTML = `<p class="locked">No floor in this address.</p>`;
+    return;
+  }
+  if (!hudOnly && !callsPanel.children.length) callsPanel.innerHTML = `<p class="locked">Loading the sheet…</p>`;
   try {
     const { status, body } = await call_api(`/api/floor/${FLOOR_N}/feed`);
     if (status === 403 && body.private) {
-      callsPanel.innerHTML = `<p class="locked">This floor's call sheet is private to its tenant.<br><br>Lease your own floor in the tower to get calls sized to your risk.</p>`;
+      if (!hudOnly) callsPanel.innerHTML = `<p class="locked">This floor's call sheet is private to its tenant.<br><br>Lease your own floor in the tower to get calls sized to your risk.</p>`;
+      return;
+    }
+    /* hudOnly: refresh the header counters and the bot's pulse from any pane, without
+     * repainting panels nobody is looking at. The heartbeat line is updated on EVERY
+     * path — it froze at tab-open while the Team strip refreshed on its own timer, so
+     * one tab showed two disagreeing readouts of the same bot within a minute. */
+    window.__botHeartbeat = (() => {
+      try { return JSON.parse(body.settings?.executor_heartbeat || "null"); } catch { return null; }
+    })();
+    updateBotHb?.(body.settings);
+    if (hudOnly) {
+      paintHud({ feed: body.feed, settings: body.settings, budget: BUDGET, rent: body.rent });
       return;
     }
     renderCalls(body, { liveOnly });
@@ -6497,7 +6554,7 @@ function renderLive({ feed = [], settings, record }) {
     window.__renderKilledInto?.(kill.body).then((ok) => {
       const n = kill.body.querySelectorAll(".killrow").length;
       kill.label.textContent = n ? `Killed \u2014 ${n} shown`
-        : ok === false ? "Killed \u2014 tenants only" : "Killed \u2014 nothing yet";
+        : ok === false ? "Killed \u2014 tenants only" : (ok === null ? "Killed \u2014 could not reach the desk" : "Killed \u2014 nothing yet");
       kill.body.querySelector(".dp-h")?.remove();
     });
   }
@@ -6729,7 +6786,7 @@ function buildScoreline(record, feed) {
   };
   add("Book", `${r.wins}\u2013${r.losses}`);
   if (r.settled) add("Settled", String(r.settled));
-  add("Net", `$${net.toLocaleString()}`, net >= 0 ? "var(--good,#4f8f52)" : "var(--bad,#b0503f)");
+  add("Net", `${net < 0 ? "-$" : "$"}${Math.abs(net).toLocaleString()}`, net >= 0 ? "var(--good,#4f8f52)" : "var(--bad,#b0503f)");
   add("To place", String(toPlace), toPlace ? "var(--amber,#e0ad3d)" : undefined);
   box.appendChild(line);
 
@@ -6889,28 +6946,15 @@ function buildBotCard(settings) {
      its own authority. A fresh heartbeat is the bot's word; a stale one is shown as
      stale; silence keeps the old honest note. The server cannot start, stop or steer
      the executor through any of this. */
-  let hb = null;
-  try { hb = JSON.parse(settings.executor_heartbeat || "null"); } catch {}
-  window.__botHeartbeat = hb;                      // wakes the robot in the 3D scene
-  const hbAge = hb?.seenAt ? Date.now() - hb.seenAt : null;
-  if (hb && hbAge != null && hbAge < 3 * 60e3) {
-    const line = mk("div", "dp-note");
-    line.style.color = "var(--good,#4f8f52)";
-    line.textContent = `● WALL-ST-E self-reports: ${(hb.mode || "?").toUpperCase()}` +
-      ` · ${hb.open ?? 0} open · heartbeat ${Math.max(1, Math.round(hbAge / 1000))}s ago` +
-      ` (reported by your machine, not verified by this site)`;
-    releaseGate.appendChild(line);
-  } else if (hb && hbAge != null) {
-    const line = mk("div", "dp-note");
-    line.style.color = "var(--bad,#b0503f)";
-    line.textContent = `○ WALL-ST-E's last heartbeat was ${Math.round(hbAge / 60e3)}m ago` +
-      ` (${(hb.mode || "?").toUpperCase()}) — the poller may be stopped or offline.`;
-    releaseGate.appendChild(line);
-  } else {
-    releaseGate.appendChild(mk("div", "dp-note",
-      "This page has no telemetry from your machine, so it cannot say whether WALL-ST-E is armed, paused or live. " +
-      "First start begins at the newest feed item and skips every older call."));
-  }
+  /* One element, one updater. This block used to compute the age at render time and
+   * never again, so the card froze at tab-open while the Team strip refreshed on its
+   * own timer — the same bot reported two different states on one tab within a
+   * minute. updateBotHb rewrites this line from whatever settings the 30s poll just
+   * fetched, so every readout on the page moves together. */
+  const hbLine = mk("div", "dp-note");
+  hbLine.id = "bot-hb";
+  releaseGate.appendChild(hbLine);
+  updateBotHb(settings);
   let legacyBot = null;
   const legacyKey = `cc_bot_${FLOOR_N}`;
   try { legacyBot = JSON.parse(localStorage.getItem(legacyKey) || "null"); } catch {}
@@ -7387,7 +7431,10 @@ async function loadKilled(host) {
   try {
     const { status, body } = await call_api("/api/killed");
     if (status === 403) return false;                     // gated, not empty
-    if (status !== 200 || !body.kills?.length) return;
+    // An unreachable desk is not a clean record. null = "could not ask", undefined =
+    // "asked, nothing there" — the label distinguishes them, so the return must too.
+    if (status !== 200) return null;
+    if (!body.kills?.length) return;
     const head = document.createElement("div");
     head.className = "dp-h"; head.textContent = "Killed — the trades that did not happen";
     host.appendChild(head);
@@ -7410,7 +7457,7 @@ async function loadKilled(host) {
       row.append(top, why);
       host.appendChild(row);
     }
-  } catch {}
+  } catch { return null; }        // a thrown fetch is "could not ask", not "nothing"
 }
 
 /* ── the call dossier: one call's whole story, seat by seat, kept forever ── */
@@ -7481,10 +7528,14 @@ window.openCallDossier = openCallDossier;
 /* ── whale callouts: who is actually taking size, and which way ─────────── */
 const whaleCache = new Map();
 async function loadWhales(mint, el) {
-  if (whaleCache.has(mint)) return paintWhales(whaleCache.get(mint), el);
+  /* A 2-minute TTL, matching the server's own callout cache. Caching forever meant a
+   * call card showed its first-fetch whale numbers for the entire session while the
+   * row claimed to be live flow. */
+  const hit = whaleCache.get(mint);
+  if (hit && Date.now() - hit.at < 120e3) return paintWhales(hit.body, el);
   try {
     const { body } = await call_api(`/api/whales/${mint}`);
-    whaleCache.set(mint, body);
+    whaleCache.set(mint, { at: Date.now(), body });
     paintWhales(body, el);
   } catch { el.textContent = "whale flow unavailable"; }
 }
@@ -7699,7 +7750,7 @@ window.load_ledger = async () => {
     const h = document.createElement("p"); h.className = "dp-note";
     h.textContent = `The record book. House: ${t.house?.calls ?? 0} calls, ${t.house?.live ?? 0} live, ` +
       `${t.house?.closed_up ?? 0} closed up, ${t.house?.closed_down ?? 0} closed down. ` +
-      `Floors: ${t.floors?.settled ?? 0} settled, ${money(t.floors?.pnl_usd)} realised. ` +
+      `${FLOOR_N != null ? "This floor:" : "Floors:"} ${t.floors?.settled ?? 0} settled, ${money(t.floors?.pnl_usd)} realised. ` +
       "This page exists so the desk can be judged on what it said, and the floors on what they did.";
     el.appendChild(h);
 
@@ -7748,6 +7799,27 @@ function ordC(n) {
 
 if (FLOOR_N != null) { refreshBudget(); loadCalls(); pollAlerts(); askNotify(); }
 setInterval(pollAlerts, 20000);
-setInterval(() => { if (callsPanel.classList.contains("on")) loadCalls({ liveOnly: true }); }, 30000);
+/* ONE HEARTBEAT FOR EVERY PANE THAT IS ACTUALLY OPEN.
+ *
+ * The 30s poll was gated on the TEAM pane alone, so seven tabs loaded once on open
+ * and then froze: the CALLS book never re-marked, STATS showed "calls live right now"
+ * from whenever you opened it, RANKS and LEDGER kept closed calls "live", WHALES
+ * showed a one-shot snapshot as live flow, and the header's Live-calls / to-place /
+ * rent counters stopped the moment you left the Calls tab. Each pane refreshes only
+ * while it is on screen — a hidden pane costs nothing, and nothing repaints behind
+ * your back. The header rides the calls fetch, so it now updates from any pane. */
+setInterval(() => {
+  if (callsPanel.classList.contains("on") ||
+      document.getElementById("livepanel")?.classList.contains("on")) {
+    loadCalls({ liveOnly: true });
+  } else {
+    loadCalls({ liveOnly: true, hudOnly: true });   // keep the header honest everywhere
+  }
+  for (const p of ["whales", "stats", "ranks", "ledger"]) {
+    if (document.getElementById(p + "panel")?.classList.contains("on")) window["load_" + p]?.();
+  }
+}, 30000);
+// Wallet and credit were fetched once at boot; a top-up showed nothing until reload.
+setInterval(() => { refreshBudget?.(); }, 60000);
 window.__pollCalls = () => loadCalls({ liveOnly: true });   // probe hook: the poll, on demand
 </script>

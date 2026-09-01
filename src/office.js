@@ -489,7 +489,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           const rows = (sql) => { try { return db.prepare(sql).all(); } catch { return []; } };
           return json(200, {
             building: {
-              floorsTotal: 50,
+              floorsTotal: occupancy.total,   // was hardcoded 50; tower.FLOORS is the truth
               floorsLeased: occupancy.floors.filter((f) => f.state === "owned").length,
               settledTrades: led.totals.floors.settled,
               realisedPnlUsd: led.totals.floors.pnl_usd,

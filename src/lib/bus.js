@@ -114,9 +114,17 @@ export function emit(type, payload = {}) {
   RING.push(ev);
   if (RING.length > RING_MAX) RING.shift();
   try {
-    db.prepare(`INSERT INTO chronicle
+    /* THE LIVE EVENT CARRIES ITS CHRONICLE ID. Without it a reconnecting client has
+     * no way to tell what it already displayed: the gap-fill asked for everything
+     * since its last CHRONICLE mark, which never advanced during live streaming, so
+     * every reconnect re-appended hours of already-shown rows as if they were new.
+     * The id is the shared key that makes the client's `e.id <= newestChron` skip
+     * work. Stamped after the insert (that is when it exists) and before the stream
+     * sees it. */
+    const info = db.prepare(`INSERT INTO chronicle
       (ts,floor,floor_attributed,evidence_scope,type,data) VALUES (?,?,1,?,?,?)`)
       .run(ev.ts, ev.floor ?? null, evidenceScope, type, JSON.stringify(ev));
+    ev.id = Number(info.lastInsertRowid);
   } catch {}                       // the record must never break the live stream
   bus.emit("event", ev);
   return ev;
