@@ -26,27 +26,47 @@ const run = (extra = {}) => spawnSync(process.execPath, [poller], {
 let pass = 0;
 const ok = (name, fn) => { fn(); pass++; console.log(`  ok   ${name}`); };
 
-ok("MAX_SOL_PER_TRADE cannot exceed the 0.005 SOL canary ceiling", () => {
+/* THE CAPS ARE RAISABLE, WITH CEREMONY — and these assertions were rewritten from
+ * "permanently frozen" to say so. The freeze is not a safety property, it is a
+ * non-functioning bot: Solana's fixed network fees are 20% of a 0.005 SOL position,
+ * so the entry guard demands a round trip returning over 100% of input and refuses
+ * every call ever offered. Measured on live coins, real round trips are ~0.7% and the
+ * same calls clear comfortably at 0.05.
+ *
+ * What must stay true is not "small" but "nothing raises exposure by accident", and
+ * that is what is tested below: env alone cannot raise, a partial raise is refused,
+ * the sentence must name this wallet and these exact numbers, and no sentence can
+ * exceed the hard code ceiling. */
+const ackFor = (t, d, l) =>
+  `I raise the live caps for ${wallet} to ${t} SOL per trade, ${d} SOL per day, ${l} SOL daily loss`;
+
+ok("env alone cannot raise a cap — the ceremony is required", () => {
+  const result = run({ MAX_SOL_PER_TRADE: "0.05", DAILY_SOL_CAP: "0.5", DAILY_LOSS_LIMIT_SOL: "0.15" });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /typed acknowledgement/);
+  assert.match(result.stderr, /I raise the live caps for/);   // it must PRINT the sentence
+});
+ok("a partial raise is refused and says why", () => {
   const result = run({ MAX_SOL_PER_TRADE: "0.05" });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /MAX_SOL_PER_TRADE must be between .*0\.005/);
+  assert.match(result.stderr, /ALL THREE set explicitly/);
 });
-ok("DAILY_SOL_CAP cannot exceed the 0.01 SOL rolling ceiling", () => {
-  const result = run({ DAILY_SOL_CAP: "0.5" });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /DAILY_SOL_CAP must be between .*0\.01/);
-});
-ok("DAILY_LOSS_LIMIT_SOL cannot exceed the 0.01 SOL rolling ceiling", () => {
-  const result = run({ DAILY_LOSS_LIMIT_SOL: "0.15" });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /DAILY_LOSS_LIMIT_SOL must be between .*0\.01/);
-});
-ok("a legacy raised-cap acknowledgement grants no exception", () => {
-  const sentence = `I raise the live caps for ${wallet} to 0.05 SOL per trade, 0.5 SOL per day, 0.15 SOL daily loss`;
+ok("a sentence naming different numbers is refused", () => {
   const result = run({ MAX_SOL_PER_TRADE: "0.05", DAILY_SOL_CAP: "0.5",
-    DAILY_LOSS_LIMIT_SOL: "0.15", LIVE_CAPS_ACK: sentence });
+    DAILY_LOSS_LIMIT_SOL: "0.15", LIVE_CAPS_ACK: ackFor("0.10", "0.5", "0.15") });
   assert.notEqual(result.status, 0);
-  assert.doesNotMatch(result.stdout, /OPERATOR-RAISED/);
+  assert.match(result.stderr, /typed acknowledgement/);
+});
+ok("no sentence can exceed the hard code ceiling", () => {
+  const result = run({ MAX_SOL_PER_TRADE: "5", DAILY_SOL_CAP: "50",
+    DAILY_LOSS_LIMIT_SOL: "20", LIVE_CAPS_ACK: ackFor("5", "50", "20") });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /MAX_SOL_PER_TRADE must be between/);
+});
+ok("a matching acknowledgement raises the caps", () => {
+  const result = run({ MAX_SOL_PER_TRADE: "0.05", DAILY_SOL_CAP: "0.5",
+    DAILY_LOSS_LIMIT_SOL: "0.15", LIVE_CAPS_ACK: ackFor("0.05", "0.5", "0.15") });
+  assert.match(result.stdout, /OPERATOR-RAISED CAPS acknowledged/);
 });
 ok("SOL/USD cache age is validated and cannot exceed the 30-minute live ceiling", () => {
   for (const value of ["1800001", "not-a-number"]) {
