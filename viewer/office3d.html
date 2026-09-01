@@ -4209,6 +4209,22 @@ function botPose(asleep) {
   if (asleep) { botFig.lamp.material.color.set(0x70828a); botFig.lamp.material.emissive.set(0x3a4448); }
 }
 botPose(true);
+
+/* THE HOOK THE ROBOT HAS ALWAYS POLLED, FINALLY CONNECTED.
+ * botTick's whole roaming state machine keyed on window.__botStatus() — which was
+ * referenced here and DEFINED NOWHERE, so wantRoam was permanently false and
+ * WALL-ST-E slept in his den on every floor forever, however hard the real bot was
+ * working. The executor's heartbeat now feeds it: the same self-reported pulse the
+ * Team tab relays. Fresh pulse (under 3 min) = he powers up and roams, lamp green
+ * when the trades are real and amber on paper; silence = he goes home and sleeps.
+ * Set by the panels that fetch it, so the scene never issues requests of its own. */
+window.__botHeartbeat = null;                      // {mode, open, seenAt} | null
+window.__botStatus = () => {
+  const hb = window.__botHeartbeat;
+  const fresh = hb && hb.seenAt && (Date.now() - hb.seenAt) < 3 * 60e3;
+  return { exists: !!hb, running: !!fresh, live: !!(fresh && hb.mode === "live") };
+};
+
 setInterval(() => {
   const bs = window.__botStatus?.();
   botState.wantRoam = !!(bs && bs.exists && bs.running);
@@ -6152,6 +6168,7 @@ async function renderTeamInto(el) {
   // Relayed from the bot's own heartbeat \u2014 the site never claims liveness itself.
   let hb = null;
   try { hb = JSON.parse(R.executorHeartbeat || "null"); } catch {}
+  window.__botHeartbeat = hb;                      // wakes the robot in the 3D scene
   const hbAge = hb?.seenAt ? Date.now() - hb.seenAt : null;
   if (hb && hbAge != null && hbAge < 3 * 60e3) {
     const bv = mk("span", "tv", `● ${(hb.mode || "?").toUpperCase()} \u00b7 ${hb.open ?? 0} open`);
@@ -6874,6 +6891,7 @@ function buildBotCard(settings) {
      the executor through any of this. */
   let hb = null;
   try { hb = JSON.parse(settings.executor_heartbeat || "null"); } catch {}
+  window.__botHeartbeat = hb;                      // wakes the robot in the 3D scene
   const hbAge = hb?.seenAt ? Date.now() - hb.seenAt : null;
   if (hb && hbAge != null && hbAge < 3 * 60e3) {
     const line = mk("div", "dp-note");
@@ -7020,7 +7038,7 @@ function buildControls(settings) {
     mint.className = "dp-btn"; mint.textContent = "Create my executor feed secret";
     mint.onclick = async () => {
       mint.disabled = true; mint.textContent = "Creating\u2026";
-      const { status, body } = await api(`/api/floor/${FLOOR_N}/copy`, { method: "POST",
+      const { status, body } = await call_api(`/api/floor/${FLOOR_N}/copy`, { method: "POST",
         body: JSON.stringify({ mintExecutorSecret: true }) });
       if (status !== 200 || !body?.executor_secret) {
         mint.disabled = false; mint.textContent = "Create my signing secret";
@@ -7049,7 +7067,7 @@ function buildControls(settings) {
       rot.disabled = true; rot.textContent = "Rotating\u2026";
       // A silent failure here looked exactly like a slow success: the panel
       // reloaded showing the SAME secret and no reason why.
-      const { status, body } = await api(`/api/floor/${FLOOR_N}/copy`, { method: "POST",
+      const { status, body } = await call_api(`/api/floor/${FLOOR_N}/copy`, { method: "POST",
         body: JSON.stringify({ rotateExecutorSecret: true }) });
       if (status !== 200 || !body?.executor_secret) {
         rot.disabled = false; rot.textContent = "Rotate";
