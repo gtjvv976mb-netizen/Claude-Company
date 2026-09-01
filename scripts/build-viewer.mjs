@@ -72,7 +72,14 @@ for (const { src: name, out } of PAGES) {
   const src = path.join(VIEWER, name);
   if (!fs.existsSync(src)) continue;
   let html = fs.readFileSync(src, "utf8");
-  html = html.replaceAll("__CLAUDE_COMPANY_SOURCE_COMMIT__", SOURCE_COMMIT);
+  /* The install command pins the EXECUTOR repo's commit, not this one. They are
+     separate repositories now: the desk is private, the executor is public
+     precisely so a tenant can read what they are about to run. Bump this when
+     you publish a new executor release (and only after reviewing it). */
+  const EXECUTOR_COMMIT = /^[0-9a-f]{40}$/i.test(String(process.env.EXECUTOR_COMMIT || ""))
+    ? String(process.env.EXECUTOR_COMMIT).toLowerCase()
+    : "04f728808713f7856290265bb00120f7aa88e8a4";
+  html = html.replaceAll("__CLAUDE_COMPANY_SOURCE_COMMIT__", EXECUTOR_COMMIT);
   const srcClosers = (html.match(/<\/script/gi) || []).length;
 
   if (IMPORT_LINE.test(html)) {

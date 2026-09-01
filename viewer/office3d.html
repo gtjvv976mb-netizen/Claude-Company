@@ -7173,7 +7173,7 @@ function buildControls(settings) {
        serves today, and joining the steps with && keeps that while removing
        three separate pastes. The secret is NOT in here on purpose: the
        installer prompts for it, so it never reaches shell history or ps. */
-    const cmd = `git clone https://github.com/gtjvv976mb-netizen/Claude-Company.git && cd Claude-Company && git checkout --detach ${releaseCommit} && bash executor/install.sh --floor ${FLOOR_N}`;
+    const cmd = `git clone https://github.com/gtjvv976mb-netizen/claude-company-executor.git && cd claude-company-executor && git checkout --detach ${releaseCommit} && bash executor/install.sh --floor ${FLOOR_N}`;
     const box2 = mk("div", "bud-addr");
     box2.style.cssText = "white-space:pre-wrap;word-break:break-all;font-size:10px;line-height:1.5";
     box2.textContent = cmd;
@@ -7210,7 +7210,7 @@ function buildControls(settings) {
       "The installer shows the new burner address and arms only when you retype that public key in the terminal. " +
       "This first live release is hard-capped at 0.005 SOL per trade and 0.01 SOL in each rolling 24-hour window."));
     // Same single pinned line as the dry-run install, with the canary flags.
-    const liveCmd = `git clone https://github.com/gtjvv976mb-netizen/Claude-Company.git && cd Claude-Company && git checkout --detach ${releaseCommit} && bash executor/install.sh --floor ${FLOOR_N} --live --expected-commit ${releaseCommit} --max-sol 0.005 --daily-cap 0.01 --rpc-file /absolute/path/to/primary-rpc --secondary-rpc-file /absolute/path/to/secondary-rpc --jupiter-key-file /absolute/path/to/jupiter-api-key`;
+    const liveCmd = `git clone https://github.com/gtjvv976mb-netizen/claude-company-executor.git && cd claude-company-executor && git checkout --detach ${releaseCommit} && bash executor/install.sh --floor ${FLOOR_N} --live --expected-commit ${releaseCommit} --max-sol 0.005 --daily-cap 0.01 --rpc-file /absolute/path/to/primary-rpc --secondary-rpc-file /absolute/path/to/secondary-rpc --jupiter-key-file /absolute/path/to/jupiter-api-key`;
     const liveBox = mk("div", "bud-addr");
     liveBox.style.cssText = "white-space:pre-wrap;word-break:break-all;font-size:10px;line-height:1.5";
     liveBox.textContent = liveCmd;
