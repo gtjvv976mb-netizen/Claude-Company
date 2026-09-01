@@ -152,17 +152,70 @@ if (EXECUTE) {
     fatal(`live journal is missing; initialize it once with LIVE_STATE_INIT_ACK=${WALLET} and INIT_ONLY=1`);
 }
 
+/* ── OPERATOR-RAISED LIVE CAPS ────────────────────────────────────────────────
+ * The canary ceilings above stay the default, and every operator can still only
+ * LOWER them by config. Raising is possible, and deliberately awkward: an operator
+ * must set all three money caps explicitly AND type an acknowledgement naming this
+ * wallet and these exact numbers. A changed number invalidates the sentence.
+ *
+ * Why that shape. The canary caps exist because a first release should be too small
+ * to hurt while real fills prove the pipeline — but frozen forever they are their own
+ * defect: a tenant who funds 1 SOL still trades in half-dollar clips and has no way
+ * to say otherwise. So the property to preserve is not "small", it is "nothing raises
+ * real-money exposure by accident". A typed sentence cannot be produced by a config
+ * typo, by a copied .env, or by anything arriving through the feed — which is the
+ * threat model that matters, since the feed is the one channel a compromised server
+ * could speak through. OPERATOR_MAX remains a hard code-level ceiling above it all.
+ * maxOpenPositions stays frozen: it multiplies every other cap. */
+const OPERATOR_MAX = Object.freeze({
+  maxSolPerTrade: 0.25,
+  dailySolCap: 2.5,
+  dailyLossLimitSol: 1,
+});
+const capsAckSentence = (wallet, trade, daily, loss) =>
+  `I raise the live caps for ${wallet} to ${trade} SOL per trade, ${daily} SOL per day, ${loss} SOL daily loss`;
+
+let LIVE_CEILINGS = LIVE_LIMITS;
+if (EXECUTE) {
+  const req = {
+    trade: process.env.MAX_SOL_PER_TRADE,
+    daily: process.env.DAILY_SOL_CAP,
+    loss: process.env.DAILY_LOSS_LIMIT_SOL,
+  };
+  const wantsRaise =
+    (req.trade != null && Number(req.trade) > LIVE_LIMITS.maxSolPerTrade) ||
+    (req.daily != null && Number(req.daily) > LIVE_LIMITS.dailySolCap) ||
+    (req.loss != null && Number(req.loss) > LIVE_LIMITS.dailyLossLimitSol);
+  if (wantsRaise) {
+    if (!req.trade || !req.daily || !req.loss)
+      fatal("raising any live cap requires ALL THREE set explicitly: MAX_SOL_PER_TRADE, " +
+        "DAILY_SOL_CAP, DAILY_LOSS_LIMIT_SOL — a partial raise hides the numbers the " +
+        "acknowledgement exists to make you look at");
+    const t = number("MAX_SOL_PER_TRADE", req.trade, { min: 0.000001, max: OPERATOR_MAX.maxSolPerTrade });
+    const d = number("DAILY_SOL_CAP", req.daily, { min: 0.000001, max: OPERATOR_MAX.dailySolCap });
+    const l = number("DAILY_LOSS_LIMIT_SOL", req.loss, { min: 0.000001, max: OPERATOR_MAX.dailyLossLimitSol });
+    if (d < t) fatal(`DAILY_SOL_CAP (${d}) is below MAX_SOL_PER_TRADE (${t}) — the day would refuse the first trade`);
+    const expected = capsAckSentence(WALLET, String(req.trade).trim(), String(req.daily).trim(), String(req.loss).trim());
+    if ((process.env.LIVE_CAPS_ACK || "").trim() !== expected)
+      fatal("raised live caps need a typed acknowledgement. Set LIVE_CAPS_ACK to exactly:\n\n    " +
+        expected + "\n");
+    LIVE_CEILINGS = Object.freeze({ ...LIVE_LIMITS, maxSolPerTrade: t, dailySolCap: d, dailyLossLimitSol: l });
+    log(`OPERATOR-RAISED CAPS acknowledged: ${t} SOL/trade, ${d} SOL/day deploy, ${l} SOL/day loss ` +
+      `(hard maxima ${OPERATOR_MAX.maxSolPerTrade}/${OPERATOR_MAX.dailySolCap}/${OPERATOR_MAX.dailyLossLimitSol} are a code change, by design)`);
+  }
+}
+
 const CFG = {
   ...DEFAULTS,
   maxSolPerTrade: number("MAX_SOL_PER_TRADE",
-    process.env.MAX_SOL_PER_TRADE || (EXECUTE ? LIVE_LIMITS.maxSolPerTrade : DEFAULTS.maxSolPerTrade),
-    { min: 0.000001, max: EXECUTE ? LIVE_LIMITS.maxSolPerTrade : 100 }),
+    process.env.MAX_SOL_PER_TRADE || (EXECUTE ? LIVE_CEILINGS.maxSolPerTrade : DEFAULTS.maxSolPerTrade),
+    { min: 0.000001, max: EXECUTE ? LIVE_CEILINGS.maxSolPerTrade : 100 }),
   dailySolCap: number("DAILY_SOL_CAP",
-    process.env.DAILY_SOL_CAP || (EXECUTE ? LIVE_LIMITS.dailySolCap : DEFAULTS.dailySolCap),
-    { min: 0.000001, max: EXECUTE ? LIVE_LIMITS.dailySolCap : 1000 }),
+    process.env.DAILY_SOL_CAP || (EXECUTE ? LIVE_CEILINGS.dailySolCap : DEFAULTS.dailySolCap),
+    { min: 0.000001, max: EXECUTE ? LIVE_CEILINGS.dailySolCap : 1000 }),
   dailyLossLimitSol: number("DAILY_LOSS_LIMIT_SOL",
-    process.env.DAILY_LOSS_LIMIT_SOL || (EXECUTE ? LIVE_LIMITS.dailyLossLimitSol : DEFAULTS.dailyLossLimitSol),
-    { min: 0.000001, max: EXECUTE ? LIVE_LIMITS.dailyLossLimitSol : 1000 }),
+    process.env.DAILY_LOSS_LIMIT_SOL || (EXECUTE ? LIVE_CEILINGS.dailyLossLimitSol : DEFAULTS.dailyLossLimitSol),
+    { min: 0.000001, max: EXECUTE ? LIVE_CEILINGS.dailyLossLimitSol : 1000 }),
   maxOpenPositions: number("MAX_OPEN_POSITIONS",
     process.env.MAX_OPEN_POSITIONS || DEFAULTS.maxOpenPositions,
     { min: 1, max: EXECUTE ? LIVE_LIMITS.maxOpenPositions : 100 }),
