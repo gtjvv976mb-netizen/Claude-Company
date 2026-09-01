@@ -1180,11 +1180,15 @@ function buildDesk(at, yaw, y = 0, accent = P.teal, kitId = null) {
   const sc = document.createElement("canvas"); sc.width = 256; sc.height = 150;
   const stex = new THREE.CanvasTexture(sc);
   stex.colorSpace = THREE.SRGBColorSpace;
-  const scr = new THREE.Mesh(BOX, new THREE.MeshBasicMaterial({ map: stex, toneMapped: false }));
-  scr.scale.set(0.02, 0.43, 0.79);
+  /* A PLANE, not a texture-mapped cube. Mapping a canvas onto a BOX paints it on
+     all six faces and the two rotations needed to aim it left the panel reading
+     wrong from every angle — that is what looked abnormal. One quad, sized to
+     the bezel, turned once to face the seated side (+X). */
+  const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.78, 0.44),
+    new THREE.MeshBasicMaterial({ map: stex, toneMapped: false }));
+  scr.rotation.y = Math.PI / 2;
   scr.position.set(-0.272, 1.22, 0);
-  scr.rotation.x = Math.PI / 2;                                     // the canvas faces the sitter
-  scr.rotation.z = Math.PI / 2;
+  scr.userData.noBake = true;                 // keep its canvas out of the merger
   g.add(scr);
   box(g, [0.03, 0.03, 0.30], [-0.268, 0.965, 0], 0x2f9fb0, 0.4);   // the power bar under the glass
   registerScreen(kitId, sc, stex);
@@ -2896,6 +2900,34 @@ class Worker {
  * operative's right, so a kit written once lands correctly whichever way the desk faces.
  */
 const DESK_KIT = {
+  // BIG C — the authorising desk: a leather blotter, the order stamp, a brass
+  // lamp and the one folder that reaches him. Nothing to analyse with; this is
+  // a desk for saying yes or no.
+  CEO: (b) => { b([0.52, 0.02, 0.72], [0.02, 0.80, 0], 0x5b3a2a);
+                b([0.20, 0.10, 0.14], [0.20, 0.85, 0.42], 0x8c2f27);      // the stamp
+                b([0.06, 0.05, 0.06], [0.20, 0.92, 0.42], 0xe0ad3d);
+                b([0.07, 0.30, 0.07], [-0.16, 0.95, -0.52], 0xe0ad3d);    // brass lamp
+                b([0.22, 0.06, 0.22], [-0.16, 1.12, -0.52], 0xe0ad3d);
+                b([0.30, 0.04, 0.42], [0.06, 0.82, -0.20], 0xf0e4c7);     // the one folder
+                b([0.26, 0.01, 0.36], [0.06, 0.845, -0.20], 0xd97757); },
+
+  // AGENT 48 — the adversary's bench: a red kill lamp, a spike file of rejected
+  // theses, and a magnifier he never puts down.
+  "Red Team": (b) => { b([0.09, 0.09, 0.09], [0.22, 0.85, 0.46], 0xb0503f);
+                b([0.03, 0.16, 0.03], [0.22, 0.94, 0.46], 0x8c2f27);
+                b([0.30, 0.20, 0.24], [-0.10, 0.90, 0.40], 0x2a2018);     // the spike file
+                for (let i = 0; i < 5; i++) b([0.24, 0.012, 0.20], [-0.10, 0.81 + i * 0.02, -0.30], 0xe4dcc9);
+                b([0.14, 0.02, 0.14], [0.10, 0.82, -0.44], 0x76858a);     // magnifier
+                b([0.03, 0.02, 0.18], [0.10, 0.82, -0.30], 0x2a2018); },
+
+  // GROX MULDER — the outside desk: an X-file, a cassette recorder and a torch.
+  // He works other people's evidence, and keeps his own copy.
+  GrokAD: (b) => { b([0.34, 0.05, 0.46], [0.04, 0.82, 0.30], 0xd9cfba);   // the file
+                b([0.30, 0.01, 0.40], [0.04, 0.85, 0.30], 0x8c2f27);
+                b([0.20, 0.07, 0.28], [0.10, 0.83, -0.40], 0x2a2c30);     // recorder
+                b([0.05, 0.02, 0.05], [0.16, 0.87, -0.48], 0xd9534f);
+                b([0.06, 0.06, 0.26], [-0.12, 0.84, -0.10], 0x5b6a70); }, // torch
+
   // Props are baked into the merged desk geometry, so a workstation costs nothing per
   // frame. Local frame: +X is the seated side, +Z is the operative's right.
 
@@ -3076,7 +3108,12 @@ function bakeStatic(root) {
   root.updateMatrixWorld(true);
   const doomed = [], buckets = new Map();
   root.traverse((o) => {
-    if (!o.isMesh || o.material.transparent || o.isSprite) return;
+    /* noBake: the static merger strips UVs and paints vertex colours, so any
+       TEXTURED mesh that goes through it comes out a flat slab. That is what
+       happened to all 17 workstation screens — they were baked into the room
+       and lost their canvases. A live screen costs one draw call and is the
+       whole point of the desk. */
+    if (!o.isMesh || o.material.transparent || o.isSprite || o.userData.noBake) return;
     const m = o.material;
     const key = `${m.roughness}:${m.metalness}`;
     (buckets.get(key) || buckets.set(key, []).get(key)).push(o);
