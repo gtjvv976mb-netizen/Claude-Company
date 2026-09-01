@@ -6087,6 +6087,12 @@ function renderRoom() {
 async function renderTeamInto(el) {
   const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
   const refresh = () => renderTeamInto(el);
+  /* The strip shows a LIVE age ("self-reported 42s ago") — a render that never
+   * refreshes turns that into a lie within a minute. Re-render on the heartbeat
+   * cadence while the panel is on screen; the timer rides the element so pane
+   * switches and re-renders never stack timers. */
+  clearTimeout(el.__teamTimer);
+  el.__teamTimer = setTimeout(() => { if (el.isConnected) renderTeamInto(el); }, 60_000);
   el.innerHTML = "";
   if (FLOOR == null) { el.appendChild(mk("p", "locked", "No floor in this address.")); return; }
   let R;
@@ -6141,6 +6147,7 @@ async function renderTeamInto(el) {
 
   // 1. the bot
   const cBot = mk("div", "tchip");
+  cBot.style.flexBasis = "100%";
   cBot.append(mk("span", "tk", "WALL-ST-E \u00b7 autotrader"));
   // Relayed from the bot's own heartbeat \u2014 the site never claims liveness itself.
   let hb = null;
@@ -6199,79 +6206,10 @@ async function renderTeamInto(el) {
   strip.appendChild(cBrain);
   el.appendChild(strip);
 
-  /* ── HUNT TARGETS: run a token now + the pinned list, folded out of the way ── */
-  const pins = Array.isArray(S.watchlist) ? S.watchlist.slice() : [];
-  /* THE RUN CONTROL MUST NOT DEPEND ON AN OPTIONAL HELPER.
-   *
-   * foldSection is defined in a DIFFERENT module block (~6099, attached to window at
-   * ~6128) from the one this render lives in (~5315-5788). It was reached through
-   * `window.foldSection?.(...)` followed by `if (!fold) return;` \u2014 so any ordering
-   * where that attachment had not run yet did not merely skip the fold, it ABANDONED
-   * THE REST OF THE RENDER. The single most important control on the page, the one
-   * that puts the desk on a coin, disappeared with no error anywhere to explain it.
-   *
-   * A missing convenience should cost the convenience, not the feature. And it now
-   * opens by default: a control nobody can find is not meaningfully shipped. */
-  const huntLabel = "Hunt targets \u2014 run a token now \u00b7 " +
-    (pins.length ? pins.length + " pinned" : "nothing pinned");
-  const fold = window.foldSection?.(huntLabel, { open: true }) ?? (() => {
-    const wrap = mk("div", "fold");
-    const h = mk("div", "dp-h");
-    h.textContent = huntLabel;
-    const body = mk("div", "");
-    wrap.append(h, body);
-    return { wrap, body };
-  })();
-  el.appendChild(fold.wrap);
-  const fb = fold.body;
-
-  const row = mk("div", "dp-row");
-  const input = mk("input", "dp-in");
-  input.placeholder = "Paste a Solana mint address";
-  input.setAttribute("aria-label", "Mint address to research");
-  const go = mk("button", "dp-btn", R.busy ? "Working\u2026" : "Run 1 cycle");
-  go.disabled = R.busy;
-  row.append(input, go);
-  fb.appendChild(row);
-  const cost = R.freeRunsLeft > 0
-    ? `${R.freeRunsLeft} free \u00b7 then ${R.runPriceTokens.toLocaleString()} \u00b7 credit ${fmtTok(R.balanceBaseUnits, R.decimals)}`
-    : `${R.runPriceTokens.toLocaleString()} per run \u00b7 credit ${fmtTok(R.balanceBaseUnits, R.decimals)}`;
-  const msg = mk("p", "dp-note", cost);
-  fb.appendChild(msg);
-  go.onclick = async () => {
-    const mint = input.value.trim();
-    if (!mint) return;
-    go.disabled = true; go.textContent = "Starting\u2026";
-    const { status, body } = await api(`/api/floor/${FLOOR}/run`, { method: "POST", body: JSON.stringify({ mint }) });
-    if (status === 200) { startProgress(); showPane("tape"); input.value = ""; }
-    else { msg.textContent = body.error || "could not start"; go.disabled = false; go.textContent = "Run 1 cycle"; }
-    setTimeout(refresh, 800);
-  };
-
-  const pinWrap = mk("div", "dp-pins");
-  const savePins = (next) => post({ watchlist: next });
-  if (!pins.length) pinWrap.appendChild(mk("p", "dp-note", "Pinned coins get checked first each cycle."));
-  for (const m of pins) {
-    const chip = mk("div", "dp-chip");
-    chip.append(mk("span", null, m.slice(0, 4) + "\u2026" + m.slice(-4)));
-    const x = mk("button", "dp-x", "\u2715"); x.setAttribute("aria-label", "Remove " + m);
-    x.onclick = () => { const i = pins.indexOf(m); if (i >= 0) pins.splice(i, 1); savePins(pins); };
-    chip.appendChild(x); pinWrap.appendChild(chip);
-  }
-  fb.appendChild(pinWrap);
-  const pinRow = mk("div", "dp-row");
-  const pinIn = mk("input", "dp-in");
-  pinIn.placeholder = "Pin a mint the team checks first";
-  pinIn.setAttribute("aria-label", "Mint address to pin");
-  const pinAdd = mk("button", "dp-btn ghost", "Pin");
-  pinAdd.onclick = () => {
-    const m = pinIn.value.trim();
-    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(m)) { pinIn.setAttribute("aria-invalid", "true"); return; }
-    if (pins.includes(m) || pins.length >= 25) { pinIn.value = ""; return; }
-    pins.push(m); savePins(pins);
-  };
-  pinRow.append(pinIn, pinAdd);
-  fb.appendChild(pinRow);
+  /* Hunt targets (run-a-token-now + pinned mints) removed from the panel at the
+   * owner's direction, 2026-09-01 — "remove the hunt target mechanisms for now."
+   * The backend routes (/run, watchlist) remain; restoring the UI is a revert of
+   * this block. */
 
 }
 window.__renderTeamInto = renderTeamInto;
@@ -6515,7 +6453,7 @@ function renderCalls({ feed = [], settings, record }, { liveOnly = false } = {})
   if (settings) callsPanel.appendChild(buildControls(settings));
 
   // 3 — the bot
-  step(3, "Auto-trade it", "Optional. A bot in your browser (or on a server) places the calls for you.");
+  step(3, "Auto-trade it", "Optional. WALL-ST-E \u2014 the self-hosted bot on your own machine \u2014 places the calls for you. Its live status shows above the moment it heartbeats.");
   if (settings) callsPanel.appendChild(buildBotCard(settings));
 
   // everything read only occasionally
