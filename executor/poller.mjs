@@ -653,7 +653,15 @@ async function onEntry(ev) {
   const slippageHaircut = (1 - jupiter.cfg.slippageBps / 10_000) ** 2;
   const conservativeReturnRatio = executableReturnRatio * slippageHaircut - worstFeeRatio;
   if (conservativeReturnRatio <= entryReference.stopRatio)
-    throw new Error(`entry round trip plus worst-case fees is already at/below the authored stop`);
+    /* Say the NUMBERS, not just the verdict. Four consecutive refusals on this line
+     * told us nothing about which side was wrong: a desk authoring stops too tight
+     * for a coin's real liquidity, or a reconstruction too pessimistic to ever pass.
+     * "It keeps refusing" is not actionable; a measured round trip against a stop
+     * ratio is. */
+    throw new Error(`entry round trip plus worst-case fees is already at/below the authored stop ` +
+      `(measured round trip ${Number(preflight.lossPct ?? 0).toFixed(2)}% → executable ${(executableReturnRatio * 100).toFixed(2)}%; ` +
+      `slippage haircut ${((1 - slippageHaircut) * 100).toFixed(2)}%, worst-case fees ${(worstFeeRatio * 100).toFixed(2)}%; ` +
+      `conservative return ${(conservativeReturnRatio * 100).toFixed(2)}% vs stop at ${(entryReference.stopRatio * 100).toFixed(2)}% of entry)`);
   const conservativeLossPct = Math.max(preflight.lossPct, (1 - conservativeReturnRatio) * 100);
   plan = planEntry({ call: normalizedCall,
     cfg: { ...perCall, measuredRoundTripLossPct: conservativeLossPct }, state: S.state });
