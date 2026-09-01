@@ -6376,11 +6376,21 @@ async function loadCalls({ liveOnly = false } = {}) {
     window.__grokBoardUpdate?.(body.feed || []);      // Grok's own board, same book
     paintHud({ feed: body.feed, settings: body.settings, budget: BUDGET, rent: body.rent });
   } catch (e) {
+    /* This swallowed the reason for years of debugging: a RENDER error (a
+       missing helper, a bad field) looked exactly like an unreachable server,
+       and the panel just said 'Could not reach the desk.' Say which it was. */
+    console.error("[calls] render failed:", e);
     callsPanel.innerHTML = "";
     const p = document.createElement("p");
     p.className = "locked";
-    p.textContent = "Could not reach the desk.";
-    callsPanel.appendChild(p);
+    p.textContent = "This tab hit an error while drawing.";
+    const d = document.createElement("p");
+    d.className = "dp-note";
+    d.textContent = String(e && e.message || e).slice(0, 140);
+    const retry = document.createElement("button");
+    retry.className = "dp-btn"; retry.textContent = "Try again";
+    retry.onclick = () => loadCalls();
+    callsPanel.append(p, d, retry);
   }
 }
 
@@ -7093,7 +7103,8 @@ function buildControls(settings) {
       "Only after reviewing the dry run: put two private HTTPS Solana RPC URLs from independent providers and the Jupiter API key in separate mode-0600 files. " +
       "The installer shows the new burner address and arms only when you retype that public key in the terminal. " +
       "This first live release is hard-capped at 0.005 SOL per trade and 0.01 SOL in each rolling 24-hour window."));
-    const liveCmd = `${checkout}\nbash executor/install.sh --floor ${FLOOR_N} --live --expected-commit ${releaseCommit} --max-sol 0.005 --daily-cap 0.01 --rpc-file /absolute/path/to/primary-rpc --secondary-rpc-file /absolute/path/to/secondary-rpc --jupiter-key-file /absolute/path/to/jupiter-api-key`;
+    // Same single pinned line as the dry-run install, with the canary flags.
+    const liveCmd = `git clone https://github.com/gtjvv976mb-netizen/Claude-Company.git && cd Claude-Company && git checkout --detach ${releaseCommit} && bash executor/install.sh --floor ${FLOOR_N} --live --expected-commit ${releaseCommit} --max-sol 0.005 --daily-cap 0.01 --rpc-file /absolute/path/to/primary-rpc --secondary-rpc-file /absolute/path/to/secondary-rpc --jupiter-key-file /absolute/path/to/jupiter-api-key`;
     const liveBox = mk("div", "bud-addr");
     liveBox.style.cssText = "white-space:pre-wrap;word-break:break-all;font-size:10px;line-height:1.5";
     liveBox.textContent = liveCmd;
