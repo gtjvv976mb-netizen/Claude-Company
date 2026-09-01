@@ -1,7 +1,17 @@
+/* Two different ways to run out of money, and only the first was recognised.
+ * "balance is empty" is the account having nothing left; "metered provider ceiling"
+ * is the desk's own pre-flight refusing a call that would cross the configured spend
+ * limit (llm.js). The second failed EVERY seat individually rather than identically,
+ * so neither this matcher nor the DEGRADED identical-error check caught it — the
+ * heartbeat read RUNNING - healthy while 149 calls were withheld for "fewer than
+ * three analysts returned", a research verdict that was really a billing verdict.
+ * A blocker that dresses as a judgement is the worst kind, so it gets named. */
 const CREDIT_ERROR_PATTERNS = [
   /credit balance is too low/i,
   /(?:the\s+)?anthropic balance is empty/i,
   /insufficient (?:api )?credits?/i,
+  /metered provider ceiling/i,
+  /provider (?:spend|budget) (?:cap|ceiling|limit) reached/i,
 ];
 
 /** True only for errors that specifically identify exhausted provider credit. */
@@ -35,6 +45,7 @@ export function providerCreditHealth(events, {
   const cutoff = nowMs - windowMs;
   let failures = 0;
   let lastFailureTs = null;
+  let lastFailureError = "";
   let lastSuccessTs = null;
 
   for (const event of events ?? []) {
@@ -51,7 +62,12 @@ export function providerCreditHealth(events, {
     if (!isCreditFailure) continue;
 
     failures++;
-    if (lastFailureTs == null || ts > lastFailureTs) lastFailureTs = ts;
+    // Keep the newest failure's TEXT, not just its time: the caller must tell an
+    // empty balance (top up) from a spend ceiling (raise the limit) — different fixes.
+    if (lastFailureTs == null || ts > lastFailureTs) {
+      lastFailureTs = ts;
+      lastFailureError = String(eventData(event).error ?? "");
+    }
   }
 
   const recovered = lastFailureTs != null && lastSuccessTs != null &&
@@ -60,6 +76,7 @@ export function providerCreditHealth(events, {
     blocked: lastFailureTs != null && !recovered,
     failures,
     lastFailureTs,
+    lastFailureError,
     lastSuccessTs,
     recoveryGraceMs,
   };

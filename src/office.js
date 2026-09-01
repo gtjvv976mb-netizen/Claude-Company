@@ -709,9 +709,18 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           const provider = providerCreditHealth(providerEvents, { nowMs: now, windowMs: providerWindowMs });
           if (provider.blocked) {
             state = "BLOCKED";
-            reason = `the Anthropic account balance is empty (${provider.failures} provider-credit failure${provider.failures === 1 ? "" : "s"} in the last six hours) — ` +
-              `this is the API account, NOT the desk's $${cap}/day cap, which still has $${Math.max(0, cap - sp.usd).toFixed(2)} of headroom. ` +
-              `Top up the Anthropic account behind ANTHROPIC_API_KEY; free screening continues meanwhile.`;
+            /* Name WHICH provider wall was hit: an empty balance is topped up, a
+             * metered ceiling is raised. Telling an operator to add credit when the
+             * account has credit and a cap is what stopped them wastes the outage. */
+            const ceiling = /metered provider ceiling|spend (?:cap|ceiling|limit)/i.test(provider.lastFailureError || "");
+            reason = ceiling
+              ? `the provider SPEND CEILING is reached (${provider.failures} refusal${provider.failures === 1 ? "" : "s"} in the last six hours) — ` +
+                `the account has credit, but a configured limit is refusing new calls. Analyst seats fail individually, so calls get withheld ` +
+                `as "fewer than three analysts returned" when the real cause is billing. Raise the limit in the Anthropic Console ` +
+                `(Billing → Usage limits); free screening continues meanwhile.`
+              : `the Anthropic account balance is empty (${provider.failures} provider-credit failure${provider.failures === 1 ? "" : "s"} in the last six hours) — ` +
+                `this is the API account, NOT the desk's $${cap}/day cap, which still has $${Math.max(0, cap - sp.usd).toFixed(2)} of headroom. ` +
+                `Top up the Anthropic account behind ANTHROPIC_API_KEY; free screening continues meanwhile.`;
           }
           /* IS THE PAID HALF ACTUALLY WORKING?
            *
