@@ -10,10 +10,29 @@ const rollback = executorHeartbeatHealth({ feedRollback: true });
 assert.equal(rollback.feedRollback, true);
 const readiness = executorHeartbeatHealth({ executionReadiness: {
   ready: true, lastSuccessAt: 100, observedAt: 99, route: "wsol-usdc", providers: 2,
+  amountLamports: 50_000_000,
+}, caps: {
+  maxSolPerTrade: 0.05, dailySolCap: 0.5, dailyLossLimitSol: 0.15, maxOpenPositions: 4,
 } });
 assert.deepEqual(readiness.executionReadiness, {
   ready: true, lastSuccessAt: 100, observedAt: 99, route: "wsol-usdc", providers: 2,
+  amountLamports: 50_000_000,
 });
+assert.deepEqual(readiness.caps, {
+  maxSolPerTrade: 0.05, dailySolCap: 0.5, dailyLossLimitSol: 0.15, maxOpenPositions: 4,
+});
+const invalidCaps = executorHeartbeatHealth({ caps: {
+  maxSolPerTrade: 0.050001, dailySolCap: 0.5, dailyLossLimitSol: 0.15, maxOpenPositions: 4,
+} });
+assert.equal(invalidCaps.caps, null);
+assert.equal(invalidCaps.state, "degraded",
+  "supplied invalid cap evidence cannot be erased while health remains healthy");
+const subminimumCaps = executorHeartbeatHealth({ caps: {
+  maxSolPerTrade: 0.0000009, dailySolCap: 0.01,
+  dailyLossLimitSol: 0.01, maxOpenPositions: 4,
+} });
+assert.equal(subminimumCaps.caps, null);
+assert.equal(subminimumCaps.state, "degraded");
 assert.equal(executorHeartbeatHealth({ executionReadiness: { ready: false } }).state, "degraded");
 assert.equal(executorHeartbeatHealth({ positions: [{ exitExecutionRequired: true }] }).state, "exits-blocked");
 assert.equal(executorHeartbeatHealth({ positions: [{ manualExitRequired: true }] }).state, "manual-action");

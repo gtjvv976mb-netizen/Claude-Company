@@ -212,15 +212,38 @@ export function sanitizeExecutorHealth(value) {
     const observedAt = strictTimestamp(readinessObject.observedAt);
     const route = readinessObject.route === "wsol-usdc" ? "wsol-usdc" : null;
     const providers = readinessObject.providers === 2 ? 2 : 0;
+    const amountLamports = Number.isSafeInteger(readinessObject.amountLamports) &&
+      readinessObject.amountLamports >= 1 && readinessObject.amountLamports <= 50_000_000
+      ? readinessObject.amountLamports : 0;
     const ready = readinessObject.ready === true && lastSuccessAt > 0 && observedAt > 0 &&
-      route === "wsol-usdc" && providers === 2;
-    executionReadiness = { ready, lastSuccessAt, observedAt, route, providers };
+      route === "wsol-usdc" && providers === 2 && amountLamports > 0;
+    executionReadiness = { ready, lastSuccessAt, observedAt, route, providers, amountLamports };
     readinessFailed = !ready;
+  }
+  const rawCaps = value.caps;
+  const capsObject = rawCaps && typeof rawCaps === "object" && !Array.isArray(rawCaps)
+    ? rawCaps : null;
+  let capsFailed = rawCaps != null && !capsObject;
+  let caps = null;
+  if (capsObject) {
+    const maxSolPerTrade = capsObject.maxSolPerTrade;
+    const dailySolCap = capsObject.dailySolCap;
+    const dailyLossLimitSol = capsObject.dailyLossLimitSol;
+    const maxOpenPositions = capsObject.maxOpenPositions;
+    const valid = typeof maxSolPerTrade === "number" && Number.isFinite(maxSolPerTrade) &&
+      maxSolPerTrade >= 0.000001 && maxSolPerTrade <= 0.05 &&
+      typeof dailySolCap === "number" && Number.isFinite(dailySolCap) &&
+      dailySolCap >= 0.000001 && dailySolCap >= maxSolPerTrade && dailySolCap <= 0.5 &&
+      typeof dailyLossLimitSol === "number" && Number.isFinite(dailyLossLimitSol) &&
+      dailyLossLimitSol >= 0.000001 && dailyLossLimitSol <= 0.15 &&
+      Number.isInteger(maxOpenPositions) && maxOpenPositions >= 1 && maxOpenPositions <= 4;
+    caps = valid ? { maxSolPerTrade, dailySolCap, dailyLossLimitSol, maxOpenPositions } : null;
+    capsFailed = !valid;
   }
   // Health is self-reported, but malformed or failed safety evidence can only make
   // the persisted status more conservative. It can never turn a degraded condition
   // into a healthy/paused readiness claim.
-  if ((feedRollback || malformedRollback || readinessFailed) &&
+  if ((feedRollback || malformedRollback || readinessFailed || capsFailed) &&
       (state === "healthy" || state === "entries-paused")) state = "degraded";
   return {
     state,
@@ -236,6 +259,7 @@ export function sanitizeExecutorHealth(value) {
     consecutiveTickFailures: count(value.consecutiveTickFailures),
     feedRollback,
     executionReadiness,
+    caps,
     runtimeCommit: commit,
     runtimeFingerprint,
   };

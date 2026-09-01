@@ -121,6 +121,30 @@ const number = (name, value, { min = 0, max = Infinity } = {}) => {
   if (!Number.isFinite(n) || n < min || n > max) fatal(`${name} must be between ${min} and ${max}`);
   return n;
 };
+const SOL_SCALE = 1_000_000_000n;
+const plainSolUnits = (value) => {
+  const raw = String(value);
+  const match = /^(0|[1-9][0-9]*)(?:\.([0-9]{1,9}))?$/.exec(raw);
+  if (!match) return null;
+  return BigInt(match[1]) * SOL_SCALE + BigInt((match[2] || "").padEnd(9, "0") || "0");
+};
+const solCap = (name, value, { min, max }) => {
+  const raw = String(value);
+  const units = plainSolUnits(raw);
+  if (units === null)
+    fatal(`${name} must be a plain decimal with at most 9 fractional digits`);
+  const minUnits = plainSolUnits(min);
+  const maxUnits = plainSolUnits(max);
+  if (units < minUnits || units > maxUnits)
+    fatal(`${name} must be between ${min} and ${max}`);
+  return Object.freeze({ raw, units, value: Number(units) / 1_000_000_000 });
+};
+const openPositions = (value) => {
+  const raw = String(value);
+  if (!/^[1-4]$/.test(raw))
+    fatal("MAX_OPEN_POSITIONS must be an integer between 1 and 4");
+  return Number(raw);
+};
 
 if (!SECRET || !/^\d+$/.test(FLOOR) || Number(FLOOR) <= 0) fatal("CC_SECRET and a positive CC_FLOOR are required");
 /* HTTPS always — with one carve-out that cannot weaken live. A loopback API lets a
@@ -218,14 +242,14 @@ if (EXECUTE) {
  *
  * The property preserved is not "small" — it is that nothing raises real-money
  * exposure by accident. All three money caps must be set explicitly, and LIVE_CAPS_ACK
- * must be a sentence naming THIS wallet and THESE numbers; change one and it stops
- * matching. A typed sentence cannot come from a config typo, a copied .env, or
- * anything arriving through the feed — the one channel a compromised server could
- * speak through. OPERATOR_MAX stays a hard code ceiling, and maxOpenPositions stays
- * frozen because it multiplies every other cap. */
-const OPERATOR_MAX = Object.freeze({ maxSolPerTrade: 0.25, dailySolCap: 2.5, dailyLossLimitSol: 1 });
+ * must be the current versioned sentence naming THIS wallet and THESE numbers; change
+ * one and it stops matching. The v2 wording deliberately revokes the pre-hardening
+ * acknowledgement retained by some old environments. OPERATOR_MAX stays at the
+ * evidence-backed configuration that cleared the live preflight, and maxOpenPositions
+ * stays frozen because it multiplies every other cap. */
+const OPERATOR_MAX = Object.freeze({ maxSolPerTrade: 0.05, dailySolCap: 0.5, dailyLossLimitSol: 0.15 });
 const capsAckSentence = (wallet, trade, daily, loss) =>
-  `I raise the live caps for ${wallet} to ${trade} SOL per trade, ${daily} SOL per day, ${loss} SOL daily loss`;
+  `I acknowledge WALL-ST-E caps v2 for ${wallet}: ${trade} SOL per trade, ${daily} SOL per day, ${loss} SOL rolling realized-loss entry brake`;
 
 let LIVE_CEILINGS = LIVE_LIMITS;
 if (EXECUTE) {
@@ -234,42 +258,53 @@ if (EXECUTE) {
     daily: process.env.DAILY_SOL_CAP,
     loss: process.env.DAILY_LOSS_LIMIT_SOL,
   };
+  const requested = {
+    trade: req.trade == null ? null : solCap("MAX_SOL_PER_TRADE", req.trade,
+      { min: 0.000001, max: OPERATOR_MAX.maxSolPerTrade }),
+    daily: req.daily == null ? null : solCap("DAILY_SOL_CAP", req.daily,
+      { min: 0.000001, max: OPERATOR_MAX.dailySolCap }),
+    loss: req.loss == null ? null : solCap("DAILY_LOSS_LIMIT_SOL", req.loss,
+      { min: 0.000001, max: OPERATOR_MAX.dailyLossLimitSol }),
+  };
   const wantsRaise =
-    (req.trade != null && Number(req.trade) > LIVE_LIMITS.maxSolPerTrade) ||
-    (req.daily != null && Number(req.daily) > LIVE_LIMITS.dailySolCap) ||
-    (req.loss != null && Number(req.loss) > LIVE_LIMITS.dailyLossLimitSol);
+    (requested.trade && requested.trade.units > plainSolUnits(LIVE_LIMITS.maxSolPerTrade)) ||
+    (requested.daily && requested.daily.units > plainSolUnits(LIVE_LIMITS.dailySolCap)) ||
+    (requested.loss && requested.loss.units > plainSolUnits(LIVE_LIMITS.dailyLossLimitSol));
   if (wantsRaise) {
-    if (!req.trade || !req.daily || !req.loss)
+    if (!requested.trade || !requested.daily || !requested.loss)
       fatal("raising any live cap requires ALL THREE set explicitly: MAX_SOL_PER_TRADE, " +
         "DAILY_SOL_CAP, DAILY_LOSS_LIMIT_SOL — a partial raise hides the numbers the " +
         "acknowledgement exists to make you look at");
-    const t = number("MAX_SOL_PER_TRADE", req.trade, { min: 0.000001, max: OPERATOR_MAX.maxSolPerTrade });
-    const d = number("DAILY_SOL_CAP", req.daily, { min: 0.000001, max: OPERATOR_MAX.dailySolCap });
-    const l = number("DAILY_LOSS_LIMIT_SOL", req.loss, { min: 0.000001, max: OPERATOR_MAX.dailyLossLimitSol });
-    if (d < t) fatal(`DAILY_SOL_CAP (${d}) is below MAX_SOL_PER_TRADE (${t}) — the day would refuse the first trade`);
-    const expected = capsAckSentence(WALLET, String(req.trade).trim(), String(req.daily).trim(), String(req.loss).trim());
-    if ((process.env.LIVE_CAPS_ACK || "").trim() !== expected)
+    if (requested.daily.units < requested.trade.units)
+      fatal(`DAILY_SOL_CAP (${requested.daily.value}) is below MAX_SOL_PER_TRADE (${requested.trade.value}) — the day would refuse the first trade`);
+    const expected = capsAckSentence(WALLET, requested.trade.raw,
+      requested.daily.raw, requested.loss.raw);
+    if ((process.env.LIVE_CAPS_ACK || "") !== expected)
       fatal("raised live caps need a typed acknowledgement. Set LIVE_CAPS_ACK to exactly:\n\n    " + expected + "\n");
-    LIVE_CEILINGS = Object.freeze({ ...LIVE_LIMITS, maxSolPerTrade: t, dailySolCap: d, dailyLossLimitSol: l });
-    log(`OPERATOR-RAISED CAPS acknowledged: ${t} SOL/trade, ${d} SOL/day deploy, ${l} SOL/day loss ` +
+    LIVE_CEILINGS = Object.freeze({ ...LIVE_LIMITS,
+      maxSolPerTrade: requested.trade.value,
+      dailySolCap: requested.daily.value,
+      dailyLossLimitSol: requested.loss.value });
+    log(`OPERATOR-RAISED CAPS acknowledged: ${requested.trade.value} SOL/trade, ${requested.daily.value} SOL/day deploy, ${requested.loss.value} SOL rolling realized-loss entry brake ` +
       `(hard maxima ${OPERATOR_MAX.maxSolPerTrade}/${OPERATOR_MAX.dailySolCap}/${OPERATOR_MAX.dailyLossLimitSol} are a code change, by design)`);
   }
 }
 
+const configuredTradeCap = solCap("MAX_SOL_PER_TRADE",
+  process.env.MAX_SOL_PER_TRADE ?? (EXECUTE ? LIVE_CEILINGS.maxSolPerTrade : DEFAULTS.maxSolPerTrade),
+  { min: 0.000001, max: EXECUTE ? LIVE_CEILINGS.maxSolPerTrade : 100 });
+const configuredDailyCap = solCap("DAILY_SOL_CAP",
+  process.env.DAILY_SOL_CAP ?? (EXECUTE ? LIVE_CEILINGS.dailySolCap : DEFAULTS.dailySolCap),
+  { min: 0.000001, max: EXECUTE ? LIVE_CEILINGS.dailySolCap : 1000 });
+const configuredLossCap = solCap("DAILY_LOSS_LIMIT_SOL",
+  process.env.DAILY_LOSS_LIMIT_SOL ?? (EXECUTE ? LIVE_CEILINGS.dailyLossLimitSol : DEFAULTS.dailyLossLimitSol),
+  { min: 0.000001, max: EXECUTE ? LIVE_CEILINGS.dailyLossLimitSol : 1000 });
 const CFG = {
   ...DEFAULTS,
-  maxSolPerTrade: number("MAX_SOL_PER_TRADE",
-    process.env.MAX_SOL_PER_TRADE || (EXECUTE ? LIVE_CEILINGS.maxSolPerTrade : DEFAULTS.maxSolPerTrade),
-    { min: 0.000001, max: EXECUTE ? LIVE_CEILINGS.maxSolPerTrade : 100 }),
-  dailySolCap: number("DAILY_SOL_CAP",
-    process.env.DAILY_SOL_CAP || (EXECUTE ? LIVE_CEILINGS.dailySolCap : DEFAULTS.dailySolCap),
-    { min: 0.000001, max: EXECUTE ? LIVE_CEILINGS.dailySolCap : 1000 }),
-  dailyLossLimitSol: number("DAILY_LOSS_LIMIT_SOL",
-    process.env.DAILY_LOSS_LIMIT_SOL || (EXECUTE ? LIVE_CEILINGS.dailyLossLimitSol : DEFAULTS.dailyLossLimitSol),
-    { min: 0.000001, max: EXECUTE ? LIVE_CEILINGS.dailyLossLimitSol : 1000 }),
-  maxOpenPositions: number("MAX_OPEN_POSITIONS",
-    process.env.MAX_OPEN_POSITIONS || DEFAULTS.maxOpenPositions,
-    { min: 1, max: EXECUTE ? LIVE_LIMITS.maxOpenPositions : 100 }),
+  maxSolPerTrade: configuredTradeCap.value,
+  dailySolCap: configuredDailyCap.value,
+  dailyLossLimitSol: configuredLossCap.value,
+  maxOpenPositions: openPositions(process.env.MAX_OPEN_POSITIONS ?? DEFAULTS.maxOpenPositions),
   trailPct: number("TRAIL_PCT", process.env.TRAIL_PCT || DEFAULTS.trailPct, { min: 0.01, max: 0.95 }),
   fDefault: number("F_DEFAULT", process.env.F_DEFAULT || DEFAULTS.fDefault, { min: 0.00001, max: 1 }),
   fNameMax: number("F_NAME_MAX", process.env.F_NAME_MAX || DEFAULTS.fNameMax, { min: 0.00001, max: 1 }),
@@ -277,6 +312,8 @@ const CFG = {
   maxAgeHours: number("MAX_AGE_HOURS", process.env.MAX_AGE_HOURS || DEFAULTS.maxAgeHours, { min: 0.01, max: 720 }),
   scaleOutPct: 0,
 };
+if (EXECUTE && configuredDailyCap.units < configuredTradeCap.units)
+  fatal(`DAILY_SOL_CAP (${CFG.dailySolCap}) is below MAX_SOL_PER_TRADE (${CFG.maxSolPerTrade}) — the day would refuse the first trade`);
 
 // Parse every transaction rail before INIT_ONLY can exit. This makes the
 // installer validate the exact persistent environment that systemd will use.
@@ -1189,6 +1226,7 @@ const runtimeHealth = {
   consecutiveFeedFailures: 0, consecutiveTickFailures: 0,
   executionReadiness: EXECUTE ? {
     ready: false, lastSuccessAt: 0, observedAt: 0, route: "wsol-usdc", providers: 0,
+    amountLamports: Math.floor(CFG.maxSolPerTrade * LAMPORTS),
   } : null,
 };
 let readinessProbeInFlight = false;
@@ -1198,7 +1236,9 @@ function maybeProbeExecutionReadiness() {
       Date.now() - lastReadinessProbeAt < 2 * 60_000) return;
   lastReadinessProbeAt = Date.now();
   readinessProbeInFlight = true;
-  Promise.resolve(jupiter.probeExecutionReadiness()).then((result) => {
+  Promise.resolve(jupiter.probeExecutionReadiness({
+    amountLamports: Math.floor(CFG.maxSolPerTrade * LAMPORTS),
+  })).then((result) => {
     const succeededAt = Date.now();
     runtimeHealth.executionReadiness = {
       ready: result?.ready === true,
@@ -1206,12 +1246,14 @@ function maybeProbeExecutionReadiness() {
       observedAt: Number(result?.observedAt) || succeededAt,
       route: result?.route === "wsol-usdc" ? "wsol-usdc" : null,
       providers: Number(result?.providers) === 2 ? 2 : 0,
+      amountLamports: Number(result?.amountLamports) || 0,
     };
   }).catch(() => {
     runtimeHealth.executionReadiness = {
       ready: false,
       lastSuccessAt: Number(runtimeHealth.executionReadiness?.lastSuccessAt) || 0,
       observedAt: Date.now(), route: "wsol-usdc", providers: 0,
+      amountLamports: Math.floor(CFG.maxSolPerTrade * LAMPORTS),
     };
   }).finally(() => { readinessProbeInFlight = false; });
 }
@@ -1234,6 +1276,12 @@ function sendHeartbeat() {
       consecutiveTickFailures: runtimeHealth.consecutiveTickFailures,
       feedRollback: feedRollbackActive(),
       executionReadiness: runtimeHealth.executionReadiness,
+      caps: {
+        maxSolPerTrade: CFG.maxSolPerTrade,
+        dailySolCap: CFG.dailySolCap,
+        dailyLossLimitSol: CFG.dailyLossLimitSol,
+        maxOpenPositions: CFG.maxOpenPositions,
+      },
       runtimeCommit: process.env.EXECUTOR_SOURCE_COMMIT || null,
       runtimeFingerprint: RUNTIME_FINGERPRINT,
     });
@@ -1247,6 +1295,12 @@ function sendHeartbeat() {
       consecutiveTickFailures: runtimeHealth.consecutiveTickFailures + 1,
       feedRollback: feedRollbackActive(),
       executionReadiness: runtimeHealth.executionReadiness,
+      caps: {
+        maxSolPerTrade: CFG.maxSolPerTrade,
+        dailySolCap: CFG.dailySolCap,
+        dailyLossLimitSol: CFG.dailyLossLimitSol,
+        maxOpenPositions: CFG.maxOpenPositions,
+      },
       runtimeCommit: process.env.EXECUTOR_SOURCE_COMMIT || null,
       runtimeFingerprint: RUNTIME_FINGERPRINT,
     });
@@ -1437,7 +1491,7 @@ async function tick() {
 }
 
 log(`up — floor ${FLOOR} — wallet ${WALLET} — ${EXECUTE ? "LIVE MAINNET" : "PAPER"}`);
-log(`caps: ${CFG.maxSolPerTrade} SOL/trade, ${CFG.dailySolCap} SOL/rolling 24h deploy, ${CFG.dailyLossLimitSol} SOL/rolling 24h loss, ${CFG.maxOpenPositions} open`);
+log(`caps: ${CFG.maxSolPerTrade} SOL/trade, ${CFG.dailySolCap} SOL/rolling 24h deploy, ${CFG.dailyLossLimitSol} SOL/rolling realized-loss entry brake, ${CFG.maxOpenPositions} open`);
 log(`journal: ${STATE_DB}; entries pause: ${PAUSE_ENTRIES_FILE}; ` +
   `sleep fault: ${SLEEP_ASSERTION_FAULT_FILE}; hard stop: ${HARD_STOP_FILE}`);
 log(`resuming ${openList().length} position(s) from cursor ${S.cursor}`);

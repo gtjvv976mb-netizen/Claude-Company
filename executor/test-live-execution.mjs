@@ -12,6 +12,7 @@ import { validateEntryPreflightContext } from "./entry-quote-guard.mjs";
 import {
   ATA_PROGRAM, JUPITER_EVENT_AUTHORITY, JUPITER_V6, JupiterV2Executor,
   EXECUTION_READINESS_AMOUNT_LAMPORTS, EXECUTION_READINESS_RESERVE_LAMPORTS,
+  EXECUTION_READINESS_MAX_AMOUNT_LAMPORTS,
   MAINNET_USDC, MAX_GROSS_RENT_LAMPORTS, MIN_SIGNABLE_BLOCKS_REMAINING,
   TOKEN_2022_PROGRAM, TOKEN_PROGRAM, WSOL,
   coherentAccountSnapshot, decodeJupiterExactIn,
@@ -1092,7 +1093,8 @@ await ok("gross rent is independently bound and capped without raising exposure 
 
 await ok("execution-readiness probe exercises both providers without signing, journaling or executing", async () => {
   const usdcAta = ata(wallet.publicKey, MAINNET_USDC);
-  const amount = BigInt(EXECUTION_READINESS_AMOUNT_LAMPORTS);
+  const readinessAmount = EXECUTION_READINESS_MAX_AMOUNT_LAMPORTS;
+  const amount = BigInt(readinessAmount);
   const quoted = 20_000n;
   const route = new TransactionInstruction({
     programId: new PublicKey(JUPITER_V6),
@@ -1112,7 +1114,7 @@ await ok("execution-readiness probe exercises both providers without signing, jo
   });
   const wrapProbe = SystemProgram.transfer({
     fromPubkey: wallet.publicKey, toPubkey: sourceAta,
-    lamports: EXECUTION_READINESS_AMOUNT_LAMPORTS,
+    lamports: readinessAmount,
   });
   const transaction = new VersionedTransaction(new TransactionMessage({
     payerKey: wallet.publicKey, recentBlockhash, instructions: [wrapProbe, route],
@@ -1174,7 +1176,7 @@ await ok("execution-readiness probe exercises both providers without signing, jo
         return atomicCapabilitySnapshot(tx, options, {
           slot: 702,
           accountFor: (address) => address === wallet.publicKey.toBase58()
-            ? systemAccount(30_000_000) : null,
+            ? systemAccount(100_000_000) : null,
         });
       }
       calls.simulate++;
@@ -1183,7 +1185,7 @@ await ok("execution-readiness probe exercises both providers without signing, jo
       assert.ok(tx.signatures.every((signature) =>
         Buffer.from(signature).every((byte) => byte === 0)));
       return { context: { slot: 702 }, value: { err: null, accounts: [
-        systemAccount(22_955_720, true),
+        systemAccount(47_955_720, true),
         null,
         tokenAccount({ tokenMint: MAINNET_USDC, owner: wallet.publicKey,
           amount: quoted, simulated: true }),
@@ -1208,9 +1210,10 @@ await ok("execution-readiness probe exercises both providers without signing, jo
     connection: provider(), secondaryConnection: provider(), keypair, journal,
     apiKey: "test", fetchFn, now: () => 5_000, config: cfg,
   });
-  const result = await executor.probeExecutionReadiness();
+  const result = await executor.probeExecutionReadiness({ amountLamports: readinessAmount });
   assert.deepEqual(result, {
     ready: true, observedAt: 5_000, route: "wsol-usdc", providers: 2,
+    amountLamports: readinessAmount,
     providerDivergencePct: 0, chainHeight: 600, lastValidBlockHeight: 999,
   });
   assert.ok(Object.isFrozen(result));
@@ -1221,8 +1224,12 @@ await ok("execution-readiness probe exercises both providers without signing, jo
   assert.equal(calls.snapshot, 4,
     "each provider needs one merged pre-state snapshot and one post-simulation snapshot");
   assert.equal(EXECUTION_READINESS_AMOUNT_LAMPORTS, 5_000_000);
+  assert.equal(EXECUTION_READINESS_MAX_AMOUNT_LAMPORTS, 50_000_000);
   assert.equal(MAX_GROSS_RENT_LAMPORTS, 4_200_000);
-  assert.ok(30_000_000n > amount + BigInt(EXECUTION_READINESS_RESERVE_LAMPORTS));
+  assert.ok(100_000_000n > amount + BigInt(EXECUTION_READINESS_RESERVE_LAMPORTS));
+  await assert.rejects(() => executor.probeExecutionReadiness({
+    amountLamports: EXECUTION_READINESS_MAX_AMOUNT_LAMPORTS + 1,
+  }), /outside the supported live-cap range/);
 });
 
 await ok("a signable exit cannot cross the journaled-signature boundary on one RPC's approval", async () => {

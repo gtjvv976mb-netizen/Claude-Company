@@ -19,7 +19,8 @@ CC_SECRET=PASTE_THE_FEED_SECRET_HERE
 CC_FLOOR=$FLOORNO
 CC_API=https://claude-company-api.onrender.com
 # DRY RUN by default: downloads calls, applies full policy, signs nothing.
-# Going live is a separate deliberate step - run install-live.sh when ready.
+# Going live is a separate deliberate step. Follow the exact-commit Linux or macOS
+# workflow in executor/README.md; the legacy install-live.sh rewriter is retired.
 EXECUTE=0
 KEYPAIR=./burner.json
 STATE_DB=./.cc-executor.sqlite

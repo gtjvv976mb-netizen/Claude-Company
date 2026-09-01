@@ -30,7 +30,7 @@ export function executorHeartbeatHealth({
   entriesPaused = false, hardStop = false, blockingIntent = false, positions = [],
   lastTickCompletedAt = 0, lastFeedSuccessAt = 0, consecutiveFeedFailures = 0,
   consecutiveTickFailures = 0, feedRollback = false, executionReadiness = null,
-  runtimeCommit = null, runtimeFingerprint = null,
+  caps = null, runtimeCommit = null, runtimeFingerprint = null,
 } = {}) {
   const list = Array.isArray(positions) ? positions : [];
   const blockedPositions = list.filter((position) =>
@@ -44,6 +44,22 @@ export function executorHeartbeatHealth({
       feedRollback || executionReadiness?.ready === false)
     state = "degraded";
   else if (entriesPaused) state = "entries-paused";
+  const boundedCap = (value, max) => {
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0.000001 && number <= max ? number : null;
+  };
+  const publicCaps = caps && typeof caps === "object" ? {
+    maxSolPerTrade: boundedCap(caps.maxSolPerTrade, 0.05),
+    dailySolCap: boundedCap(caps.dailySolCap, 0.5),
+    dailyLossLimitSol: boundedCap(caps.dailyLossLimitSol, 0.15),
+    maxOpenPositions: Number.isInteger(Number(caps.maxOpenPositions)) &&
+      Number(caps.maxOpenPositions) >= 1 && Number(caps.maxOpenPositions) <= 4
+      ? Number(caps.maxOpenPositions) : null,
+  } : null;
+  const capsValid = publicCaps && Object.values(publicCaps).every((value) => value != null) &&
+    publicCaps.dailySolCap >= publicCaps.maxSolPerTrade;
+  if (caps != null && !capsValid && (state === "healthy" || state === "entries-paused"))
+    state = "degraded";
   return {
     state, entriesPaused: Boolean(entriesPaused), hardStop: Boolean(hardStop),
     blockingIntent: Boolean(blockingIntent), blockedPositions, manualAction, exitBlocked,
@@ -58,7 +74,12 @@ export function executorHeartbeatHealth({
       observedAt: Number(executionReadiness.observedAt) || 0,
       route: executionReadiness.route === "wsol-usdc" ? "wsol-usdc" : null,
       providers: Number(executionReadiness.providers) === 2 ? 2 : 0,
+      amountLamports: Number.isSafeInteger(Number(executionReadiness.amountLamports)) &&
+        Number(executionReadiness.amountLamports) >= 1 &&
+        Number(executionReadiness.amountLamports) <= 50_000_000
+        ? Number(executionReadiness.amountLamports) : 0,
     } : null,
+    caps: capsValid ? publicCaps : null,
     runtimeCommit: /^[0-9a-f]{7,40}$/i.test(String(runtimeCommit || ""))
       ? String(runtimeCommit).slice(0, 40).toLowerCase() : null,
     runtimeFingerprint: /^[0-9a-f]{32}$/i.test(String(runtimeFingerprint || ""))

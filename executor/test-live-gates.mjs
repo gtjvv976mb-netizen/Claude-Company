@@ -86,6 +86,8 @@ ok("live deployment and transaction ceilings cannot be raised by environment", (
     const MONEY = ["MAX_SOL_PER_TRADE", "DAILY_SOL_CAP", "DAILY_LOSS_LIMIT_SOL"];
     assert.match(result.stderr, MONEY.includes(name)
       ? /ALL THREE set explicitly|typed acknowledgement/
+      : name === "MAX_OPEN_POSITIONS"
+        ? /MAX_OPEN_POSITIONS must be an integer between 1 and 4/
       : new RegExp(`${name} must be between`));
   }
 });

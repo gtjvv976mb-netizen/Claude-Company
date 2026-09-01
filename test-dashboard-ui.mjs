@@ -50,6 +50,18 @@ assert.match(html, /Owner-only local activation · five deliberate steps/);
 assert.match(html, /__CLAUDE_COMPANY_SOURCE_COMMIT__/);
 assert.match(html, /Fund the burner last/);
 assert.match(html, /cannot start, stop, steer, sign for, or fund it/);
+assert.match(html, /Active local cap policy · self-reported/);
+assert.match(html, /rolling realized-loss entry brake/);
+assert.match(html, /The realized-loss value is an entry brake, not a guaranteed loss ceiling/);
+assert.match(html, /--daily-loss-cap 0\.01/);
+assert.match(html, /--max-sol 0\.05 --daily-cap 0\.5 --daily-loss-cap 0\.15/);
+assert.match(html, /fresh v2 wallet-and-values acknowledgement/);
+assert.match(html, /const dashSol = \(value\) =>[\s\S]*?toFixed\(9\)/,
+  "sub-millisol caps and readiness probes retain enough precision to never render as zero");
+assert.doesNotMatch(html, /Active trade cap[\s\S]{0,160}toFixed\(3\)|amountLamports[\s\S]{0,180}toFixed\(3\)/,
+  "active cap and readiness sizing do not use lossy three-decimal SOL formatting");
+assert.doesNotMatch(html, /First live release · hard ceilings|status\.releaseCaps|24h loss[^\n]*hard stop/,
+  "the dashboard must not present defaults or a realized-loss brake as guaranteed hard loss ceilings");
 assert.match(html, /function legacyBurnerRecoveryCard\(\)/);
 assert.match(html, /Copy the legacy burner's secret key/);
 assert.match(html, /wallsteFiltersDirty/);

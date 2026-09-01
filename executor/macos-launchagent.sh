@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Install and explicitly control WALL-ST-E as a per-user macOS LaunchAgent.
-# This script never reads, sources, rewrites, or prints the protected environment.
+# This script never sources or prints the protected environment. Only the explicit,
+# interactive arm-caps command may atomically rewrite its cap fields.
 set -euo pipefail
 umask 077
 
@@ -10,6 +11,9 @@ COMMAND="${1:-}"
 if [ "$#" -gt 0 ]; then shift; fi
 EXECUTOR_DIR=""
 ENV_FILE=""
+MAX_SOL=""
+DAILY_SOL_CAP=""
+DAILY_LOSS_CAP=""
 
 usage() {
   cat <<'HELP'
@@ -19,15 +23,20 @@ Commands:
   install     Validate and install the plist. Does not start WALL-ST-E.
   load        Explicitly load and start the installed LaunchAgent.
   unload      Explicitly stop and unload only this LaunchAgent.
+  arm-caps    While stopped and entry-paused, bind a cap tuple to the burner wallet.
   status      Show whether the plist is installed and the agent is loaded.
   uninstall   Remove the plist after an explicit unload. Keeps logs and all state.
 
 Options:
   --executor-dir DIR   Directory containing poller.mjs and launchd-runner.mjs.
   --env-file FILE      Existing owner-only .cc-executor.env (default: executor dir).
+  --max-sol SOL        arm-caps: maximum SOL per trade (up to 0.05).
+  --daily-sol-cap SOL  arm-caps: rolling 24-hour deployment cap (up to 0.5).
+  --daily-loss-cap SOL arm-caps: rolling realized-loss entry brake (up to 0.15).
 
-This lifecycle never funds a wallet, changes trading mode or caps, removes pause or
-hard-stop sentinels, or terminates a manually-started poller.
+This lifecycle never funds a wallet, changes trading mode, removes pause or hard-stop
+sentinels, or terminates a manually-started poller. arm-caps is the sole cap-changing
+command; it requires a real terminal and retains an owner-only rollback environment.
 HELP
 }
 
@@ -44,6 +53,9 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --executor-dir) need_value "$@"; EXECUTOR_DIR="$2"; shift 2;;
     --env-file) need_value "$@"; ENV_FILE="$2"; shift 2;;
+    --max-sol) need_value "$@"; MAX_SOL="$2"; shift 2;;
+    --daily-sol-cap) need_value "$@"; DAILY_SOL_CAP="$2"; shift 2;;
+    --daily-loss-cap) need_value "$@"; DAILY_LOSS_CAP="$2"; shift 2;;
     --help|-h) usage; exit 0;;
     *) fail "unknown option: $1";;
   esac
@@ -51,9 +63,14 @@ done
 
 case "$COMMAND" in
   help|--help|-h|"") usage; [ -n "$COMMAND" ] && exit 0 || exit 1;;
-  install|load|unload|status|uninstall) ;;
+  install|load|unload|arm-caps|status|uninstall) ;;
   *) fail "unknown command: $COMMAND";;
 esac
+
+if [ "$COMMAND" != "arm-caps" ] &&
+   { [ -n "$MAX_SOL" ] || [ -n "$DAILY_SOL_CAP" ] || [ -n "$DAILY_LOSS_CAP" ]; }; then
+  fail "cap options are accepted only by the explicit arm-caps command"
+fi
 
 if [ "$(uname -s)" != "Darwin" ]; then fail "this lifecycle supports macOS only"; fi
 
@@ -68,7 +85,7 @@ SERVICE_TARGET="$DOMAIN/$LABEL"
 
 # Emergency unload and uninstall must keep working even if the checkout or its
 # protected environment has been moved or damaged. Only install/load resolve runtime.
-if [ "$COMMAND" = "install" ] || [ "$COMMAND" = "load" ]; then
+if [ "$COMMAND" = "install" ] || [ "$COMMAND" = "load" ] || [ "$COMMAND" = "arm-caps" ]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
   if [ -z "$EXECUTOR_DIR" ]; then EXECUTOR_DIR="$SCRIPT_DIR"; fi
   if [ ! -d "$EXECUTOR_DIR" ]; then fail "executor directory does not exist"; fi
@@ -247,6 +264,23 @@ case "$COMMAND" in
       echo "$LABEL was not loaded; it is now persistently disabled."
     fi
     echo "State and safety sentinels were not changed."
+    ;;
+  arm-caps)
+    if [ -z "$MAX_SOL" ] || [ -z "$DAILY_SOL_CAP" ] || [ -z "$DAILY_LOSS_CAP" ]; then
+      fail "arm-caps requires --max-sol, --daily-sol-cap, and --daily-loss-cap"
+    fi
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+      fail "arm-caps requires an interactive terminal (TTY); piped input is refused"
+    fi
+    if is_loaded; then fail "agent is loaded; run the explicit unload command before arming caps"; fi
+    /bin/launchctl disable "$SERVICE_TARGET"
+    if ! is_disabled; then fail "could not confirm persistent disable; caps were not changed"; fi
+    validate_runtime
+    "$NODE_BIN" "$RUNNER" arm-caps \
+      --env "$ENV_FILE" --workdir "$EXECUTOR_DIR" \
+      --max-sol "$MAX_SOL" --daily-sol-cap "$DAILY_SOL_CAP" \
+      --daily-loss-cap "$DAILY_LOSS_CAP"
+    echo "Review the retained entry pause and run monitor before any later explicit load/unpause decision."
     ;;
   status)
     if [ -f "$PLIST_FILE" ] && [ ! -L "$PLIST_FILE" ]; then

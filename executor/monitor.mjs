@@ -239,7 +239,7 @@ function readJournal(stateDb, now, issues) {
 async function probeFeed({
   api, floor, secret, cursor, pollMs, fetchFn, now, issues,
   expectedMode, expectedWallet, expectedCursor, expectedOpen, expectedEntriesPaused,
-  expectedRuntimeCommit, expectedRuntimeFingerprint,
+  expectedRuntimeCommit, expectedRuntimeFingerprint, expectedCaps,
 }) {
   if (!api || !floor || !secret) {
     issue(issues, "feed_probe_unconfigured", "warning", "authenticated feed probe is not configured");
@@ -295,6 +295,8 @@ async function probeFeed({
       const rawExecutionReadiness = rawHealth?.executionReadiness &&
         typeof rawHealth.executionReadiness === "object"
         ? rawHealth.executionReadiness : null;
+      const rawCaps = rawHealth?.caps && typeof rawHealth.caps === "object"
+        ? rawHealth.caps : null;
       result.heartbeat = heartbeat && seenAt > 0 ? {
         supported: true, mode: String(heartbeat.mode || "").slice(0, 16),
         wallet: fingerprint(heartbeatWallet),
@@ -321,6 +323,13 @@ async function probeFeed({
             observedAt: Number(rawExecutionReadiness.observedAt || 0),
             route: String(rawExecutionReadiness.route || "").slice(0, 32),
             providers: Number(rawExecutionReadiness.providers || 0),
+            amountLamports: Number(rawExecutionReadiness.amountLamports || 0),
+          } : null,
+          caps: rawCaps ? {
+            maxSolPerTrade: Number(rawCaps.maxSolPerTrade),
+            dailySolCap: Number(rawCaps.dailySolCap),
+            dailyLossLimitSol: Number(rawCaps.dailyLossLimitSol),
+            maxOpenPositions: Number(rawCaps.maxOpenPositions),
           } : null,
         } : null,
       } : { supported: true, missing: true };
@@ -371,6 +380,14 @@ async function probeFeed({
           "heartbeat has no runtime identity; an old or different executor may own the process lock");
       if (expectedMode === "live") {
         const readiness = health?.executionReadiness;
+        const reportedCaps = health?.caps;
+        if (!reportedCaps)
+          issue(issues, "heartbeat_caps_missing", "critical",
+            "heartbeat has no sanitized active-cap report");
+        else if (["maxSolPerTrade", "dailySolCap", "dailyLossLimitSol", "maxOpenPositions"]
+          .some((name) => reportedCaps[name] !== expectedCaps?.[name]))
+          issue(issues, "heartbeat_caps_mismatch", "critical",
+            "heartbeat active caps do not match the protected local configuration");
         if (!readiness)
           issue(issues, "execution_readiness_missing", "critical",
             "heartbeat has no successful no-sign execution-readiness probe");
@@ -380,6 +397,9 @@ async function probeFeed({
         else if (readiness.route !== "wsol-usdc" || readiness.providers !== 2)
           issue(issues, "execution_readiness_invalid", "critical",
             "execution readiness did not verify the fixed WSOL/USDC route through both RPC providers");
+        else if (readiness.amountLamports !== expectedCaps?.maxSolPerTradeLamports)
+          issue(issues, "execution_readiness_size_mismatch", "critical",
+            "execution readiness did not rehearse the active per-trade cap");
         else {
           const timestampsValid = Number.isFinite(readiness.lastSuccessAt) &&
             Number.isFinite(readiness.observedAt) && readiness.lastSuccessAt > 0 &&
@@ -431,6 +451,17 @@ export async function inspectExecutor({
   const mode = cfg.EXECUTE === "1" ? "live" : "paper";
   const expectedRuntimeCommit = /^[0-9a-f]{40}$/i.test(String(cfg.EXECUTOR_SOURCE_COMMIT || ""))
     ? String(cfg.EXECUTOR_SOURCE_COMMIT).toLowerCase() : null;
+  const configuredCap = (name, fallback) => {
+    const value = Number(cfg[name] ?? fallback);
+    return Number.isFinite(value) && value > 0 ? value : fallback;
+  };
+  const expectedCaps = {
+    maxSolPerTrade: configuredCap("MAX_SOL_PER_TRADE", mode === "live" ? 0.005 : 0.05),
+    dailySolCap: configuredCap("DAILY_SOL_CAP", mode === "live" ? 0.01 : 0.5),
+    dailyLossLimitSol: configuredCap("DAILY_LOSS_LIMIT_SOL", mode === "live" ? 0.01 : 0.15),
+    maxOpenPositions: configuredCap("MAX_OPEN_POSITIONS", 4),
+  };
+  expectedCaps.maxSolPerTradeLamports = Math.floor(expectedCaps.maxSolPerTrade * 1_000_000_000);
   const localRuntimeFingerprint = runtimeFingerprintFn(dir);
   if (mode === "live" && !expectedRuntimeCommit)
     issue(issues, "runtime_commit_unconfigured", "critical",
@@ -540,7 +571,7 @@ export async function inspectExecutor({
     pollMs, fetchFn, now, issues, expectedMode: mode, expectedWallet: journal.wallet,
     expectedCursor: journal.cursor, expectedOpen: journal.openPositions,
     expectedEntriesPaused: controls.entriesPaused,
-    expectedRuntimeCommit, expectedRuntimeFingerprint: localRuntimeFingerprint,
+    expectedRuntimeCommit, expectedRuntimeFingerprint: localRuntimeFingerprint, expectedCaps,
   });
 
   const hasCritical = issues.some((item) => item.severity === "critical");

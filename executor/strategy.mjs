@@ -87,7 +87,7 @@ export function planEntry({ call, cfg = DEFAULTS, state }) {
   if (state.openCount >= c.maxOpenPositions)
     return { action: "skip", reason: `already holding ${state.openCount} of max ${c.maxOpenPositions}` };
   if (state.realizedTodaySol <= -Math.abs(c.dailyLossLimitSol))
-    return { action: "skip", reason: `rolling 24h loss limit hit (${state.realizedTodaySol.toFixed(3)} SOL)` };
+    return { action: "skip", reason: `rolling 24h realized-loss entry brake hit (${state.realizedTodaySol.toFixed(3)} SOL)` };
 
   // A call with no stop cannot be risk-managed; refuse it rather than hold
   // something with no floor under it.

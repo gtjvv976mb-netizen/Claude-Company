@@ -15,7 +15,7 @@ t("executor and server share snipe-v3", POLICY_VERSION === "snipe-v3", POLICY_VE
 let st=freshState(0); st.openCount=4;
 t("max open positions blocks entry", planEntry({call,cfg:DEFAULTS,state:st}).action==="skip");
 st=freshState(0); st.realizedTodaySol=-0.2;
-t("rolling 24h loss limit blocks entry", planEntry({call,cfg:DEFAULTS,state:st}).action==="skip");
+t("rolling 24h realized-loss brake blocks a later entry", planEntry({call,cfg:DEFAULTS,state:st}).action==="skip");
 st=freshState(0); st.deployedTodaySol=0.4999;
 t("rolling 24h deploy cap blocks entry", planEntry({call,cfg:DEFAULTS,state:st}).action==="skip");
 st=freshState(0);

@@ -318,7 +318,7 @@ a model call. To spend less, lower `DESK_MAX_CANDIDATES` or override an individu
 - **Nothing here has an edge until you have graded it.** Read the first weeks of the journal
   as a backtest you are watching forward.
 - **The live executor is an experimental local canary, not evidence of an edge.** It is
-  Metis exact-in/classic-SPL-only, hard-capped, and requires operator-owned infrastructure;
+  Metis exact-in/classic-SPL-only, code-bounded with locally acknowledged cap changes, and requires operator-owned infrastructure;
   browser and webhook signing remain disabled. Dry runs, simulations, and successful fills
   do not establish positive expectancy.
 

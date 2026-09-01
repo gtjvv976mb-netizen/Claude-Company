@@ -59,10 +59,10 @@ cannot move funds.
 ### macOS LaunchAgent lifecycle
 
 This is a supervisor-adoption path for an **already configured macOS executor**, not
-a fresh-wallet installer. It does not create an environment, wallet, journal, or live
-acknowledgement, and never funds anything. From the stable executor directory, install
-the locked dependencies and per-user supervisor. It consumes the existing owner-only
-`.cc-executor.env`; it never sources that file through a shell:
+a fresh-wallet installer. Installation does not create an environment, wallet,
+journal, or live acknowledgement, and never funds anything. From the stable executor
+directory, install the locked dependencies and per-user supervisor. It consumes the
+existing owner-only `.cc-executor.env`; it never sources that file through a shell:
 
 ```bash
 chmod 600 executor/.cc-executor.env
@@ -169,18 +169,63 @@ pmset -g batt
 pmset -g assertions
 ```
 
-`install` does not load the agent. It requires the pause sentinel, checks the immutable
-`0.005` SOL/trade, `0.01` SOL/rolling-24h deployment, and `0.01` SOL loss ceilings,
-canonicalizes relative wallet/state/control paths against the explicitly supplied old
-working directory, lowers any legacy `0.05`/`0.5`/`0.15` exposure caps to those frozen
-ceilings (while retaining any already lower value), and updates `EXECUTOR_SOURCE_COMMIT`.
+`install` does not load the agent. It requires the pause sentinel and canonicalizes
+relative wallet/state/control paths against the explicitly supplied old working
+directory. It preserves an already configured `0.05`/`0.5`/`0.15`-or-lower raised-cap
+tuple only when all three raw values and the existing wallet acknowledgement match the
+current v2 ceremony exactly. A missing, partial, legacy-v1, mismatched, incoherent, or
+out-of-range raise is normalized to the `0.005` SOL/trade, `0.01` SOL/rolling-24h
+deployment, and `0.01` SOL rolling realized-loss entry-brake defaults; already lower
+values stay lower. The migration never creates a raised-cap acknowledgement and updates
+`EXECUTOR_SOURCE_COMMIT`.
 The reviewed gross ATA-rent default is `4200000` lamports so one temporary WSOL ATA and
 one destination ATA can be built; an explicitly lower `MAX_RENT_LAMPORTS` remains lower.
 The old environment is retained beside it as an owner-only rollback file. Secret values,
-wallet, journal, pause, and hard-stop files are never exposed or replaced; core exposure
-caps are never raised.
+wallet, journal, pause, and hard-stop files are never exposed or replaced; the migration
+never raises exposure.
 Keep entries paused until
 the new monitor reports `safeToUnpause: true`; no release command removes that sentinel.
+
+### Arming a reviewed cap profile on macOS
+
+After versioned adoption, macOS operators can create the current v2 cap
+acknowledgement locally. First unload the LaunchAgent and create the configured
+entry-pause sentinel. The command below confirms that the login policy is disabled,
+the canonical executor lock has no live owner, the pause is present, and the public
+wallet derived from the protected keypair exactly matches `LIVE_TRADING_ACK`:
+
+```bash
+bash "$RELEASE_DIR/executor/macos-launchagent.sh" arm-caps \
+  --executor-dir "$RELEASE_DIR/executor" \
+  --env-file "$ENV_FILE" \
+  --max-sol 0.05 \
+  --daily-sol-cap 0.5 \
+  --daily-loss-cap 0.15
+```
+
+`arm-caps` works only at a real local terminal. It prints the exact wallet-and-values
+v2 sentence and requires the operator to type it completely; piped input, the revoked
+v1 sentence, a different wallet, changed numeric text, a partial tuple, an incoherent
+tuple, or a value outside the reviewed maxima is refused. On success it atomically
+updates all three raw cap fields plus `LIVE_CAPS_ACK`, retains a mode-`0600` copy of the
+previous environment beside it, starts no service, and leaves entries paused. It never
+loads the service, removes a safety sentinel, funds the burner, or signs a
+transaction. Keep the pause present, explicitly load the same pinned release, and only
+then run the monitor against that live process:
+
+```bash
+bash "$RELEASE_DIR/executor/macos-launchagent.sh" load \
+  --executor-dir "$RELEASE_DIR/executor" \
+  --env-file "$ENV_FILE"
+
+node "$RELEASE_DIR/executor/monitor.mjs" \
+  --executor-dir "$RELEASE_DIR/executor" \
+  --env-file "$ENV_FILE" --json
+```
+
+Consider removing the entry pause only if the running process reports the exact armed
+caps and the monitor reports `safeToUnpause: true`. Loading is not permission to
+unpause, and no command in this workflow removes the sentinel.
 
 ## Explicit live installation
 
@@ -191,7 +236,7 @@ Live mode requires all of the following:
   its own mode-`0600` file;
 - a Jupiter API key supplied from a mode-`0600` file;
 - `--live` on the installer command;
-- caps for a supervised canary; and
+- per-trade, rolling deployment, and rolling-loss caps for a supervised canary; and
 - a terminal acknowledgement made by retyping the displayed burner public key.
 
 Prepare the Jupiter key and RPC files without putting credentials in shell history:
@@ -206,16 +251,15 @@ ${EDITOR:-vi} ./primary-rpc
 ${EDITOR:-vi} ./secondary-rpc
 ```
 
-The first live release is hard-capped at **0.005 SOL per trade** and
-**0.01 SOL in every rolling 24-hour window**, including finalized entry fees and fees
-paid by failed on-chain attempts. Environment edits cannot raise those ceilings:
+With no cap flags, a live install uses the canary defaults: **0.005 SOL per trade**,
+**0.01 SOL deployed in every rolling 24-hour window**, and a **0.01 SOL rolling
+realized-loss brake**. Deployment accounting includes finalized entry fees and fees
+paid by failed on-chain attempts. The default live invocation needs no cap arguments:
 
 ```bash
 bash executor/install.sh --floor <YOUR_FLOOR_NUMBER> \
   --live \
   --expected-commit <PUBLISHED_COMMIT_SHA> \
-  --max-sol 0.005 \
-  --daily-cap 0.01 \
   --rpc-file /absolute/path/to/primary-rpc \
   --secondary-rpc-file /absolute/path/to/secondary-rpc \
   --jupiter-key-file /absolute/path/to/jupiter-api-key
@@ -231,6 +275,35 @@ The installer prints the dedicated burner’s **public** key and asks you to
 retype it through the terminal. That exact value becomes `LIVE_TRADING_ACK`. The
 service refuses live mode if the acknowledgement, wallet, API key, both private RPCs,
 state database, or required file permissions do not pass startup checks.
+
+An operator may deliberately raise the three money caps, up to the reviewed code
+maxima of **0.05 SOL per trade**, **0.5 SOL daily deployment**, and a **0.15 SOL daily
+realized-loss entry brake**. The brake stops future entries after recorded rolling
+losses reach the threshold; it is not a guarantee that realized loss cannot overshoot
+because fills, slippage, and fees remain uncertain. If any cap is above its canary
+default, all three must be supplied together;
+the daily deployment cap must also be at least the per-trade cap:
+
+```bash
+bash executor/install.sh --floor <YOUR_FLOOR_NUMBER> \
+  --live \
+  --expected-commit <PUBLISHED_COMMIT_SHA> \
+  --max-sol 0.05 \
+  --daily-cap 0.5 \
+  --daily-loss-cap 0.15 \
+  --rpc-file /absolute/path/to/primary-rpc \
+  --secondary-rpc-file /absolute/path/to/secondary-rpc \
+  --jupiter-key-file /absolute/path/to/jupiter-api-key
+```
+
+After the burner public key exists and the normal wallet acknowledgement succeeds,
+the installer displays a second, versioned sentence naming that exact wallet and the
+three literal cap values. It reads the sentence only from the local terminal and
+stores the exact match as `LIVE_CAPS_ACK` in the owner-only environment file. A legacy
+v1 sentence, a sentence for another wallet, a changed number, a partial set of raised
+caps, or a non-interactive install fails closed. The installer does not accept this
+acknowledgement as an argument and neither a browser nor the Claude Company server can
+perform the activation.
 
 `EXECUTE=1` by itself is not an activation procedure. Do not paste a private key,
 Jupiter key, or executor feed secret into Claude Company or a command-line argument.
@@ -405,6 +478,7 @@ not evidence of an edge.
 | `KEYPAIR` | generated `burner.json` | Dedicated local wallet; must be mode `0600` |
 | `EXECUTE` | `0` | `1` requests live mode but is insufficient without every other live gate |
 | `LIVE_TRADING_ACK` | unset | Must exactly match the loaded burner public key in live mode |
+| `LIVE_CAPS_ACK` | unset | Required when any live money cap exceeds its canary default; must be the installer’s exact wallet-and-number-bound v2 sentence |
 | `JUPITER_API_KEY` | unset | Required locally for Jupiter Swap API v2 in live mode |
 | `SOLANA_RPC` | public default in dry run | A private HTTPS provider is required in live mode |
 | `SOLANA_RPC_SECONDARY` | required in live mode | Independent private provider for expiry, custody, and Pyth SOL/USD consensus checks; an outage fails closed or uses only the bounded Pyth exit cache |
@@ -412,9 +486,9 @@ not evidence of an edge.
 | `STATE_DB` | installer-managed | Durable cursor, positions, transaction journal, and wallet binding |
 | `PAUSE_ENTRIES_FILE` | installer-managed | Presence blocks new entries while allowing managed exits |
 | `HARD_STOP_FILE` | installer-managed | Presence blocks new submissions while reconciliation continues |
-| `MAX_SOL_PER_TRADE` | installer value | Absolute input ceiling for one entry; live hard maximum `0.005` SOL |
-| `DAILY_SOL_CAP` | installer value | Rolling 24-hour deployment cap; live hard maximum `0.01` SOL |
-| `DAILY_LOSS_LIMIT_SOL` | policy default | Rolling 24-hour realized-loss brake, including failed-attempt fees |
+| `MAX_SOL_PER_TRADE` | live `0.005` | Absolute input ceiling for one entry; acknowledged operator hard maximum `0.05` SOL |
+| `DAILY_SOL_CAP` | live `0.01` | Rolling 24-hour deployment cap; acknowledged operator hard maximum `0.5` SOL and never below the per-trade cap |
+| `DAILY_LOSS_LIMIT_SOL` | live `0.01` | Rolling 24-hour realized-loss entry brake, including failed-attempt fees; acknowledged operator hard maximum `0.15` SOL, not a guaranteed loss ceiling |
 | `MAX_OPEN_POSITIONS` | policy default | Concurrent recorded-position ceiling |
 | `SLIPPAGE_BPS` | policy default | Maximum requested swap slippage |
 | `MAX_PRICE_IMPACT_PCT` | `5` | Strict maximum impact for a new entry |
@@ -430,8 +504,10 @@ not evidence of an edge.
 | `TRAIL_PCT` | `0.25` | Trail distance after the shared 1.5x arm |
 | `MAX_AGE_HOURS` | `12` | Time exit used by snipe-v3 |
 
-Do not hand-edit `LIVE_TRADING_ACK` to bypass the installer. Re-run the reviewed
-installer if you intentionally change modes, wallets, credentials, RPCs, or caps. An
+Do not hand-edit `LIVE_TRADING_ACK` or `LIVE_CAPS_ACK`. On Linux, re-run the reviewed
+installer to change modes, wallets, credentials, RPCs, or caps. On an adopted macOS
+release, use the stopped-and-paused `arm-caps` ceremony above for cap-only changes;
+other configuration changes require a separately reviewed migration or reinstall. An
 upgrade stages and validates a versioned release before stopping the active service,
 checkpoints and backs up the journal, atomically switches the `current` symlink, and
 restores the previous unit, environment, journal, and release if activation fails.

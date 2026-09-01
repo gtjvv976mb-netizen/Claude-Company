@@ -12,6 +12,10 @@ JUPITER_KEY_FILE=""
 FLOOR=""
 MAX_SOL=""
 DAILY_CAP=""
+DAILY_LOSS_CAP=""
+MAX_SOL_SET=0
+DAILY_CAP_SET=0
+DAILY_LOSS_CAP_SET=0
 RPC=""
 SECONDARY_RPC=""
 RPC_FILE=""
@@ -64,8 +68,9 @@ while [ "$#" -gt 0 ]; do
     --secret-file) need_value "$@"; SECRET_FILE="$2"; shift 2;;
     --jupiter-key-file) need_value "$@"; JUPITER_KEY_FILE="$2"; shift 2;;
     --floor) need_value "$@"; FLOOR="$2"; shift 2;;
-    --max-sol) need_value "$@"; MAX_SOL="$2"; shift 2;;
-    --daily-cap) need_value "$@"; DAILY_CAP="$2"; shift 2;;
+    --max-sol) need_value "$@"; MAX_SOL="$2"; MAX_SOL_SET=1; shift 2;;
+    --daily-cap) need_value "$@"; DAILY_CAP="$2"; DAILY_CAP_SET=1; shift 2;;
+    --daily-loss-cap) need_value "$@"; DAILY_LOSS_CAP="$2"; DAILY_LOSS_CAP_SET=1; shift 2;;
     --rpc) need_value "$@"; RPC="$2"; shift 2;;
     --rpc-file) need_value "$@"; RPC_FILE="$2"; shift 2;;
     --secondary-rpc) need_value "$@"; SECONDARY_RPC="$2"; shift 2;;
@@ -211,19 +216,58 @@ if [ "$MODE" = "live" ]; then
   fi
 fi
 
-if [ -z "$MAX_SOL" ]; then [ "$MODE" = "live" ] && MAX_SOL="0.005" || MAX_SOL="0.05"; fi
-if [ -z "$DAILY_CAP" ]; then [ "$MODE" = "live" ] && DAILY_CAP="0.01" || DAILY_CAP="0.5"; fi
-number_re='^([0-9]+([.][0-9]*)?|[.][0-9]+)$'
+# BEGIN LIVE_CAPS_VALIDATOR
+LIVE_CANARY_MAX_SOL="0.005"
+LIVE_CANARY_DAILY_CAP="0.01"
+LIVE_CANARY_DAILY_LOSS_CAP="0.01"
+LIVE_MIN_MONEY_CAP="0.000001"
+LIVE_OPERATOR_MAX_SOL="0.05"
+LIVE_OPERATOR_MAX_DAILY_CAP="0.5"
+LIVE_OPERATOR_MAX_DAILY_LOSS_CAP="0.15"
+
+if [ -z "$MAX_SOL" ]; then [ "$MODE" = "live" ] && MAX_SOL="$LIVE_CANARY_MAX_SOL" || MAX_SOL="0.05"; fi
+if [ -z "$DAILY_CAP" ]; then [ "$MODE" = "live" ] && DAILY_CAP="$LIVE_CANARY_DAILY_CAP" || DAILY_CAP="0.5"; fi
+if [ -z "$DAILY_LOSS_CAP" ]; then
+  [ "$MODE" = "live" ] && DAILY_LOSS_CAP="$LIVE_CANARY_DAILY_LOSS_CAP" || DAILY_LOSS_CAP="0.15"
+fi
+# One SOL has exactly 1e9 lamports. Limiting cap literals to that precision keeps
+# the comparison exact enough for the declared unit and prevents awk's binary
+# floating-point conversion from rounding a mathematically out-of-range literal
+# onto an accepted boundary.
+number_re='^(0|[1-9][0-9]*)([.][0-9]{1,9})?$'
 if ! [[ "$MAX_SOL" =~ $number_re ]] || ! [[ "$DAILY_CAP" =~ $number_re ]] ||
-   ! awk -v m="$MAX_SOL" -v d="$DAILY_CAP" 'BEGIN { exit !(m > 0 && d > 0 && m <= d) }'; then
-  echo "--max-sol and --daily-cap must be positive decimals, with max-sol <= daily-cap" >&2
+   ! [[ "$DAILY_LOSS_CAP" =~ $number_re ]] ||
+   ! awk -v m="$MAX_SOL" -v d="$DAILY_CAP" -v l="$DAILY_LOSS_CAP" \
+     -v minimum="$LIVE_MIN_MONEY_CAP" \
+     'BEGIN { exit !(m >= minimum && d >= minimum && l >= minimum) }'; then
+  echo "--max-sol, --daily-cap, and --daily-loss-cap must be plain decimals at least 0.000001 with at most 9 fractional digits" >&2
   exit 1
 fi
-if [ "$MODE" = "live" ] &&
-   ! awk -v m="$MAX_SOL" -v d="$DAILY_CAP" 'BEGIN { exit !(m <= 0.005 && d <= 0.01) }'; then
-  echo "live canary limits are hard-capped at 0.005 SOL per trade and 0.01 SOL per rolling 24h" >&2
+CAPS_RAISED=0
+if [ "$MODE" = "live" ]; then
+  if ! awk -v m="$MAX_SOL" -v d="$DAILY_CAP" -v l="$DAILY_LOSS_CAP" \
+      -v mm="$LIVE_OPERATOR_MAX_SOL" -v dm="$LIVE_OPERATOR_MAX_DAILY_CAP" \
+      -v lm="$LIVE_OPERATOR_MAX_DAILY_LOSS_CAP" \
+      'BEGIN { exit !(m <= mm && d <= dm && l <= lm) }'; then
+    echo "live caps cannot exceed 0.05 SOL per trade, 0.5 SOL daily deploy, or a 0.15 SOL daily realized-loss entry brake" >&2
+    exit 1
+  fi
+  if awk -v m="$MAX_SOL" -v d="$DAILY_CAP" -v l="$DAILY_LOSS_CAP" \
+      -v cm="$LIVE_CANARY_MAX_SOL" -v cd="$LIVE_CANARY_DAILY_CAP" \
+      -v cl="$LIVE_CANARY_DAILY_LOSS_CAP" \
+      'BEGIN { exit !(m > cm || d > cd || l > cl) }'; then
+    CAPS_RAISED=1
+    if [ "$MAX_SOL_SET" -ne 1 ] || [ "$DAILY_CAP_SET" -ne 1 ] || [ "$DAILY_LOSS_CAP_SET" -ne 1 ]; then
+      echo "raising any live cap requires --max-sol, --daily-cap, and --daily-loss-cap together" >&2
+      exit 1
+    fi
+  fi
+fi
+if ! awk -v m="$MAX_SOL" -v d="$DAILY_CAP" 'BEGIN { exit !(m <= d) }'; then
+  echo "--daily-cap must be greater than or equal to --max-sol" >&2
   exit 1
 fi
+# END LIVE_CAPS_VALIDATOR
 
 validate_https_endpoint() {
   local label="$1" endpoint="$2"
@@ -423,6 +467,7 @@ chmod 600 "$INSTALL_DIR/burner.json"
 PUBKEY="$(cd "$RELEASE_DIR" && BURNER_FILE="$INSTALL_DIR/burner.json" node -e 'const{Keypair}=require("@solana/web3.js");const fs=require("fs");console.log(Keypair.fromSecretKey(new Uint8Array(JSON.parse(fs.readFileSync(process.env.BURNER_FILE)))).publicKey.toBase58())')"
 
 LIVE_ACK=""
+LIVE_CAPS_ACK=""
 EXECUTE_VALUE="0"
 if [ "$MODE" = "live" ]; then
   if [ ! -r /dev/tty ]; then echo "live mode requires a terminal acknowledgement" >&2; exit 1; fi
@@ -432,12 +477,29 @@ WALL-ST-E LIVE CANARY
   Wallet:       $PUBKEY
   Max/trade:    $MAX_SOL SOL
   Rolling deploy: $DAILY_CAP SOL / 24h
+  Realized-loss entry brake: $DAILY_LOSS_CAP SOL / rolling 24h
 
 This is real mainnet trading from a dedicated wallet. The site cannot stop it.
 Retype the public wallet above to arm this local service:
 NOTICE
   IFS= read -r LIVE_ACK < /dev/tty
   if [ "$LIVE_ACK" != "$PUBKEY" ]; then echo "public-key acknowledgement did not match; live mode not armed" >&2; exit 1; fi
+  if [ "$CAPS_RAISED" -eq 1 ]; then
+    CAPS_ACK_EXPECTED="I acknowledge WALL-ST-E caps v2 for $PUBKEY: $MAX_SOL SOL per trade, $DAILY_CAP SOL per day, $DAILY_LOSS_CAP SOL rolling realized-loss entry brake"
+    cat > /dev/tty <<NOTICE
+
+RAISED LIVE CAPS
+The canary defaults are 0.005 SOL/trade, 0.01 SOL/day deploy, and a 0.01 SOL rolling realized-loss entry brake.
+To accept the higher limits above, type this entire sentence exactly:
+
+$CAPS_ACK_EXPECTED
+NOTICE
+    IFS= read -r LIVE_CAPS_ACK < /dev/tty
+    if [ "$LIVE_CAPS_ACK" != "$CAPS_ACK_EXPECTED" ]; then
+      echo "wallet-and-cap acknowledgement did not match; raised live caps not armed" >&2
+      exit 1
+    fi
+  fi
   EXECUTE_VALUE="1"
 fi
 
@@ -452,10 +514,12 @@ fi
   write_env_line HARD_STOP_FILE "$HARD_STOP_FILE"
   write_env_line MAX_SOL_PER_TRADE "$MAX_SOL"
   write_env_line DAILY_SOL_CAP "$DAILY_CAP"
+  write_env_line DAILY_LOSS_LIMIT_SOL "$DAILY_LOSS_CAP"
   write_env_line EXECUTE "$EXECUTE_VALUE"
   write_env_line EXECUTOR_SOURCE_COMMIT "$SOURCE_COMMIT"
   if [ "$MODE" = "live" ]; then
     write_env_line LIVE_TRADING_ACK "$LIVE_ACK"
+    write_env_line LIVE_CAPS_ACK "$LIVE_CAPS_ACK"
     write_env_line JUPITER_API_KEY "$JUPITER_KEY"
     write_env_line SOLANA_RPC "$RPC"
     write_env_line SOLANA_RPC_SECONDARY "$SECONDARY_RPC"
@@ -514,8 +578,10 @@ PAUSE_ENTRIES_FILE="$PAUSE_FILE" \
 HARD_STOP_FILE="$HARD_STOP_FILE" \
 MAX_SOL_PER_TRADE="$MAX_SOL" \
 DAILY_SOL_CAP="$DAILY_CAP" \
+DAILY_LOSS_LIMIT_SOL="$DAILY_LOSS_CAP" \
 EXECUTE="$EXECUTE_VALUE" \
 LIVE_TRADING_ACK="$LIVE_ACK" \
+LIVE_CAPS_ACK="$LIVE_CAPS_ACK" \
 JUPITER_API_KEY="$JUPITER_KEY" \
 SOLANA_RPC="$RPC" \
 SOLANA_RPC_SECONDARY="$SECONDARY_RPC" \
@@ -579,8 +645,8 @@ SERVICE_ENABLE_CHANGED=1
 # supervision; it is never made to forget what may already have happened on chain.
 ACTIVATION_COMMITTED=1
 sudo systemctl restart cc-executor
-SECRET=""; JUPITER_KEY=""; LIVE_ACK=""; REPLY=""
-unset SECRET JUPITER_KEY LIVE_ACK REPLY
+SECRET=""; JUPITER_KEY=""; LIVE_ACK=""; LIVE_CAPS_ACK=""; CAPS_ACK_EXPECTED=""; REPLY=""
+unset SECRET JUPITER_KEY LIVE_ACK LIVE_CAPS_ACK CAPS_ACK_EXPECTED REPLY
 
 cat <<DONE
 
@@ -591,7 +657,8 @@ cat <<DONE
       $PUBKEY
 
   Runtime commit: $SOURCE_COMMIT
-  Max $MAX_SOL SOL/trade · $DAILY_CAP SOL/rolling 24h
+  Max $MAX_SOL SOL/trade · $DAILY_CAP SOL/rolling 24h deploy
+  Realized-loss entry brake $DAILY_LOSS_CAP SOL/rolling 24h
   Watch:          sudo journalctl -u cc-executor -f
   Pause entries:  touch $PAUSE_FILE
   Hard stop:      touch $HARD_STOP_FILE

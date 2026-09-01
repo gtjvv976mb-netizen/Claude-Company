@@ -26,7 +26,7 @@ const makeDb = (file, { cursor = 12, positions = [], intents = [] } = {}) => {
     .run(row.id, row.kind, row.mint, row.state, row.updatedAt);
   db.close(); fs.chmodSync(file, 0o600);
 };
-const writeConfig = (dir) => {
+const writeConfig = (dir, extraLines = []) => {
   const file = path.join(dir, ".cc-executor.env");
   fs.writeFileSync(file, [
     "CC_API='https://example.invalid'", "CC_FLOOR=50", "CC_SECRET=TOP_SECRET_NEVER_PRINT",
@@ -34,6 +34,7 @@ const writeConfig = (dir) => {
     "SOLANA_RPC=https://primary.invalid/key/PRIMARY_SECRET",
     "SOLANA_RPC_SECONDARY=https://secondary.invalid/key/SECONDARY_SECRET",
     `EXECUTOR_SOURCE_COMMIT=${SOURCE_COMMIT}`,
+    ...extraLines,
   ].join("\n"), { mode: 0o600 });
   return file;
 };
@@ -55,7 +56,11 @@ const heartbeat = (now, extra = {}) => ({
     feedRollback: false,
     executionReadiness: {
       ready: true, lastSuccessAt: now - 1_000, observedAt: now - 1_000,
-      route: "wsol-usdc", providers: 2,
+      route: "wsol-usdc", providers: 2, amountLamports: 5_000_000,
+    },
+    caps: {
+      maxSolPerTrade: 0.005, dailySolCap: 0.01,
+      dailyLossLimitSol: 0.01, maxOpenPositions: 4,
     },
   },
   ...extra,
@@ -68,6 +73,32 @@ const heartbeat = (now, extra = {}) => ({
   ) || [];
   assert.equal(boundedOracleConnections.length, 2,
     "both recurring monitor oracle providers must use the shared aborting RPC transport");
+}
+
+{
+  const dir = tmp();
+  writeConfig(dir, ["MAX_SOL_PER_TRADE=0.05", "DAILY_SOL_CAP=0.5",
+    "DAILY_LOSS_LIMIT_SOL=0.15", "MAX_OPEN_POSITIONS=4"]);
+  makeDb(path.join(dir, ".cc-executor.sqlite"));
+  fs.writeFileSync(path.join(dir, ".cc-executor.sqlite.lock"), `${process.pid}\n`, { mode: 0o600 });
+  const now = 1_000_000;
+  const raisedHealth = {
+    ...heartbeat(now).health,
+    caps: { maxSolPerTrade: 0.05, dailySolCap: 0.5,
+      dailyLossLimitSol: 0.15, maxOpenPositions: 4 },
+    executionReadiness: { ...heartbeat(now).health.executionReadiness,
+      amountLamports: 50_000_000 },
+  };
+  const report = await inspect({
+    executorDir: dir, environment: {}, now, processProbe, runtimeFingerprintFn, oracleProbe,
+    fetchFn: async (url) => url.endsWith("/heartbeat")
+      ? response({ heartbeat: heartbeat(now, { health: raisedHealth }) })
+      : response({ cluster: "mainnet-beta", latest_id: 12, events: [] }),
+  });
+  assert.equal(report.status, "healthy");
+  assert.ok(!report.issues.some((item) =>
+    ["heartbeat_caps_mismatch", "execution_readiness_size_mismatch"].includes(item.code)));
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 {
@@ -233,11 +264,14 @@ const heartbeat = (now, extra = {}) => ({
   const cases = [
     [null, "execution_readiness_missing"],
     [{ ready: false, lastSuccessAt: now - 1_000, observedAt: now - 1_000,
-      route: "wsol-usdc", providers: 2 }, "execution_readiness_failed"],
+      route: "wsol-usdc", providers: 2, amountLamports: 5_000_000 }, "execution_readiness_failed"],
     [{ ready: true, lastSuccessAt: now - 300_001, observedAt: now - 300_001,
-      route: "wsol-usdc", providers: 2 }, "execution_readiness_stale"],
+      route: "wsol-usdc", providers: 2, amountLamports: 5_000_000 }, "execution_readiness_stale"],
     [{ ready: true, lastSuccessAt: now - 1_000, observedAt: now - 1_000,
       route: "unsafe-route", providers: 1 }, "execution_readiness_invalid"],
+    [{ ready: true, lastSuccessAt: now - 1_000, observedAt: now - 1_000,
+      route: "wsol-usdc", providers: 2, amountLamports: 4_999_999 },
+    "execution_readiness_size_mismatch"],
   ];
   for (const [executionReadiness, expectedCode] of cases) {
     const report = await inspect({

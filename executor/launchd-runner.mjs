@@ -9,7 +9,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { createInterface } from "node:readline/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { Keypair } from "@solana/web3.js";
 
 const MIN_NODE = Object.freeze({ major: 22, minor: 13 });
 const RUNTIME_FILES = Object.freeze([
@@ -263,6 +265,213 @@ function nonNegativeNumber(values, name, fallback) {
   return value;
 }
 
+const SOL_SCALE = 1_000_000_000n;
+function plainSolUnits(value) {
+  const raw = String(value);
+  const match = /^(0|[1-9][0-9]*)(?:\.([0-9]{1,9}))?$/.exec(raw);
+  if (!match) return null;
+  return BigInt(match[1]) * SOL_SCALE + BigInt((match[2] || "").padEnd(9, "0") || "0");
+}
+
+function exactMoneyCap(name, value, { min = 0.000001, max = null, fail = abort } = {}) {
+  const raw = String(value);
+  const units = plainSolUnits(raw);
+  if (units === null) {
+    fail(`${name} must be a plain decimal with at most 9 fractional digits`);
+    return null;
+  }
+  const minUnits = plainSolUnits(min);
+  const maxUnits = max === null ? null : plainSolUnits(max);
+  if (units < minUnits || (maxUnits !== null && units > maxUnits)) {
+    fail(max === null
+      ? `${name} must be at least ${min}`
+      : `${name} must be between ${min} and ${max}`);
+    return null;
+  }
+  return Object.freeze({ raw, units, value: Number(units) / 1_000_000_000 });
+}
+
+function liveMoneyCap(values, name, fallback) {
+  const raw = values[name] === undefined ? String(fallback) : values[name];
+  return exactMoneyCap(name, raw);
+}
+
+function liveOpenPositions(values, fail = abort) {
+  const raw = values.MAX_OPEN_POSITIONS === undefined ? "4" : values.MAX_OPEN_POSITIONS;
+  if (!/^[1-4]$/.test(raw)) {
+    fail("MAX_OPEN_POSITIONS must be an integer between 1 and 4");
+    return null;
+  }
+  return Number(raw);
+}
+
+const CANARY_MONEY_CAPS = Object.freeze({
+  MAX_SOL_PER_TRADE: 0.005,
+  DAILY_SOL_CAP: 0.01,
+  DAILY_LOSS_LIMIT_SOL: 0.01,
+});
+// DAILY_LOSS_LIMIT_SOL is a rolling realized-loss entry brake threshold. It limits
+// later entry authority; it cannot guarantee a fill/slippage loss ceiling.
+const OPERATOR_MONEY_MAX = Object.freeze({
+  MAX_SOL_PER_TRADE: 0.05,
+  DAILY_SOL_CAP: 0.5,
+  DAILY_LOSS_LIMIT_SOL: 0.15,
+});
+const MONEY_CAP_NAMES = Object.freeze(Object.keys(CANARY_MONEY_CAPS));
+const capsAckSentence = (wallet, trade, daily, loss) =>
+  `I acknowledge WALL-ST-E caps v2 for ${wallet}: ${trade} SOL per trade, ${daily} SOL per day, ${loss} SOL rolling realized-loss entry brake`;
+
+function requestedOperatorCaps(options) {
+  const names = ["--max-sol", "--daily-sol-cap", "--daily-loss-cap"];
+  requireOptions(options, ["--env", "--workdir", ...names]);
+  const raw = Object.freeze({
+    MAX_SOL_PER_TRADE: options["--max-sol"],
+    DAILY_SOL_CAP: options["--daily-sol-cap"],
+    DAILY_LOSS_LIMIT_SOL: options["--daily-loss-cap"],
+  });
+  const parsed = Object.fromEntries(Object.entries(raw).map(([name, value]) => [name,
+    exactMoneyCap(name, value, { max: OPERATOR_MONEY_MAX[name],
+      fail: (message) => { throw new Error(message); } }),
+  ]));
+  if (parsed.DAILY_SOL_CAP.units < parsed.MAX_SOL_PER_TRADE.units)
+    throw new Error("DAILY_SOL_CAP must be at least MAX_SOL_PER_TRADE");
+  return raw;
+}
+
+function loadProtectedKeypair(file) {
+  const absolute = protectedRegularFile(file, "live keypair");
+  let bytes;
+  try { bytes = JSON.parse(fs.readFileSync(absolute, "utf8")); }
+  catch { throw new Error("KEYPAIR is not a readable Solana JSON keypair"); }
+  try { return Keypair.fromSecretKey(new Uint8Array(bytes)); }
+  catch { throw new Error("KEYPAIR does not contain a valid Solana secret key"); }
+}
+
+async function terminalConfirmation(expected, { input, output }) {
+  output.write(`\nExact acknowledgement required:\n${expected}\n\n`);
+  const terminal = createInterface({ input, output });
+  try { return await terminal.question("Type the complete sentence exactly: "); }
+  finally { terminal.close(); }
+}
+
+/**
+ * Atomically records a locally chosen cap tuple and its wallet-bound v2
+ * acknowledgement. Production callers must use real TTY streams. The injectable
+ * reader keeps the ceremony behaviorally testable without weakening that boundary.
+ */
+export async function armOperatorCaps(options, {
+  input = process.stdin,
+  output = process.stdout,
+  readConfirmation = terminalConfirmation,
+} = {}) {
+  const raw = requestedOperatorCaps(options);
+  if (!input?.isTTY || !output?.isTTY)
+    throw new Error("cap arming requires an interactive terminal (TTY); piped input is refused");
+
+  const workdir = protectedRuntimeDirectory(absoluteOption(options, "--workdir"));
+  const environment = parseProtectedEnvironment(options["--env"]);
+  const values = environment.values;
+  if (values.EXECUTE !== "1") throw new Error("cap arming requires an existing live EXECUTE=1 environment");
+  if (values.INIT_ONLY === "1") throw new Error("INIT_ONLY must not be persisted in the live environment");
+  liveOpenPositions(values, (message) => { throw new Error(message); });
+  if (typeof values.LIVE_TRADING_ACK !== "string" || !values.LIVE_TRADING_ACK ||
+      values.LIVE_TRADING_ACK !== values.LIVE_TRADING_ACK.trim())
+    throw new Error("live environment is missing an exact LIVE_TRADING_ACK wallet");
+
+  const keypairPath = path.resolve(workdir, values.KEYPAIR || "burner.json");
+  const wallet = loadProtectedKeypair(keypairPath).publicKey.toBase58();
+  if (wallet !== values.LIVE_TRADING_ACK)
+    throw new Error("LIVE_TRADING_ACK does not match the public key derived from KEYPAIR");
+
+  const pause = resolvePauseEntries(values, workdir);
+  ownerControlFile(pause, "entry-pause sentinel", { required: true });
+  const lock = resolveLock(values, workdir);
+  const active = activeLockOwner(lock);
+  if (active !== null)
+    throw Object.assign(new Error(`an active executor (pid ${active}) owns the process lock; stop it explicitly`),
+      { exitCode: 3 });
+
+  const acknowledgement = capsAckSentence(wallet, raw.MAX_SOL_PER_TRADE,
+    raw.DAILY_SOL_CAP, raw.DAILY_LOSS_LIMIT_SOL);
+  const typed = await readConfirmation(acknowledgement, { input, output });
+  if (typed !== acknowledgement)
+    throw new Error("cap acknowledgement did not match exactly; environment was not changed");
+
+  // Re-prove every mutable gate after the human pause at the prompt.
+  const current = parseProtectedEnvironment(environment.absolute);
+  if (current.text !== environment.text)
+    throw new Error("protected environment changed during acknowledgement; retry from a fresh review");
+  ownerControlFile(pause, "entry-pause sentinel", { required: true });
+  const activeAfterPrompt = activeLockOwner(lock);
+  if (activeAfterPrompt !== null)
+    throw Object.assign(new Error(`an active executor (pid ${activeAfterPrompt}) started during acknowledgement; caps were not changed`),
+      { exitCode: 3 });
+
+  const rendered = rewriteEnvironment(environment.text, {
+    ...raw,
+    LIVE_CAPS_ACK: acknowledgement,
+  });
+  const envFile = environment.absolute;
+  const backup = `${envFile}.previous-caps-${Date.now()}-${process.pid}`;
+  const temporary = `${envFile}.next-caps-${process.pid}-${Date.now()}`;
+  let published = false;
+  try {
+    writeExclusiveProtected(backup, Buffer.from(environment.text, "utf8"));
+    writeExclusiveProtected(temporary, Buffer.from(rendered, "utf8"));
+    const candidate = parseProtectedEnvironment(temporary);
+    if (candidate.values.LIVE_CAPS_ACK !== acknowledgement ||
+        MONEY_CAP_NAMES.some((name) => candidate.values[name] !== raw[name]))
+      throw new Error("rendered cap environment failed exact self-verification");
+    ownerControlFile(pause, "entry-pause sentinel", { required: true });
+    const finalOwner = activeLockOwner(lock);
+    if (finalOwner !== null)
+      throw Object.assign(new Error(`an active executor (pid ${finalOwner}) started before publication; caps were not changed`),
+        { exitCode: 3 });
+    if (parseProtectedEnvironment(envFile).text !== environment.text)
+      throw new Error("protected environment changed before publication; caps were not changed");
+    fs.renameSync(temporary, envFile);
+    published = true;
+    fsyncDirectory(path.dirname(envFile));
+  } catch (error) {
+    try { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); } catch {}
+    if (!published) try { if (fs.existsSync(backup)) fs.unlinkSync(backup); } catch {}
+    throw error;
+  }
+
+  output.write("Caps armed in the protected environment. This command started no service, and entries remain paused.\n");
+  output.write(`Owner-only rollback environment: ${backup}\n`);
+  return { acknowledgement, backup, wallet, caps: raw };
+}
+
+/** Mirror poller.mjs's deliberately awkward operator-raise ceremony. Adoption may
+ * preserve an existing raise, never create one: all three raw values must be present,
+ * valid under the poller's bounds, coherent, and named exactly in the wallet-bound
+ * acknowledgement already stored in the protected environment. */
+function acknowledgedOperatorCaps(values, configured) {
+  const wantsRaise = MONEY_CAP_NAMES.some((name) =>
+    configured[name].units > plainSolUnits(CANARY_MONEY_CAPS[name]));
+  if (!wantsRaise) return { wantsRaise: false, accepted: false };
+  const raw = Object.fromEntries(MONEY_CAP_NAMES.map((name) =>
+    [name, typeof values[name] === "string" ? values[name] : ""]));
+  if (MONEY_CAP_NAMES.some((name) => !raw[name]))
+    return { wantsRaise: true, accepted: false };
+  if (MONEY_CAP_NAMES.some((name) =>
+      configured[name].units > plainSolUnits(OPERATOR_MONEY_MAX[name])))
+    return { wantsRaise: true, accepted: false };
+  if (configured.DAILY_SOL_CAP.units < configured.MAX_SOL_PER_TRADE.units)
+    return { wantsRaise: true, accepted: false };
+  const wallet = values.LIVE_TRADING_ACK;
+  if (typeof wallet !== "string" || !wallet || wallet !== wallet.trim())
+    return { wantsRaise: true, accepted: false };
+  const expected = capsAckSentence(wallet, raw.MAX_SOL_PER_TRADE,
+    raw.DAILY_SOL_CAP, raw.DAILY_LOSS_LIMIT_SOL);
+  return {
+    wantsRaise: true,
+    accepted: typeof values.LIVE_CAPS_ACK === "string" &&
+      values.LIVE_CAPS_ACK === expected,
+  };
+}
+
 function encodedEnvironmentValue(value) {
   return `"${String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"')
     .replaceAll("$", "\\$").replaceAll("`", "\\`")}"`;
@@ -323,27 +532,46 @@ function upgradeEnvironment(options, { requirePaused = false, requireStopped = f
     "SOLANA_RPC", "SOLANA_RPC_SECONDARY"]) {
     if (!values[name]) abort(`live environment is missing ${name}`);
   }
-  const capCeilings = Object.freeze({
-    MAX_SOL_PER_TRADE: 0.005,
-    DAILY_SOL_CAP: 0.01,
-    DAILY_LOSS_LIMIT_SOL: 0.01,
-    // Gross ATA creation rent is a transaction-compatibility rail, not market
-    // exposure. A missing value adopts the reviewed two-ATA ceiling; an explicitly
-    // lower operator value remains untouched by the migration.
-    MAX_RENT_LAMPORTS: 4_200_000,
-  });
+  liveOpenPositions(values);
+  const configuredExposure = Object.fromEntries(MONEY_CAP_NAMES.map((name) =>
+    [name, liveMoneyCap(values, name, CANARY_MONEY_CAPS[name])]));
+  const raisedCaps = acknowledgedOperatorCaps(values, configuredExposure);
   const capReplacements = Object.create(null);
   const capDefaultsApplied = [];
   const capsLowered = [];
-  for (const [name, ceiling] of Object.entries(capCeilings)) {
-    const configured = nonNegativeNumber(values, name, ceiling);
+  const raisedCapsPreserved = [];
+  for (const [name, ceiling] of Object.entries(CANARY_MONEY_CAPS)) {
+    const configured = configuredExposure[name];
+    if (raisedCaps.accepted) {
+      raisedCapsPreserved.push(name);
+      continue;
+    }
     if (values[name] === undefined) {
       capReplacements[name] = String(ceiling);
       capDefaultsApplied.push(name);
-    } else if (configured > ceiling) {
+    } else if (configured.units > plainSolUnits(ceiling)) {
       capReplacements[name] = String(ceiling);
       capsLowered.push(name);
     }
+  }
+  const adoptedExposure = Object.fromEntries(MONEY_CAP_NAMES.map((name) => [name,
+    capReplacements[name] === undefined
+      ? configuredExposure[name] : exactMoneyCap(name, capReplacements[name]),
+  ]));
+  if (adoptedExposure.DAILY_SOL_CAP.units < adoptedExposure.MAX_SOL_PER_TRADE.units)
+    abort(`DAILY_SOL_CAP (${adoptedExposure.DAILY_SOL_CAP.value}) is below ` +
+      `MAX_SOL_PER_TRADE (${adoptedExposure.MAX_SOL_PER_TRADE.value}) after safe normalization`);
+  // Gross ATA creation rent is a transaction-compatibility rail, not market
+  // exposure. A missing value adopts the reviewed two-ATA ceiling; an explicitly
+  // lower operator value remains untouched by the migration.
+  const rentCeiling = 4_200_000;
+  const configuredRent = nonNegativeNumber(values, "MAX_RENT_LAMPORTS", rentCeiling);
+  if (values.MAX_RENT_LAMPORTS === undefined) {
+    capReplacements.MAX_RENT_LAMPORTS = String(rentCeiling);
+    capDefaultsApplied.push("MAX_RENT_LAMPORTS");
+  } else if (configuredRent > rentCeiling) {
+    capReplacements.MAX_RENT_LAMPORTS = String(rentCeiling);
+    capsLowered.push("MAX_RENT_LAMPORTS");
   }
 
   const resolveLegacy = (value, fallback, label) => {
@@ -388,7 +616,8 @@ function upgradeEnvironment(options, { requirePaused = false, requireStopped = f
     ...capReplacements,
   });
   return { environment, replacements, commit, pause, hardStop, originalLock, canonicalLock,
-    capDefaultsApplied, capsLowered };
+    capDefaultsApplied, capsLowered, raisedCapsRequested: raisedCaps.wantsRaise,
+    raisedCapsPreserved };
 }
 
 function updateUpgradeEnvironment(options) {
@@ -496,6 +725,8 @@ function usage() {
   node launchd-runner.mjs preflight --env FILE --poller FILE
   node launchd-runner.mjs ready --env FILE --poller FILE --pid PID
   node launchd-runner.mjs run --env FILE --poller FILE --label LABEL
+  node launchd-runner.mjs arm-caps --env FILE --workdir DIR \\
+    --max-sol SOL --daily-sol-cap SOL --daily-loss-cap SOL
   node launchd-runner.mjs validate-upgrade-env --env FILE --legacy-workdir DIR --commit SHA
   node launchd-runner.mjs update-upgrade-env --env FILE --legacy-workdir DIR --commit SHA --backup FILE
   node launchd-runner.mjs restore-upgrade-env --env FILE --backup FILE --commit SHA
@@ -503,6 +734,8 @@ function usage() {
     --poller FILE --env FILE --workdir DIR --stdout FILE --stderr FILE --throttle SECONDS`);
 }
 
+const isEntrypoint = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isEntrypoint) {
 const command = process.argv[2];
 if (!command || command === "help" || command === "--help") {
   usage();
@@ -524,9 +757,17 @@ if (command === "render-plist") {
 } else if (command === "validate-upgrade-env") {
   const prepared = upgradeEnvironment(options);
   console.log(`live environment can be safely normalized for commit ${prepared.commit}; no secret value was printed`);
-  console.log(prepared.capsLowered.length
-    ? `install will lower values above reviewed ceilings: ${prepared.capsLowered.join(",")}`
-    : "all explicitly configured caps are already at or below the reviewed ceilings");
+  if (prepared.raisedCapsPreserved.length) {
+    console.log(`install will preserve wallet-acknowledged operator caps: ${prepared.raisedCapsPreserved.join(",")}`);
+    if (prepared.capsLowered.length)
+      console.log(`install will lower other values above reviewed ceilings: ${prepared.capsLowered.join(",")}`);
+  } else {
+    console.log(prepared.capsLowered.length
+      ? `install will lower values above reviewed ceilings: ${prepared.capsLowered.join(",")}`
+      : "all explicitly configured caps are already at or below the reviewed ceilings");
+  }
+  if (prepared.raisedCapsRequested && !prepared.raisedCapsPreserved.length)
+    console.log("operator-raised caps were not completely and validly wallet-acknowledged; canary normalization remains active");
   if (prepared.capDefaultsApplied.length)
     console.log(`install will apply reviewed defaults to missing values: ${prepared.capDefaultsApplied.join(",")}`);
   console.log(`entry-pause sentinel required before install: ${prepared.pause}`);
@@ -535,6 +776,9 @@ if (command === "render-plist") {
   updateUpgradeEnvironment(options);
 } else if (command === "restore-upgrade-env") {
   restoreUpgradeEnvironment(options);
+} else if (command === "arm-caps") {
+  try { await armOperatorCaps(options); }
+  catch (error) { abort(error?.message || "cap arming failed", error?.exitCode || 1); }
 } else if (command === "ready") {
   requireOptions(options, ["--env", "--poller", "--pid"]);
   const expectedPid = Number(options["--pid"]);
@@ -593,4 +837,5 @@ if (command === "render-plist") {
   await import(pathToFileURL(poller).href);
 } else {
   abort(`unknown command ${command}`);
+}
 }

@@ -7449,10 +7449,11 @@ function buildControls(settings) {
     box.appendChild(mk("div", "dp-note",
       "Only after reviewing the dry run: put two private HTTPS Solana RPC URLs from independent providers and the Jupiter API key in separate mode-0600 files. " +
       "The installer shows the new burner address and arms only when you retype that public key in the terminal. " +
-      "This first live release is hard-capped at 0.005 SOL per trade and 0.01 SOL in each rolling 24-hour window."));
+      "The default canary is 0.005 SOL per trade, 0.01 SOL rolling deployment, and a 0.01 SOL rolling realized-loss entry brake. " +
+      "A larger profile is local-only, requires all three values plus a fresh v2 wallet-and-values acknowledgement, and cannot exceed 0.05 / 0.5 / 0.15 SOL."));
     // Same single pinned line as the dry-run install, with the canary flags.
     const liveCmd = hasPinnedExecutorRelease
-      ? `git clone https://github.com/gtjvv976mb-netizen/Claude-Company.git && cd Claude-Company && git checkout --detach ${releaseCommit} && bash executor/install.sh --floor ${FLOOR_N} --live --expected-commit ${releaseCommit} --max-sol 0.005 --daily-cap 0.01 --rpc-file /absolute/path/to/primary-rpc --secondary-rpc-file /absolute/path/to/secondary-rpc --jupiter-key-file /absolute/path/to/jupiter-api-key`
+      ? `git clone https://github.com/gtjvv976mb-netizen/Claude-Company.git && cd Claude-Company && git checkout --detach ${releaseCommit} && bash executor/install.sh --floor ${FLOOR_N} --live --expected-commit ${releaseCommit} --max-sol 0.005 --daily-cap 0.01 --daily-loss-cap 0.01 --rpc-file /absolute/path/to/primary-rpc --secondary-rpc-file /absolute/path/to/secondary-rpc --jupiter-key-file /absolute/path/to/jupiter-api-key`
       : "Live-canary installation is unavailable in this local preview. Build a release with an exact EXECUTOR_COMMIT.";
     const liveBox = mk("div", "bud-addr");
     liveBox.style.cssText = "white-space:pre-wrap;word-break:break-all;font-size:10px;line-height:1.5";
@@ -8075,6 +8076,12 @@ const dashNode = (tag, cls, text) => {
 const dashCompact = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
 const dashMoney = (value) => value == null || !Number.isFinite(Number(value))
   ? "—" : "$" + dashCompact.format(Number(value));
+const dashSol = (value) => {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "—";
+  const rendered = number.toFixed(9).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+  return (rendered === "-0" ? "0" : rendered) + " SOL";
+};
 const dashAge = (ms) => {
   if (ms == null || !Number.isFinite(Number(ms))) return "never";
   const seconds = Math.max(0, Math.round(Number(ms) / 1000));
@@ -8456,9 +8463,9 @@ const wallsteActivationLabels = {
   feedCredentialReady: "Private read-only feed credential exists",
   heartbeatSeen: "A local poller has reported at least once",
   currentPaperMode: "A fresh current heartbeat reports dry-run / paper mode",
-  executionReadinessReady: "A fresh heartbeat reports a two-provider readiness pass",
+  executionReadinessReady: "A fresh heartbeat reports a two-provider probe at the active trade cap",
   walletReported: "A fresh heartbeat reports the local burner public address",
-  walletFunded: "That current burner's confirmed balance meets the release daily cap",
+  walletFunded: "That current burner's confirmed balance meets the active-cap readiness reserve",
 };
 const copyPrivateValue = async (button, value, label) => {
   if (!value) return;
@@ -8575,6 +8582,8 @@ async function loadWallsteDashboard({ background = false } = {}) {
     const wallet = status.wallet || {};
     const filters = status.filters || {};
     const activation = status.activation || {};
+    const capPolicy = status.capPolicy || {};
+    const activeCaps = capPolicy.active || null;
     const secret = feedR.status === 200 ? feedR.body?.settings?.executor_secret : null;
     window.__botHeartbeat = heartbeat;
 
@@ -8597,7 +8606,9 @@ async function loadWallsteDashboard({ background = false } = {}) {
       dashMetric("Health", String(health?.state || "not reported").replace(/-/g, " "),
         health?.runtimeCommit ? "runtime " + String(health.runtimeCommit).slice(0, 10) : "reported by the local poller"),
       dashMetric("Open positions", String(heartbeat?.open ?? 0),
-        String(Array.isArray(heartbeat?.held) ? heartbeat.held.length : 0) + " holdings named in heartbeat")
+        String(Array.isArray(heartbeat?.held) ? heartbeat.held.length : 0) + " holdings named in heartbeat"),
+      dashMetric("Active trade cap", activeCaps ? dashSol(activeCaps.maxSolPerTrade) : "Not reported",
+        capPolicy.activeFresh ? "fresh self-report" : activeCaps ? "last-reported · stale" : "awaiting current executor")
     );
     el.appendChild(statusGrid);
 
@@ -8606,7 +8617,7 @@ async function loadWallsteDashboard({ background = false } = {}) {
     funding.appendChild(dashNode("h4", "", "5 · Fund the dedicated burner last"));
     if (wallet.address) {
       funding.appendChild(dashNode("div", "bud-bal",
-        wallet.balanceSol == null ? "Balance unavailable" : Number(wallet.balanceSol).toFixed(4) + " SOL"));
+        wallet.balanceSol == null ? "Balance unavailable" : dashSol(wallet.balanceSol)));
       const addressRow = dashNode("div", "secretbox");
       addressRow.appendChild(dashNode("code", "", String(wallet.address).slice(0, 8) + "…" + String(wallet.address).slice(-8)));
       const copy = dashNode("button", "dp-btn ghost", "Copy address");
@@ -8626,6 +8637,9 @@ async function loadWallsteDashboard({ background = false } = {}) {
         " · state: " + String(wallet.state || "unknown").replace(/-/g, " ") +
         " · source: " + String(wallet.source || "read-only") +
         (wallet.observedAt ? " · observed " + dashAge(Date.now() - wallet.observedAt) : "")));
+      if (wallet.requiredForReadinessSol != null) funding.appendChild(dashNode("p", "dp-note",
+        "Conservative no-sign readiness reserve for the reported active trade cap: " +
+        dashSol(wallet.requiredForReadinessSol) + ". This is not a recommendation to fund more."));
       funding.appendChild(dashNode("p", "dp-note",
         connected
           ? "Fund with SOL from your own wallet only. This page has no transfer control and never receives the burner key."
@@ -8653,7 +8667,9 @@ async function loadWallsteDashboard({ background = false } = {}) {
       dashMetric("Blocking intent", health?.blockingIntent === true ? "PRESENT" : health ? "Clear" : "Unknown",
         "unresolved local journal intent"),
       dashMetric("Readiness providers", readiness ? String(readiness.providers || 0) + " / 2" : "Not reported",
-        readiness ? (readiness.ready ? "ready" : "not ready") + " · " + String(readiness.route || "route unknown") : "no-sign probe")
+        readiness ? (readiness.ready ? "ready" : "not ready") + " · " + String(readiness.route || "route unknown") +
+          (readiness.amountLamports ? " · " + dashSol(Number(readiness.amountLamports) / 1e9) + " rehearsal" : " · size not reported")
+          : "no-sign probe")
     );
     healthCard.appendChild(heartbeatGrid);
     const held = Array.isArray(heartbeat?.held) ? heartbeat.held : [];
@@ -8756,7 +8772,13 @@ async function loadWallsteDashboard({ background = false } = {}) {
     const reviewCommand = "sudo journalctl -u cc-executor -f";
     const liveCanaryCommand = "bash executor/install.sh --floor " + FLOOR_N +
       " --live --expected-commit " + executorReleaseCommit +
-      " --max-sol 0.005 --daily-cap 0.01" +
+      " --max-sol 0.005 --daily-cap 0.01 --daily-loss-cap 0.01" +
+      " --rpc-file /absolute/path/to/primary-rpc" +
+      " --secondary-rpc-file /absolute/path/to/secondary-rpc" +
+      " --jupiter-key-file /absolute/path/to/jupiter-api-key";
+    const raisedProfileCommand = "bash executor/install.sh --floor " + FLOOR_N +
+      " --live --expected-commit " + executorReleaseCommit +
+      " --max-sol 0.05 --daily-cap 0.5 --daily-loss-cap 0.15" +
       " --rpc-file /absolute/path/to/primary-rpc" +
       " --secondary-rpc-file /absolute/path/to/secondary-rpc" +
       " --jupiter-key-file /absolute/path/to/jupiter-api-key";
@@ -8809,7 +8831,7 @@ async function loadWallsteDashboard({ background = false } = {}) {
     const localReady = activation.currentLiveMode === true && activation.executionReadinessReady === true &&
       readiness?.providers === 2;
     const liveStep = setupStep(4, "Configure two independent RPCs and Jupiter locally, then arm locally",
-      "Store each credential in its own mode-0600 file. The live installer performs a no-sign two-provider readiness check and asks you at the host terminal to retype the displayed burner public address. The browser cannot acknowledge that prompt.",
+      "Store each credential in its own mode-0600 file. After the service starts, the live executor reports a no-sign two-provider readiness check at the active trade cap. During installation, it asks you at the host terminal to retype the displayed burner public address; the browser cannot acknowledge that prompt. The default canary may refuse trades whose fixed costs are too large; any raised profile requires all three cap flags plus a second exact v2 acknowledgement typed locally.",
       localReady);
     liveStep.appendChild(dashNode("pre", "commandbox", liveCanaryCommand));
     const copyLive = dashNode("button", "dp-btn ghost commandcopy", "Copy live-canary command");
@@ -8818,10 +8840,19 @@ async function loadWallsteDashboard({ background = false } = {}) {
     copyLive.title = releaseIsPinned ? "Copy the pinned live-canary command" : "Unavailable until this build contains an exact release commit";
     copyLive.onclick = () => copyVisibleCommand(copyLive, liveCanaryCommand);
     liveStep.appendChild(copyLive);
+    liveStep.appendChild(dashNode("p", "dp-note",
+      "Optional reviewed raised profile: 0.05 SOL/trade, 0.5 SOL rolling deploy, 0.15 SOL rolling realized-loss entry brake. It has materially more real-money risk. The installer accepts it only after you type the exact v2 wallet-and-values sentence locally."));
+    liveStep.appendChild(dashNode("pre", "commandbox", raisedProfileCommand));
+    const copyRaised = dashNode("button", "dp-btn ghost commandcopy", "Copy raised-profile command");
+    copyRaised.type = "button";
+    copyRaised.disabled = !releaseIsPinned;
+    copyRaised.title = releaseIsPinned ? "Copy the pinned raised-profile command" : "Unavailable until this build contains an exact release commit";
+    copyRaised.onclick = () => copyVisibleCommand(copyRaised, raisedProfileCommand);
+    liveStep.appendChild(copyRaised);
 
     setupStep(5, "Fund the burner last",
       activation.walletFunded
-        ? "The confirmed-chain read reports the burner at or above the first-release rolling daily cap. Keep the balance deliberately small."
+        ? "The confirmed-chain read reports the burner at or above the conservative reserve for its self-reported active trade cap. Keep the balance deliberately small."
         : wallet.address
           ? "Only after the local checks above pass, send SOL from your own wallet to the public address in the final read-only card below."
           : "Wait until the paper heartbeat reports the burner public address. Never enter or upload its private key here.",
@@ -8934,17 +8965,34 @@ async function loadWallsteDashboard({ background = false } = {}) {
     filterCard.appendChild(form);
     el.appendChild(filterCard);
 
-    const caps = status.releaseCaps || {};
+    const caps = capPolicy.active || {};
+    const defaults = capPolicy.canaryDefaults || {};
+    const maxima = capPolicy.operatorMaxima || {};
     const capsCard = dashNode("section", "dashsection");
-    capsCard.appendChild(dashNode("h4", "", "First live release · hard ceilings"));
+    capsCard.appendChild(dashNode("h4", "", "Active local cap policy · self-reported"));
+    capsCard.appendChild(dashNode("p", "dp-note",
+      capPolicy.activeFresh
+        ? "These are the fresh values enforced by the reporting executor. This page cannot change them."
+        : caps.maxSolPerTrade != null
+          ? "These values came from a stale heartbeat. Confirm the current environment on the executor host before relying on them."
+          : "No sanitized active-cap report is available yet. The values below are policy defaults and maxima, not current state."));
     const capsGrid = dashNode("div", "dashgrid");
     capsGrid.append(
-      dashMetric("Per trade", String(caps.maxSolPerTrade ?? "—") + " SOL", "hard ceiling"),
-      dashMetric("24h deployed", String(caps.rolling24hDeploySol ?? "—") + " SOL", "rolling ceiling"),
-      dashMetric("24h loss", String(caps.rolling24hLossSol ?? "—") + " SOL", "hard stop"),
-      dashMetric("Open positions", String(caps.maxOpenPositions ?? "—"), "maximum")
+      dashMetric("Active per trade", caps.maxSolPerTrade == null ? "—" : String(caps.maxSolPerTrade) + " SOL", "entry input ceiling"),
+      dashMetric("Active 24h deploy", caps.rolling24hDeploySol == null ? "—" : String(caps.rolling24hDeploySol) + " SOL", "rolling entry ceiling"),
+      dashMetric("Active loss brake", caps.rolling24hRealizedLossBrakeSol == null ? "—" : String(caps.rolling24hRealizedLossBrakeSol) + " SOL", "blocks later entries after realized loss"),
+      dashMetric("Open positions", String(caps.maxOpenPositions ?? "—"), "concurrent recorded maximum")
     );
     capsCard.appendChild(capsGrid);
+    capsCard.appendChild(dashNode("p", "boundary-note",
+      "The realized-loss value is an entry brake, not a guaranteed loss ceiling: an open position can gap or rug beyond it before an exit lands."));
+    capsCard.appendChild(dashNode("p", "dp-note",
+      "Default canary · " + String(defaults.maxSolPerTrade ?? "—") + " SOL/trade · " +
+      String(defaults.rolling24hDeploySol ?? "—") + " SOL/24h deploy · " +
+      String(defaults.rolling24hRealizedLossBrakeSol ?? "—") + " SOL realized-loss brake. " +
+      "Locally acknowledged v2 maxima · " + String(maxima.maxSolPerTrade ?? "—") + " / " +
+      String(maxima.rolling24hDeploySol ?? "—") + " / " +
+      String(maxima.rolling24hRealizedLossBrakeSol ?? "—") + " SOL. Raised caps are never accepted from this browser or the call feed."));
     el.appendChild(capsCard);
     // Funding is deliberately the final activation surface. It stays read-only and
     // is never placed before the local release, paper-review, and readiness steps.

@@ -52,6 +52,16 @@ check("live mode is explicit", /--live\) MODE="live"/.test(installer) && /EXECUT
 check("live acknowledgement must match the generated public key",
   /LIVE_ACK" != "\$PUBKEY/.test(installer) &&
   /write_env_line LIVE_TRADING_ACK "\$LIVE_ACK"/.test(installer));
+check("raised-cap acknowledgement is freshly typed, wallet-bound, number-bound and versioned",
+  installer.includes('CAPS_ACK_EXPECTED="I acknowledge WALL-ST-E caps v2 for $PUBKEY: $MAX_SOL SOL per trade, $DAILY_CAP SOL per day, $DAILY_LOSS_CAP SOL rolling realized-loss entry brake"') &&
+  /IFS= read -r LIVE_CAPS_ACK < \/dev\/tty/.test(installer) &&
+  /LIVE_CAPS_ACK" != "\$CAPS_ACK_EXPECTED/.test(installer) &&
+  !installer.includes("I raise the live caps for") &&
+  installer.indexOf('PUBKEY="$(cd "$RELEASE_DIR"') < installer.indexOf('CAPS_ACK_EXPECTED="I acknowledge WALL-ST-E caps v2'));
+check("raised-cap acknowledgement is persisted only through the protected environment path",
+  /write_env_line LIVE_CAPS_ACK "\$LIVE_CAPS_ACK"/.test(installer) &&
+  /LIVE_CAPS_ACK="\$LIVE_CAPS_ACK" \\/.test(installer) &&
+  !installer.includes("--live-caps-ack") && !installer.includes("--caps-ack"));
 check("live mode requires two explicit, distinct private HTTPS RPCs",
   /--live requires --rpc-file and --secondary-rpc-file/.test(installer) &&
     /--secondary-rpc must use an independent provider hostname from --rpc/.test(installer) &&
@@ -61,9 +71,117 @@ check("private RPC credentials can stay in owner-only files instead of argv",
   installer.includes("--rpc-file") && installer.includes("--secondary-rpc-file") &&
   /read_private_file "primary RPC"/.test(installer) &&
   /read_private_file "secondary RPC"/.test(installer));
-check("live installer enforces the fixed canary deployment ceilings",
-  /hard-capped at 0\.005 SOL per trade and 0\.01 SOL per rolling 24h/.test(installer) &&
-  /m <= 0\.005 && d <= 0\.01/.test(installer));
+check("live canary defaults cover trade, deployment and realized loss",
+  /LIVE_CANARY_MAX_SOL="0\.005"/.test(installer) &&
+  /LIVE_CANARY_DAILY_CAP="0\.01"/.test(installer) &&
+  /LIVE_CANARY_DAILY_LOSS_CAP="0\.01"/.test(installer) &&
+  /write_env_line DAILY_LOSS_LIMIT_SOL "\$DAILY_LOSS_CAP"/.test(installer));
+check("an optional live raise requires all three explicit numeric cap flags",
+  /--daily-loss-cap\) need_value/.test(installer) &&
+  /MAX_SOL_SET" -ne 1.*DAILY_CAP_SET" -ne 1.*DAILY_LOSS_CAP_SET" -ne 1/.test(installer) &&
+  /raising any live cap requires --max-sol, --daily-cap, and --daily-loss-cap together/.test(installer));
+check("installer matches the poller's immutable operator maxima and daily/trade relation",
+  /LIVE_OPERATOR_MAX_SOL="0\.05"/.test(installer) &&
+  /LIVE_OPERATOR_MAX_DAILY_CAP="0\.5"/.test(installer) &&
+  /LIVE_OPERATOR_MAX_DAILY_LOSS_CAP="0\.15"/.test(installer) &&
+  /BEGIN \{ exit !\(m <= d\) \}/.test(installer));
+
+const capsStart = installer.indexOf("# BEGIN LIVE_CAPS_VALIDATOR");
+const capsEnd = installer.indexOf("# END LIVE_CAPS_VALIDATOR");
+check("installer exposes one reviewed live-cap validator", capsStart >= 0 && capsEnd > capsStart);
+if (capsStart >= 0 && capsEnd > capsStart) {
+  const validator = installer.slice(capsStart, capsEnd);
+  const runCaps = (overrides = {}) => spawnSync("bash", ["-c",
+    `set -euo pipefail\n${validator}\nprintf '%s|%s|%s|%s\\n' "$MAX_SOL" "$DAILY_CAP" "$DAILY_LOSS_CAP" "$CAPS_RAISED"`], {
+    env: {
+      ...process.env,
+      MODE: "live",
+      MAX_SOL: "",
+      DAILY_CAP: "",
+      DAILY_LOSS_CAP: "",
+      MAX_SOL_SET: "0",
+      DAILY_CAP_SET: "0",
+      DAILY_LOSS_CAP_SET: "0",
+      ...overrides,
+    },
+    encoding: "utf8",
+  });
+
+  const defaults = runCaps();
+  check("no live cap flags select the unchanged canary and no raised-cap ceremony",
+    defaults.status === 0 && defaults.stdout.trim() === "0.005|0.01|0.01|0");
+
+  const raised = runCaps({
+    MAX_SOL: "0.05", DAILY_CAP: "0.5", DAILY_LOSS_CAP: "0.15",
+    MAX_SOL_SET: "1", DAILY_CAP_SET: "1", DAILY_LOSS_CAP_SET: "1",
+  });
+  check("all three explicit reviewed values select the raised-cap ceremony",
+    raised.status === 0 && raised.stdout.trim() === "0.05|0.5|0.15|1");
+
+  const exactMinimum = runCaps({
+    MAX_SOL: "0.000001", DAILY_CAP: "0.000001", DAILY_LOSS_CAP: "0.000001",
+    MAX_SOL_SET: "1", DAILY_CAP_SET: "1", DAILY_LOSS_CAP_SET: "1",
+  });
+  check("the poller's exact minimum remains installable",
+    exactMinimum.status === 0 &&
+    exactMinimum.stdout.trim() === "0.000001|0.000001|0.000001|0");
+
+  const belowMinimum = [
+    { MAX_SOL: "0.0000009", DAILY_CAP: "0.01", DAILY_LOSS_CAP: "0.01" },
+    { MAX_SOL: "0.005", DAILY_CAP: "0.0000009", DAILY_LOSS_CAP: "0.01" },
+    { MAX_SOL: "0.005", DAILY_CAP: "0.01", DAILY_LOSS_CAP: "0.0000009" },
+  ].map((values) => runCaps({
+    ...values, MAX_SOL_SET: "1", DAILY_CAP_SET: "1", DAILY_LOSS_CAP_SET: "1",
+  }));
+  check("every money cap enforces the poller's 0.000001 lower bound before installation",
+    belowMinimum.every((result) => result.status !== 0 &&
+      /must be plain decimals at least 0\.000001/.test(result.stderr)));
+
+  const roundedBoundaryLiterals = [
+    { MAX_SOL: "0.00000099999999999999999999", DAILY_CAP: "0.01", DAILY_LOSS_CAP: "0.01" },
+    { MAX_SOL: "0.050000000000000000000000001", DAILY_CAP: "0.5", DAILY_LOSS_CAP: "0.15" },
+    { MAX_SOL: "0.05", DAILY_CAP: "0.500000000000000000000000001", DAILY_LOSS_CAP: "0.15" },
+    { MAX_SOL: "0.05", DAILY_CAP: "0.5", DAILY_LOSS_CAP: "0.150000000000000000000000001" },
+  ].map((values) => runCaps({
+    ...values, MAX_SOL_SET: "1", DAILY_CAP_SET: "1", DAILY_LOSS_CAP_SET: "1",
+  }));
+  check("over-precise cap literals cannot round onto a permitted boundary",
+    roundedBoundaryLiterals.every((result) => result.status !== 0 &&
+      /at most 9 fractional digits/.test(result.stderr)));
+
+  const nonCanonicalLiterals = [".005", "00.005", "1."].map((MAX_SOL) => runCaps({
+    MAX_SOL, DAILY_CAP: "0.01", DAILY_LOSS_CAP: "0.01",
+    MAX_SOL_SET: "1", DAILY_CAP_SET: "1", DAILY_LOSS_CAP_SET: "1",
+  }));
+  check("installer cap grammar exactly matches the runtime's canonical decimal grammar",
+    nonCanonicalLiterals.every((result) => result.status !== 0 &&
+      /must be plain decimals/.test(result.stderr)));
+
+  const partial = runCaps({ MAX_SOL: "0.05", MAX_SOL_SET: "1" });
+  check("a partial live raise fails closed",
+    partial.status !== 0 && /requires --max-sol, --daily-cap, and --daily-loss-cap together/.test(partial.stderr));
+
+  const excessive = [
+    { MAX_SOL: "0.050001", DAILY_CAP: "0.5", DAILY_LOSS_CAP: "0.15" },
+    { MAX_SOL: "0.05", DAILY_CAP: "0.500001", DAILY_LOSS_CAP: "0.15" },
+    { MAX_SOL: "0.05", DAILY_CAP: "0.5", DAILY_LOSS_CAP: "0.150001" },
+  ].map((values) => runCaps({
+    ...values, MAX_SOL_SET: "1", DAILY_CAP_SET: "1", DAILY_LOSS_CAP_SET: "1",
+  }));
+  check("each reviewed operator maximum rejects even a minimal excess",
+    excessive.every((result) => result.status !== 0 && /live caps cannot exceed/.test(result.stderr)));
+
+  const inverted = runCaps({
+    MAX_SOL: "0.02", DAILY_CAP: "0.01", DAILY_LOSS_CAP: "0.01",
+    MAX_SOL_SET: "1", DAILY_CAP_SET: "1", DAILY_LOSS_CAP_SET: "1",
+  });
+  check("daily deployment below one trade fails closed",
+    inverted.status !== 0 && /daily-cap must be greater than or equal to --max-sol/.test(inverted.stderr));
+
+  const lower = runCaps({ MAX_SOL: "0.004", MAX_SOL_SET: "1" });
+  check("a partial lowering remains safe and does not require a raise acknowledgement",
+    lower.status === 0 && lower.stdout.trim() === "0.004|0.01|0.01|0");
+}
 check("Jupiter key is read privately, never accepted as an argv value",
   installer.includes("--jupiter-key-file") && !installer.includes("--jupiter-key)"));
 check("feed secret stays out of argv and the systemd unit",

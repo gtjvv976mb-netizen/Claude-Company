@@ -22,10 +22,11 @@ import { CURRENT_TX_ATTEMPT_PROTOCOL } from "./journal.mjs";
 export const WSOL = "So11111111111111111111111111111111111111112";
 export const MAINNET_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 export const EXECUTION_READINESS_ROUTE = "wsol-usdc";
-// Exercise the full first-release entry boundary. The probe never signs or submits,
-// so using the 0.005-SOL canary ceiling adds no spend risk and prevents ordinary
-// priority fees from looking unsafe only because a tiny synthetic basis was used.
+// Exercise the default canary boundary when no active size is supplied. Live callers
+// pass their configured per-trade cap so a raised-cap process cannot claim readiness
+// from a smaller rehearsal. The probe never signs or submits.
 export const EXECUTION_READINESS_AMOUNT_LAMPORTS = 5_000_000;
+export const EXECUTION_READINESS_MAX_AMOUNT_LAMPORTS = 50_000_000;
 export const EXECUTION_READINESS_RESERVE_LAMPORTS = 10_000_000;
 export const MAX_GROSS_RENT_LAMPORTS = 4_200_000;
 export const WRITABLE_SNAPSHOT_ATTEMPTS = 3;
@@ -1427,18 +1428,22 @@ export class JupiterV2Executor {
   }
 
   /** Exercise the complete execution boundary without creating broadcastable bytes.
-   * The fixed full-canary WSOL→mainnet-USDC route checks Jupiter authentication/order
+   * The active-cap WSOL→mainnet-USDC route checks Jupiter authentication/order
    * construction, ALT/account reads, both independent validators/simulators, and a
    * conservative wallet spend+fee+rent reserve on BOTH views. No signature, journal
    * mutation or /execute request exists anywhere on this path. */
-  async probeExecutionReadiness() {
-    const amountRaw = String(EXECUTION_READINESS_AMOUNT_LAMPORTS);
+  async probeExecutionReadiness({ amountLamports = EXECUTION_READINESS_AMOUNT_LAMPORTS } = {}) {
+    const amount = Number(amountLamports);
+    if (!Number.isSafeInteger(amount) || amount < 1 ||
+        amount > EXECUTION_READINESS_MAX_AMOUNT_LAMPORTS)
+      throw new Error("execution-readiness amount is outside the supported live-cap range");
+    const amountRaw = String(amount);
     const intent = {
       kind: "entry", mint: MAINNET_USDC, inputMint: WSOL, outputMint: MAINNET_USDC,
       amountRaw, context: {},
     };
     const prepared = await this._prepareUnsigned(intent);
-    const requiredLamports = BigInt(EXECUTION_READINESS_AMOUNT_LAMPORTS) +
+    const requiredLamports = BigInt(amount) +
       BigInt(Math.ceil(Number(this.cfg.maxNetworkFeeLamports ?? 500_000))) +
       BigInt(Math.ceil(Number(this.cfg.maxRentLamports ?? MAX_GROSS_RENT_LAMPORTS))) +
       BigInt(EXECUTION_READINESS_RESERVE_LAMPORTS);
@@ -1452,6 +1457,7 @@ export class JupiterV2Executor {
       observedAt,
       route: EXECUTION_READINESS_ROUTE,
       providers: 2,
+      amountLamports: amount,
       providerDivergencePct: prepared.simulation.divergencePct,
       chainHeight: prepared.chainHeight,
       lastValidBlockHeight: Number(prepared.order.lastValidBlockHeight),

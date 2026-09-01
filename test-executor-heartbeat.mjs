@@ -28,14 +28,21 @@ assert.ok(!JSON.stringify(health).includes("must-not-cross"));
 const now = Date.now();
 const ready = sanitizeExecutorHealth({ state: "entries-paused", feedRollback: false,
   executionReadiness: { ready: true, lastSuccessAt: now - 1000, observedAt: now - 1200,
-    route: "wsol-usdc", providers: 2, secret: "readiness-secret-must-not-cross" } });
+    route: "wsol-usdc", providers: 2, amountLamports: 50_000_000,
+    secret: "readiness-secret-must-not-cross" },
+  caps: { maxSolPerTrade: 0.05, dailySolCap: 0.5,
+    dailyLossLimitSol: 0.15, maxOpenPositions: 4, secret: "cap-secret-must-not-cross" } });
 assert.equal(ready.state, "entries-paused");
 assert.equal(ready.feedRollback, false);
 assert.deepEqual(ready.executionReadiness, {
   ready: true, lastSuccessAt: now - 1000, observedAt: now - 1200,
-  route: "wsol-usdc", providers: 2,
+  route: "wsol-usdc", providers: 2, amountLamports: 50_000_000,
+});
+assert.deepEqual(ready.caps, {
+  maxSolPerTrade: 0.05, dailySolCap: 0.5, dailyLossLimitSol: 0.15, maxOpenPositions: 4,
 });
 assert.ok(!JSON.stringify(ready).includes("readiness-secret-must-not-cross"));
+assert.ok(!JSON.stringify(ready).includes("cap-secret-must-not-cross"));
 
 const rollback = sanitizeExecutorHealth({ state: "healthy", feedRollback: true,
   executionReadiness: ready.executionReadiness });
@@ -51,15 +58,27 @@ assert.equal(failedReadiness.state, "degraded",
 const malformed = sanitizeExecutorHealth({ state: "healthy", feedRollback: "false",
   executionReadiness: { ready: true, lastSuccessAt: String(now), observedAt: now,
     route: { secret: "nested-route-secret" }, providers: "2",
-    endpoint: "https://rpc.invalid/private" } });
+    amountLamports: "5000000", endpoint: "https://rpc.invalid/private" },
+  caps: { maxSolPerTrade: "0.005", dailySolCap: 0.01,
+    dailyLossLimitSol: 0.01, maxOpenPositions: 4 } });
 assert.equal(malformed.feedRollback, false, "only a literal boolean is retained");
 assert.deepEqual(malformed.executionReadiness, {
   ready: false, lastSuccessAt: 0, observedAt: now, route: null, providers: 0,
+  amountLamports: 0,
 });
+assert.equal(malformed.caps, null);
 assert.equal(malformed.state, "degraded",
   "malformed rollback/readiness evidence fails status closed");
 assert.ok(!JSON.stringify(malformed).includes("nested-route-secret"));
 assert.ok(!JSON.stringify(malformed).includes("rpc.invalid"));
+
+const subminimumCaps = sanitizeExecutorHealth({ state: "healthy", caps: {
+  maxSolPerTrade: 0.0000009, dailySolCap: 0.01,
+  dailyLossLimitSol: 0.01, maxOpenPositions: 4,
+} });
+assert.equal(subminimumCaps.caps, null);
+assert.equal(subminimumCaps.state, "degraded",
+  "cap telemetry below the runtime minimum cannot persist as healthy");
 
 const nonObjectReadiness = sanitizeExecutorHealth({ state: "healthy",
   executionReadiness: "secret-bearing-invalid-readiness" });
