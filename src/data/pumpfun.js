@@ -64,8 +64,8 @@ export async function deployerProfile(mint) {
 export async function callouts(mint, limit = 20) {
   const r = await getJson(`${BASE}/callout/top/${mint}?limit=${Math.min(50, limit)}`,
     { label: "pumpfun/callouts", timeoutMs: 8000 });
-  const rows = Array.isArray(r.data?.callouts) ? r.data.callouts : [];
-  if (!r.ok || !rows.length) return { ok: false, callouts: [] };
+  if (!r.ok || !Array.isArray(r.data?.callouts)) return { ok: false, callouts: [] };
+  const rows = r.data.callouts;
   return {
     ok: true,
     callouts: rows.map((x) => ({

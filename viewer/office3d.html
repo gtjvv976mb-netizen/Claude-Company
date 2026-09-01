@@ -94,37 +94,6 @@ body{
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(102,163,72,.7)}70%{box-shadow:0 0 0 9px rgba(102,163,72,0)}100%{box-shadow:0 0 0 0 rgba(102,163,72,0)}}
 
 .wrap{position:relative; height:calc(100vh - 58px)}
-/* ── MOBILE: nothing cut, everything reachable, everything smaller ────────
-   The dock was 708px of tabs pinned right — two thirds of it hung off the
-   left edge of a phone. It now spans the width and scrolls sideways under
-   the thumb; the masthead compacts; panels drop a font step. */
-@media (max-width:760px){
-  .dock{left:8px; right:8px; top:10px; justify-content:flex-start;
-    overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; gap:3px}
-  .dock::-webkit-scrollbar{display:none}
-  .dtab{padding:6px 8px; font-size:10px; flex:none}
-  .topbar{padding:8px 12px; gap:10px}
-  .firm{font-size:19px}
-  .topstats{gap:10px}
-  .stat{font-size:10.5px}
-  .stat b{font-size:11.5px}
-  .live{font-size:9.5px}
-  .rail{left:8px; right:8px; width:auto; top:56px; max-height:calc(100% - 66px)}
-  .rail, .rail p, .rail li{font-size:12.5px}
-  .dp-note{font-size:10.5px}
-  .call .nums span{font-size:10.5px}
-  .alertrow{padding:7px 10px; font-size:11px; gap:8px}
-  .alertrow .why{font-size:10px}
-  .hint{font-size:8.5px; letter-spacing:.06em; right:8px}
-  .pulse{display:flex; left:8px; right:8px; bottom:8px; max-width:none;
-    font-size:8.5px; padding:5px 8px; gap:6px}
-  .pulse .preason{display:none}
-  #pulse .pnums{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-  .alertbar{top:50px}
-  .hint{display:none}
-  .memo .sym{font-size:17px}
-  .dossier{left:8px; right:8px; width:auto}
-}
 
 #stage{position:relative; min-width:0; overflow:hidden}
 #stage canvas{display:block; width:100%; height:100%; cursor:grab}
@@ -155,11 +124,13 @@ body{
    when it had nothing to say. It is a pop-up now: the dock is always there, the
    panel only when you ask for it. */
 .dock{
-  position:absolute; right:14px; top:14px; z-index:7; display:flex; gap:5px;
+  position:absolute; right:14px; top:14px; z-index:9; display:flex; gap:4px;
+  max-width:calc(100% - 28px); overflow-x:auto; scrollbar-width:none;
   padding:5px; border-radius:9px;
   background:var(--dock-bg); border:1px solid var(--panel-line);
   backdrop-filter:blur(7px); box-shadow:0 6px 18px var(--shadow);
 }
+.dock::-webkit-scrollbar{display:none}
 .dtab{
   position:relative; text-align:center;
   font:inherit; font-size:11.5px; font-weight:600; letter-spacing:.07em; text-transform:uppercase;
@@ -169,6 +140,9 @@ body{
 .dtab:hover{color:var(--ink); background:var(--panel-line)}
 .dtab[aria-selected="true"]{
   background:var(--amber); border-color:var(--amber); color:#2a2018;
+}
+.dtab:focus-visible,.subtab:focus-visible,.railclose:focus-visible{
+  outline:2px solid var(--amber);outline-offset:2px;
 }
 /* The unread dot USED TO TAKE LAYOUT SPACE, so 'Tape' and 'Calls' sat left of
    centre in their own buttons while every other label was centred. It is a
@@ -180,8 +154,9 @@ body{
 .dtab .dot.on{opacity:1}
 
 .rail{
-  position:absolute; right:14px; top:62px; z-index:5;
-  width:min(348px, calc(100% - 28px)); max-height:calc(100% - 78px);
+  position:absolute; right:14px; top:64px; z-index:8;
+  width:min(700px, calc(100% - 28px)); height:min(760px, calc(100% - 82px));
+  max-height:calc(100% - 82px);
   display:none; flex-direction:column; min-height:0;
   background:var(--panel); border:1px solid var(--panel-line); border-radius:9px;
   box-shadow:0 18px 44px rgba(0,0,0,.42); overflow:hidden;
@@ -202,6 +177,86 @@ body{
   padding:5px 10px; border-radius:5px; border:1px solid var(--panel-line); background:transparent; color:var(--ink-soft); cursor:pointer}
 .tab[aria-selected="true"]{background:var(--teal); color:var(--cream); border-color:var(--teal)}
 .tab:focus-visible{outline:2px solid var(--amber); outline-offset:2px}
+
+/* Eight destinations replace the old ten-tab filing cabinet. The 3D floor remains
+   full-size underneath; this is a wide working rail on desktop and a bottom sheet
+   on phones. Every destination and subview is a real ARIA tab/tabpanel pair. */
+.dashpanel{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column}
+.dashpanel[hidden],.dashsubpanel[hidden]{display:none!important}
+.dashbody{flex:1;min-height:0;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px}
+.dashlead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.dashlead h3{margin:0;font-family:"Instrument Serif",Georgia,serif;font-size:26px;font-weight:400;line-height:1.05}
+.dashlead p{margin:4px 0 0;max-width:560px;color:var(--ink-soft);font-size:12px;line-height:1.5}
+.dashbadge{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;
+  border:1px solid var(--card-line);background:var(--card);font:600 9.5px "JetBrains Mono",monospace;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--ink-soft)}
+.dashbadge.good{color:var(--good);border-color:color-mix(in srgb,var(--good) 48%,var(--card-line))}
+.dashbadge.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 48%,var(--card-line))}
+.dashbadge.bad{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 48%,var(--card-line))}
+.dashgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+.dashmetric{min-width:0;padding:11px 12px;border:1px solid var(--card-line);border-radius:9px;background:var(--card)}
+.dashmetric .k{font:600 9px "JetBrains Mono",monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint)}
+.dashmetric b{display:block;margin-top:5px;font-size:16px;line-height:1.2;overflow-wrap:anywhere}
+.dashmetric small{display:block;margin-top:4px;color:var(--ink-faint);font-size:10.5px;line-height:1.35}
+.dashsection{padding:12px;border:1px solid var(--card-line);border-radius:10px;background:var(--card)}
+.dashsection h4{margin:0 0 8px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint)}
+.dashactions{display:flex;gap:7px;flex-wrap:wrap}
+.dashactions .dp-btn{min-height:31px}
+.subtabs{display:flex;gap:5px;padding:9px 12px;border-bottom:1px solid var(--panel-line);background:var(--card)}
+.subtab{font:600 10px Archivo,system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;
+  padding:6px 10px;border-radius:999px;border:1px solid var(--card-line);background:transparent;color:var(--ink-soft);cursor:pointer}
+.subtab[aria-selected="true"]{background:var(--teal);border-color:var(--teal);color:var(--cream)}
+.dashsubpanel{flex:1;min-height:0;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:9px}
+.boundary-note{padding:10px 12px;border:1px solid color-mix(in srgb,var(--amber) 58%,var(--card-line));
+  border-left:4px solid var(--amber);border-radius:8px;background:color-mix(in srgb,var(--amber) 8%,var(--card));
+  font-size:11.5px;line-height:1.48;color:var(--ink-soft)}
+.boundary-note strong{color:var(--ink)}
+.candidate-tier{display:flex;flex-direction:column;gap:8px;padding:11px;border:1px solid var(--card-line);border-radius:10px;background:var(--card)}
+.candidate-tier-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.candidate-tier-head b{font-family:"Instrument Serif",Georgia,serif;font-size:21px;font-weight:400;text-transform:capitalize}
+.candidate-tier-head span{font:10px "JetBrains Mono",monospace;color:var(--ink-faint)}
+.candidate-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.candidate{min-width:0;padding:9px 10px;border:1px solid var(--panel-line);border-radius:8px;background:var(--panel)}
+.candidate.empty-slot{min-height:70px;display:grid;place-content:center;text-align:center;color:var(--ink-faint);border-style:dashed;font-size:10.5px}
+.candidate-head{display:flex;align-items:center;gap:7px;min-width:0}
+.candidate-head b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.candidate-rank{font:700 10px "JetBrains Mono",monospace;color:var(--amber)}
+.candidate-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;font:10px "JetBrains Mono",monospace;color:var(--ink-faint)}
+.candidate-meta strong{color:var(--ink);font-weight:500}
+.candidate-why{margin:7px 0 0;color:var(--ink-soft);font-size:10.5px;line-height:1.4}
+.candidate-link{font-size:10px;color:var(--teal);text-decoration:none}
+.candidate-link:hover{text-decoration:underline}
+.wallste-grid,.settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.statusline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px}
+.statusdot{width:9px;height:9px;border-radius:50%;background:var(--ink-faint)}
+.statusdot.good{background:var(--good)}.statusdot.warn{background:var(--warn)}.statusdot.bad{background:var(--bad)}
+.checklist{display:flex;flex-direction:column;gap:7px;margin:0;padding:0;list-style:none}
+.checklist li{display:flex;align-items:flex-start;gap:8px;font-size:11.5px;line-height:1.4}
+.checklist i{font-style:normal;width:18px;flex:none;text-align:center;color:var(--ink-faint)}
+.checklist li.done i{color:var(--good)}.checklist li.warn i{color:var(--warn)}
+.setup-steps{display:flex;flex-direction:column;gap:8px;margin-top:9px}
+.setup-step{display:grid;grid-template-columns:28px minmax(0,1fr);gap:9px;padding:10px;
+  border:1px solid var(--card-line);border-radius:9px;background:var(--panel)}
+.setup-step .n{width:25px;height:25px;display:grid;place-content:center;border-radius:50%;
+  background:var(--amber);color:#2a2018;font:700 10px "JetBrains Mono",monospace}
+.setup-step.done .n{background:var(--good);color:#fff}
+.setup-step h5{margin:1px 0 4px;font-size:12px}.setup-step p{margin:0;color:var(--ink-soft);font-size:11px;line-height:1.45}
+.commandbox{margin-top:7px;padding:8px;border:1px dashed var(--card-line);border-radius:7px;
+  background:var(--card);font:9.5px/1.5 "JetBrains Mono",monospace;overflow-wrap:anywhere;white-space:pre-wrap}
+.commandcopy{margin-top:6px}
+.held-list{display:flex;flex-direction:column;gap:5px;margin-top:7px}
+.held-list .datarow{padding:6px 8px}
+.secretbox{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:8px;border:1px dashed var(--card-line);border-radius:7px;background:var(--panel)}
+.secretbox code{flex:1;min-width:170px;font:10.5px "JetBrains Mono",monospace;overflow-wrap:anywhere}
+.fieldgroup{display:flex;flex-direction:column;gap:5px}
+.fieldgroup label{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-faint);font-weight:600}
+.fieldgroup .dp-in{width:100%}
+.form-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;grid-column:1/-1}
+.callout-card{padding:10px 11px;border:1px solid var(--card-line);border-radius:9px;background:var(--card)}
+.callout-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.callout-head .who{font-weight:700}.callout-head .coin{margin-left:auto;font:600 10px "JetBrains Mono",monospace;color:var(--ink-faint)}
+.callout-evidence{margin:7px 0 0;color:var(--ink-soft);font-size:11.5px;line-height:1.45}
+.callout-proof{display:flex;gap:7px;flex-wrap:wrap;margin-top:7px;font:10px "JetBrains Mono",monospace;color:var(--ink-faint)}
 
 .tape{flex:1; min-height:0; overflow-y:auto; padding:12px 14px; font-family:"JetBrains Mono",ui-monospace,monospace; font-size:12.5px; line-height:1.7}
 .tape .row{display:flex; gap:8px; padding:2px 0; border-bottom:1px dotted var(--panel-line)}
@@ -244,7 +299,9 @@ body{
      personnel file's head. Sized to its content now, capped with an inner scroll. */
   position:absolute; right:16px; top:60px; max-height:calc(100% - 76px);
   width:min(330px, calc(100% - 32px));
-  z-index:7; display:none; flex-direction:column; overflow:hidden;
+  /* Call dossiers can be opened from inside the dashboard rail, so the file must
+     sit above both the rail (8) and its dock (9), including on the mobile sheet. */
+  z-index:12; display:none; flex-direction:column; overflow:hidden;
   background:var(--card); color:var(--ink);
   border:1px solid var(--card-line); border-radius:3px;
   box-shadow:0 18px 44px rgba(0,0,0,.42), 0 1px 0 rgba(255,255,255,.05) inset;
@@ -465,6 +522,44 @@ select.dp-in{cursor:pointer}
    advances while the Crew tab is open. */
 .legend i.turn{background-repeat:no-repeat; background-position:0 0}
 .note{padding:0 13px 13px; font-size:11.5px; color:var(--ink-faint); border-top:1px solid var(--panel-line); line-height:1.5}
+
+/* ── MOBILE: nothing cut, everything reachable, everything smaller ────────
+   Keep this block after the base dashboard rules so the bottom dock does not
+   inherit the desktop top edge and stretch vertically across the viewport. */
+@media (max-width:760px){
+  .dock{left:8px; right:8px; top:auto; bottom:8px; justify-content:flex-start;
+    overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; gap:3px}
+  .dock::-webkit-scrollbar{display:none}
+  .dtab{padding:8px 10px; font-size:9.5px; flex:none; min-height:40px}
+  .topbar{padding:8px 12px; gap:10px}
+  .firm{font-size:19px}
+  .topstats{gap:10px}
+  .stat{font-size:10.5px}
+  .stat b{font-size:11.5px}
+  .live{font-size:9.5px}
+  .rail{left:8px; right:8px; width:auto; top:auto; bottom:58px;
+    height:min(74vh,680px); max-height:calc(100% - 72px); border-radius:18px 18px 10px 10px}
+  .rail, .rail p, .rail li{font-size:12.5px}
+  .railhead{padding:12px 14px}
+  .dashbody{padding:11px}
+  .dashgrid,.candidate-grid,.settings-grid,.wallste-grid{grid-template-columns:1fr!important}
+  .subtabs{overflow-x:auto;scrollbar-width:none}
+  .subtabs::-webkit-scrollbar{display:none}
+  .subtab{flex:0 0 auto}
+  .dp-note{font-size:10.5px}
+  .call .nums span{font-size:10.5px}
+  .alertrow{padding:7px 10px; font-size:11px; gap:8px}
+  .alertrow .why{font-size:10px}
+  .hint{font-size:8.5px; letter-spacing:.06em; right:8px}
+  .pulse{display:flex; left:8px; right:8px; bottom:62px; max-width:none;
+    font-size:8.5px; padding:5px 8px; gap:6px}
+  .pulse .preason{display:none}
+  #pulse .pnums{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .alertbar{top:50px}
+  .hint{display:none}
+  .memo .sym{font-size:17px}
+  .dossier{left:8px; right:8px; width:auto}
+}
 </style>
 
 <script>
@@ -481,6 +576,7 @@ select.dp-in{cursor:pointer}
 <div class="topbar">
   <a class="firm" href="/" style="text-decoration:none;color:inherit" title="Back to the homepage">Claude <em>Company</em></a>
   <a class="backchip" href="/tower" title="Back to the building">← Tower</a>
+  <button class="shift" id="shiftbtn" type="button" aria-label="Switch between day and night shift" title="Switch the floor's lighting">☾</button>
   <div class="tag" id="s-floortag">The Aye-Team · The House Desk</div>
   <div class="spacer"></div>
   <div class="topstats">
@@ -516,39 +612,102 @@ select.dp-in{cursor:pointer}
     <span class="pnums" id="pulse-nums"></span>
     <span class="preason" id="pulse-reason"></span>
   </div>
-  <div class="dock" role="tablist" aria-label="Floor panels">
-    <button class="dtab" id="tab-tape" role="tab" aria-selected="false">Tape<span class="dot" id="tape-dot"></span></button>
-    <button class="dtab" id="tab-inbox" role="tab" aria-selected="false">Big C</button>
-    <button class="dtab" id="tab-calls" role="tab" aria-selected="false">Team</button>
-    <button class="dtab" id="tab-live" role="tab" aria-selected="false">Calls<span class="dot" id="live-dot"></span></button>
-    <button class="dtab" id="tab-desk" role="tab" aria-selected="false">Desk</button>
-    <button class="dtab" id="tab-crew" role="tab" aria-selected="false">Crew</button>
-    <button class="dtab" id="tab-whales" role="tab" aria-selected="false">Whales<span class="dot" id="whale-dot"></span></button>
-    <button class="dtab" id="tab-stats" role="tab" aria-selected="false">Stats</button>
-    <button class="dtab" id="tab-ranks" role="tab" aria-selected="false">Ranks</button>
-    <button class="dtab" id="tab-ledger" role="tab" aria-selected="false">Ledger</button>
-    <button class="dtab" id="shiftbtn" type="button" aria-label="Switch between day and night shift" title="Switch the floor's lighting">&#x263E;</button>
+  <div class="dock" id="primary-nav" role="tablist" aria-label="Floor dashboard destinations">
+    <button class="dtab" id="dash-tab-overview" role="tab" aria-controls="overviewpanel" aria-selected="false" tabindex="0" data-destination="overview">Overview</button>
+    <button class="dtab" id="dash-tab-calls" role="tab" aria-controls="callsworkspace" aria-selected="false" tabindex="-1" data-destination="calls">Calls<span class="dot" id="live-dot"></span></button>
+    <button class="dtab" id="dash-tab-wallste" role="tab" aria-controls="wallstepanel" aria-selected="false" tabindex="-1" data-destination="wallste">WALL-ST-E</button>
+    <button class="dtab" id="dash-tab-team" role="tab" aria-controls="teampanel" aria-selected="false" tabindex="-1" data-destination="team">Team</button>
+    <button class="dtab" id="dash-tab-callouts" role="tab" aria-controls="calloutspanel" aria-selected="false" tabindex="-1" data-destination="callouts">Callouts<span class="dot" id="whale-dot"></span></button>
+    <button class="dtab" id="dash-tab-activity" role="tab" aria-controls="activityworkspace" aria-selected="false" tabindex="-1" data-destination="activity">Activity<span class="dot" id="tape-dot"></span></button>
+    <button class="dtab" id="dash-tab-performance" role="tab" aria-controls="performanceworkspace" aria-selected="false" tabindex="-1" data-destination="performance">Performance</button>
+    <button class="dtab" id="dash-tab-settings" role="tab" aria-controls="settingspanel" aria-selected="false" tabindex="-1" data-destination="settings">Settings</button>
   </div>
 
-  <aside class="rail" id="rail">
+  <!-- Kept solely so older module-local event wiring can initialize without a
+       null dereference. These controls never enter the accessibility tree and no
+       visible destination dispatches through their legacy duplicate handlers. -->
+  <div hidden aria-hidden="true">
+    <button id="tab-tape"></button><button id="tab-inbox"></button>
+    <button id="tab-calls"></button><button id="tab-live"></button>
+    <button id="tab-desk"></button><button id="tab-crew"></button>
+    <button id="tab-whales"></button><button id="tab-stats"></button>
+    <button id="tab-ranks"></button><button id="tab-ledger"></button>
+  </div>
+
+  <aside class="rail" id="rail" aria-label="Floor dashboard">
     <div class="railhead">
-      <h2 id="rail-title">The Tape</h2>
-      <button class="railclose" id="rail-close" aria-label="Close">✕</button>
+      <div>
+        <div class="dp-h">Floor dashboard</div>
+        <h2 id="rail-title">Overview</h2>
+      </div>
+      <button class="railclose" id="rail-close" aria-label="Close dashboard">✕</button>
     </div>
-    <div class="tape" id="tape"></div>
-    <div class="inbox" id="inbox"></div>
-    <div class="deskpanel" id="deskpanel"></div>
-    <div class="callspanel" id="callspanel"></div>
-    <div class="callspanel" id="livepanel"></div>
-    <div class="datapanel" id="whalespanel"></div>
-    <div class="datapanel" id="statspanel"></div>
-    <div class="datapanel" id="rankspanel"></div>
-    <div class="datapanel" id="ledgerpanel"></div>
-    <div class="crewpanel" id="crewpanel">
-      <div class="legend" id="legend"></div>
-      <p class="note">Every figure is one agent. They move because a pipeline stage actually
-        started or finished — not on a timer. Research only: nothing here is executed.
-        Click any agent to open their file.</p>
+
+    <section class="dashpanel" id="overviewpanel" role="tabpanel" aria-labelledby="dash-tab-overview" tabindex="0" hidden>
+      <div class="dashbody" id="overviewbody"></div>
+    </section>
+
+    <section class="dashpanel" id="callsworkspace" role="tabpanel" aria-labelledby="dash-tab-calls" tabindex="0" hidden>
+      <div class="subtabs" role="tablist" aria-label="Calls views">
+        <button class="subtab" id="calls-tab-candidates" role="tab" aria-controls="candidatepanel" aria-selected="true" tabindex="0" data-calls-view="candidates">Candidates</button>
+        <button class="subtab" id="calls-tab-published" role="tab" aria-controls="livepanel" aria-selected="false" tabindex="-1" data-calls-view="published">Published</button>
+        <button class="subtab" id="calls-tab-closed" role="tab" aria-controls="closedpanel" aria-selected="false" tabindex="-1" data-calls-view="closed">Closed / Killed</button>
+      </div>
+      <div class="dashsubpanel" id="candidatepanel" role="tabpanel" aria-labelledby="calls-tab-candidates"></div>
+      <div class="callspanel dashsubpanel" id="livepanel" role="tabpanel" aria-labelledby="calls-tab-published" hidden></div>
+      <div class="dashsubpanel" id="closedpanel" role="tabpanel" aria-labelledby="calls-tab-closed" hidden></div>
+    </section>
+
+    <section class="dashpanel" id="wallstepanel" role="tabpanel" aria-labelledby="dash-tab-wallste" tabindex="0" hidden>
+      <div class="dashbody" id="wallstebody"></div>
+    </section>
+
+    <section class="dashpanel" id="teampanel" role="tabpanel" aria-labelledby="dash-tab-team" tabindex="0" hidden>
+      <div class="dashbody">
+        <div class="dashlead"><div><h3>Your team</h3><p>Shift, Managing Director brain, and the people working each bounded seat.</p></div></div>
+        <div id="teamcontrolpanel"></div>
+        <div class="crewpanel on" id="crewpanel">
+          <div class="legend" id="legend"></div>
+          <p class="note">Every figure is one agent. Movement reflects a real pipeline stage, not a timer. Research only: no agent here can sign or execute a trade. Select a portrait to open its file.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="dashpanel" id="calloutspanel" role="tabpanel" aria-labelledby="dash-tab-callouts" tabindex="0" hidden>
+      <div class="dashbody" id="calloutsbody"></div>
+    </section>
+
+    <section class="dashpanel" id="activityworkspace" role="tabpanel" aria-labelledby="dash-tab-activity" tabindex="0" hidden>
+      <div class="subtabs" role="tablist" aria-label="Activity views">
+        <button class="subtab" id="activity-tab-tape" role="tab" aria-controls="tape" aria-selected="true" tabindex="0" data-activity-view="tape">Tape</button>
+        <button class="subtab" id="activity-tab-decisions" role="tab" aria-controls="inbox" aria-selected="false" tabindex="-1" data-activity-view="decisions">Decisions</button>
+        <button class="subtab" id="activity-tab-ledger" role="tab" aria-controls="ledgerpanel" aria-selected="false" tabindex="-1" data-activity-view="ledger">Ledger</button>
+      </div>
+      <div class="tape dashsubpanel" id="tape" role="tabpanel" aria-labelledby="activity-tab-tape"></div>
+      <div class="inbox dashsubpanel" id="inbox" role="tabpanel" aria-labelledby="activity-tab-decisions" hidden></div>
+      <div class="datapanel dashsubpanel" id="ledgerpanel" role="tabpanel" aria-labelledby="activity-tab-ledger" hidden></div>
+    </section>
+
+    <section class="dashpanel" id="performanceworkspace" role="tabpanel" aria-labelledby="dash-tab-performance" tabindex="0" hidden>
+      <div class="subtabs" role="tablist" aria-label="Performance views">
+        <button class="subtab" id="performance-tab-building" role="tab" aria-controls="statspanel" aria-selected="true" tabindex="0" data-performance-view="building">Building</button>
+        <button class="subtab" id="performance-tab-ranks" role="tab" aria-controls="rankspanel" aria-selected="false" tabindex="-1" data-performance-view="ranks">Leaderboard</button>
+      </div>
+      <div class="datapanel dashsubpanel" id="statspanel" role="tabpanel" aria-labelledby="performance-tab-building"></div>
+      <div class="datapanel dashsubpanel" id="rankspanel" role="tabpanel" aria-labelledby="performance-tab-ranks" hidden></div>
+    </section>
+
+    <section class="dashpanel" id="settingspanel" role="tabpanel" aria-labelledby="dash-tab-settings" tabindex="0" hidden>
+      <div class="dashbody" id="settingsbody"></div>
+    </section>
+
+    <!-- Legacy rendering targets retained off-screen for loaders that still keep
+         the HUD and 3D boards current. They are not destinations and cannot be
+         opened from the new navigation. -->
+    <div hidden aria-hidden="true">
+      <div class="deskpanel" id="deskpanel"></div>
+      <div class="callspanel" id="callspanel"></div>
+      <div class="datapanel" id="whalespanel"></div>
     </div>
   </aside>
 </div>
@@ -4353,8 +4512,8 @@ function openDossier(seatId) {
     const mBtn = document.createElement("button");
     mBtn.className = "dp-btn ghost";
     mBtn.style.marginTop = "6px";
-    mBtn.textContent = "\u2699 Manage him in the Team tab";
-    mBtn.onclick = () => { closeDossier(); document.getElementById("tab-calls")?.click(); };
+    mBtn.textContent = "\u2699 Open WALL-ST-E status";
+    mBtn.onclick = () => { closeDossier(); window.showDashboard?.("wallste"); };
     dBodyEl.appendChild(mBtn);
   }
 
@@ -4842,14 +5001,9 @@ function paintInboxSummary(lastSym) {
 }
 inboxEl.innerHTML = `<p class="empty">Nothing on BIG C's desk yet.<br>Authorised orders land here.</p>`;
 
-document.getElementById("tab-tape").onclick = () => switchTab(true);
-document.getElementById("tab-inbox").onclick = () => switchTab(false);
-function switchTab(showTape) {
-  tapeEl.classList.toggle("off", !showTape);
-  inboxEl.classList.toggle("on", !showTape);
-  document.getElementById("tab-tape").setAttribute("aria-selected", String(showTape));
-  document.getElementById("tab-inbox").setAttribute("aria-selected", String(!showTape));
-}
+/* The visible dashboard router owns Tape/Decisions selection. The hidden legacy
+ * buttons receive one compatibility handler in the later module; keeping the old
+ * direct onclick pair here as well caused both routers to mutate the same panes. */
 const legendEl = document.getElementById("legend");
 const legendTiles = {};
 for (const s of STAFF) {
@@ -5869,57 +6023,84 @@ const tapeEl2 = document.getElementById("tape");
 
 const RAIL = document.getElementById("rail");
 const RAIL_TITLE = document.getElementById("rail-title");
-const PANE_TITLE = { tape: "The Tape", inbox: "Big C", desk: "My Desk", calls: "Your Trading Team",
-  live: "Live Calls", crew: "The Aye-Team",
-  whales: "Whale Callouts", stats: "The Building's Books", ranks: "The Leaderboard", ledger: "The Record Book" };
-const PANE_TABS = { tape: "tab-tape", inbox: "tab-inbox", desk: "tab-desk", calls: "tab-calls",
-  live: "tab-live", crew: "tab-crew",
-  whales: "tab-whales", stats: "tab-stats", ranks: "tab-ranks", ledger: "tab-ledger" };
+const DASHBOARD_TITLE = { overview: "Overview", calls: "Calls", wallste: "WALL-ST-E",
+  team: "Team", callouts: "Callouts", activity: "Activity", performance: "Performance", settings: "Settings" };
+const DASHBOARD_PANEL = { overview: "overviewpanel", calls: "callsworkspace", wallste: "wallstepanel",
+  team: "teampanel", callouts: "calloutspanel", activity: "activityworkspace",
+  performance: "performanceworkspace", settings: "settingspanel" };
+const primaryTabs = [...document.querySelectorAll("#primary-nav [role=tab][data-destination]")];
 let openPane = null;
 
-function showPane(which) {
-  // The old version never cleared the calls panel, so switching Calls -> Tape left
-  // both stacked in the same box.
-  tapeEl2.classList.toggle("off", which !== "tape");
-  inboxEl2.classList.toggle("on", which === "inbox");
-  panel.classList.toggle("on", which === "desk");
-  document.getElementById("callspanel").classList.toggle("on", which === "calls");
-  document.getElementById("livepanel").classList.toggle("on", which === "live");
-  document.getElementById("crewpanel").classList.toggle("on", which === "crew");
-  for (const pane of ["whales", "stats", "ranks", "ledger"])
-    document.getElementById(pane + "panel").classList.toggle("on", which === pane);
-
-  for (const [pane, id] of Object.entries(PANE_TABS))
-    document.getElementById(id).setAttribute("aria-selected", String(pane === which));
-
-  RAIL_TITLE.textContent = PANE_TITLE[which] || "The Floor";
+function showDashboard(which, { focus = false, force = false } = {}) {
+  if (!DASHBOARD_PANEL[which]) which = "overview";
+  if (!force && openPane === which && RAIL.classList.contains("open")) return;
+  for (const [name, id] of Object.entries(DASHBOARD_PANEL)) {
+    const pane = document.getElementById(id);
+    if (pane) pane.hidden = name !== which;
+  }
+  for (const tab of primaryTabs) {
+    const selected = tab.dataset.destination === which;
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+  }
+  RAIL_TITLE.textContent = DASHBOARD_TITLE[which] || "Floor dashboard";
   RAIL.classList.add("open");
   openPane = which;
+  window.__loadDashboardDestination?.(which);
+  if (focus) document.getElementById(DASHBOARD_PANEL[which])?.focus({ preventScroll: true });
 }
 
 function closeRail() {
+  const closingPane = openPane;
+  const returnFocus = RAIL.contains(document.activeElement);
   RAIL.classList.remove("open");
   openPane = null;
-  for (const id of Object.values(PANE_TABS)) document.getElementById(id).setAttribute("aria-selected", "false");
+  for (const [index, tab] of primaryTabs.entries()) {
+    tab.setAttribute("aria-selected", "false");
+    tab.tabIndex = closingPane ? (tab.dataset.destination === closingPane ? 0 : -1) : (index === 0 ? 0 : -1);
+  }
+  if (returnFocus && closingPane)
+    document.getElementById("dash-tab-" + closingPane)?.focus({ preventScroll: true });
 }
 
-/** A dock tab toggles: pressing the one already showing puts the room back. */
+/** Compatibility adapter for old module-local hooks. Visible navigation never
+ * dispatches through it, which removes the duplicate Tape/Calls handler race. */
 function togglePane(which, onOpen) {
-  if (openPane === which) { closeRail(); return; }
-  showPane(which);
+  const legacy = {
+    tape: ["activity", "activity", "tape"], inbox: ["activity", "activity", "decisions"],
+    desk: ["settings"], calls: ["team"], live: ["calls", "calls", "published"],
+    crew: ["team"], whales: ["callouts"], stats: ["performance", "performance", "building"],
+    ranks: ["performance", "performance", "ranks"], ledger: ["activity", "activity", "ledger"],
+  }[which] || [which];
+  showDashboard(legacy[0]);
+  if (legacy[1]) window.__activateDashboardSubview?.(legacy[1], legacy[2]);
   if (onOpen) onOpen();
 }
 
 document.getElementById("rail-close").addEventListener("click", closeRail);
-document.getElementById("tab-crew").addEventListener("click", () => togglePane("crew"));
-for (const pane of ["whales", "stats", "ranks", "ledger"])
-  document.getElementById("tab-" + pane).addEventListener("click", () =>
-    togglePane(pane, () => window["load_" + pane]?.()));
-// Three separate module scripts share this page, and module scope does not carry
-// between them — the old Calls handler duplicated the pane logic for exactly this
-// reason. The dock helpers go on window so the other scripts can reach them.
+RAIL.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  event.preventDefault();
+  closeRail();
+});
+primaryTabs.forEach((tab, index) => {
+  tab.addEventListener("click", () => showDashboard(tab.dataset.destination, { focus: false }));
+  tab.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === "Home" ? 0 : event.key === "End" ? primaryTabs.length - 1
+      : (index + (event.key === "ArrowRight" ? 1 : -1) + primaryTabs.length) % primaryTabs.length;
+    primaryTabs[next].focus();
+    showDashboard(primaryTabs[next].dataset.destination);
+  });
+});
+
+// Three module scripts share the file, so dashboard coordination is deliberately
+// exported through one narrow global surface.
 window.togglePane = togglePane;
-window.showPane = showPane;
+window.showPane = togglePane;
+window.showDashboard = showDashboard;
+window.closeDashboard = closeRail;
 tabDesk.addEventListener("click", () => togglePane("desk", loadRoom));
 tabTape.addEventListener("click", () => togglePane("tape"));
 tabInbox.addEventListener("click", () => togglePane("inbox"));
@@ -6125,15 +6306,15 @@ function renderRoom() {
    the pinned hunt addresses. This used to be scattered on the Desk; the Team
    tab renders it into its own box via window.__renderTeamInto. Fetches fresh
    floor state each call and re-renders itself after every change. */
-async function renderTeamInto(el) {
+async function renderTeamInto(el, { includeBot = true } = {}) {
   const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
-  const refresh = () => renderTeamInto(el);
+  const refresh = () => renderTeamInto(el, { includeBot });
   /* The strip shows a LIVE age ("self-reported 42s ago") — a render that never
    * refreshes turns that into a lie within a minute. Re-render on the heartbeat
    * cadence while the panel is on screen; the timer rides the element so pane
    * switches and re-renders never stack timers. */
   clearTimeout(el.__teamTimer);
-  el.__teamTimer = setTimeout(() => { if (el.isConnected) renderTeamInto(el); }, 60_000);
+  el.__teamTimer = setTimeout(() => { if (el.isConnected) renderTeamInto(el, { includeBot }); }, 60_000);
   el.innerHTML = "";
   if (FLOOR == null) { el.appendChild(mk("p", "locked", "No floor in this address.")); return; }
   let R;
@@ -6210,7 +6391,7 @@ async function renderTeamInto(el) {
     cBot.appendChild(mk("span", "tv", "○ local status not linked"));
     cBot.appendChild(mk("span", "dp-note", "Check the machine running the poller"));
   }
-  strip.appendChild(cBot);
+  if (includeBot) strip.appendChild(cBot);
 
   // 2. the shift — with the toggle and cadence inline
   const cShift = mk("div", "tchip");
@@ -6496,8 +6677,11 @@ async function loadCalls({ liveOnly = false, hudOnly = false } = {}) {
       paintHud({ feed: body.feed, settings: body.settings, budget: BUDGET, rent: body.rent });
       return;
     }
-    renderCalls(body, { liveOnly });
-    renderLive(body);
+    // The former Team panel is retained only as an off-screen compatibility target.
+    // Do not render owner credentials into hidden DOM; the new Team and WALL-ST-E
+    // destinations request only the data they need when the owner opens them.
+    if (!callsPanel.closest("[hidden]")) renderCalls(body, { liveOnly });
+    if (!window.__dashboardCallsView) renderLive(body);
     window.__grokBoardUpdate?.(body.feed || []);      // Grok's own board, same book
     paintHud({ feed: body.feed, settings: body.settings, budget: BUDGET, rent: body.rent });
   } catch (e) {
@@ -7616,7 +7800,7 @@ async function openCallDossier(callId) {
 }
 window.openCallDossier = openCallDossier;
 
-/* ── whale callouts: who is actually taking size, and which way ─────────── */
+/* ── legacy flow cards: current-value token movement, never purchase cost ─ */
 const whaleCache = new Map();
 async function loadWhales(mint, el) {
   /* A 2-minute TTL, matching the server's own callout cache. Caching forever meant a
@@ -7646,7 +7830,7 @@ function paintWhales(w, el) {
     const r = document.createElement("div");
     r.className = "wh-row " + t.side;
     const short = t.wallet.slice(0, 4) + "…" + t.wallet.slice(-4);
-    r.textContent = `${t.side === "buy" ? "▲ bought" : "▼ sold"} $${Math.round(t.usd).toLocaleString()} · ${short}`;
+    r.textContent = `${t.side === "buy" ? "▲ token inflow" : "▼ token outflow"} · ~$${Math.round(t.usd).toLocaleString()} current value · ${short}`;
     el.appendChild(r);
   }
 }
@@ -7674,7 +7858,7 @@ window.load_whales = async () => {
   const el = document.getElementById("whalespanel");
   el.innerHTML = "";
   const h = document.createElement("p"); h.className = "dp-note";
-  h.textContent = "What the whales are SAYING. Pump.fun callouts on the coins whales just sized into — tap a quote to open the callout itself. Flow below.";
+  h.textContent = "Matched Pump.fun callers. Exact author wallets joined to recent confirmed pool-touching token inflows; values use the current market mark, not reconstructed purchase cost.";
   el.appendChild(h);
   try {
     const [co, fe] = await Promise.all([
@@ -7713,7 +7897,7 @@ window.load_whales = async () => {
         const meta = document.createElement("span");
         meta.className = "faint";
         const bits = [];
-        if (q.whaleUsd > 0) bits.push(`bought ${money(q.whaleUsd)}`);
+        if (q.whaleUsd > 0) bits.push(`matched inflow now valued at ${money(q.whaleUsd)}`);
         if (q.username) bits.push("@" + q.username);
         if (q.multiple != null && q.multiple >= 2) bits.push(`${q.multiple >= 10 ? Math.round(q.multiple) : q.multiple.toFixed(1)}× since`);
         meta.textContent = bits.length ? ` · ${bits.join(" · ")} · ` : " · ";
@@ -7724,13 +7908,13 @@ window.load_whales = async () => {
         row.append(who, meta, words, out);
         card.appendChild(row);
       };
-      (c.whales || []).forEach((q, i) => quoteRow(q, `🐋 Whale #${i + 1}`, false));
+      (c.whales || []).forEach((q, i) => quoteRow(q, `Matched caller #${i + 1}`, false));
       (c.chatter || []).forEach((q) => quoteRow(q, "💬 callout", true));
       el.appendChild(card);
     }
     if (!coins.length) {
       const n = document.createElement("p"); n.className = "dp-note";
-      n.textContent = "No whale voices caught this pass — threads are read live off the coins whales most recently sized into.";
+      n.textContent = "No matched caller evidence in the successfully checked threads this pass.";
       el.appendChild(n);
     }
     // The flow ledger the tab used to be: still the receipts under the quotes.
@@ -7743,7 +7927,7 @@ window.load_whales = async () => {
     }
     const fh = document.createElement("p"); fh.className = "dp-note";
     fh.style.marginTop = "10px";
-    fh.textContent = "Size taken — distinct wallets, net of the pool's own mirrored side.";
+    fh.textContent = "Current-value token flow — distinct wallets, net of the pool's mirrored side; not purchase consideration.";
     el.appendChild(fh);
     for (const w of rows) {
       const r = drow([
@@ -7878,12 +8062,1180 @@ function ordC(n) {
   return n + (h >= 11 && h <= 13 ? "th" : t === 1 ? "st" : t === 2 ? "nd" : t === 3 ? "rd" : "th") + " Floor";
 }
 
+/* ═══ EIGHT-DESTINATION FLOOR DASHBOARD ═══════════════════════════════════
+   This layer composes the existing loaders into one navigable work surface.
+   It never changes the 3D scene and deliberately keeps candidates, published
+   calls, local execution telemetry, and settled performance in separate views. */
+const dashNode = (tag, cls, text) => {
+  const el = document.createElement(tag);
+  if (cls) el.className = cls;
+  if (text != null) el.textContent = String(text);
+  return el;
+};
+const dashCompact = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
+const dashMoney = (value) => value == null || !Number.isFinite(Number(value))
+  ? "—" : "$" + dashCompact.format(Number(value));
+const dashAge = (ms) => {
+  if (ms == null || !Number.isFinite(Number(ms))) return "never";
+  const seconds = Math.max(0, Math.round(Number(ms) / 1000));
+  return seconds < 90 ? seconds + "s ago"
+    : seconds < 5400 ? Math.round(seconds / 60) + "m ago"
+    : Math.round(seconds / 3600) + "h ago";
+};
+const dashFuture = (timestamp) => {
+  const remaining = Number(timestamp) - Date.now();
+  if (!Number.isFinite(remaining)) return "—";
+  if (remaining <= 0) return "due now";
+  const hours = Math.ceil(remaining / 3600000);
+  return hours < 48 ? "in " + hours + "h" : "in " + Math.ceil(hours / 24) + "d";
+};
+const dashLoading = (el, text) => {
+  el.innerHTML = "";
+  el.setAttribute("aria-busy", "true");
+  el.appendChild(dashNode("p", "locked", text || "Loading…"));
+};
+const dashReady = (el) => el.removeAttribute("aria-busy");
+const dashLead = (title, copy, badge, badgeClass) => {
+  const lead = dashNode("div", "dashlead");
+  const words = dashNode("div");
+  words.append(dashNode("h3", "", title), dashNode("p", "", copy));
+  lead.appendChild(words);
+  if (badge) lead.appendChild(dashNode("span", "dashbadge " + (badgeClass || ""), badge));
+  return lead;
+};
+const dashMetric = (key, value, note) => {
+  const card = dashNode("div", "dashmetric");
+  card.append(dashNode("span", "k", key), dashNode("b", "", value));
+  if (note) card.appendChild(dashNode("small", "", note));
+  return card;
+};
+const dashboardSubview = { calls: "candidates", activity: "tape", performance: "building" };
+
+function activateDashboardSubview(group, view, { focus = false } = {}) {
+  const buttons = [...document.querySelectorAll("[data-" + group + "-view]")];
+  const chosen = buttons.some((button) => button.getAttribute("data-" + group + "-view") === view)
+    ? view : buttons[0]?.getAttribute("data-" + group + "-view");
+  if (!chosen) return;
+  dashboardSubview[group] = chosen;
+  if (group === "calls") window.__dashboardCallsView = chosen;
+  for (const button of buttons) {
+    const selected = button.getAttribute("data-" + group + "-view") === chosen;
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+    const panel = document.getElementById(button.getAttribute("aria-controls"));
+    if (!panel) continue;
+    panel.hidden = !selected;
+    panel.classList.toggle("on", selected);
+    if (panel.id === "tape") panel.classList.toggle("off", !selected);
+  }
+  const activeButton = buttons.find((button) => button.getAttribute("data-" + group + "-view") === chosen);
+  if (focus) activeButton?.focus();
+  if (group === "calls") {
+    if (chosen === "candidates") loadCandidateBoard();
+    else loadDashboardCalls(chosen);
+  } else if (group === "activity") {
+    if (chosen === "tape") window.loadChronicle?.();
+    if (chosen === "decisions") window.loadChronicle?.();
+    if (chosen === "ledger") window.load_ledger?.();
+  } else if (group === "performance") {
+    if (chosen === "building") window.load_stats?.();
+    if (chosen === "ranks") window.load_ranks?.();
+  }
+}
+window.__activateDashboardSubview = activateDashboardSubview;
+
+for (const group of ["calls", "activity", "performance"]) {
+  const buttons = [...document.querySelectorAll("[data-" + group + "-view]")];
+  buttons.forEach((button, index) => {
+    button.addEventListener("click", () =>
+      activateDashboardSubview(group, button.getAttribute("data-" + group + "-view")));
+    button.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
+        : (index + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
+      activateDashboardSubview(group, buttons[next].getAttribute("data-" + group + "-view"), { focus: true });
+    });
+  });
+}
+
+async function loadOverviewDashboard() {
+  const el = document.getElementById("overviewbody");
+  if (!el) return;
+  if (FLOOR_N == null) {
+    el.innerHTML = "";
+    el.append(dashLead("No floor selected", "Open a floor from the tower to see its dashboard.", "VIEW ONLY", "warn"));
+    return;
+  }
+  dashLoading(el, "Opening the floor dashboard…");
+  const [floorR, feedR, pulseR, statsR, budgetR] = await Promise.all([
+    call_api("/api/floor/" + FLOOR_N),
+    call_api("/api/floor/" + FLOOR_N + "/feed"),
+    call_api("/api/heartbeat"),
+    call_api("/api/stats/overview"),
+    call_api("/api/budget"),
+  ]).catch(() => []);
+  el.innerHTML = "";
+  dashReady(el);
+  const room = floorR?.body || {};
+  const identity = room.identity || {};
+  const feed = feedR?.status === 200 && Array.isArray(feedR.body?.feed) ? feedR.body.feed : [];
+  const feedPrivate = feedR?.status === 401 || feedR?.status === 403;
+  const live = feed.filter((call) => call.status === "live");
+  const offered = live.filter((call) => call.verdict === "offered");
+  const pulse = pulseR?.body || {};
+  const building = statsR?.body?.building || {};
+  let heartbeat = null;
+  try { heartbeat = room.executorHeartbeat ? JSON.parse(room.executorHeartbeat) : null; } catch {}
+  const heartbeatAge = heartbeat?.seenAt ? Date.now() - heartbeat.seenAt : null;
+  const floorName = identity.floorName || room.settings?.desk_name || room.floorLabel || ("Floor " + FLOOR_N);
+  const ownerBadge = room.isMine ? "OWNER VIEW" : room.lease ? "OBSERVING" : "VACANT";
+  el.appendChild(dashLead(floorName,
+    room.isMine
+      ? "Your floor at a glance. Open a destination for the full record or its owner controls."
+      : "A read-only view of this floor. Private calls and controls remain with its tenant.",
+    ownerBadge, room.isMine ? "good" : "warn"));
+
+  const metrics = dashNode("div", "dashgrid");
+  metrics.append(
+    dashMetric("Desk state", pulse.state || (room.busy ? "WORKING" : "—"),
+      pulse.reason || (pulse.lastEventTs ? "last event " + dashAge(Date.now() - pulse.lastEventTs) : "central desk pulse")),
+    dashMetric("Published live", feedPrivate ? "PRIVATE" : String(live.length),
+      feedPrivate ? "the tenant call sheet is not visible in this session"
+        : room.isMine ? String(offered.length) + " offered to this floor" : "paper call sheet"),
+    dashMetric("WALL-ST-E", heartbeatAge != null && heartbeatAge < 150000
+      ? String(heartbeat.mode || "connected").toUpperCase() : heartbeat ? "STALE" : "NOT LINKED",
+      heartbeatAge == null ? "no self-reported heartbeat" : "self-reported " + dashAge(heartbeatAge)),
+    dashMetric("Settled P&L", feedPrivate ? "PRIVATE" : money(feedR?.body?.record?.pnl_usd ?? 0),
+      feedPrivate ? "the tenant performance record is unavailable in this session"
+        : String(feedR?.body?.record?.settled ?? 0) + " settled trades"),
+    dashMetric("Building", String(building.floorsLeased ?? "—") + " floors leased",
+      String(building.houseCalls ?? 0) + " house calls published"),
+    dashMetric("Today", String(pulse.today?.workups ?? 0) + " workups",
+      String(pulse.today?.kills ?? 0) + " killed · " + String(pulse.today?.watches ?? 0) + " watched")
+  );
+  el.appendChild(metrics);
+
+  if (room.isMine && budgetR?.status === 200) {
+    const budget = budgetR.body || {};
+    let credit = "—";
+    try {
+      credit = (Number(BigInt(budget.balanceBaseUnits || "0") /
+        10n ** BigInt(Math.max(0, Number(budget.decimals || 0) - 3))) / 1000)
+        .toLocaleString(undefined, { maximumFractionDigits: 0 }) + " CLAUDECO";
+    } catch {}
+    const section = dashNode("div", "dashsection");
+    section.append(dashNode("h4", "", "Owner essentials"));
+    const row = dashNode("div", "dashgrid");
+    const rent = feedR?.body?.rent;
+    row.append(
+      dashMetric("Building credit", credit, "research and rent only"),
+      dashMetric("Rent", rent?.overdue ? "OVERDUE" : rent?.dueAt ? dashFuture(rent.dueAt) : "—",
+        "never trading capital"),
+      dashMetric("Managing Director", room.settings?.md_brain === "grok" ? "Grok" : "Claude",
+        room.settings?.mode === "grind" ? "team is grinding" : "team is on a break")
+    );
+    section.appendChild(row);
+    el.appendChild(section);
+  }
+
+  const recent = dashNode("div", "dashsection");
+  recent.appendChild(dashNode("h4", "", "Recent published calls"));
+  if (!feed.length) recent.appendChild(dashNode("p", "dp-note",
+    feedR?.status === 403 ? "The tenant's call sheet is private." : "No calls have been published yet."));
+  for (const call of feed.slice(0, 3)) {
+    recent.appendChild(drow([
+      ["b grow", call.symbol || String(call.mint || "").slice(0, 6)],
+      ["span", call.status === "live" ? "live" : String(call.close_reason || "closed").replace(/_/g, " ")],
+      ["faint", call.delivered_at ? ago(call.delivered_at) : ""],
+    ]));
+  }
+  el.appendChild(recent);
+
+  const quick = dashNode("div", "dashsection");
+  quick.appendChild(dashNode("h4", "", "Go to"));
+  const actions = dashNode("div", "dashactions");
+  for (const [destination, label] of [
+    ["calls", "Candidate board"], ["wallste", "WALL-ST-E status"],
+    ["activity", "Live activity"], ["performance", "Performance"],
+  ]) {
+    const button = dashNode("button", "dp-btn ghost", label);
+    button.type = "button";
+    button.onclick = () => window.showDashboard?.(destination, { focus: true });
+    actions.appendChild(button);
+  }
+  quick.appendChild(actions);
+  el.appendChild(quick);
+}
+
+const CANDIDATE_BANDS = [
+  ["micro", "micro", "$10k–$100k — sharpest moves, sharpest rugs"],
+  ["low", "low", "$100k–$500k — room to re-rate, thin book"],
+  ["medium", "medium", "$500k–$1m — a tape worth reading"],
+  ["high", "high", "$1m–$10m — needs real money to move"],
+  ["very_high", "very high", "$10m–$20m — slow, but survivable"],
+];
+let candidateBoardLoading = false;
+async function loadCandidateBoard() {
+  const el = document.getElementById("candidatepanel");
+  if (!el || dashboardSubview.calls !== "candidates") return;
+  if (candidateBoardLoading) return;
+  candidateBoardLoading = true;
+  const previousScroll = el.scrollTop;
+  if (el.childElementCount === 0) dashLoading(el, "Loading the pre-decision memecoin board…");
+  else el.setAttribute("aria-busy", "true");
+  try {
+    const { status, body } = await call_api("/api/candidates/board");
+    el.innerHTML = "";
+    dashReady(el);
+    if (status === 401 || status === 403) {
+      el.append(dashLead("Pre-decision candidates", "This board is private to tenants and the house.", "TENANTS ONLY", "warn"));
+      return;
+    }
+    if (status !== 200) throw new Error(body?.error || "candidate board unavailable");
+    const captured = body.capturedAt ? new Date(body.capturedAt).toLocaleString() : "no completed sweep yet";
+    el.append(dashLead("Pre-decision memecoin candidates",
+      "Five ranked slots in every canonical market-cap tier, captured after the free screen and before any Claude, Grok, Red Team, CEO, or execution decision.",
+      String(body.candidateCount ?? 0) + " CANDIDATES", "warn"));
+    const boundary = dashNode("div", "boundary-note");
+    boundary.innerHTML = "<strong>NOT REVIEWED · NOT APPROVED · NOT EXECUTABLE.</strong> " +
+      "These are market candidates only. Their appearance here is not a call, order, recommendation, or permission to trade.";
+    el.appendChild(boundary);
+    const meta = dashNode("p", "dp-note",
+      "Source: " + String(body.source || "pre-decision") + " · decision status: " +
+      String(body.decisionStatus || "not-reviewed") + " · captured " + captured);
+    el.appendChild(meta);
+
+    for (const [key, fallbackLabel, fallbackNote] of CANDIDATE_BANDS) {
+      const band = body.bands?.[key] || {};
+      const tier = dashNode("section", "candidate-tier");
+      const head = dashNode("div", "candidate-tier-head");
+      head.append(dashNode("b", "", band.label || fallbackLabel),
+        dashNode("span", "", band.note || fallbackNote));
+      tier.appendChild(head);
+      const grid = dashNode("div", "candidate-grid");
+      const candidates = Array.isArray(band.candidates) ? band.candidates.slice(0, 5) : [];
+      for (let index = 0; index < 5; index++) {
+        const candidate = candidates[index];
+        if (!candidate) {
+          grid.appendChild(dashNode("div", "candidate empty-slot",
+            "Slot " + (index + 1) + " · no screened memecoin in this tier"));
+          continue;
+        }
+        const card = dashNode("article", "candidate");
+        const cHead = dashNode("div", "candidate-head");
+        cHead.append(coinFace(candidate.mint, candidate.symbol, 28),
+          dashNode("span", "candidate-rank", "#" + String(candidate.rank || index + 1)),
+          dashNode("b", "", candidate.symbol || candidate.name || String(candidate.mint).slice(0, 6)));
+        card.appendChild(cHead);
+        const meta2 = dashNode("div", "candidate-meta");
+        for (const [label, value] of [
+          ["cap", dashMoney(candidate.marketCapUsd)],
+          ["liq", dashMoney(candidate.liquidityUsd)],
+          ["24h", dashMoney(candidate.volume24hUsd)],
+          ["score", candidate.score == null ? "—" : Math.round(candidate.score)],
+        ]) {
+          const bit = dashNode("span");
+          bit.append(document.createTextNode(label + " "), dashNode("strong", "", value));
+          meta2.appendChild(bit);
+        }
+        card.appendChild(meta2);
+        if (Array.isArray(candidate.rankWhy) && candidate.rankWhy.length)
+          card.appendChild(dashNode("p", "candidate-why", candidate.rankWhy.slice(0, 2).join(" · ")));
+        const foot = dashNode("div", "dashactions");
+        foot.appendChild(caChip(candidate.mint));
+        if (/^https:\/\//.test(String(candidate.pairUrl || ""))) {
+          const link = dashNode("a", "candidate-link", "Inspect market data ↗");
+          link.href = candidate.pairUrl; link.target = "_blank"; link.rel = "noopener";
+          foot.appendChild(link);
+        }
+        card.appendChild(foot);
+        grid.appendChild(card);
+      }
+      tier.appendChild(grid);
+      el.appendChild(tier);
+    }
+    requestAnimationFrame(() => { el.scrollTop = previousScroll; });
+  } catch (error) {
+    el.innerHTML = "";
+    dashReady(el);
+    el.append(dashLead("Candidate board unavailable",
+      String(error?.message || error), "READ-ONLY ERROR", "bad"));
+  } finally {
+    candidateBoardLoading = false;
+  }
+}
+
+let dashboardFeedCache = null;
+async function dashboardFloorFeed({ force = false } = {}) {
+  if (!force && dashboardFeedCache && Date.now() - dashboardFeedCache.at < 12000)
+    return dashboardFeedCache.response;
+  const response = await call_api("/api/floor/" + FLOOR_N + "/feed");
+  if (response.status === 200) dashboardFeedCache = { at: Date.now(), response };
+  return response;
+}
+
+async function loadDashboardCalls(view, { force = false } = {}) {
+  if (!["published", "closed"].includes(view) || dashboardSubview.calls !== view) return;
+  const el = document.getElementById(view === "published" ? "livepanel" : "closedpanel");
+  if (!el) return;
+  dashLoading(el, view === "published" ? "Loading published calls…" : "Loading closed and killed calls…");
+  try {
+    const { status, body } = await dashboardFloorFeed({ force });
+    if (dashboardSubview.calls !== view) return;
+    el.innerHTML = "";
+    dashReady(el);
+    if (status === 401 || status === 403) {
+      el.append(dashLead(view === "published" ? "Published calls" : "Closed / killed",
+        "This floor's call sheet is private to its tenant.", "TENANTS ONLY", "warn"));
+      return;
+    }
+    if (status !== 200) throw new Error(body?.error || "call sheet unavailable");
+    const feed = Array.isArray(body.feed) ? body.feed : [];
+    window.__botHeartbeat = (() => {
+      try { return JSON.parse(body.settings?.executor_heartbeat || "null"); } catch { return null; }
+    })();
+    updateBotHb?.(body.settings);
+    paintHud({ feed, settings: body.settings, budget: BUDGET, rent: body.rent });
+    window.__grokBoardUpdate?.(feed);
+
+    if (view === "published") {
+      const published = feed.filter((call) => call.status === "live");
+      el.append(dashLead("Published calls",
+        "Decisions that cleared the research chain and remain open on the house paper book.",
+        String(published.length) + " LIVE", published.length ? "good" : ""));
+      const boundary = dashNode("div", "boundary-note");
+      boundary.innerHTML = "<strong>PUBLISHED IS NOT THE SAME AS HELD.</strong> " +
+        "The desk's paper position, your wallet, and WALL-ST-E's local position are shown separately. Any manual swap is signed by you.";
+      el.appendChild(boundary);
+      el.appendChild(buildScoreline(body.record, feed));
+      const wrap = dashNode("div");
+      wrap.style.cssText = "display:flex;flex-direction:column;gap:7px";
+      el.appendChild(wrap);
+      paintFeedInto(wrap, published, body.settings);
+    } else {
+      const closed = feed.filter((call) => call.status !== "live");
+      el.append(dashLead("Closed / killed",
+        "Published calls after closure, followed by candidates stopped before a call ever existed.",
+        String(closed.length) + " CLOSED", ""));
+      const boundary = dashNode("div", "boundary-note");
+      boundary.innerHTML = "<strong>TWO DIFFERENT RECORDS.</strong> Closed calls were published decisions. " +
+        "Killed rows were rejected before publication and never became executable instructions.";
+      el.appendChild(boundary);
+      const closedWrap = dashNode("div");
+      closedWrap.style.cssText = "display:flex;flex-direction:column;gap:7px";
+      el.appendChild(closedWrap);
+      if (closed.length) paintFeedInto(closedWrap, closed, body.settings);
+      else closedWrap.appendChild(dashNode("p", "locked", "No published calls have closed yet."));
+      const killedSection = dashNode("section", "dashsection");
+      killedSection.appendChild(dashNode("h4", "", "Killed before publication"));
+      const killed = dashNode("div");
+      killed.style.cssText = "display:flex;flex-direction:column;gap:7px";
+      killedSection.appendChild(killed);
+      el.appendChild(killedSection);
+      const ok = await loadKilled(killed);
+      killed.querySelector(".dp-h")?.remove();
+      if (ok === false) killed.appendChild(dashNode("p", "dp-note", "Killed candidates are tenants only."));
+    }
+  } catch (error) {
+    el.innerHTML = "";
+    dashReady(el);
+    el.append(dashLead("Call sheet unavailable", String(error?.message || error), "READ-ONLY ERROR", "bad"));
+  }
+}
+window.__loadDashboardCallsSubview = (force = false) => {
+  const view = dashboardSubview.calls;
+  if (view === "published" || view === "closed") loadDashboardCalls(view, { force });
+};
+
+const wallsteFilterCategories = [
+  ["established", "blue-chips"], ["utility", "utility"], ["infra", "infra"],
+  ["defi", "DeFi"], ["ai", "AI"], ["memecoin", "memecoins"], ["unclear", "unproven"],
+];
+const wallsteActivationLabels = {
+  feedCredentialReady: "Private read-only feed credential exists",
+  heartbeatSeen: "A local poller has reported at least once",
+  currentPaperMode: "A fresh current heartbeat reports dry-run / paper mode",
+  executionReadinessReady: "A fresh heartbeat reports a two-provider readiness pass",
+  walletReported: "A fresh heartbeat reports the local burner public address",
+  walletFunded: "That current burner's confirmed balance meets the release daily cap",
+};
+const copyPrivateValue = async (button, value, label) => {
+  if (!value) return;
+  if (!confirm("Copy " + label + " to the clipboard?\n\nTreat it as private and clear the clipboard after pasting.")) return;
+  try {
+    await navigator.clipboard.writeText(value);
+    const old = button.textContent;
+    button.textContent = "Copied ✓";
+    setTimeout(() => { button.textContent = old; }, 1800);
+  } catch {
+    button.textContent = "Clipboard blocked";
+  }
+};
+const copyVisibleCommand = async (button, value) => {
+  try {
+    await navigator.clipboard.writeText(value);
+    const old = button.textContent;
+    button.textContent = "Copied ✓";
+    setTimeout(() => { button.textContent = old; }, 1800);
+  } catch {
+    button.textContent = "Clipboard blocked";
+  }
+};
+
+/** Browser signing is retired, but a prior user may still have SOL in the burner
+ * created by an older release. Recovery stays reachable only after the owner-only
+ * WALL-ST-E status route succeeds, never initializes signing, and reveals the key only
+ * through an explicit confirmation + clipboard action. */
+function legacyBurnerRecoveryCard() {
+  let legacy = null;
+  const storageKey = "cc_bot_" + FLOOR_N;
+  try { legacy = JSON.parse(localStorage.getItem(storageKey) || "null"); } catch {}
+  if (!legacy || typeof legacy !== "object") return null;
+  const secret = Array.isArray(legacy.sk) && legacy.sk.length >= 32 &&
+    legacy.sk.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)
+    ? legacy.sk : null;
+  try {
+    legacy.live = false;
+    legacy.running = false;
+    localStorage.setItem(storageKey, JSON.stringify(legacy));
+  } catch {}
+
+  const card = dashNode("section", "dashsection");
+  card.appendChild(dashNode("h4", "", "Legacy browser burner · recovery only"));
+  card.appendChild(dashNode("p", "dp-note",
+    "An older Claude Company release created a browser-local burner on this device. It has been forced to paper/off state. Browser signing remains disabled."));
+  const address = typeof legacy.pk === "string" && legacy.pk
+    ? legacy.pk.slice(0, 8) + "…" + legacy.pk.slice(-8) : "public address unavailable";
+  const row = dashNode("div", "secretbox");
+  row.appendChild(dashNode("code", "", address));
+  const recover = dashNode("button", "dp-btn ghost", secret ? "Copy recovery key" : "Recovery key invalid");
+  recover.type = "button";
+  recover.disabled = !secret;
+  recover.onclick = async () => {
+    if (!confirm("Copy the legacy burner's secret key?\n\nAnyone with it controls that wallet. Import it into a trusted Solana wallet only to recover funds, then clear your clipboard.")) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(secret));
+      recover.textContent = "Copied — import now, then clear clipboard";
+    } catch {
+      recover.textContent = "Clipboard blocked";
+    }
+  };
+  row.appendChild(recover);
+  card.append(row, dashNode("p", "boundary-note",
+    "Recovery only: sweep any remaining funds to a wallet you control. Never paste this secret into Claude Company, a model, chat, or support message."));
+  return card;
+}
+
+let wallsteDashboardLoading = false;
+let wallsteFiltersDirty = false;
+
+async function loadWallsteDashboard({ background = false } = {}) {
+  const el = document.getElementById("wallstebody");
+  if (!el || document.getElementById("wallstepanel")?.hidden) return;
+  if (FLOOR_N == null) {
+    el.innerHTML = "";
+    el.append(dashLead("WALL-ST-E", "Open a floor from the tower first.", "NO FLOOR", "warn"));
+    return;
+  }
+  if (wallsteDashboardLoading) return;
+  wallsteDashboardLoading = true;
+  const previousScroll = el.scrollTop;
+  if (el.childElementCount === 0) dashLoading(el, "Reading WALL-ST-E status…");
+  else el.setAttribute("aria-busy", "true");
+  try {
+    const [statusR, feedR] = await Promise.all([
+      call_api("/api/floor/" + FLOOR_N + "/executor/status"),
+      call_api("/api/floor/" + FLOOR_N + "/feed"),
+    ]);
+    const activeControlAfterFetch = document.activeElement;
+    const editingAfterFetch = document.getElementById("wallstepanel")?.contains(activeControlAfterFetch) &&
+      /^(INPUT|SELECT|TEXTAREA)$/.test(activeControlAfterFetch?.tagName || "");
+    // A background poll that began while the form was untouched must not erase an
+    // edit which started during its network wait.
+    if (background && (wallsteFiltersDirty || editingAfterFetch)) {
+      dashReady(el);
+      return;
+    }
+    el.innerHTML = "";
+    dashReady(el);
+    if (statusR.status === 401 || statusR.status === 403) {
+      el.append(dashLead("WALL-ST-E is owner-only",
+        statusR.status === 401
+          ? "Reconnect the wallet that holds this floor to see its local executor telemetry."
+          : "Only the wallet that holds this floor can see its burner, filters, or activation state.",
+        "OWNER ONLY", "warn"));
+      return;
+    }
+    if (statusR.status !== 200) throw new Error(statusR.body?.error || "executor status unavailable");
+    const status = statusR.body || {};
+    const telemetry = status.telemetry || {};
+    const heartbeat = telemetry.heartbeat || null;
+    const health = heartbeat?.health || null;
+    const wallet = status.wallet || {};
+    const filters = status.filters || {};
+    const activation = status.activation || {};
+    const secret = feedR.status === 200 ? feedR.body?.settings?.executor_secret : null;
+    window.__botHeartbeat = heartbeat;
+
+    const mode = heartbeat?.mode ? String(heartbeat.mode).toUpperCase() : "NOT REPORTED";
+    const connected = telemetry.connected === true;
+    el.append(dashLead("WALL-ST-E",
+      "Your self-hosted autotrader. This page observes its outbound heartbeat and confirmed public balance; it cannot start, stop, steer, sign for, or fund it.",
+      connected ? mode + " · CONNECTED" : heartbeat ? mode + " · STALE" : "NOT LINKED",
+      connected ? "good" : heartbeat ? "bad" : "warn"));
+    const boundary = dashNode("div", "boundary-note");
+    boundary.innerHTML = "<strong>OBSERVATION ONLY · TENANT MACHINE ONLY.</strong> " +
+      "Telemetry is self-reported by your machine. Burner balance is a read-only confirmed-chain lookup. " +
+      "Remote control and browser signing are disabled.";
+    el.appendChild(boundary);
+
+    const statusGrid = dashNode("div", "dashgrid");
+    statusGrid.append(
+      dashMetric("Telemetry", connected ? "Connected" : heartbeat ? "Stale" : "No heartbeat",
+        "self-reported " + (telemetry.ageMs == null ? "never" : dashAge(telemetry.ageMs))),
+      dashMetric("Health", String(health?.state || "not reported").replace(/-/g, " "),
+        health?.runtimeCommit ? "runtime " + String(health.runtimeCommit).slice(0, 10) : "reported by the local poller"),
+      dashMetric("Open positions", String(heartbeat?.open ?? 0),
+        String(Array.isArray(heartbeat?.held) ? heartbeat.held.length : 0) + " holdings named in heartbeat")
+    );
+    el.appendChild(statusGrid);
+
+    const split = dashNode("div", "wallste-grid");
+    const funding = dashNode("section", "dashsection");
+    funding.appendChild(dashNode("h4", "", "5 · Fund the dedicated burner last"));
+    if (wallet.address) {
+      funding.appendChild(dashNode("div", "bud-bal",
+        wallet.balanceSol == null ? "Balance unavailable" : Number(wallet.balanceSol).toFixed(4) + " SOL"));
+      const addressRow = dashNode("div", "secretbox");
+      addressRow.appendChild(dashNode("code", "", String(wallet.address).slice(0, 8) + "…" + String(wallet.address).slice(-8)));
+      const copy = dashNode("button", "dp-btn ghost", "Copy address");
+      copy.type = "button";
+      copy.disabled = !connected;
+      copy.title = connected
+        ? "Copy the public burner address from the fresh heartbeat"
+        : "Disabled: this address came from a stale heartbeat; confirm it on the executor host";
+      copy.onclick = async () => {
+        try { await navigator.clipboard.writeText(wallet.address); copy.textContent = "Copied ✓"; }
+        catch { copy.textContent = "Clipboard blocked"; }
+      };
+      addressRow.appendChild(copy);
+      funding.appendChild(addressRow);
+      funding.appendChild(dashNode("p", "dp-note",
+        (connected ? "Fresh heartbeat address" : "LAST-REPORTED ADDRESS · STALE — DO NOT FUND") +
+        " · state: " + String(wallet.state || "unknown").replace(/-/g, " ") +
+        " · source: " + String(wallet.source || "read-only") +
+        (wallet.observedAt ? " · observed " + dashAge(Date.now() - wallet.observedAt) : "")));
+      funding.appendChild(dashNode("p", "dp-note",
+        connected
+          ? "Fund with SOL from your own wallet only. This page has no transfer control and never receives the burner key."
+          : "Wait for a fresh heartbeat and verify the address on the executor host before funding. The last-reported address may no longer be current."));
+    } else {
+      funding.appendChild(dashNode("p", "locked",
+        "No burner address has been reported. Start the local poller in paper mode first; its next heartbeat supplies the public address."));
+    }
+
+    const healthCard = dashNode("section", "dashsection");
+    healthCard.appendChild(dashNode("h4", "", "Current heartbeat details · self-reported"));
+    const heartbeatGrid = dashNode("div", "dashgrid");
+    const lastTickAt = Number(health?.lastTickCompletedAt || 0);
+    const lastFeedAt = Number(health?.lastFeedSuccessAt || 0);
+    const readiness = health?.executionReadiness || null;
+    heartbeatGrid.append(
+      dashMetric("Last completed tick", lastTickAt ? dashAge(Date.now() - lastTickAt) : "Not reported",
+        lastTickAt ? new Date(lastTickAt).toLocaleString() : "from outbound heartbeat"),
+      dashMetric("Last feed success", lastFeedAt ? dashAge(Date.now() - lastFeedAt) : "Not reported",
+        lastFeedAt ? new Date(lastFeedAt).toLocaleString() : "from outbound heartbeat"),
+      dashMetric("Entry pause", health?.entriesPaused === true ? "Paused" : health ? "Not paused" : "Unknown",
+        "self-reported control state"),
+      dashMetric("Hard stop", health?.hardStop === true ? "ACTIVE" : health ? "Clear" : "Unknown",
+        "self-reported control state"),
+      dashMetric("Blocking intent", health?.blockingIntent === true ? "PRESENT" : health ? "Clear" : "Unknown",
+        "unresolved local journal intent"),
+      dashMetric("Readiness providers", readiness ? String(readiness.providers || 0) + " / 2" : "Not reported",
+        readiness ? (readiness.ready ? "ready" : "not ready") + " · " + String(readiness.route || "route unknown") : "no-sign probe")
+    );
+    healthCard.appendChild(heartbeatGrid);
+    const held = Array.isArray(heartbeat?.held) ? heartbeat.held : [];
+    healthCard.appendChild(dashNode("p", "dp-note",
+      held.length ? "Held mints named by the local heartbeat:" : "No held mints were named by the current heartbeat."));
+    if (held.length) {
+      const heldList = dashNode("div", "held-list");
+      for (const position of held) {
+        const row = dashNode("div", "datarow");
+        const mint = String(position?.mint || "");
+        row.append(
+          dashNode("span", "", mint ? mint.slice(0, 7) + "…" + mint.slice(-7) : "Unknown mint"),
+          dashNode("strong", "", Number(position?.sol || 0).toFixed(4) + " SOL")
+        );
+        heldList.appendChild(row);
+      }
+      healthCard.appendChild(heldList);
+    }
+    split.appendChild(healthCard);
+
+    const checklistCard = dashNode("section", "dashsection");
+    checklistCard.appendChild(dashNode("h4", "", "Activation checklist"));
+    const list = dashNode("ul", "checklist");
+    for (const key of Object.keys(wallsteActivationLabels)) {
+      const done = activation[key] === true;
+      const item = dashNode("li", done ? "done" : "warn");
+      item.append(dashNode("i", "", done ? "✓" : "○"), dashNode("span", "", wallsteActivationLabels[key]));
+      list.appendChild(item);
+    }
+    checklistCard.appendChild(list);
+    checklistCard.appendChild(dashNode("p", "dp-note",
+      activation.currentLiveMode
+        ? "The local machine currently reports LIVE mode. Any change must be made and confirmed on that machine."
+        : "No browser button can arm live mode. Review dry-run output and activate only from the local host."));
+    split.appendChild(checklistCard);
+    el.appendChild(split);
+
+    const legacyRecovery = legacyBurnerRecoveryCard();
+    if (legacyRecovery) el.appendChild(legacyRecovery);
+
+    const secretCard = dashNode("section", "dashsection");
+    secretCard.appendChild(dashNode("h4", "", "Private feed setup"));
+    secretCard.appendChild(dashNode("p", "dp-note",
+      "The feed secret authenticates the poller's read-only call feed and outbound heartbeat. It is not a wallet key, but it should still remain private."));
+    const secretBox = dashNode("div", "secretbox");
+    if (secret) {
+      secretBox.appendChild(dashNode("code", "", "••••••••••••••••••••" + String(secret).slice(-6)));
+      const copySecret = dashNode("button", "dp-btn ghost", "Copy secret");
+      copySecret.type = "button";
+      copySecret.onclick = () => copyPrivateValue(copySecret, secret, "the executor feed secret");
+      const rotateSecret = dashNode("button", "dp-btn ghost", "Rotate");
+      rotateSecret.type = "button";
+      rotateSecret.onclick = async () => {
+        if (!confirm("Rotate this feed secret?\n\nThe old poller will receive 401 and stop until it is reconfigured.")) return;
+        rotateSecret.disabled = true; rotateSecret.textContent = "Rotating…";
+        const result = await call_api("/api/floor/" + FLOOR_N + "/copy", {
+          method: "POST", body: JSON.stringify({ rotateExecutorSecret: true }),
+        });
+        if (result.status === 200) {
+          dashboardFeedCache = null;
+          loadWallsteDashboard();
+        } else {
+          rotateSecret.disabled = false;
+          rotateSecret.textContent = result.body?.error || "Rotation failed";
+        }
+      };
+      secretBox.append(copySecret, rotateSecret);
+    } else {
+      secretBox.appendChild(dashNode("code", "", "No feed credential configured"));
+      const createSecret = dashNode("button", "dp-btn", "Create credential");
+      createSecret.type = "button";
+      createSecret.onclick = async () => {
+        createSecret.disabled = true; createSecret.textContent = "Creating…";
+        const result = await call_api("/api/floor/" + FLOOR_N + "/copy", {
+          method: "POST", body: JSON.stringify({ mintExecutorSecret: true }),
+        });
+        if (result.status === 200) {
+          dashboardFeedCache = null;
+          loadWallsteDashboard();
+        } else {
+          createSecret.disabled = false;
+          createSecret.textContent = result.body?.error || "Could not create";
+        }
+      };
+      secretBox.appendChild(createSecret);
+    }
+    secretCard.appendChild(secretBox);
+    const docs = dashNode("a", "candidate-link", "Read setup, local activation, safety, and recovery ↗");
+    docs.href = "/executor/README.md"; docs.target = "_blank"; docs.rel = "noopener";
+    secretCard.appendChild(docs);
+    el.appendChild(secretCard);
+
+    const executorReleaseCommit = "__CLAUDE_COMPANY_SOURCE_COMMIT__";
+    const releaseIsPinned = /^[0-9a-f]{40}$/i.test(executorReleaseCommit);
+    const runtimeMatchesRelease = releaseIsPinned &&
+      String(health?.runtimeCommit || "").toLowerCase() === executorReleaseCommit.toLowerCase();
+    const dryRunCommand = "git clone https://github.com/gtjvv976mb-netizen/Claude-Company.git && " +
+      "cd Claude-Company && git checkout --detach " + executorReleaseCommit +
+      " && bash executor/install.sh --floor " + FLOOR_N;
+    const reviewCommand = "sudo journalctl -u cc-executor -f";
+    const liveCanaryCommand = "bash executor/install.sh --floor " + FLOOR_N +
+      " --live --expected-commit " + executorReleaseCommit +
+      " --max-sol 0.005 --daily-cap 0.01" +
+      " --rpc-file /absolute/path/to/primary-rpc" +
+      " --secondary-rpc-file /absolute/path/to/secondary-rpc" +
+      " --jupiter-key-file /absolute/path/to/jupiter-api-key";
+    const setupCard = dashNode("section", "dashsection");
+    setupCard.appendChild(dashNode("h4", "", "Owner-only local activation · five deliberate steps"));
+    setupCard.appendChild(dashNode("p", "dp-note",
+      "Run every command on the executor host. This browser can prepare settings and copy text; it cannot install, start, arm, sign, stop, or fund WALL-ST-E."));
+    const setupSteps = dashNode("div", "setup-steps");
+    const setupStep = (number, title, text, done = false) => {
+      const step = dashNode("article", "setup-step" + (done ? " done" : ""));
+      step.appendChild(dashNode("span", "n", done ? "✓" : String(number)));
+      const body = dashNode("div");
+      body.append(dashNode("h5", "", title), dashNode("p", "", text));
+      step.appendChild(body);
+      setupSteps.appendChild(step);
+      return body;
+    };
+    setupStep(1, "Create and copy the private feed credential",
+      activation.feedCredentialReady
+        ? "Credential exists. Copy it from the masked, confirm-before-copy control above and enter it only on the executor host."
+        : "Create the credential above, then copy it only after the privacy confirmation. It authenticates feed reads and outbound heartbeats, never wallet custody.",
+      activation.feedCredentialReady === true);
+
+    const installStep = setupStep(2, "Install the exact reviewed release in dry-run mode",
+      releaseIsPinned
+        ? "This command detaches the checkout at the published 40-character commit. Dry run is the installer default."
+        : "The deployment has not embedded its exact 40-character source commit, so installation copy is locked. Publish the build with the source placeholder replaced first.",
+      runtimeMatchesRelease);
+    installStep.appendChild(dashNode("pre", "commandbox", dryRunCommand));
+    const copyDry = dashNode("button", "dp-btn ghost commandcopy", "Copy dry-run install");
+    copyDry.type = "button";
+    copyDry.disabled = !releaseIsPinned;
+    copyDry.title = releaseIsPinned ? "Copy the pinned dry-run command" : "Unavailable until this build contains an exact release commit";
+    copyDry.onclick = () => copyVisibleCommand(copyDry, dryRunCommand);
+    installStep.appendChild(copyDry);
+
+    const paperStep = setupStep(3, "Run and review paper mode",
+      activation.currentPaperMode
+        ? "The latest heartbeat reports PAPER. Watch multiple decisions and verify local policy, pauses, and recovery before considering live mode."
+        : activation.currentLiveMode
+          ? "The latest heartbeat reports LIVE; this page cannot prove that the earlier paper review was completed."
+          : "Start only the locally installed dry-run service, then review its journal before proceeding.",
+      activation.currentPaperMode === true);
+    paperStep.appendChild(dashNode("pre", "commandbox", reviewCommand));
+    const copyReview = dashNode("button", "dp-btn ghost commandcopy", "Copy review command");
+    copyReview.type = "button";
+    copyReview.onclick = () => copyVisibleCommand(copyReview, reviewCommand);
+    paperStep.appendChild(copyReview);
+
+    const localReady = activation.currentLiveMode === true && activation.executionReadinessReady === true &&
+      readiness?.providers === 2;
+    const liveStep = setupStep(4, "Configure two independent RPCs and Jupiter locally, then arm locally",
+      "Store each credential in its own mode-0600 file. The live installer performs a no-sign two-provider readiness check and asks you at the host terminal to retype the displayed burner public address. The browser cannot acknowledge that prompt.",
+      localReady);
+    liveStep.appendChild(dashNode("pre", "commandbox", liveCanaryCommand));
+    const copyLive = dashNode("button", "dp-btn ghost commandcopy", "Copy live-canary command");
+    copyLive.type = "button";
+    copyLive.disabled = !releaseIsPinned;
+    copyLive.title = releaseIsPinned ? "Copy the pinned live-canary command" : "Unavailable until this build contains an exact release commit";
+    copyLive.onclick = () => copyVisibleCommand(copyLive, liveCanaryCommand);
+    liveStep.appendChild(copyLive);
+
+    setupStep(5, "Fund the burner last",
+      activation.walletFunded
+        ? "The confirmed-chain read reports the burner at or above the first-release rolling daily cap. Keep the balance deliberately small."
+        : wallet.address
+          ? "Only after the local checks above pass, send SOL from your own wallet to the public address in the final read-only card below."
+          : "Wait until the paper heartbeat reports the burner public address. Never enter or upload its private key here.",
+      activation.walletFunded === true);
+    setupCard.appendChild(setupSteps);
+    el.appendChild(setupCard);
+
+    const filterCard = dashNode("section", "dashsection");
+    filterCard.appendChild(dashNode("h4", "", "Delivery and execution filters"));
+    filterCard.appendChild(dashNode("p", "dp-note",
+      "These settings shape which published calls reach your floor and the fixed rules carried to the local poller. Saving them never starts or controls WALL-ST-E."));
+    const form = dashNode("div", "settings-grid");
+    const field = (label, input) => {
+      const wrap = dashNode("div", "fieldgroup");
+      input.setAttribute("aria-label", label);
+      wrap.append(dashNode("label", "", label), input);
+      return wrap;
+    };
+    const appetite = dashNode("select", "dp-in");
+    for (const value of ["conservative", "balanced", "aggressive"]) {
+      const option = dashNode("option", "", value[0].toUpperCase() + value.slice(1));
+      option.value = value; option.selected = filters.appetite === value; appetite.appendChild(option);
+    }
+    const bankroll = dashNode("input", "dp-in");
+    bankroll.type = "number"; bankroll.min = "0.01"; bankroll.step = "0.1"; bankroll.value = filters.bankrollSol ?? 5;
+    const tier = dashNode("select", "dp-in");
+    for (const [value, label] of [["any", "Any canonical tier"], ["micro", "Micro · $10k–$100k"],
+      ["low", "Low · $100k–$500k"], ["medium", "Medium · $500k–$1m"],
+      ["high", "High · $1m–$10m"], ["very_high", "Very high · $10m–$20m"]]) {
+      const option = dashNode("option", "", label); option.value = value;
+      option.selected = filters.marketCapTier === value; tier.appendChild(option);
+    }
+    const minLiq = dashNode("input", "dp-in");
+    minLiq.type = "number"; minLiq.min = "0"; minLiq.step = "1000"; minLiq.value = filters.minLiquidityUsd ?? 0;
+    const fixed = dashNode("input", "dp-in");
+    fixed.type = "number"; fixed.min = "0"; fixed.step = "0.001"; fixed.value = filters.fixedSol ?? 0;
+    const takeProfit = dashNode("input", "dp-in");
+    takeProfit.type = "number"; takeProfit.min = "0"; takeProfit.step = "0.05"; takeProfit.value = filters.takeProfitX ?? 0;
+    form.append(field("Risk appetite", appetite), field("Declared bankroll · SOL", bankroll),
+      field("Market-cap sleeve", tier), field("Minimum liquidity · USD", minLiq),
+      field("Fixed order · SOL · 0 = auto", fixed), field("Take-profit multiple · 0 = auto", takeProfit));
+
+    const categoryGroup = dashNode("div", "fieldgroup");
+    categoryGroup.style.gridColumn = "1/-1";
+    categoryGroup.appendChild(dashNode("label", "", "Allowed categories"));
+    const categories = dashNode("div", "padgrid");
+    const categorySet = new Set(Array.isArray(filters.categories) ? filters.categories : []);
+    for (const [value, label] of wallsteFilterCategories) {
+      const choice = dashNode("label", "pad" + (categorySet.has(value) ? " on" : ""));
+      const check = dashNode("input"); check.type = "checkbox"; check.value = value; check.checked = categorySet.has(value);
+      check.onchange = () => choice.classList.toggle("on", check.checked);
+      choice.append(check, document.createTextNode(label)); categories.appendChild(choice);
+    }
+    categoryGroup.appendChild(categories);
+    form.appendChild(categoryGroup);
+
+    const padGroup = dashNode("div", "fieldgroup");
+    padGroup.style.gridColumn = "1/-1";
+    padGroup.appendChild(dashNode("label", "", "Allowed launchpads"));
+    const pads = dashNode("div", "padgrid");
+    const padSet = new Set(Array.isArray(filters.launchpads) ? filters.launchpads : ALL_PADS);
+    for (const value of ALL_PADS) {
+      const choice = dashNode("label", "pad" + (padSet.has(value) ? " on" : ""));
+      const check = dashNode("input"); check.type = "checkbox"; check.value = value; check.checked = padSet.has(value);
+      check.onchange = () => choice.classList.toggle("on", check.checked);
+      choice.append(check, document.createTextNode(value === "other" ? "established" : value)); pads.appendChild(choice);
+    }
+    padGroup.appendChild(pads);
+    form.appendChild(padGroup);
+
+    const instantWrap = dashNode("label", "pad" + (filters.instantDelivery ? " on" : ""));
+    instantWrap.style.gridColumn = "1/-1";
+    const instant = dashNode("input"); instant.type = "checkbox"; instant.checked = filters.instantDelivery === true;
+    instant.onchange = () => instantWrap.classList.toggle("on", instant.checked);
+    instantWrap.append(instant, document.createTextNode("Deliver eligible calls immediately · does not start the executor"));
+    form.appendChild(instantWrap);
+    form.addEventListener("input", () => { wallsteFiltersDirty = true; });
+    form.addEventListener("change", () => { wallsteFiltersDirty = true; });
+    const actions = dashNode("div", "form-actions");
+    const save = dashNode("button", "dp-btn", "Save filters");
+    save.type = "button";
+    const message = dashNode("span", "dp-note");
+    save.onclick = async () => {
+      save.disabled = true; save.textContent = "Saving…";
+      const result = await call_api("/api/floor/" + FLOOR_N + "/copy", {
+        method: "POST",
+        body: JSON.stringify({
+          appetite: appetite.value,
+          bankrollSol: Number(bankroll.value),
+          auto: instant.checked,
+          categories: [...categories.querySelectorAll("input:checked")].map((input) => input.value),
+          launchpads: [...pads.querySelectorAll("input:checked")].map((input) => input.value),
+          minLiqUsd: Number(minLiq.value) || null,
+          takeProfitX: Number(takeProfit.value) || "auto",
+          fixedSol: Number(fixed.value) || "auto",
+          mcapTier: tier.value,
+        }),
+      });
+      save.disabled = false; save.textContent = "Save filters";
+      message.textContent = result.status === 200 ? "Saved. The next delivery uses these filters."
+        : (result.body?.error || "Could not save.");
+      if (result.status === 200) {
+        wallsteFiltersDirty = false;
+        dashboardFeedCache = null;
+        setTimeout(loadWallsteDashboard, 650);
+      }
+    };
+    actions.append(save, message);
+    form.appendChild(actions);
+    filterCard.appendChild(form);
+    el.appendChild(filterCard);
+
+    const caps = status.releaseCaps || {};
+    const capsCard = dashNode("section", "dashsection");
+    capsCard.appendChild(dashNode("h4", "", "First live release · hard ceilings"));
+    const capsGrid = dashNode("div", "dashgrid");
+    capsGrid.append(
+      dashMetric("Per trade", String(caps.maxSolPerTrade ?? "—") + " SOL", "hard ceiling"),
+      dashMetric("24h deployed", String(caps.rolling24hDeploySol ?? "—") + " SOL", "rolling ceiling"),
+      dashMetric("24h loss", String(caps.rolling24hLossSol ?? "—") + " SOL", "hard stop"),
+      dashMetric("Open positions", String(caps.maxOpenPositions ?? "—"), "maximum")
+    );
+    capsCard.appendChild(capsGrid);
+    el.appendChild(capsCard);
+    // Funding is deliberately the final activation surface. It stays read-only and
+    // is never placed before the local release, paper-review, and readiness steps.
+    el.appendChild(funding);
+    wallsteFiltersDirty = false;
+    requestAnimationFrame(() => { el.scrollTop = previousScroll; });
+  } catch (error) {
+    el.innerHTML = "";
+    dashReady(el);
+    el.append(dashLead("WALL-ST-E status unavailable", String(error?.message || error), "READ-ONLY ERROR", "bad"));
+  } finally {
+    wallsteDashboardLoading = false;
+  }
+}
+
+async function loadCalloutsDashboard() {
+  const el = document.getElementById("calloutsbody");
+  if (!el || document.getElementById("calloutspanel")?.hidden) return;
+  dashLoading(el, "Matching callout authors to confirmed wallet activity…");
+  try {
+    const { status, body } = await call_api("/api/callouts");
+    el.innerHTML = "";
+    dashReady(el);
+    if (status === 401 || status === 403) {
+      el.append(dashLead("Evidence-backed callouts",
+        "Matched caller evidence is private to tenants and the house.", "TENANTS ONLY", "warn"));
+      return;
+    }
+    if (status !== 200) throw new Error(body?.error || "callouts unavailable");
+    const policy = body.policy || {};
+    const coverage = body.coverage || {};
+    const coins = Array.isArray(body.coins) ? body.coins : [];
+    const matched = [];
+    for (const coin of coins) {
+      // The canonical endpoint is authoritative. Never read chatter, and do
+      // not render the whales compatibility alias a second time.
+      for (const callout of Array.isArray(coin.callouts) ? coin.callouts : []) {
+        const evidence = callout?.evidence;
+        const inflows = Array.isArray(evidence?.inflows) ? evidence.inflows : [];
+        const exactMatch = evidence?.kind === "recent_pool_token_inflow_current_value" &&
+          evidence?.purchaseConsiderationProven === false &&
+          typeof callout?.user === "string" && callout.user && inflows.length > 0;
+        if (exactMatch) matched.push({ coin, callout, evidence, inflows });
+      }
+    }
+    el.append(dashLead("Evidence-backed matched callers",
+      "Only Pump.fun authors whose exact public wallet matches a recent confirmed pool-touching token inflow. Values use the current market mark, not reconstructed purchase cost.",
+      String(matched.length) + " MATCHED", matched.length ? "good" : ""));
+    const boundary = dashNode("div", "boundary-note");
+    boundary.append(
+      dashNode("strong", "", "WALLET MATCHES, NOT SOCIAL GUESSWORK."),
+      document.createTextNode(" A username, badge, quote, or tracked multiple never qualifies on its own. " +
+        "Policy: " + String(policy.identityClaim || "wallet-match-only") +
+        " · value basis: " + String(policy.valueBasis || "token-inflow-at-current-market-mark") +
+        " · purchase consideration proven: " + String(policy.purchaseConsiderationProven === true) +
+        " · unmatched chatter included: " + String(policy.unmatchedChatterIncluded === true) +
+        " · coverage: " + String(coverage.succeeded ?? 0) + "/" + String(coverage.attempted ?? 0) +
+        " checked" + (coverage.complete === true ? " (complete)" : " (incomplete)"))
+    );
+    el.appendChild(boundary);
+
+    // Opening the canonical evidence view marks this snapshot seen even when the
+    // honest result is empty; an empty scan must not leave a permanent unread dot.
+    try { localStorage.setItem("cc-whales-seen", String(body.generatedAt || Date.now())); } catch {}
+    document.getElementById("whale-dot")?.classList.remove("on");
+
+    if (!matched.length) {
+      const attempted = Number(coverage.attempted || 0);
+      const succeeded = Number(coverage.succeeded || 0);
+      const failed = Number(coverage.failed || 0);
+      const partial = Number(coverage.partialScans || 0);
+      const honestEmpty = attempted === 0
+        ? "No Pump.fun flow candidates were available for a caller check in this pass."
+        : succeeded === 0 && failed > 0
+          ? "Caller verification was unavailable for every attempted coin. This is unknown, not evidence that no matched caller exists."
+          : "No exact author-wallet match cleared the current-value inflow threshold in the " + succeeded +
+            " successfully checked coin" + (succeeded === 1 ? "" : "s") +
+            (failed || partial ? "; " + failed + " check" + (failed === 1 ? "" : "s") +
+              " failed and " + partial + " scan" + (partial === 1 ? " was" : "s were") + " partial" : "") + ".";
+      el.appendChild(dashNode("p", "locked", honestEmpty));
+      return;
+    }
+    for (const row of matched) {
+      const coin = row.coin;
+      const callout = row.callout;
+      const evidence = row.evidence;
+      const card = dashNode("article", "callout-card");
+      const head = dashNode("div", "callout-head");
+      head.appendChild(coinFace(coin.mint, coin.symbol, 28));
+      const who = callout.username ? "@" + String(callout.username).replace(/^@/, "")
+        : String(callout.user).slice(0, 6) + "…" + String(callout.user).slice(-6);
+      head.appendChild(dashNode("span", "who", who));
+      if (callout.verified === true) head.appendChild(dashNode("span", "dashbadge good", "PUMP.FUN VERIFIED"));
+      head.appendChild(dashNode("span", "coin", "$" + String(coin.symbol || coin.mint?.slice(0, 6) || "?").replace(/^\$/, "")));
+      card.appendChild(head);
+      if (callout.text) card.appendChild(dashNode("p", "callout-evidence", "“" + String(callout.text).slice(0, 280) + "”"));
+      const proof = dashNode("div", "callout-proof");
+      proof.append(
+        dashNode("span", "", dashMoney(evidence.matchedCurrentValueUsd) + " current-value inflow"),
+        dashNode("span", "", String(evidence.qualifyingInflowCount || row.inflows.length) + " matching transaction" +
+          ((evidence.qualifyingInflowCount || row.inflows.length) === 1 ? "" : "s")),
+        dashNode("span", "", "current-value threshold " + dashMoney(evidence.thresholdUsd)),
+        dashNode("span", "", String(callout.verificationLevel || "wallet-inflow-matched").replace(/-/g, " "))
+      );
+      card.appendChild(proof);
+      const links = dashNode("div", "dashactions");
+      const sourceUrl = callout.source?.url || callout.url;
+      if (/^https:\/\//.test(String(sourceUrl || ""))) {
+        const source = dashNode("a", "candidate-link", "Open matched callout ↗");
+        source.href = sourceUrl; source.target = "_blank"; source.rel = "noopener";
+        links.appendChild(source);
+      }
+      const receipt = row.inflows.find((inflow) => /^https:\/\//.test(String(inflow?.link || "")));
+      if (receipt) {
+        const chain = dashNode("a", "candidate-link", "Verify matching transaction ↗");
+        chain.href = receipt.link; chain.target = "_blank"; chain.rel = "noopener";
+        links.appendChild(chain);
+      }
+      links.appendChild(caChip(coin.mint));
+      card.appendChild(links);
+      el.appendChild(card);
+    }
+  } catch (error) {
+    el.innerHTML = "";
+    dashReady(el);
+    el.append(dashLead("Callouts unavailable", String(error?.message || error), "EVIDENCE ERROR", "bad"));
+  }
+}
+
+async function loadSettingsDashboard() {
+  const el = document.getElementById("settingsbody");
+  if (!el || document.getElementById("settingspanel")?.hidden) return;
+  if (FLOOR_N == null) {
+    el.innerHTML = "";
+    el.append(dashLead("Settings", "Open a floor from the tower first.", "NO FLOOR", "warn"));
+    return;
+  }
+  dashLoading(el, "Loading owner settings…");
+  try {
+    const [floorR, feedR] = await Promise.all([
+      call_api("/api/floor/" + FLOOR_N),
+      call_api("/api/floor/" + FLOOR_N + "/feed"),
+    ]);
+    el.innerHTML = "";
+    dashReady(el);
+    const room = floorR.body || {};
+    if (floorR.status !== 200) throw new Error(floorR.body?.error || "floor settings unavailable");
+    if (!room.isMine) {
+      el.append(dashLead("Settings are owner-only",
+        "Connect the wallet that holds this floor to change its nameplate or notification address.",
+        "OWNER ONLY", "warn"));
+      return;
+    }
+    const identity = room.identity || {};
+    const copySettings = feedR.status === 200 ? (feedR.body?.settings || {}) : {};
+    el.append(dashLead("Settings",
+      "Identity, desk name, notifications, and this device's display. Team operations live under Team; execution filters and feed setup live under WALL-ST-E.",
+      "OWNER CONTROLS", "good"));
+
+    const identityCard = dashNode("section", "dashsection");
+    identityCard.appendChild(dashNode("h4", "", "Floor identity"));
+    const identityForm = dashNode("div", "settings-grid");
+    const field = (label, input) => {
+      const wrap = dashNode("div", "fieldgroup");
+      input.setAttribute("aria-label", label);
+      wrap.append(dashNode("label", "", label), input);
+      return wrap;
+    };
+    const floorName = dashNode("input", "dp-in");
+    floorName.maxLength = 28; floorName.value = identity.floorName || ""; floorName.placeholder = "Name this floor";
+    const mdName = dashNode("input", "dp-in");
+    mdName.maxLength = 24; mdName.value = identity.mdName || ""; mdName.placeholder = "Name your Managing Director";
+    const costume = dashNode("select", "dp-in");
+    for (const [value, label] of [["", "Choose a costume"], ["charcoal", "The Charcoal Suit"],
+      ["tweed", "Tweed & Elbow Patches"], ["flight", "The Flight Jacket"], ["trench", "The Trench"],
+      ["tracksuit", "Velour Tracksuit"], ["labcoat", "The Lab Coat"], ["tux", "Evening Wear"],
+      ["vest", "Hi-Vis & Hard Hat"]]) {
+      const option = dashNode("option", "", label); option.value = value;
+      option.disabled = !value;
+      option.selected = (identity.costume || "") === value; costume.appendChild(option);
+    }
+    identityForm.append(field("Floor name", floorName), field("Managing Director name", mdName),
+      field("Managing Director costume", costume));
+    const identityActions = dashNode("div", "form-actions");
+    const identitySave = dashNode("button", "dp-btn", "Save identity");
+    identitySave.type = "button";
+    const identityMessage = dashNode("span", "dp-note");
+    identitySave.onclick = async () => {
+      identitySave.disabled = true; identitySave.textContent = "Saving…";
+      const payload = {};
+      if (floorName.value.trim() !== (identity.floorName || "")) payload.floorName = floorName.value.trim();
+      if (mdName.value.trim() !== (identity.mdName || "")) payload.mdName = mdName.value.trim();
+      if (costume.value && costume.value !== (identity.costume || "")) payload.costume = costume.value;
+      if (!Object.keys(payload).length) {
+        identitySave.disabled = false; identitySave.textContent = "Save identity";
+        identityMessage.textContent = "No changes to save.";
+        return;
+      }
+      const result = await call_api("/api/floor/" + FLOOR_N + "/identity", {
+        method: "POST", body: JSON.stringify(payload),
+      });
+      identitySave.disabled = false; identitySave.textContent = "Save identity";
+      identityMessage.textContent = result.status === 200 ? "Saved." :
+        ((result.body?.errors || [result.body?.error || "Could not save."]).join(" · "));
+      if (result.status === 200) window.applyIdentity?.(result.body?.identity || result.body, room.floorLabel);
+    };
+    identityActions.append(identitySave, identityMessage);
+    identityForm.appendChild(identityActions);
+    identityCard.appendChild(identityForm);
+    el.appendChild(identityCard);
+
+    const deskCard = dashNode("section", "dashsection");
+    deskCard.appendChild(dashNode("h4", "", "Desk and notifications"));
+    const deskForm = dashNode("div", "settings-grid");
+    const deskName = dashNode("input", "dp-in");
+    deskName.maxLength = 28; deskName.value = room.settings?.desk_name || ""; deskName.placeholder = "Name your desk";
+    const webhook = dashNode("input", "dp-in");
+    webhook.type = "url"; webhook.value = copySettings.webhook_url || "";
+    webhook.placeholder = "Discord, Telegram, or Slack webhook";
+    deskForm.append(field("Desk name", deskName), field("Exit-alert webhook · optional", webhook));
+    const deskActions = dashNode("div", "form-actions");
+    const deskSave = dashNode("button", "dp-btn", "Save desk settings");
+    deskSave.type = "button";
+    const deskMessage = dashNode("span", "dp-note");
+    deskSave.onclick = async () => {
+      deskSave.disabled = true; deskSave.textContent = "Saving…";
+      const [nameResult, hookResult] = await Promise.all([
+        call_api("/api/floor/" + FLOOR_N + "/settings", {
+          method: "POST", body: JSON.stringify({ deskName: deskName.value.trim() }),
+        }),
+        call_api("/api/floor/" + FLOOR_N + "/copy", {
+          method: "POST", body: JSON.stringify({ webhookUrl: webhook.value.trim() || null }),
+        }),
+      ]);
+      deskSave.disabled = false; deskSave.textContent = "Save desk settings";
+      deskMessage.textContent = nameResult.status === 200 && hookResult.status === 200
+        ? "Saved." : (hookResult.body?.error || nameResult.body?.error || "Could not save.");
+      if (nameResult.status === 200 && hookResult.status === 200) dashboardFeedCache = null;
+    };
+    deskActions.append(deskSave, deskMessage);
+    deskForm.appendChild(deskActions);
+    deskCard.append(deskForm, dashNode("p", "dp-note",
+      "The webhook receives durable entry and exit alerts only. It cannot sign, control WALL-ST-E, or receive a wallet key."));
+    el.appendChild(deskCard);
+
+    const routing = dashNode("section", "dashsection");
+    routing.appendChild(dashNode("h4", "", "Controls now live where they are used"));
+    const actions = dashNode("div", "dashactions");
+    for (const [destination, label] of [["team", "Team shift and brain"], ["wallste", "WALL-ST-E filters and setup"]]) {
+      const button = dashNode("button", "dp-btn ghost", label);
+      button.type = "button"; button.onclick = () => window.showDashboard?.(destination);
+      actions.appendChild(button);
+    }
+    const theme = dashNode("button", "dp-btn ghost", "Switch day / night");
+    theme.type = "button"; theme.onclick = () => document.getElementById("shiftbtn")?.click();
+    actions.appendChild(theme);
+    routing.appendChild(actions);
+    el.appendChild(routing);
+
+    const build = document.querySelector('meta[name="cc-build"]')?.content;
+    if (build) {
+      const note = dashNode("p", "dp-note", "build " + build);
+      note.style.cssText = "text-align:center;opacity:.58;font-size:10px";
+      el.appendChild(note);
+    }
+  } catch (error) {
+    el.innerHTML = "";
+    dashReady(el);
+    el.append(dashLead("Settings unavailable", String(error?.message || error), "OWNER ERROR", "bad"));
+  }
+}
+
+window.__loadDashboardDestination = (which) => {
+  if (which === "overview") loadOverviewDashboard();
+  else if (which === "calls") activateDashboardSubview("calls", dashboardSubview.calls);
+  else if (which === "wallste") loadWallsteDashboard();
+  else if (which === "team") window.__renderTeamInto?.(document.getElementById("teamcontrolpanel"), { includeBot: false });
+  else if (which === "callouts") loadCalloutsDashboard();
+  else if (which === "activity") activateDashboardSubview("activity", dashboardSubview.activity);
+  else if (which === "performance") activateDashboardSubview("performance", dashboardSubview.performance);
+  else if (which === "settings") loadSettingsDashboard();
+};
+
 /* light the whale dot when the feed has rows newer than last look */
 (async () => {
   try {
-    const { body } = await call_api("/api/whales/feed?pad=pump.fun");
-    const newest = body.callouts?.[0]?.ts || 0;
-    if (newest > Number(localStorage.getItem("cc-whales-seen") || 0))
+    const { body } = await call_api("/api/callouts");
+    const newest = body.generatedAt || 0;
+    const hasMatches = Array.isArray(body.coins) && body.coins.some((coin) =>
+      Array.isArray(coin?.callouts) && coin.callouts.length > 0);
+    if (hasMatches && newest > Number(localStorage.getItem("cc-whales-seen") || 0))
       document.getElementById("whale-dot")?.classList.add("on");
   } catch {}
 })();
@@ -7900,12 +9252,22 @@ setInterval(pollAlerts, 20000);
  * while it is on screen — a hidden pane costs nothing, and nothing repaints behind
  * your back. The header rides the calls fetch, so it now updates from any pane. */
 setInterval(() => {
-  if (callsPanel.classList.contains("on") ||
-      document.getElementById("livepanel")?.classList.contains("on")) {
-    loadCalls({ liveOnly: true });
+  const callsOpen = !document.getElementById("callsworkspace")?.hidden;
+  if (callsOpen && dashboardSubview.calls === "candidates") {
+    loadCandidateBoard();
+  } else if (callsOpen && ["published", "closed"].includes(dashboardSubview.calls)) {
+    loadDashboardCalls(dashboardSubview.calls, { force: true });
   } else {
     loadCalls({ liveOnly: true, hudOnly: true });   // keep the header honest everywhere
   }
+  if (!document.getElementById("overviewpanel")?.hidden) loadOverviewDashboard();
+  const wallstePanel = document.getElementById("wallstepanel");
+  const activeControl = document.activeElement;
+  const editingWallste = wallstePanel?.contains(activeControl) &&
+    /^(INPUT|SELECT|TEXTAREA)$/.test(activeControl?.tagName || "");
+  if (!wallstePanel?.hidden && document.visibilityState === "visible" &&
+      !editingWallste && !wallsteFiltersDirty) loadWallsteDashboard({ background: true });
+  if (!document.getElementById("calloutspanel")?.hidden) loadCalloutsDashboard();
   for (const p of ["whales", "stats", "ranks", "ledger"]) {
     if (document.getElementById(p + "panel")?.classList.contains("on")) window["load_" + p]?.();
   }
@@ -7913,4 +9275,8 @@ setInterval(() => {
 // Wallet and credit were fetched once at boot; a top-up showed nothing until reload.
 setInterval(() => { refreshBudget?.(); }, 60000);
 window.__pollCalls = () => loadCalls({ liveOnly: true });   // probe hook: the poll, on demand
+
+// Overview is the default destination. The rail opens only after every module has
+// registered its loader, so the first visible dashboard state is complete.
+queueMicrotask(() => window.showDashboard?.("overview", { force: true }));
 </script>

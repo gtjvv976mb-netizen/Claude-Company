@@ -16,6 +16,7 @@ import { cfg, floorsFor } from "./config.js";
 import * as store from "./lib/store.js";
 import * as shadow from "./shadow.js";
 import { buildBoard, selectAcrossBoard, CAP_BANDS, COIN_TYPES } from "./categories.js";
+import { recordCandidateBoard } from "./candidate-board.js";
 import * as funnel from "./funnel.js";
 import * as ds from "./data/dexscreener.js";
 import { eligibility, contenderScore, pickOne, bookState, SEQUENTIAL, MAX_LIVE_CALLS } from "./mandate.js";
@@ -516,6 +517,10 @@ export async function runPenthouseCycle({
    * empty cell would never even be noticed. Here an empty cell is a finding: "nothing
    * legitimate under $100k this hour" is worth knowing and used to be invisible. */
   const board = buildBoard(scored, { perCell: PER_CELL, viable: (c) => wouldSurviveScreen(c) === null });
+  // Preserve the exact free-screened shortlist before any paid analyst or choosing
+  // seat sees it. The UI labels these candidates, never calls.
+  try { recordCandidateBoard(cycle, board, { considered: universe.length }); }
+  catch (error) { emit("board:record_failed", { error: String(error?.message || error) }); }
   emit("board:built", {
     considered: universe.length, offBoard: board.offBoard,
     cellsFilled: board.filled, cellsPossible: board.possible,

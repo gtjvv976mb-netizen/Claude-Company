@@ -1,4 +1,5 @@
 import { readRpc } from "../lib/http.js";
+import { isAddress } from "../lib/base58.js";
 import { cfg } from "../config.js";
 
 const TOKEN2022 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
@@ -120,4 +121,26 @@ export async function topHolders(mint, supplyRaw) {
 export async function health() {
   const r = await readRpc(cfg.rpc, "getSlot", []);
   return r.ok ? { ok: true, slot: r.data } : { ok: false, error: r.error };
+}
+
+const walletBalanceCache = new Map();
+
+/** Public SOL balance for one validated wallet. This is used only to show a
+ * tenant whether their self-hosted burner is funded; it cannot move funds. A short
+ * cache prevents an open dashboard from turning status refreshes into RPC load. */
+export async function walletSolBalance(wallet, { maxAgeMs = 30_000 } = {}) {
+  if (!isAddress(wallet))
+    return { ok: false, error: "invalid wallet" };
+  const now = Date.now();
+  const cached = walletBalanceCache.get(wallet);
+  if (cached && now - cached.observedAt <= Math.max(0, Number(maxAgeMs) || 0))
+    return cached;
+  const r = await readRpc(cfg.rpc, "getBalance", [wallet, { commitment: "confirmed" }],
+    { attempts: 1, timeoutMs: 5_000 });
+  const lamports = Number(r?.data?.value);
+  if (!r.ok || !Number.isSafeInteger(lamports) || lamports < 0)
+    return { ok: false, error: r?.error || "balance unavailable" };
+  const result = { ok: true, lamports, sol: lamports / 1e9, observedAt: now };
+  walletBalanceCache.set(wallet, result);
+  return result;
 }

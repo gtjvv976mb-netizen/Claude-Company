@@ -402,8 +402,10 @@ export function broadcast(callId, leasedFloors) {
 }
 
 export const feedFor = (floorNo, limit = 25) => db.prepare(`
-  SELECT d.*, c.mint, c.symbol, c.category, c.conviction, c.status, c.entry_ref, c.stop, c.target,
+  SELECT d.*, c.mint, c.symbol, c.category, c.launchpad, c.conviction, c.status,
+         c.entry_ref, c.entry_lo, c.entry_hi, c.stop, c.target, c.opened_at, c.closed_at,
          c.thesis, c.invalidation, c.close_reason, c.close_mark, c.image_url,
+         c.mcap_at_call, c.liq_at_call, c.rt_loss_at_call,
          (SELECT e.mark FROM call_events e WHERE e.call_id = c.id AND e.mark IS NOT NULL
           ORDER BY e.id DESC LIMIT 1) AS last_mark,
          (SELECT MAX(e.ts) FROM call_events e WHERE e.call_id = c.id AND e.mark IS NOT NULL) AS last_mark_ts

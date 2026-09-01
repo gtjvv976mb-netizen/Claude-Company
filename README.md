@@ -151,6 +151,12 @@ Solana RPC.
 
 After deployment, verify `/api/lease/config`, `/api/stats/overview`, `/api/heartbeat`, and
 `/api/improvements/status`.
+The tenant dashboard additionally reads `/api/candidates/board` for the immutable
+pre-decision top-five board, `/api/callouts` for exact author-wallet matches to confirmed
+pool-touching token inflows valued at the current market mark (not reconstructed purchase cost), and
+`/api/floor/:n/executor/status` for the floor owner's sanitized WALL-ST-E telemetry.
+Anonymous requests to the first two should be refused; the executor-status route must
+also refuse signed-in guests who do not own that floor.
 A ready improvement service reports `bundleAuthConfigured: true`, and its `sourceCommit`
 must equal the exact 40-character commit SHA deployed by Render before an improvement
 review is dispatched. The public status response is deliberately coarse; the review
@@ -266,6 +272,16 @@ the PM stops at the threshold and slides proposals **under the CEO's door**. Rej
 the shredder. Everything ends up in the journal.
 
 The CEO's office is the one room no other agent enters.
+
+The floor HUD has eight working destinations: **Overview**, **Calls**, **WALL-ST-E**,
+**Team**, **Callouts**, **Activity**, **Performance**, and **Settings**. Calls keeps the
+free-screened candidate board visibly separate from published and closed calls. Candidate
+rows have no execution action. WALL-ST-E is an owner-only observation/setup surface: it
+can show the local process's self-reported heartbeat and a confirmed read-only balance for
+the public burner address, but it has no remote-control or browser-signing path. Callouts
+only shows Pump.fun authors whose exact public wallet matches recent qualifying confirmed
+token inflows; unmatched conversation is omitted, scan coverage is explicit, and current-mark
+value is never relabelled as the wallet's original purchase consideration.
 
 ## How an order reaches you
 

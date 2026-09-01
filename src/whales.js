@@ -13,7 +13,9 @@ import { emit } from "./lib/bus.js";
  * as a sale, and just as easy to ship.
  */
 
-export const WHALE_USD = Number(process.env.WHALE_MIN_USD || 500);
+const configuredWhaleUsd = Number(process.env.WHALE_MIN_USD || 500);
+export const WHALE_USD = Number.isFinite(configuredWhaleUsd) && configuredWhaleUsd > 0
+  ? configuredWhaleUsd : 500;
 
 /** Recent large trades in one mint, largest first. */
 /**
@@ -32,7 +34,12 @@ export const WHALE_USD = Number(process.env.WHALE_MIN_USD || 500);
  * nothing, so it must never be able to hold the desk hostage: past the deadline it
  * returns what it has and says how much it skipped.
  */
-export async function callouts(mint, { scan = 30, minUsd = WHALE_USD, deadline = null } = {}) {
+export async function callouts(mint, {
+  scan = 30,
+  minUsd = WHALE_USD,
+  deadline = null,
+  includeEvidence = false,
+} = {}) {
   const px = await ds.pairsFor(mint);
   if (!px.ok || !px.pairs.length) return { ok: false, error: px.error || "no pairs" };
 
@@ -50,6 +57,7 @@ export async function callouts(mint, { scan = 30, minUsd = WHALE_USD, deadline =
   const trades = [];
 
   let skipped = 0;
+  let failedReads = 0;
   for (const s of (sigs.data || []).filter((x) => !x.err)) {
     // Out of time: stop reading and report on what we have. A partial whale read is a
     // slightly worse ranking nudge; an unfinished cycle is no calls at all.
@@ -59,7 +67,10 @@ export async function callouts(mint, { scan = 30, minUsd = WHALE_USD, deadline =
       // One attempt under a deadline: the retries exist for holder concentration, which
       // is decision-relevant. This is a nudge and does not deserve three tries.
       deadline ? { attempts: 1 } : {});
-    if (!tx.ok || !tx.data?.meta || tx.data.meta.err) continue;
+    if (!tx.ok || !tx.data?.meta) { failedReads++; continue; }
+    // A successfully read transaction which failed on chain is a known non-trade,
+    // not missing coverage.
+    if (tx.data.meta.err) continue;
     const m = tx.data.meta;
 
     const pre = new Map((m.preTokenBalances || []).filter((b) => b.mint === mint).map((b) => [b.accountIndex, b]));
@@ -73,12 +84,20 @@ export async function callouts(mint, { scan = 30, minUsd = WHALE_USD, deadline =
       if (delta === 0n) continue;
 
       const tokens = Math.abs(Number(delta)) / 10 ** decimals;
+      // This is the token delta valued at the current DexScreener mark. The
+      // transaction parser does not reconstruct quote-token consideration, so callers
+      // must not present this approximation as dollars paid at execution time.
       const usd = tokens * price;
       if (usd < minUsd) continue;
       trades.push({
         wallet: p.owner,
         side: delta > 0n ? "buy" : "sell",
         usd: Number(usd.toFixed(2)),
+        currentValueUsd: Number(usd.toFixed(2)),
+        evidenceKind: delta > 0n
+          ? "pool_token_inflow_current_value"
+          : "pool_token_outflow_current_value",
+        valueBasis: "token-delta-at-current-market-mark",
         tokens: Number(tokens.toFixed(0)),
         signature: s.signature,
         at: tx.data.blockTime ? tx.data.blockTime * 1000 : null,
@@ -92,12 +111,15 @@ export async function callouts(mint, { scan = 30, minUsd = WHALE_USD, deadline =
   const boughtUsd = buys.reduce((a, t) => a + t.usd, 0);
   const soldUsd = sells.reduce((a, t) => a + t.usd, 0);
 
-  return {
+  const result = {
     ok: true, mint, pool, priceUsd: price, scanned: sigs.data.length,
     // How much of the tape we did NOT read, so a thin sample is never mistaken for a
     // quiet one. A coin with no whales and a coin we ran out of time on look identical
     // in every field but this.
-    unread: skipped, partial: skipped > 0,
+    unread: skipped + failedReads,
+    skipped,
+    failed: failedReads,
+    partial: skipped + failedReads > 0,
     trades: trades.slice(0, 12),
     buys: buys.length, sells: sells.length,
     boughtUsd: Number(boughtUsd.toFixed(2)),
@@ -107,6 +129,11 @@ export async function callouts(mint, { scan = 30, minUsd = WHALE_USD, deadline =
     uniqueBuyers: new Set(buys.map((t) => t.wallet)).size,
     uniqueSellers: new Set(sells.map((t) => t.wallet)).size,
   };
+  // The canonical Callouts matcher needs every bounded qualifying row, not only the
+  // former three-card display preview. Keep it opt-in so the legacy/public per-mint
+  // endpoint does not widen its wallet payload.
+  if (includeEvidence) result.evidenceTrades = trades;
+  return result;
 }
 
 /**

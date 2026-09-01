@@ -35,8 +35,13 @@ import * as copy from "./copy.js";
 import * as perf from "./perf.js";
 import * as alerts from "./alerts.js";
 import * as identity from "./identity.js";
+import { latestCandidateBoard } from "./candidate-board.js";
+import { walletSolBalance } from "./data/solana.js";
+import { buildExecutorDashboard } from "./executor-dashboard.js";
 import * as passes from "./passes.js";
-import { callouts } from "./whales.js";
+import { callouts, WHALE_USD } from "./whales.js";
+import { evidenceBackedPumpfunCallouts } from "./callouts.js";
+import { isAddress } from "./lib/base58.js";
 import { retiredBrowserRpcResponse } from "./execution-gates.js";
 import { providerCreditHealth } from "./provider-health.js";
 import { currentImprovementBundle, improvementServiceStatus } from "./improvement-bundle.js";
@@ -59,7 +64,7 @@ export function executorFeedPayload(floorNo, rawAfter = 0) {
     SELECT a.id, a.call_id, a.kind, a.mint, a.urgency, a.created_at,
            c.symbol, c.category, c.launchpad, c.conviction,
            c.entry_ref, c.entry_lo, c.entry_hi, c.stop, c.target, c.close_reason, c.status, c.opened_at,
-           c.liq_at_call, c.rt_loss_at_call, c.policy_version,
+           c.liq_at_call, c.rt_loss_at_call, c.mcap_at_call, c.policy_version,
            COALESCE((SELECT e.mark FROM call_events e
                      WHERE e.call_id=c.id AND e.mark IS NOT NULL
                      ORDER BY e.id DESC LIMIT 1), c.entry_ref) AS current_mark,
@@ -98,6 +103,7 @@ export function executorFeedPayload(floorNo, rawAfter = 0) {
       current_mark: r.current_mark, current_mark_at: r.current_mark_at,
       conviction: r.conviction, category: r.category, launchpad: r.launchpad,
       liq_at_call: r.liq_at_call, rt_loss_at_call: r.rt_loss_at_call,
+      mcap_at_call: r.mcap_at_call,
       policy_version: r.policy_version,
       take_profit_x: floorSettings.take_profit_x ?? 0,
       fixed_sol: floorSettings.fixed_sol ?? 0,
@@ -112,6 +118,71 @@ export function executorHeartbeatPayload(floorNo) {
   let heartbeat = null;
   try { heartbeat = raw ? JSON.parse(raw) : null; } catch { heartbeat = null; }
   return { heartbeat };
+}
+
+/** A guest pass grants the call sheet only. Local executor telemetry contains the
+ * burner address, held mints, and safety state, so it is masked with credentials for
+ * every non-owner response. Kept as a pure projection so the privacy boundary has a
+ * direct regression test instead of depending on route text. */
+export function floorFeedSettingsForViewer(settings, { isOwner = false } = {}) {
+  if (isOwner) return settings;
+  return {
+    ...settings,
+    webhook_url: settings?.webhook_url ? "(set)" : null,
+    executor_url: settings?.executor_url ? "(set)" : null,
+    executor_secret: null,
+    executor_heartbeat: null,
+  };
+}
+
+/** Owner-facing, read-only status for the self-hosted executor. The settings object
+ * is projected field-by-field and the private feed credential never enters the
+ * payload. The optional balance reader makes this contract deterministic in tests. */
+export async function executorStatusPayload(floorNo, {
+  balanceReader = walletSolBalance,
+  nowMs = Date.now(),
+} = {}) {
+  const stored = executorHeartbeatPayload(floorNo).heartbeat;
+  const heartbeat = stored && typeof stored === "object" ? {
+    mode: stored.mode,
+    wallet: stored.wallet,
+    cursor: stored.cursor,
+    open: stored.open,
+    held: stored.held,
+    health: sanitizeExecutorHealth(stored.health),
+    ts: stored.ts,
+    seenAt: stored.seenAt,
+  } : null;
+  const raw = copy.settingsFor(floorNo);
+  let balanceResult = null;
+  if (isAddress(heartbeat?.wallet)) {
+    try {
+      balanceResult = await balanceReader(heartbeat.wallet);
+      if (balanceResult?.ok && !balanceResult.observedAt)
+        balanceResult = { ...balanceResult, observedAt: nowMs };
+    } catch {
+      balanceResult = { ok: false, error: "balance unavailable" };
+    }
+  }
+  return buildExecutorDashboard({
+    floorNo,
+    heartbeat,
+    balanceResult,
+    nowMs,
+    settings: {
+      feedCredentialReady: Boolean(raw.executor_secret),
+      appetite: raw.appetite,
+      bankrollSol: raw.bankroll_sol,
+      instantDelivery: raw.auto === true,
+      categories: raw.categories,
+      launchpads: raw.launchpads,
+      minLiquidityUsd: raw.min_liq_usd,
+      takeProfitX: raw.take_profit_x,
+      fixedSol: raw.fixed_sol,
+      marketCapTier: raw.mcap_tier,
+      updatedAt: raw.updated_at,
+    },
+  });
 }
 
 export function sanitizeExecutorHealth(value) {
@@ -396,6 +467,20 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           return json(200, { ok: true });
         }
 
+        /* ── WALL-ST-E DASHBOARD — owner-only observation, never control ─────
+           Browser session auth protects the tenant's wallet/filter telemetry. The
+           only chain action is one fixed getBalance for the public burner address;
+           no user-supplied RPC method or transaction can cross this route. */
+        const executorStatusMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/executor\/status$/);
+        if (executorStatusMatch) {
+          if (req.method !== "GET") return json(405, { error: "method not allowed" });
+          const floorNo = Number(executorStatusMatch[1]);
+          if (!me) return json(401, { error: "sign in with your wallet first" });
+          if (!holdsFloor(floorNo)) return json(403, { error: "this is not your floor" });
+          res.setHeader("cache-control", "no-store");
+          return json(200, await executorStatusPayload(floorNo));
+        }
+
         /* ── RETIRED BROWSER RPC LANE ─────────────────────────────────────────
            The browser signer is not part of this release, so retaining even a
            read-only wildcard-CORS proxy would expose the private production RPC for
@@ -500,6 +585,15 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           return json(200, { live: calls.liveCalls(), recent: calls.recentCalls(20), stats: calls.stats() });
         }
         if (url.pathname === "/api/calls/stats") return json(200, calls.stats());
+
+        // The exact free-screened market board before Claude/Grok/CEO judgement.
+        // Candidates are deliberately distinct from published calls.
+        if (url.pathname === "/api/candidates/board" && !insider())
+          return json(403, { private: true, error: "the candidate board is for tenants and the house" });
+        if (url.pathname === "/api/candidates/board" && req.method !== "GET")
+          return json(405, { error: "method not allowed" });
+        if (url.pathname === "/api/candidates/board")
+          return json(200, latestCandidateBoard({ coinType: "memecoin", perBand: 5 }));
 
         // The house record, computed from chain data rather than self-reported.
         if (url.pathname === "/api/record") return json(200, perf.houseRecord());
@@ -1006,43 +1100,98 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           return json(200, { watches: out });
         }
 
-        /* ── whale CALLOUTS: pump.fun's on-site calls on the coins whales sized into ──
-           A callout is a wallet posting a thesis on the coin's own page; the site
-           tracks the multiple since. An author whose wallet is among the pool's
-           recent big buyers is a WHALE (ranked by dollars taken); the rest rank
-           by their tracked multiple. Cached 2 minutes — this fans out to
-           pump.fun and the RPC. */
-        if (url.pathname === "/api/whales/callouts" && !insider())
-          return json(403, { error: "whale callouts are insider data — lease a floor" });
-        if (url.pathname === "/api/whales/callouts") {
+        /* ── CALLOUTS: Pump.fun authors with matching wallet activity ──────────
+           A username, badge, or tracked multiple alone is not evidence. The default
+           product view includes only an exact author-wallet match to a confirmed,
+           pool-touching token inflow valued above the threshold at the current mark.
+           That basis is stated explicitly; it is not relabelled as purchase USD.
+           Unmatched chatter is never returned.
+           `/api/whales/callouts` remains a compatibility alias for older viewers. */
+        const calloutsIndex = url.pathname === "/api/callouts" ||
+          url.pathname === "/api/whales/callouts";
+        if (calloutsIndex && !insider())
+          return json(403, { error: "callouts are insider data — lease a floor" });
+        if (calloutsIndex) {
+          if (req.method !== "GET") return json(405, { error: "method not allowed" });
           const now = Date.now();
-          if (globalThis.__whaleCallouts && now - globalThis.__whaleCallouts.at < 120e3)
-            return json(200, globalThis.__whaleCallouts.body);
+          if (globalThis.__verifiedCallouts && now - globalThis.__verifiedCallouts.at < 120e3)
+            return json(200, globalThis.__verifiedCallouts.body);
           const feed = identity.whaleFeed({ launchpad: "pump.fun", limit: 40 });
           const seen = new Set();
           const mints = feed.filter((w) => w.mint && !seen.has(w.mint) && seen.add(w.mint)).slice(0, 3);
           const pf = await import("./data/pumpfun.js");
           const { callouts: liveWhales } = await import("./whales.js");
-          const out = [];
-          for (const m of mints) {
+          const deadline = now + 10_000;
+          const resolved = await Promise.all(mints.map(async (m) => {
             const [thread, flow] = await Promise.all([
               pf.callouts(m.mint, 20).catch(() => ({ ok: false, callouts: [] })),
-              liveWhales(m.mint, { scan: 16 }).catch(() => null),
+              liveWhales(m.mint, {
+                scan: 16, minUsd: WHALE_USD, deadline, includeEvidence: true,
+              }).catch(() => null),
             ]);
-            if (!thread.ok) continue;
-            const buyers = new Map();
-            for (const t of flow?.trades ?? [])
-              if (t.side === "buy" && t.wallet) buyers.set(t.wallet, (buyers.get(t.wallet) ?? 0) + (t.usd ?? 0));
-            const quotes = thread.callouts.map((q) => ({ ...q, whaleUsd: buyers.get(q.user) ?? 0 }));
-            const whales = quotes.filter((q) => q.whaleUsd > 0)
-              .sort((x, y) => y.whaleUsd - x.whaleUsd).slice(0, 3);
-            const chatter = quotes.filter((q) => q.whaleUsd === 0)
-              .sort((x, y) => (y.multiple ?? 0) - (x.multiple ?? 0)).slice(0, 3);
-            if (whales.length + chatter.length === 0) continue;
-            out.push({ mint: m.mint, symbol: m.symbol, netUsd: m.net_usd ?? null, whales, chatter });
-          }
-          const body2 = { coins: out };
-          globalThis.__whaleCallouts = { at: now, body: body2 };
+            if (!thread.ok) return { ok: false, reason: "pumpfun-callouts-unavailable" };
+            if (!flow?.ok) return { ok: false, reason: "solana-tape-unavailable" };
+            const matched = evidenceBackedPumpfunCallouts({
+              mint: m.mint,
+              callouts: thread.callouts.map((row) => ({
+                ...row,
+                source: { provider: "pump.fun", url: row.url ?? null },
+              })),
+              trades: flow.evidenceTrades,
+              minUsd: WHALE_USD,
+              partial: flow.partial,
+              scanned: flow.scanned,
+              unread: flow.unread,
+              failed: flow.failed,
+            });
+            const evidenceCallouts = matched.callouts.slice(0, 5).map((row) => ({
+              ...row,
+              verificationLevel: row.verified
+                ? "pumpfun-verified-and-wallet-inflow-matched"
+                : "wallet-inflow-matched",
+            }));
+            const coin = evidenceCallouts.length ? {
+              mint: m.mint,
+              symbol: m.symbol,
+              netUsd: m.net_usd ?? null,
+              callouts: evidenceCallouts,
+              // Compatibility for the former viewer. Chatter is intentionally empty.
+              whales: evidenceCallouts,
+              chatter: [],
+              evidence: matched.evidence,
+            } : null;
+            return { ok: true, partial: matched.evidence.partial === true, coin };
+          }));
+          const successful = resolved.filter((row) => row?.ok === true);
+          const failed = resolved.filter((row) => row?.ok !== true);
+          const partialScans = successful.filter((row) => row.partial).length;
+          const out = successful.map((row) => row.coin).filter(Boolean);
+          const failureCounts = new Map();
+          for (const row of failed)
+            failureCounts.set(row.reason, (failureCounts.get(row.reason) ?? 0) + 1);
+          const body2 = {
+            coins: out,
+            generatedAt: Date.now(),
+            source: "pump.fun-callouts+solana-confirmed-pool-token-inflows",
+            coverage: {
+              attempted: mints.length,
+              succeeded: successful.length,
+              failed: failed.length,
+              partialScans,
+              verifiedEmpty: successful.filter((row) => !row.partial && !row.coin).length,
+              incompleteEmpty: successful.filter((row) => row.partial && !row.coin).length,
+              complete: failed.length === 0 && partialScans === 0,
+              failures: [...failureCounts].map(([reason, count]) => ({ reason, count })),
+            },
+            policy: {
+              unmatchedChatterIncluded: false,
+              minimumCurrentValueUsd: WHALE_USD,
+              valueBasis: "token-inflow-at-current-market-mark",
+              purchaseConsiderationProven: false,
+              identityClaim: "wallet-match-only",
+            },
+          };
+          globalThis.__verifiedCallouts = { at: now, body: body2 };
           return json(200, body2);
         }
 
@@ -1103,9 +1252,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               ? hqOwner(me)
               : leasing.leaseFor(floorNo)?.wallet === me);
             const st = copy.settingsFor(floorNo);
-            const settings = isOwner ? st
-              : { ...st, webhook_url: st.webhook_url ? "(set)" : null,
-                  executor_url: st.executor_url ? "(set)" : null, executor_secret: null };
+            const settings = floorFeedSettingsForViewer(st, { isOwner });
             return json(200, { feed: copy.feedFor(floorNo), settings,
                                appetites: copy.APPETITES, rent: leasing.rentStatus(floorNo),
                                record: perf.recordFor(floorNo) });
