@@ -886,7 +886,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           const dayAgo = now - 86400e3;
           const sp = spendSince(dayAgo);
           const cap = cfg.dailyBudgetUsd;
-          let state = "RUNNING", reason = null;
+          let state = "RUNNING", reason = null, providerError = null;
           if (process.env.PENTHOUSE_ENABLED === "0") { state = "PAUSED"; reason = "research disabled by the operator"; }
           else if (!process.env.ANTHROPIC_API_KEY) { state = "PAUSED"; reason = "no API key — the house team cannot work"; }
           else if (cap > 0 && sp.usd >= cap) { state = "PAUSED"; reason = `daily budget reached ($${sp.usd.toFixed(2)} of $${cap}) — monitoring and watch checks continue free`; }
@@ -903,6 +903,13 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           const provider = providerCreditHealth(providerEvents, { nowMs: now, windowMs: providerWindowMs });
           if (provider.blocked) {
             state = "BLOCKED";
+            /* THE PROVIDER'S OWN WORDS. Twice today an outage was misdiagnosed
+               from the desk's paraphrase of an error nobody could see: once it
+               sent the operator to raise an Anthropic limit when the desk's own
+               cap was the wall, and once "balance is empty" against an account
+               that had credit. The raw string carries no secret and settles it
+               in one glance, so it ships in the heartbeat. */
+            providerError = String(provider.lastFailureError || "").slice(0, 240);
             /* Name WHICH provider wall was hit: an empty balance is topped up, a
              * metered ceiling is raised. Telling an operator to add credit when the
              * account has credit and a cap is what stopped them wastes the outage. */
@@ -984,7 +991,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           });
           const settled = q("SELECT COUNT(*) n, COALESCE(SUM(pnl_usd),0) pnl, SUM(pnl_usd>0) w FROM results");
           return json(200, {
-            state, reason, lastEventTs: lastEv, grokEnabled: !!process.env.XAI_API_KEY,
+            state, reason, providerError, lastEventTs: lastEv, grokEnabled: !!process.env.XAI_API_KEY,
             providerCredit: {
               blocked: provider.blocked,
               failures: provider.failures,
