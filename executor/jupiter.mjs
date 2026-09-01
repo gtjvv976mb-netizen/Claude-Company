@@ -99,7 +99,17 @@ async function jsonResponse(response, label) {
   let body;
   try { body = JSON.parse(text); }
   catch { throw new Error(`${label} returned non-JSON (${response.status})`); }
-  if (!response.ok) throw new Error(`${label} ${response.status}: ${body?.error || body?.errorMessage || "request failed"}`);
+  if (!response.ok) {
+    /* An object error interpolated straight into a template renders "[object Object]",
+     * which is the least useful string a failing money path can produce — it cost a
+     * live diagnosis. Serialise structured errors so the reason survives to the log. */
+    const raw = body?.error ?? body?.errorMessage ?? body?.message;
+    const detail = raw == null ? "request failed"
+      : typeof raw === "string" ? raw
+      : (() => { try { return JSON.stringify(raw); } catch { return String(raw); } })();
+    const code = body?.errorCode != null ? ` (code ${body.errorCode})` : "";
+    throw new Error(`${label} ${response.status}: ${detail}${code}`);
+  }
   return body;
 }
 
