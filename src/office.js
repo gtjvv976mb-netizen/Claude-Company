@@ -289,6 +289,37 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           return json(200, executorFeedPayload(floorNo, url.searchParams.get("after") || 0));
         }
 
+        /* ── EXECUTOR HEARTBEAT — outbound-only, self-reported liveness ──────
+           The bot card refuses to claim WALL-ST-E is live without telemetry,
+           which was honest and blind. This gives it eyes without giving the
+           server hands: the poller POSTs a tiny status (mode, cursor, open
+           count) on the same read-only secret; the site relays it AS
+           self-reported. Still no control channel, no keys, no custody —
+           the server cannot start, stop, or steer the executor with this. */
+        const hbMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/executor\/heartbeat$/);
+        if (hbMatch && req.method === "POST") {
+          const floorNo = Number(hbMatch[1]);
+          const secret = db.prepare("SELECT executor_secret FROM copy_settings WHERE floor_no=?").get(floorNo)?.executor_secret;
+          const auth = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+          const okAuth = secret && auth && (() => {
+            try { return cryptoTimingEqual(auth, secret); } catch { return false; }
+          })();
+          if (!okAuth) return json(401, { error: "bad or missing executor secret" });
+          const body = await readBody();
+          if (!body || typeof body !== "object") return json(400, { error: "malformed heartbeat" });
+          const hb = {
+            mode: String(body.mode ?? "").slice(0, 16),
+            wallet: String(body.wallet ?? "").slice(0, 64),
+            cursor: Number(body.cursor) || 0,
+            open: Number(body.open) || 0,
+            ts: Number(body.ts) || Date.now(),
+            seenAt: Date.now(),
+          };
+          db.prepare("UPDATE copy_settings SET executor_heartbeat=? WHERE floor_no=?")
+            .run(JSON.stringify(hb), floorNo);
+          return json(200, { ok: true });
+        }
+
         /* ── RETIRED BROWSER RPC LANE ─────────────────────────────────────────
            The browser signer is not part of this release, so retaining even a
            read-only wildcard-CORS proxy would expose the private production RPC for

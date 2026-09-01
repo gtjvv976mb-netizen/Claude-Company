@@ -6914,9 +6914,31 @@ function buildBotCard(settings) {
   releaseGate.appendChild(mk("div", "dp-note",
     "Claude Company is noncustodial: the central site publishes calls but never receives a wallet key or signs a trade. " +
     "Browser and webhook signing stay disabled. WALL-ST-E can trade only from the local poller after you explicitly arm it."));
-  releaseGate.appendChild(mk("div", "dp-note",
-    "This page has no telemetry from your machine, so it cannot say whether WALL-ST-E is armed, paused or live. " +
-    "First start begins at the newest feed item and skips every older call."));
+  /* The card relays what the bot last SAID about itself — it never claims liveness on
+     its own authority. A fresh heartbeat is the bot's word; a stale one is shown as
+     stale; silence keeps the old honest note. The server cannot start, stop or steer
+     the executor through any of this. */
+  let hb = null;
+  try { hb = JSON.parse(settings.executor_heartbeat || "null"); } catch {}
+  const hbAge = hb?.seenAt ? Date.now() - hb.seenAt : null;
+  if (hb && hbAge != null && hbAge < 3 * 60e3) {
+    const line = mk("div", "dp-note");
+    line.style.color = "var(--good,#4f8f52)";
+    line.textContent = `● WALL-ST-E self-reports: ${(hb.mode || "?").toUpperCase()}` +
+      ` · ${hb.open ?? 0} open · heartbeat ${Math.max(1, Math.round(hbAge / 1000))}s ago` +
+      ` (reported by your machine, not verified by this site)`;
+    releaseGate.appendChild(line);
+  } else if (hb && hbAge != null) {
+    const line = mk("div", "dp-note");
+    line.style.color = "var(--bad,#b0503f)";
+    line.textContent = `○ WALL-ST-E's last heartbeat was ${Math.round(hbAge / 60e3)}m ago` +
+      ` (${(hb.mode || "?").toUpperCase()}) — the poller may be stopped or offline.`;
+    releaseGate.appendChild(line);
+  } else {
+    releaseGate.appendChild(mk("div", "dp-note",
+      "This page has no telemetry from your machine, so it cannot say whether WALL-ST-E is armed, paused or live. " +
+      "First start begins at the newest feed item and skips every older call."));
+  }
   let legacyBot = null;
   const legacyKey = `cc_bot_${FLOOR_N}`;
   try { legacyBot = JSON.parse(localStorage.getItem(legacyKey) || "null"); } catch {}

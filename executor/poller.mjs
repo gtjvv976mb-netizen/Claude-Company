@@ -39,7 +39,12 @@ const LOCK_FILE = path.resolve(process.env.LOCK_FILE || `${STATE_DB}.lock`);
 const PAUSE_ENTRIES_FILE = path.resolve(process.env.PAUSE_ENTRIES_FILE || `${STATE_DB}.pause-entries`);
 const HARD_STOP_FILE = path.resolve(process.env.HARD_STOP_FILE || `${STATE_DB}.hard-stop`);
 const LAMPORTS = 1_000_000_000;
-const MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
+/* The FULL 44-character mainnet-beta genesis hash. It shipped truncated to 32
+ * characters, so the equality check could never pass against a real RPC — a bug only
+ * a genuine live boot could surface, and exactly the kind fail-closed design is for:
+ * the first live start REFUSED with the true genesis printed in the message, which is
+ * how this was caught. Verified against the RPC's own answer. */
+const MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 const LIVE_LIMITS = Object.freeze({
   maxSolPerTrade: 0.005,
   dailySolCap: 0.01,
@@ -807,9 +812,32 @@ async function manageOpen() {
 }
 
 let ticking = false;
+/* Self-reported liveness for the floor's bot card. Outbound-only, same read-only
+ * secret as the feed, fire-and-forget: a dead site must never delay a stop check,
+ * so failures are silent and nothing awaits it in the trade path. It carries no
+ * secret and opens no control channel — the server learns the bot's pulse, not its
+ * reins. Throttled to once a minute. */
+let lastHeartbeatAt = 0;
+function sendHeartbeat() {
+  if (Date.now() - lastHeartbeatAt < 60_000) return;
+  lastHeartbeatAt = Date.now();
+  fetch(`${API}/api/floor/${FLOOR}/executor/heartbeat`, {
+    method: "POST", redirect: "error", signal: AbortSignal.timeout(5_000),
+    headers: { authorization: `Bearer ${SECRET}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      mode: EXECUTE ? "live" : "paper",
+      wallet: WALLET,
+      cursor: S.cursor,
+      open: openList().length,
+      ts: Date.now(),
+    }),
+  }).catch(() => {});
+}
+
 async function tick() {
   if (ticking || shuttingDown) return;
   ticking = true;
+  sendHeartbeat();
   try {
     if (EXECUTE) await jupiter.recoverPending();
     accountConfirmedIntents();
