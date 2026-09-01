@@ -3360,9 +3360,11 @@ const grokBoard = (() => {
   //    back rampart and two trash-cube stacks bake into the nav grid (before
   //    buildNav); his parking spot between them stays walkable so he can roll
   //    out. The adobe itself is built later, beside the pick system it needs.
-  solidRect(-12.9, -10.6, 0.5, 2.0);            // rampart to the WEST, so the
-  solidRect(-12.3, -11.55, 1.7, 0.55);          // back glazing stays clear
-  solidRect(-12.3, -9.65, 1.7, 0.55);
+  // the den squared to the floor: rampart NORTH (toward the back wall), cube
+  // stacks east and west, and the mouth open south like every office door.
+  solidRect(-11.75, -11.25, 2.0, 0.5);          // rampart
+  solidRect(-12.7, -10.6, 0.55, 1.7);           // cube stacks
+  solidRect(-10.8, -10.6, 0.55, 1.7);
 
   // ── nobody walks through this room either: the whole footprint is solid on
   //    the nav grid. On Claude floors it is an invisible exclusion zone in a
@@ -4055,11 +4057,12 @@ const botFig = (() => {
   //    the back wall and two ramparts of compacted trash cubes — the ones he
   //    makes — with his trinket shelf and charging dock inside. Opening south.
   const den = new THREE.Group();
-  den.position.set(BOT_DEN.x - 0.35, 0, BOT_DEN.z);
-  /* +PI/2, not -PI/2. Rotating by -90 maps the den's local back wall (-z) onto
-     world +x — the EAST side — so the adobe opened away from Codex Banks with
-     its back turned to him. This puts the rampart west and the opening east. */
-  den.rotation.y = Math.PI / 2;
+  den.position.set(BOT_DEN.x, 0, BOT_DEN.z);
+  /* NO rotation. The den is built opening toward local +z, and both offices'
+     doors face +z too (their glass fronts sit on z1, the bullpen side). Turning
+     it 90 either way pointed it along the back wall instead — it now faces the
+     way every door on this floor faces, with its rampart to the north. */
+  den.rotation.y = 0;
   bx(den, 2.0, 1.9, 0.14, 0, 0.95, -0.62, m(0x6e5a3a, 0.9));         // corrugated back
   for (let i = 0; i < 5; i++)                                         // ribs on the panel
     bx(den, 0.06, 1.8, 0.05, -0.8 + i * 0.4, 0.95, -0.55, m(0x57462c, 0.9));
