@@ -161,6 +161,7 @@ body{
   backdrop-filter:blur(7px); box-shadow:0 6px 18px var(--shadow);
 }
 .dtab{
+  position:relative; text-align:center;
   font:inherit; font-size:11.5px; font-weight:600; letter-spacing:.07em; text-transform:uppercase;
   padding:7px 11px; border-radius:6px; cursor:pointer; white-space:nowrap;
   background:transparent; border:1px solid transparent; color:var(--ink-soft);
@@ -169,9 +170,12 @@ body{
 .dtab[aria-selected="true"]{
   background:var(--amber); border-color:var(--amber); color:#2a2018;
 }
+/* The unread dot USED TO TAKE LAYOUT SPACE, so 'Tape' and 'Calls' sat left of
+   centre in their own buttons while every other label was centred. It is a
+   corner badge now: visible, and weightless. */
 .dtab .dot{
-  display:inline-block; width:6px; height:6px; border-radius:50%; margin-left:6px;
-  background:var(--coral); vertical-align:middle; opacity:0;
+  position:absolute; top:4px; right:5px; width:6px; height:6px; border-radius:50%;
+  background:var(--coral); opacity:0;
 }
 .dtab .dot.on{opacity:1}
 
