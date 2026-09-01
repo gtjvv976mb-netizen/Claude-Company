@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WALL-ST-E · X Articles visual kit</title>
+  <style>
+    @font-face {
+      font-family: "Instrument Serif";
+      src: url("../../token/fonts/InstrumentSerif-Regular.ttf") format("truetype");
+      font-display: block;
+    }
+    @font-face {
+      font-family: "Archivo";
+      src: url("../../token/fonts/Archivo-Bold.ttf") format("truetype");
+      font-weight: 700;
+      font-display: block;
+    }
+    :root {
+      --ink: #131c1f;
+      --night: #1b2b2f;
+      --panel: #22343a;
+      --panel2: #293f45;
+      --line: #3b5358;
+      --cream: #f4ecd8;
+      --muted: #b7b09f;
+      --amber: #e0ad3d;
+      --yellow: #c79a33;
+      --green: #67bf88;
+      --teal: #267f82;
+      --aqua: #73c9d2;
+      --coral: #d97757;
+      --danger: #dc806b;
+      --metal: #70828a;
+      --mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--ink); }
+    body { color: var(--cream); font-family: Archivo, Arial, sans-serif; }
+    .card {
+      position: relative;
+      display: none;
+      width: 1600px;
+      height: 900px;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 84% 15%, rgba(115,201,210,.12), transparent 27%),
+        radial-gradient(circle at 9% 92%, rgba(224,173,61,.09), transparent 29%),
+        linear-gradient(145deg, #172327 0%, #1b2b2f 57%, #19272b 100%);
+    }
+    .card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: .13;
+      background-image:
+        linear-gradient(rgba(244,236,216,.07) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(244,236,216,.07) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: linear-gradient(to bottom, transparent, #000 38%, #000 100%);
+    }
+    body[data-card="cover-wide"] #cover-wide,
+    body[data-card="cover"] #cover,
+    body[data-card="custody"] #custody,
+    body[data-card="two-paths"] #two-paths,
+    body[data-card="runway"] #runway,
+    body[data-card="gauntlet"] #gauntlet,
+    body[data-card="position"] #position,
+    body[data-card="brakes"] #brakes { display: block; }
+    .brand {
+      position: absolute;
+      top: 52px;
+      left: 70px;
+      right: 70px;
+      z-index: 4;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 20px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .brand-left { display: flex; align-items: center; gap: 16px; }
+    .mark {
+      position: relative;
+      width: 34px;
+      height: 34px;
+      border: 2px solid var(--coral);
+      border-radius: 7px;
+      transform: rotate(45deg);
+    }
+    .mark::after {
+      content: "";
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      left: 10px;
+      top: 10px;
+      border-radius: 50%;
+      background: var(--amber);
+    }
+    .figure-no { color: var(--amber); }
+    .eyebrow, .kicker {
+      font-family: var(--mono);
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      color: var(--amber);
+    }
+    .title {
+      position: absolute;
+      z-index: 3;
+      top: 122px;
+      left: 70px;
+      margin: 0;
+      font-family: "Instrument Serif", Georgia, serif;
+      font-weight: 400;
+      font-size: 76px;
+      line-height: .98;
+      letter-spacing: -.025em;
+    }
+    .subtitle {
+      position: absolute;
+      z-index: 3;
+      top: 228px;
+      left: 74px;
+      margin: 0;
+      max-width: 1220px;
+      color: var(--muted);
+      font-size: 25px;
+      line-height: 1.35;
+    }
+    .footer {
+      position: absolute;
+      z-index: 4;
+      left: 70px;
+      right: 70px;
+      bottom: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 17px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 17px;
+      letter-spacing: .04em;
+    }
+    .footer strong { color: var(--cream); }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      min-height: 38px;
+      padding: 7px 15px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(19,28,31,.75);
+      color: var(--cream);
+      font-family: var(--mono);
+      font-size: 17px;
+      letter-spacing: .04em;
+      white-space: nowrap;
+    }
+    .pill.green { border-color: rgba(103,191,136,.6); color: var(--green); }
+    .pill.amber { border-color: rgba(224,173,61,.65); color: var(--amber); }
+    .pill.coral { border-color: rgba(220,128,107,.65); color: var(--danger); }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: currentColor; box-shadow: 0 0 16px currentColor; }
+    .ui-card {
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: rgba(34,52,58,.9);
+      box-shadow: 0 24px 70px rgba(0,0,0,.22);
+    }
+    .ui-label {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 16px;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+    }
+    .ui-head { font-size: 28px; line-height: 1.15; }
+    .ui-copy { color: var(--muted); font-size: 19px; line-height: 1.42; }
+    .rule { height: 1px; background: var(--line); }
+    .arrow {
+      color: var(--amber);
+      font-family: var(--mono);
+      font-size: 34px;
+      line-height: 1;
+    }
+
+    /* X Articles header — purpose-built at 5:2 so the composer does not need to
+       turn a 16:9 editorial cover into a narrow crop. */
+    #cover-wide {
+      width: 1500px;
+      height: 600px;
+      background:
+        radial-gradient(circle at 67% 47%, rgba(224,173,61,.18), transparent 24%),
+        radial-gradient(circle at 94% 0%, rgba(115,201,210,.13), transparent 27%),
+        linear-gradient(118deg, #172327 0%, #1b2b2f 55%, #19272b 100%);
+    }
+    #cover-wide::before {
+      background-size: 40px 40px;
+      mask-image: linear-gradient(90deg, transparent, #000 20%, #000 100%);
+    }
+    #cover-wide .wide-brand {
+      position: absolute;
+      z-index: 8;
+      top: 32px;
+      left: 54px;
+      right: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 14px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    #cover-wide .wide-brand .brand-left { gap: 12px; }
+    #cover-wide .wide-brand .mark { width: 24px; height: 24px; border-radius: 5px; }
+    #cover-wide .wide-brand .mark::after { width: 7px; height: 7px; left: 7px; top: 7px; }
+    #cover-wide .wide-copy {
+      position: absolute;
+      z-index: 7;
+      left: 56px;
+      top: 132px;
+      width: 700px;
+    }
+    #cover-wide .eyebrow { font-size: 14px; }
+    #cover-wide h1 {
+      margin: 15px 0 0;
+      font-family: "Instrument Serif", Georgia, serif;
+      font-size: 76px;
+      font-weight: 400;
+      line-height: .92;
+      letter-spacing: -.035em;
+      white-space: nowrap;
+    }
+    #cover-wide h1 span { color: var(--amber); }
+    #cover-wide .deck {
+      margin: 18px 0 0;
+      width: 670px;
+      color: var(--cream);
+      font-size: 25px;
+      line-height: 1.2;
+    }
+    #cover-wide .deck em { color: var(--green); font-style: normal; }
+    #cover-wide .chips { display: flex; gap: 10px; margin-top: 20px; }
+    #cover-wide .chips .pill { min-height: 32px; padding: 5px 12px; font-size: 13px; }
+    #cover-wide .robot-halo {
+      position: absolute;
+      z-index: 1;
+      left: 692px;
+      top: 35px;
+      width: 430px;
+      height: 520px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 50% 48%, rgba(224,173,61,.22), rgba(38,127,130,.09) 46%, transparent 72%);
+    }
+    #cover-wide .robot {
+      position: absolute;
+      z-index: 3;
+      left: 729px;
+      top: 49px;
+      width: 360px;
+      height: 500px;
+      object-fit: cover;
+      object-position: center 46%;
+      border-radius: 24px;
+      mix-blend-mode: screen;
+      filter: saturate(1.08) contrast(1.05) drop-shadow(0 22px 28px rgba(0,0,0,.45));
+      opacity: .98;
+    }
+    #cover-wide .wide-status {
+      position: absolute;
+      z-index: 9;
+      top: 160px;
+      right: 52px;
+      width: 388px;
+      padding: 14px 18px;
+      border-radius: 16px;
+    }
+    #cover-wide .status-row {
+      display: grid;
+      grid-template-columns: minmax(0,1fr) auto;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 0;
+    }
+    #cover-wide .status-row + .status-row { border-top: 1px solid var(--line); }
+    #cover-wide .ui-label { font-size: 12px; }
+    #cover-wide .status-name { margin-top: 4px; color: var(--cream); font-size: 15px; }
+    #cover-wide .wide-status .pill { min-height: 31px; padding: 5px 10px; font-size: 12px; }
+    #cover-wide .status-note {
+      margin-top: 5px;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 10px;
+      text-align: right;
+    }
+    #cover-wide .wide-footer {
+      position: absolute;
+      z-index: 10;
+      left: 54px;
+      right: 54px;
+      bottom: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 13px;
+      letter-spacing: .04em;
+    }
+    #cover-wide .wide-footer strong { color: var(--cream); }
+
+    /* Cover */
+    #cover .cover-copy { position: absolute; z-index: 5; left: 74px; top: 144px; width: 815px; }
+    #cover .cover-copy .eyebrow { font-size: 19px; }
+    #cover h1 {
+      margin: 24px 0 0;
+      font-family: "Instrument Serif", Georgia, serif;
+      font-size: 116px;
+      font-weight: 400;
+      line-height: .86;
+      letter-spacing: -.04em;
+    }
+    #cover h1 span { display: block; color: var(--amber); }
+    #cover .deck { width: 730px; margin: 30px 0 0; color: var(--cream); font-size: 31px; line-height: 1.24; }
+    #cover .deck em { color: var(--green); font-style: normal; }
+    #cover .chips { display: flex; gap: 12px; margin-top: 30px; }
+    #cover .robot-halo {
+      position: absolute;
+      z-index: 1;
+      right: 34px;
+      top: 70px;
+      width: 660px;
+      height: 760px;
+      border-radius: 52% 48% 40% 60%;
+      background: radial-gradient(circle at 50% 44%, rgba(224,173,61,.2), rgba(38,127,130,.10) 46%, transparent 70%);
+      filter: blur(2px);
+    }
+    #cover .robot {
+      position: absolute;
+      z-index: 2;
+      top: 74px;
+      right: 80px;
+      width: 550px;
+      height: 690px;
+      object-fit: cover;
+      object-position: center 46%;
+      border-radius: 30px;
+      mix-blend-mode: screen;
+      filter: saturate(1.08) contrast(1.05) drop-shadow(0 26px 34px rgba(0,0,0,.45));
+      opacity: .98;
+    }
+    #cover .status-stack {
+      position: absolute;
+      z-index: 6;
+      right: 72px;
+      bottom: 94px;
+      width: 610px;
+      padding: 18px 22px;
+    }
+    #cover .status-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 18px; padding: 10px 0; }
+    #cover .status-row + .status-row { border-top: 1px solid var(--line); }
+    #cover .status-name { font-size: 18px; }
+    #cover .status-note { color: var(--muted); font-family: var(--mono); font-size: 14px; }
+    #cover .footer { right: 720px; }
+
+    /* Custody boundary */
+    #custody .boundary {
+      position: absolute;
+      z-index: 1;
+      top: 342px;
+      bottom: 125px;
+      left: 800px;
+      width: 0;
+      border-left: 3px dashed rgba(224,173,61,.65);
+    }
+    #custody .boundary span {
+      position: absolute;
+      left: -174px;
+      top: -36px;
+      width: 348px;
+      padding: 10px 16px;
+      border: 1px solid var(--amber);
+      border-radius: 999px;
+      background: var(--night);
+      color: var(--amber);
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 15px;
+      letter-spacing: .05em;
+    }
+    #custody .server, #custody .host { position: absolute; top: 326px; height: 390px; padding: 30px; }
+    #custody .server { left: 80px; width: 620px; }
+    #custody .host { right: 80px; width: 620px; border-color: rgba(103,191,136,.48); }
+    #custody .cardhead { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
+    #custody .big-label { margin-top: 9px; font-family: "Instrument Serif", Georgia, serif; font-size: 45px; line-height: 1; }
+    #custody .parts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 26px; }
+    #custody .part { min-height: 92px; padding: 15px; border: 1px solid var(--line); border-radius: 13px; background: rgba(19,28,31,.55); }
+    #custody .part b { display: block; color: var(--cream); font-size: 18px; }
+    #custody .part span { display: block; margin-top: 6px; color: var(--muted); font-family: var(--mono); font-size: 14px; line-height: 1.3; }
+    #custody .feed-arrow {
+      position: absolute;
+      z-index: 4;
+      left: 666px;
+      top: 463px;
+      width: 270px;
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 15px;
+      color: var(--aqua);
+    }
+    #custody .feed-arrow strong { display: block; margin-top: 12px; font-size: 36px; letter-spacing: .08em; }
+    #custody .blocked {
+      position: absolute;
+      z-index: 4;
+      left: 648px;
+      top: 590px;
+      width: 305px;
+      text-align: center;
+      color: var(--danger);
+      font-family: var(--mono);
+      font-size: 15px;
+    }
+    #custody .blocked b { display: block; font-size: 34px; margin-bottom: 8px; }
+
+    /* Two paths */
+    #two-paths .lanes { position: absolute; left: 70px; right: 70px; top: 306px; bottom: 120px; display: grid; grid-template-columns: 1fr 1fr; gap: 34px; }
+    #two-paths .lane { padding: 28px 30px; }
+    #two-paths .lane.manual { border-top: 5px solid var(--aqua); }
+    #two-paths .lane.auto { border-top: 5px solid var(--amber); }
+    #two-paths .lane-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    #two-paths .lane h3 { margin: 7px 0 0; font-family: "Instrument Serif", Georgia, serif; font-size: 48px; font-weight: 400; }
+    #two-paths .steps { display: grid; grid-template-columns: 1fr 38px 1fr 38px 1fr; align-items: stretch; margin-top: 28px; }
+    #two-paths .step { min-height: 190px; padding: 20px 16px; border: 1px solid var(--line); border-radius: 14px; background: rgba(19,28,31,.52); }
+    #two-paths .step .n { color: var(--amber); font-family: var(--mono); font-size: 15px; }
+    #two-paths .step b { display: block; margin-top: 28px; font-size: 21px; line-height: 1.15; }
+    #two-paths .step span { display: block; margin-top: 10px; color: var(--muted); font-size: 15px; line-height: 1.35; }
+    #two-paths .steps .arrow { align-self: center; text-align: center; font-size: 28px; }
+    #two-paths .lane-foot { margin-top: 24px; color: var(--muted); font-size: 18px; line-height: 1.36; }
+    #two-paths .lane-foot strong { color: var(--cream); }
+
+    /* Four-step runway */
+    #runway .runway-grid { position: absolute; z-index: 2; left: 70px; right: 70px; top: 296px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+    #runway .run-step { position: relative; min-height: 466px; padding: 28px 24px; }
+    #runway .run-step::after { content: ""; position: absolute; top: 48px; right: -20px; width: 21px; border-top: 2px solid var(--amber); }
+    #runway .run-step:last-child::after { display: none; }
+    #runway .run-step.final { border-color: rgba(103,191,136,.55); }
+    #runway .run-n { font-family: "Instrument Serif", Georgia, serif; color: var(--amber); font-size: 72px; line-height: 1; }
+    #runway .run-tag { margin-top: 8px; color: var(--muted); font-family: var(--mono); font-size: 15px; letter-spacing: .08em; }
+    #runway h3 { margin: 20px 0 0; font-family: "Instrument Serif", Georgia, serif; font-size: 40px; font-weight: 400; }
+    #runway ul { margin: 24px 0 0; padding: 0; list-style: none; }
+    #runway li { position: relative; margin: 0 0 17px; padding-left: 21px; color: var(--muted); font-size: 17px; line-height: 1.34; }
+    #runway li::before { content: ""; position: absolute; left: 0; top: .48em; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); }
+    #runway .caps { position: absolute; z-index: 3; left: 70px; right: 70px; bottom: 70px; display: grid; grid-template-columns: auto repeat(3, 1fr); align-items: center; gap: 9px 24px; padding: 14px 22px; border: 1px solid rgba(103,191,136,.5); border-radius: 16px; background: rgba(25,48,44,.92); color: var(--cream); font-family: var(--mono); font-size: 15px; }
+    #runway .caps b { color: var(--green); }
+    #runway .caps .reviewed { grid-column: 1 / -1; padding-top: 8px; border-top: 1px solid rgba(103,191,136,.28); color: var(--muted); text-align: center; font-size: 13px; }
+
+    /* Gauntlet */
+    #gauntlet .gates { position: absolute; z-index: 2; left: 70px; right: 70px; top: 310px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+    #gauntlet .gate { min-height: 190px; padding: 24px 24px 22px 84px; position: relative; }
+    #gauntlet .gate-n { position: absolute; left: 24px; top: 24px; width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid var(--amber); border-radius: 50%; color: var(--amber); font-family: var(--mono); font-size: 17px; }
+    #gauntlet .gate h3 { margin: 0; font-size: 23px; line-height: 1.12; }
+    #gauntlet .gate p { margin: 14px 0 0; color: var(--muted); font-size: 17px; line-height: 1.42; }
+    #gauntlet .result { position: absolute; left: 70px; right: 70px; bottom: 80px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    #gauntlet .result > div { padding: 17px 24px; border-radius: 14px; font-family: var(--mono); font-size: 18px; text-align: center; }
+    #gauntlet .skip { border: 1px solid rgba(220,128,107,.6); color: var(--danger); background: rgba(70,35,33,.48); }
+    #gauntlet .sign { border: 1px solid rgba(103,191,136,.6); color: var(--green); background: rgba(31,69,53,.48); }
+
+    /* Position policy */
+    #position .policy-grid { position: absolute; z-index: 2; left: 70px; right: 70px; top: 310px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+    #position .policy { min-height: 315px; padding: 28px 24px; }
+    #position .multiple { font-family: "Instrument Serif", Georgia, serif; font-size: 66px; color: var(--amber); line-height: 1; }
+    #position .policy h3 { margin: 15px 0 0; font-size: 23px; }
+    #position .policy p { margin: 16px 0 0; color: var(--muted); font-size: 17px; line-height: 1.45; }
+    #position .policy .mini { margin-top: 24px; padding-top: 17px; border-top: 1px solid var(--line); color: var(--cream); font-family: var(--mono); font-size: 15px; }
+    #position .desk-exit { position: absolute; z-index: 2; left: 70px; right: 70px; bottom: 82px; padding: 20px 28px; display: flex; align-items: center; justify-content: space-between; gap: 28px; border-color: rgba(220,128,107,.55); }
+    #position .desk-exit strong { color: var(--danger); font-size: 21px; }
+    #position .desk-exit span { color: var(--muted); font-size: 17px; }
+
+    /* Brakes */
+    #brakes .brake-grid { position: absolute; z-index: 2; left: 100px; right: 100px; top: 306px; display: grid; grid-template-columns: 1fr 1fr; gap: 34px; }
+    #brakes .brake { min-height: 390px; padding: 34px; }
+    #brakes .brake.pause { border-top: 5px solid var(--amber); }
+    #brakes .brake.stop { border-top: 5px solid var(--danger); }
+    #brakes .file { display: inline-flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 9px; background: rgba(19,28,31,.6); font-family: var(--mono); font-size: 17px; }
+    #brakes h3 { margin: 24px 0 0; font-family: "Instrument Serif", Georgia, serif; font-size: 48px; font-weight: 400; }
+    #brakes .brake p { color: var(--muted); font-size: 19px; line-height: 1.42; }
+    #brakes .behaviour { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 26px; }
+    #brakes .behaviour div { padding: 15px; border-radius: 11px; background: rgba(19,28,31,.55); border: 1px solid var(--line); }
+    #brakes .behaviour b { display: block; font-size: 15px; }
+    #brakes .behaviour span { display: block; margin-top: 5px; color: var(--muted); font-family: var(--mono); font-size: 13px; }
+    #brakes .truth { position: absolute; z-index: 2; left: 100px; right: 100px; bottom: 77px; display: flex; align-items: center; justify-content: space-between; gap: 30px; padding: 18px 25px; border: 1px solid var(--line); border-radius: 14px; background: rgba(19,28,31,.65); }
+    #brakes .truth b { color: var(--cream); font-size: 18px; }
+    #brakes .truth span { color: var(--muted); font-family: var(--mono); font-size: 15px; }
+  </style>
+</head>
+<body>
+  <section class="card" id="cover-wide" aria-label="WALL-ST-E wide X Articles header">
+    <div class="wide-brand"><div class="brand-left"><span class="mark"></span><span>Claude Company · field note</span></div><span>claudedotcompany.com</span></div>
+    <div class="wide-copy">
+      <div class="eyebrow">Local execution · zero hosted custody</div>
+      <h1>Meet <span>WALL-ST-E</span></h1>
+      <p class="deck">The autotrader our servers <em>cannot control.</em></p>
+      <div class="chips"><span class="pill amber">PAPER BY DEFAULT</span><span class="pill green">KEY STAYS LOCAL</span></div>
+    </div>
+    <div class="robot-halo"></div>
+    <img class="robot" src="wall-st-e-hero.jpg" alt="" aria-hidden="true">
+    <div class="wide-status ui-card">
+      <div class="status-row"><div><div class="ui-label">Research desk</div><div class="status-name">Call feed connection</div></div><span class="pill green"><i class="dot"></i> LIVE</span></div>
+      <div class="status-row"><div><div class="ui-label">WALL-ST-E</div><div class="status-name">Owner-only telemetry</div></div><div><span class="pill amber"><i class="dot"></i> SELF-REPORTED</span><div class="status-note">sanitized · no controls</div></div></div>
+    </div>
+    <div class="wide-footer"><strong>THE DESK IS LIVE · EXECUTION STAYS LOCAL</strong><span>YOUR KEYS · YOUR MACHINE · YOUR ROBOT</span></div>
+  </section>
+
+  <section class="card" id="cover" aria-label="WALL-ST-E article cover">
+    <div class="brand"><div class="brand-left"><span class="mark"></span><span>Claude Company · field note</span></div><span>claudedotcompany.com</span></div>
+    <div class="cover-copy">
+      <div class="eyebrow">Local execution · zero hosted custody</div>
+      <h1>Meet <span>WALL-ST-E</span></h1>
+      <p class="deck">The autotrader our servers <em>cannot control.</em></p>
+      <div class="chips"><span class="pill amber">PAPER BY DEFAULT</span><span class="pill green">KEY STAYS LOCAL</span></div>
+    </div>
+    <div class="robot-halo"></div>
+    <img class="robot" src="wall-st-e-hero.jpg" alt="" aria-hidden="true">
+    <div class="status-stack ui-card">
+      <div class="status-row"><div><div class="ui-label">Research desk</div><div class="status-name">Call feed connection</div></div><span class="pill green"><i class="dot"></i> LIVE</span></div>
+      <div class="status-row"><div><div class="ui-label">WALL-ST-E</div><div class="status-name">Owner-only telemetry</div></div><div><span class="pill amber"><i class="dot"></i> SELF-REPORTED</span><div class="status-note">sanitized status · no remote controls</div></div></div>
+    </div>
+    <div class="footer"><strong>The desk is live. Execution stays local.</strong><span>YOUR KEYS · YOUR MACHINE · YOUR ROBOT</span></div>
+  </section>
+
+  <section class="card" id="custody" aria-label="Custody boundary diagram">
+    <div class="brand"><div class="brand-left"><span class="mark"></span><span>WALL-ST-E · custody boundary</span></div><span class="figure-no">FIG. 01</span></div>
+    <h2 class="title">The line our servers cannot cross.</h2>
+    <p class="subtitle">Claude Company publishes research and can display owner-authenticated sanitized status. Keys, private credentials and the durable journal remain on the operator’s host.</p>
+    <div class="boundary"><span>PRIVATE KEY NEVER CROSSES</span></div>
+    <div class="server ui-card">
+      <div class="cardhead"><div><div class="ui-label">Claude Company</div><div class="big-label">Research server</div></div><span class="pill coral">NO SIGNER</span></div>
+      <div class="parts">
+        <div class="part"><b>Call + exit feed</b><span>Entry reference · stop · target · thesis</span></div>
+        <div class="part"><b>Floor mandate</b><span>Appetite · bankroll · categories · liquidity</span></div>
+        <div class="part"><b>Sanitized status</b><span>Heartbeat · readiness · active caps · public balance</span></div>
+        <div class="part"><b>No control plane</b><span>Cannot start · stop · unpause · sign · read secrets</span></div>
+      </div>
+    </div>
+    <div class="host ui-card">
+      <div class="cardhead"><div><div class="ui-label">Operator-controlled machine</div><div class="big-label">WALL-ST-E</div></div><span class="pill green">LOCAL CUSTODY</span></div>
+      <div class="parts">
+        <div class="part"><b>burner.json</b><span>Mode 0600 · dedicated wallet key</span></div>
+        <div class="part"><b>Local policy</b><span>Sizing · caps · entry and exit rules</span></div>
+        <div class="part"><b>Durable journal</b><span>Cursor · positions · signed attempts</span></div>
+        <div class="part"><b>Jupiter + two RPCs</b><span>Validate · simulate · reconcile</span></div>
+      </div>
+    </div>
+    <div class="feed-arrow">CALLS + EXITS →<strong>⇄</strong>← SANITIZED STATUS</div>
+    <div class="blocked"><b>× ─── KEY</b>NO KEY-UPLOAD PATH</div>
+    <div class="footer"><strong>The server may display status. It cannot start, stop, unpause, sign or inspect secrets.</strong><span>NONCUSTODIAL BY ARCHITECTURE</span></div>
+  </section>
+
+  <section class="card" id="two-paths" aria-label="Two trading paths diagram">
+    <div class="brand"><div class="brand-left"><span class="mark"></span><span>WALL-ST-E · two execution paths</span></div><span class="figure-no">FIG. 02</span></div>
+    <h2 class="title">One offered call. Two ways to act.</h2>
+    <p class="subtitle">Both paths keep signing outside Claude Company. The difference is who applies the final decision: you, or a policy running on your machine.</p>
+    <div class="lanes">
+      <div class="lane manual ui-card">
+        <div class="lane-head"><div><div class="ui-label">Manual path</div><h3>You approve</h3></div><span class="pill">CONNECTED WALLET</span></div>
+        <div class="steps">
+          <div class="step"><span class="n">01</span><b>Open the call</b><span>See the desk’s size, stop, target and thesis.</span></div><div class="arrow">→</div>
+          <div class="step"><span class="n">02</span><b>Open Jupiter</b><span>The page prefills the pair and suggested amount.</span></div><div class="arrow">→</div>
+          <div class="step"><span class="n">03</span><b>Your wallet signs</b><span>Review the swap and approve—or walk away.</span></div>
+        </div>
+        <div class="lane-foot"><strong>The site never receives your private key.</strong> If the widget cannot load, the fallback opens an external market page.</div>
+      </div>
+      <div class="lane auto ui-card">
+        <div class="lane-head"><div><div class="ui-label">Autotrader path</div><h3>WALL-ST-E enforces</h3></div><span class="pill amber">LOCAL POLLER</span></div>
+        <div class="steps">
+          <div class="step"><span class="n">01</span><b>Poll the floor</b><span>Reads only new, authenticated call and exit events.</span></div><div class="arrow">→</div>
+          <div class="step"><span class="n">02</span><b>Run every gate</b><span>Freshness, local sizing, costs, route and simulation.</span></div><div class="arrow">→</div>
+          <div class="step"><span class="n">03</span><b>Burner signs</b><span>Only the dedicated key on the local host can sign.</span></div>
+        </div>
+        <div class="lane-foot"><strong>No browser or webhook broadcast path exists.</strong> Paper mode remains the default until the operator explicitly arms the live canary.</div>
+      </div>
+    </div>
+    <div class="footer"><strong>Custody stays with the operator in both modes.</strong><span>YOUR WALLET · YOUR SIGNATURE · OR YOUR LOCAL POLICY</span></div>
+  </section>
+
+  <section class="card" id="runway" aria-label="Installation runway diagram">
+    <div class="brand"><div class="brand-left"><span class="mark"></span><span>WALL-ST-E · activation runway</span></div><span class="figure-no">FIG. 03</span></div>
+    <h2 class="title">Install. Rehearse. Arm. Fund last.</h2>
+    <p class="subtitle">Live mode is a local ceremony, not a switch hidden in the website. Fresh Linux installs and the macOS supervisor path both fail closed.</p>
+    <div class="runway-grid">
+      <div class="run-step ui-card"><div class="run-n">01</div><div class="run-tag">INSTALL</div><h3>Pin the release</h3><ul><li>Use a fresh checkout</li><li>Bind one floor feed</li><li>Generate a dedicated burner</li><li>Protect local files</li></ul></div>
+      <div class="run-step ui-card"><div class="run-n">02</div><div class="run-tag">REHEARSE</div><h3>Start on paper</h3><ul><li>Entry decisions on future calls</li><li>No signing or full paper lifecycle</li><li>First start skips old calls</li><li>Inspect the host logs</li></ul></div>
+      <div class="run-step ui-card"><div class="run-n">03</div><div class="run-tag">ARM</div><h3>Pass every live gate</h3><ul><li>Exact detached commit</li><li>Jupiter + two private RPCs</li><li>Wallet ACK · values if raised</li><li>macOS keeps entries paused</li></ul></div>
+      <div class="run-step final ui-card"><div class="run-n">04</div><div class="run-tag">FUND LAST</div><h3>Risk only the burner</h3><ul><li>Confirm paper behavior first</li><li>Send only an amount you can lose</li><li>Keep the main wallet separate</li><li>Watch the local journal</li></ul></div>
+    </div>
+    <div class="caps"><span>DEFAULT CANARY</span><b>0.005 SOL / TRADE</b><b>0.01 SOL / 24H DEPLOY</b><b>0.01 SOL / LOSS BRAKE</b><span class="reviewed">REVIEWED SUPPORTED MAXIMA · 0.05 / TRADE · 0.5 / 24H DEPLOY · 0.15 / REALIZED-LOSS ENTRY BRAKE</span></div>
+  </section>
+
+  <section class="card" id="gauntlet" aria-label="Entry safety gauntlet diagram">
+    <div class="brand"><div class="brand-left"><span class="mark"></span><span>WALL-ST-E · entry gauntlet</span></div><span class="figure-no">FIG. 04</span></div>
+    <h2 class="title">A call is a candidate—not an order.</h2>
+    <p class="subtitle">Every 15 seconds by default, the local poller checks for new events. A buy is possible only when every independent gate still agrees.</p>
+    <div class="gates">
+      <div class="gate ui-card"><span class="gate-n">01</span><h3>Feed integrity</h3><p>Correct floor, mainnet cluster, authenticated request, strictly increasing cursor and a forward-only first start.</p></div>
+      <div class="gate ui-card"><span class="gate-n">02</span><h3>Fresh entry</h3><p>Call age ≤45m; monitored mark age ≤15m; price remains inside the authored entry zone and above the stop.</p></div>
+      <div class="gate ui-card"><span class="gate-n">03</span><h3>Local risk size</h3><p>Stop risk, book heat, open positions, rolling deployment/loss limits, spendable balance and the desk’s ceiling.</p></div>
+      <div class="gate ui-card"><span class="gate-n">04</span><h3>Executable costs</h3><p>Forward and reverse Jupiter quotes, price impact, slippage, fees and worst-case round-trip loss.</p></div>
+      <div class="gate ui-card"><span class="gate-n">05</span><h3>Transaction binding</h3><p>Exact wallet, mints, amount, custody accounts, programs, signers, fee limits and block-height expiry.</p></div>
+      <div class="gate ui-card"><span class="gate-n">06</span><h3>Sign, simulate, journal</h3><p>Exact bytes are signed locally, then simulated. A passing attempt is durably recorded before any submission.</p></div>
+    </div>
+    <div class="result"><div class="skip">ANY GATE FAILS → SKIP · NO SIGNATURE</div><div class="sign">ALL GATES PASS → LOCAL SIGNATURE ONLY</div></div>
+  </section>
+
+  <section class="card" id="position" aria-label="Position protection policy diagram">
+    <div class="brand"><div class="brand-left"><span class="mark"></span><span>WALL-ST-E · shared snipe-v2 policy</span></div><span class="figure-no">FIG. 05</span></div>
+    <h2 class="title">Once in, the stop only tightens.</h2>
+    <p class="subtitle">The server’s paper record and the local executor import the same versioned price policy. Every automatic exit closes the recorded position in full.</p>
+    <div class="policy-grid">
+      <div class="policy ui-card"><div class="multiple">OPEN</div><h3>Authored stop</h3><p>No stop means no trade. The current entry mark must still sit above that invalidation level.</p><div class="mini">STOP = THESIS FLOOR</div></div>
+      <div class="policy ui-card"><div class="multiple">1.35×</div><h3>Breakeven ratchet</h3><p>Once the high reaches 1.35× entry, the stop moves up to entry and never moves back down.</p><div class="mini">STOP ≥ ENTRY</div></div>
+      <div class="policy ui-card"><div class="multiple">1.50×</div><h3>25% trailing stop</h3><p>The trail arms behind the high-water mark. New highs can tighten it; lower marks cannot loosen it.</p><div class="mini">STOP ≥ HIGH × 0.75</div></div>
+      <div class="policy ui-card"><div class="multiple">EXIT</div><h3>Target or time</h3><p>The authored target or shared 2× default closes the position. Unresolved positions age out at 12 hours.</p><div class="mini">FULL EXIT · NO SCALE-OUT</div></div>
+    </div>
+    <div class="desk-exit ui-card"><strong>DESK EXIT OUTRANKS PRICE</strong><span>New authority · exit probe loss &gt;12% · liquidity below 60% of call-time · persistent darkness · stale thesis</span><span class="pill coral">EXIT LATCHED</span></div>
+  </section>
+
+  <section class="card" id="brakes" aria-label="Local brake controls diagram">
+    <div class="brand"><div class="brand-left"><span class="mark"></span><span>WALL-ST-E · local controls</span></div><span class="figure-no">FIG. 06</span></div>
+    <h2 class="title">Two files. Two different brakes.</h2>
+    <p class="subtitle">Both controls live beside the protected local journal. The owner dashboard can observe sanitized status, but it cannot change either sentinel.</p>
+    <div class="brake-grid">
+      <div class="brake pause ui-card"><span class="file">▱ pause-entries</span><h3>Pause new buys</h3><p>Use this when you want no fresh exposure while WALL-ST-E keeps protecting what is already on the book.</p><div class="behaviour"><div><b>NEW ENTRIES</b><span>BLOCKED</span></div><div><b>MANAGED EXITS</b><span>CONTINUE</span></div><div><b>PENDING ATTEMPTS</b><span>RECONCILE</span></div><div><b>POSITION MARKS</b><span>MONITORED</span></div></div></div>
+      <div class="brake stop ui-card"><span class="file">▱ hard-stop</span><h3>Block submissions</h3><p>Use this as the stronger brake. It prevents every new transaction submission—including automated exits.</p><div class="behaviour"><div><b>NEW ENTRIES</b><span>BLOCKED</span></div><div><b>NEW EXITS</b><span>BLOCKED</span></div><div><b>ALREADY SIGNED</b><span>RECONCILE ONLY</span></div><div><b>OPEN POSITIONS</b><span>MANUAL SUPERVISION</span></div></div></div>
+    </div>
+    <div class="truth"><b>Stopping the service does not close an on-chain position.</b><span>LOSS BRAKE BLOCKS FUTURE ENTRIES · IT DOES NOT GUARANTEE REALIZED LOSS</span></div>
+  </section>
+
+  <script>
+    (async () => {
+      const cards = new Set(["cover-wide", "cover", "custody", "two-paths", "runway", "gauntlet", "position", "brakes"]);
+      const requested = new URLSearchParams(location.search).get("card") || "cover-wide";
+      document.body.dataset.card = cards.has(requested) ? requested : "cover-wide";
+      await document.fonts.ready;
+      await Promise.all([...document.images].map((img) => img.complete ? Promise.resolve() : new Promise((resolve) => {
+        img.addEventListener("load", resolve, { once: true });
+        img.addEventListener("error", resolve, { once: true });
+      })));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      window.__ART_READY__ = true;
+    })();
+  </script>
+</body>
+</html>

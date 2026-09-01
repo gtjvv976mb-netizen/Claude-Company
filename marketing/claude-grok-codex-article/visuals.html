@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claude + Grok + Codex · X Articles visuals</title>
+  <style>
+    @font-face { font-family: Instrument; src: url("../../token/fonts/InstrumentSerif-Regular.ttf") format("truetype"); font-display:block; }
+    @font-face { font-family: Archivo; src: url("../../token/fonts/Archivo-Bold.ttf") format("truetype"); font-weight:700; font-display:block; }
+    :root {
+      --ink:#131c1f; --night:#18272b; --panel:#22343a; --panel2:#293f45;
+      --line:#3b5358; --cream:#f4ecd8; --muted:#b7b09f; --amber:#e0ad3d;
+      --claude:#d97757; --grok:#e9ecec; --codex:#6f91ff; --codex-soft:#9fdcff;
+      --green:#67bf88; --danger:#dc806b;
+      --mono:ui-monospace,"SFMono-Regular",Menlo,Monaco,Consolas,monospace;
+    }
+    * { box-sizing:border-box; }
+    html,body { width:100%; height:100%; margin:0; overflow:hidden; background:var(--ink); }
+    body { color:var(--cream); font-family:Archivo,Arial,sans-serif; }
+    .canvas {
+      position:relative; display:none; overflow:hidden;
+      background:
+        radial-gradient(circle at 84% 8%, rgba(111,145,255,.14), transparent 27%),
+        radial-gradient(circle at 8% 94%, rgba(217,119,87,.11), transparent 29%),
+        linear-gradient(145deg,#172327 0%,#1b2b2f 58%,#18272b 100%);
+    }
+    .canvas::before {
+      content:""; position:absolute; inset:0; opacity:.12; pointer-events:none;
+      background-image:linear-gradient(rgba(244,236,216,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(244,236,216,.07) 1px,transparent 1px);
+      background-size:48px 48px;
+      mask-image:linear-gradient(to bottom,transparent,#000 36%,#000 100%);
+    }
+    body[data-card="header"] #header,
+    body[data-card="jobs"] #jobs,
+    body[data-card="loop"] #loop { display:block; }
+    #header { width:1500px; height:600px; }
+    #jobs,#loop { width:1600px; height:900px; }
+    .brand {
+      position:absolute; z-index:10; top:38px; left:58px; right:58px;
+      display:flex; align-items:center; justify-content:space-between;
+      color:var(--muted); font:15px var(--mono); letter-spacing:.09em; text-transform:uppercase;
+    }
+    .brand-left { display:flex; align-items:center; gap:13px; }
+    .mark { position:relative; width:26px; height:26px; border:2px solid var(--claude); border-radius:5px; transform:rotate(45deg); }
+    .mark::after { content:""; position:absolute; width:7px; height:7px; left:7px; top:7px; border-radius:50%; background:var(--amber); }
+    .eyebrow { color:var(--amber); font:15px var(--mono); letter-spacing:.12em; text-transform:uppercase; }
+    .pill {
+      display:inline-flex; align-items:center; min-height:31px; padding:5px 11px;
+      border:1px solid var(--line); border-radius:999px; background:rgba(19,28,31,.78);
+      color:var(--cream); font:12px var(--mono); letter-spacing:.04em; white-space:nowrap;
+    }
+    .pill.claude { color:#f6a78b; border-color:rgba(217,119,87,.62); }
+    .pill.grok { color:var(--grok); border-color:rgba(233,236,236,.5); }
+    .pill.codex { color:var(--codex-soft); border-color:rgba(111,145,255,.65); }
+    .footer {
+      position:absolute; z-index:10; left:58px; right:58px; bottom:34px;
+      display:flex; align-items:center; justify-content:space-between; padding-top:13px;
+      border-top:1px solid var(--line); color:var(--muted); font:13px var(--mono); letter-spacing:.05em;
+    }
+    .footer strong { color:var(--cream); }
+
+    /* Header */
+    #header .copy { position:absolute; z-index:6; left:58px; top:125px; width:690px; }
+    #header h1 { margin:17px 0 0; font:400 84px/.88 Instrument,Georgia,serif; letter-spacing:-.035em; }
+    #header h1 span { display:block; color:var(--amber); }
+    #header .deck { width:650px; margin:23px 0 0; color:var(--cream); font-size:25px; line-height:1.24; }
+    #header .mantra { display:flex; flex-wrap:wrap; gap:9px; margin-top:25px; }
+    #header .portrait-grid {
+      position:absolute; z-index:5; top:98px; right:52px; width:692px; height:405px;
+      display:grid; grid-template-columns:repeat(3,1fr); gap:14px;
+    }
+    #header .portrait {
+      position:relative; overflow:hidden; border:1px solid var(--line); border-radius:19px;
+      background:rgba(34,52,58,.93); box-shadow:0 24px 55px rgba(0,0,0,.24);
+    }
+    #header .portrait::after { content:""; position:absolute; left:0; right:0; bottom:0; height:5px; background:var(--accent); }
+    #header .portrait.claude { --accent:var(--claude); transform:translateY(22px); }
+    #header .portrait.grok { --accent:var(--grok); }
+    #header .portrait.codex { --accent:var(--codex); transform:translateY(22px); }
+    #header .portrait img { display:block; width:100%; height:270px; object-fit:cover; object-position:center; background:#1b2b2f; }
+    #header .portrait-info { padding:14px 15px 17px; }
+    #header .portrait-info b { display:block; font-size:18px; }
+    #header .portrait-info span { display:block; margin-top:6px; color:var(--muted); font:11px/1.35 var(--mono); text-transform:uppercase; letter-spacing:.05em; }
+
+    /* Shared figures */
+    .figure-title { position:absolute; z-index:4; top:116px; left:70px; margin:0; font:400 75px/.98 Instrument,Georgia,serif; letter-spacing:-.025em; }
+    .figure-sub { position:absolute; z-index:4; top:218px; left:74px; max-width:1340px; margin:0; color:var(--muted); font-size:23px; line-height:1.36; }
+    .ui-card { border:1px solid var(--line); border-radius:20px; background:rgba(34,52,58,.92); box-shadow:0 24px 65px rgba(0,0,0,.2); }
+    .label { color:var(--muted); font:13px var(--mono); letter-spacing:.1em; text-transform:uppercase; }
+
+    /* Jobs */
+    #jobs .job-grid {
+      position:absolute; z-index:3; top:315px; left:70px; right:70px;
+      display:grid; grid-template-columns:repeat(3,1fr); gap:26px;
+    }
+    #jobs .job { position:relative; min-height:445px; padding:25px 25px 24px; overflow:hidden; }
+    #jobs .job::before { content:""; position:absolute; left:0; top:0; bottom:0; width:5px; background:var(--accent); }
+    #jobs .job.claude { --accent:var(--claude); }
+    #jobs .job.grok { --accent:var(--grok); }
+    #jobs .job.codex { --accent:var(--codex); }
+    #jobs .job-head { display:grid; grid-template-columns:112px 1fr; gap:19px; align-items:center; }
+    #jobs .job-head img { width:112px; height:112px; object-fit:cover; border:1px solid var(--line); border-radius:15px; background:#1b2b2f; }
+    #jobs .job h3 { margin:7px 0 0; font:400 43px/1 Instrument,Georgia,serif; }
+    #jobs .role { margin-top:8px; color:var(--accent); font:13px var(--mono); letter-spacing:.06em; text-transform:uppercase; }
+    #jobs .mapping { display:grid; gap:10px; margin-top:23px; }
+    #jobs .maprow { padding:12px 14px; border:1px solid var(--line); border-radius:11px; background:rgba(19,28,31,.58); }
+    #jobs .maprow b { display:block; color:var(--cream); font-size:14px; }
+    #jobs .maprow span { display:block; margin-top:5px; color:var(--muted); font:13px/1.36 var(--mono); }
+    #jobs .boundary { margin-top:15px; color:var(--accent); font:13px/1.4 var(--mono); }
+
+    /* Loop */
+    #loop .flow {
+      position:absolute; z-index:3; left:60px; right:60px; top:315px;
+      display:grid; grid-template-columns:repeat(5,1fr); gap:28px;
+    }
+    #loop .stage { position:relative; min-height:205px; padding:23px 20px; }
+    #loop .stage:not(:last-child)::after {
+      content:"→"; position:absolute; right:-25px; top:72px; color:var(--amber); font:31px var(--mono);
+    }
+    #loop .stage-no { color:var(--amber); font:12px var(--mono); letter-spacing:.1em; }
+    #loop .stage h3 { margin:13px 0 0; font:400 32px/1 Instrument,Georgia,serif; }
+    #loop .stage p { margin:13px 0 0; color:var(--muted); font-size:15px; line-height:1.42; }
+    #loop .downline {
+      position:absolute; z-index:2; left:750px; top:519px; width:550px; height:78px;
+      border-right:2px dashed rgba(159,220,255,.65);
+      border-bottom:2px dashed rgba(159,220,255,.65);
+    }
+    #loop .downline::after { content:"↓"; position:absolute; left:-10px; bottom:-22px; color:var(--codex-soft); font:24px var(--mono); }
+    #loop .improvement {
+      position:absolute; z-index:3; top:615px; left:505px; right:75px;
+      display:grid; grid-template-columns:1.1fr 48px 1fr; align-items:stretch; gap:18px;
+    }
+    #loop .review-card { min-height:150px; padding:20px 23px; border-color:rgba(111,145,255,.55); }
+    #loop .review-card h3 { margin:8px 0 0; font:400 32px/1 Instrument,Georgia,serif; }
+    #loop .review-card p { margin:11px 0 0; color:var(--muted); font-size:14px; line-height:1.42; }
+    #loop .review-arrow { display:grid; place-items:center; color:var(--amber); font:32px var(--mono); }
+    #loop .return-label {
+      position:absolute; z-index:4; left:75px; bottom:119px; width:378px; padding:17px 19px;
+      border:1px dashed rgba(103,191,136,.55); border-radius:14px; color:var(--green);
+      font:13px/1.45 var(--mono); text-transform:uppercase; letter-spacing:.05em;
+    }
+  </style>
+</head>
+<body>
+  <section class="canvas" id="header" aria-label="Claude, Grok and Codex article header">
+    <div class="brand"><div class="brand-left"><span class="mark"></span><span>Claude Company · systems note</span></div><span>claudedotcompany.com</span></div>
+    <div class="copy">
+      <div class="eyebrow">One desk · three bounded roles</div>
+      <h1>Three minds.<span>Separate powers.</span></h1>
+      <p class="deck">Why Claude Company integrated Claude, Grok and Codex.</p>
+      <div class="mantra"><span class="pill claude">CLAUDE REASONS</span><span class="pill grok">GROK LISTENS TO X</span><span class="pill codex">CODEX AUDITS</span></div>
+    </div>
+    <div class="portrait-grid">
+      <div class="portrait claude"><img src="../../token/big-c-turntable.gif" alt=""><div class="portrait-info"><b>CLAUDE</b><span>Research + judgment</span></div></div>
+      <div class="portrait grok"><img src="../../token/grox-mulder-front.png" alt=""><div class="portrait-info"><b>GROK</b><span>Native X intelligence</span></div></div>
+      <div class="portrait codex"><img src="../../token/codex-turntable-cover.png" alt=""><div class="portrait-info"><b>CODEX</b><span>Improvement proposals</span></div></div>
+    </div>
+    <div class="footer"><strong>NOT THREE MODELS VOTING · ONE SYSTEM WITH BOUNDARIES</strong><span>NO MODEL HOLDS THE KEYS</span></div>
+  </section>
+
+  <section class="canvas" id="jobs" aria-label="Three bounded jobs diagram">
+    <div class="brand"><div class="brand-left"><span class="mark"></span><span>Claude Company · integration map</span></div><span>FIG. 01</span></div>
+    <h2 class="figure-title">Three minds. Three bounded jobs.</h2>
+    <p class="figure-sub">Each system receives a different slice of the problem—and none receives end-to-end authority.</p>
+    <div class="job-grid">
+      <article class="job claude ui-card">
+        <div class="job-head"><img src="../../token/big-c-turntable.gif" alt=""><div><div class="label">Primary reasoning</div><h3>Claude</h3><div class="role">Evidence → judgment</div></div></div>
+        <div class="mapping">
+          <div class="maprow"><b>Works on</b><span>Blind analysis · Red Team · Risk · PM · unsigned ticket · CEO review</span></div>
+          <div class="maprow"><b>Produces</b><span>A structured research decision with thesis, invalidation and size ceiling</span></div>
+        </div>
+        <div class="boundary">BOUNDARY · CANNOT SIGN OR SEND</div>
+      </article>
+      <article class="job grok ui-card">
+        <div class="job-head"><img src="../../token/grox-mulder-front.png" alt=""><div><div class="label">Live social intelligence</div><h3>Grok</h3><div class="role">X → structured evidence</div></div></div>
+        <div class="mapping">
+          <div class="maprow"><b>Works on</b><span>Candidate X read · X-first trend scan · optional tenant PM brain</span></div>
+          <div class="maprow"><b>Produces</b><span>Creator, lore, velocity and authenticity evidence—with citations</span></div>
+        </div>
+        <div class="boundary">BOUNDARY · CANNOT BYPASS THE RAILS</div>
+      </article>
+      <article class="job codex ui-card">
+        <div class="job-head"><img src="../../token/codex-turntable-cover.png" alt=""><div><div class="label">Improvement engineer</div><h3>Codex</h3><div class="role">Evidence → proposals</div></div></div>
+        <div class="mapping">
+          <div class="maprow"><b>Reviews</b><span>Read-only code · aggregate scorecards · failures · cost · exact test provenance</span></div>
+          <div class="maprow"><b>Produces</b><span>Up to five review proposals · manual worker activation still pending</span></div>
+        </div>
+        <div class="boundary">BOUNDARY · CANNOT EDIT, DEPLOY OR TRADE</div>
+      </article>
+    </div>
+    <div class="footer"><strong>SEPARATE INPUTS · SEPARATE AUTHORITY · ONE AUDITABLE SYSTEM</strong><span>FIG. 01 · CLAUDE COMPANY</span></div>
+  </section>
+
+  <section class="canvas" id="loop" aria-label="Claude Company integration loop diagram">
+    <div class="brand"><div class="brand-left"><span class="mark"></span><span>Claude Company · integration loop</span></div><span>FIG. 02</span></div>
+    <h2 class="figure-title">The integration is a loop—not a group chat.</h2>
+    <p class="figure-sub">Live context enters research. Decisions create measurements. Measurements can support governed improvement.</p>
+    <div class="flow">
+      <article class="stage ui-card"><div class="stage-no">01 · CODE</div><h3>Screen</h3><p>Kill mechanical traps and disputed data before paid reasoning.</p></article>
+      <article class="stage ui-card"><div class="stage-no">02 · GROK</div><h3>Listen</h3><p>Add native X evidence—or mark the signal missing.</p></article>
+      <article class="stage ui-card"><div class="stage-no">03 · CLAUDE</div><h3>Reason</h3><p>Blind analysis, adversarial review, sizing and judgment.</p></article>
+      <article class="stage ui-card"><div class="stage-no">04 · CODE</div><h3>Veto + publish</h3><p>Compliance either stops it or permits an unsigned call.</p></article>
+      <article class="stage ui-card"><div class="stage-no">05 · RECORD</div><h3>Measure</h3><p>Retain evidence, failures, costs and forward outcome marks.</p></article>
+    </div>
+    <div class="downline"></div>
+    <div class="return-label">A tested future release may re-enter at step 01.<br>Never a direct production write.</div>
+    <div class="improvement">
+      <article class="review-card ui-card"><div class="label">Codex · manual read-only review</div><h3>Propose</h3><p>Aggregate evidence + exact provenance → bounded engineering recommendations. Protected worker activation is still pending.</p></article>
+      <div class="review-arrow">→</div>
+      <article class="review-card ui-card"><div class="label">Human + ordinary CI</div><h3>Decide</h3><p>Review the proposal, make the change on a branch, run the full suite and merge explicitly—or reject it.</p></article>
+    </div>
+    <div class="footer"><strong>NO SOCIAL SIGNAL GOES STRAIGHT TO A WALLET</strong><span>NO CODEX PROPOSAL GOES STRAIGHT TO PRODUCTION</span></div>
+  </section>
+
+  <script>
+    const cards = new Set(["header","jobs","loop"]);
+    const requested = new URLSearchParams(location.search).get("card") || "header";
+    document.body.dataset.card = cards.has(requested) ? requested : "header";
+    document.fonts.ready.then(() => { window.__ART_READY__ = true; });
+  </script>
+</body>
+</html>

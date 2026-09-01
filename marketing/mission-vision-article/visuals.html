@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claude Company Mission & Vision · X Articles visuals</title>
+  <style>
+    @font-face { font-family:Instrument; src:url("../../token/fonts/InstrumentSerif-Regular.ttf") format("truetype"); font-display:block; }
+    @font-face { font-family:Archivo; src:url("../../token/fonts/Archivo-Bold.ttf") format("truetype"); font-weight:700; font-display:block; }
+    :root {
+      --ink:#131c1f; --night:#18272b; --panel:#22343a; --panel2:#293f45;
+      --line:#3b5358; --cream:#f4ecd8; --muted:#b7b09f; --amber:#e0ad3d;
+      --coral:#d97757; --green:#67bf88; --teal:#73c9d2; --danger:#dc806b;
+      --mono:ui-monospace,"SFMono-Regular",Menlo,Monaco,Consolas,monospace;
+    }
+    * { box-sizing:border-box; }
+    html,body { width:100%; height:100%; margin:0; overflow:hidden; background:var(--ink); }
+    body { color:var(--cream); font-family:Archivo,Arial,sans-serif; }
+    .canvas {
+      position:relative; display:none; overflow:hidden;
+      background:
+        radial-gradient(circle at 85% 9%,rgba(115,201,210,.12),transparent 28%),
+        radial-gradient(circle at 8% 93%,rgba(217,119,87,.11),transparent 29%),
+        linear-gradient(145deg,#172327 0%,#1b2b2f 58%,#18272b 100%);
+    }
+    .canvas::before {
+      content:""; position:absolute; inset:0; opacity:.12; pointer-events:none;
+      background-image:linear-gradient(rgba(244,236,216,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(244,236,216,.07) 1px,transparent 1px);
+      background-size:48px 48px; mask-image:linear-gradient(to bottom,transparent,#000 37%,#000 100%);
+    }
+    body[data-card="header"] #header,body[data-card="mission"] #mission,body[data-card="vision"] #vision { display:block; }
+    #header { width:1500px; height:600px; }
+    #mission,#vision { width:1600px; height:900px; }
+    .brand {
+      position:absolute; z-index:10; top:38px; left:58px; right:58px;
+      display:flex; align-items:center; justify-content:space-between;
+      color:var(--muted); font:15px var(--mono); letter-spacing:.09em; text-transform:uppercase;
+    }
+    .brand-left { display:flex; align-items:center; gap:13px; }
+    .mark { position:relative; width:26px; height:26px; border:2px solid var(--coral); border-radius:5px; transform:rotate(45deg); }
+    .mark::after { content:""; position:absolute; width:7px; height:7px; left:7px; top:7px; border-radius:50%; background:var(--amber); }
+    .eyebrow { color:var(--amber); font:15px var(--mono); letter-spacing:.12em; text-transform:uppercase; }
+    .pill { display:inline-flex; align-items:center; min-height:32px; padding:5px 12px; border:1px solid var(--line); border-radius:999px; background:rgba(19,28,31,.76); color:var(--cream); font:12px var(--mono); letter-spacing:.04em; white-space:nowrap; }
+    .pill.coral { color:#f3a287; border-color:rgba(217,119,87,.62); }
+    .pill.green { color:var(--green); border-color:rgba(103,191,136,.6); }
+    .pill.teal { color:var(--teal); border-color:rgba(115,201,210,.6); }
+    .footer {
+      position:absolute; z-index:10; left:58px; right:58px; bottom:34px;
+      display:flex; align-items:center; justify-content:space-between; padding-top:13px;
+      border-top:1px solid var(--line); color:var(--muted); font:13px var(--mono); letter-spacing:.05em;
+    }
+    .footer strong { color:var(--cream); }
+    .ui-card { border:1px solid var(--line); border-radius:20px; background:rgba(34,52,58,.92); box-shadow:0 24px 65px rgba(0,0,0,.2); }
+    .label { color:var(--muted); font:13px var(--mono); letter-spacing:.1em; text-transform:uppercase; }
+    .figure-title { position:absolute; z-index:4; top:116px; left:70px; margin:0; font:400 75px/.98 Instrument,Georgia,serif; letter-spacing:-.025em; }
+    .figure-sub { position:absolute; z-index:4; top:218px; left:74px; max-width:1360px; margin:0; color:var(--muted); font-size:23px; line-height:1.36; }
+
+    /* Header */
+    #header .copy { position:absolute; z-index:7; left:58px; top:122px; width:750px; }
+    #header h1 { margin:17px 0 0; font:400 84px/.88 Instrument,Georgia,serif; letter-spacing:-.035em; }
+    #header h1 span { display:block; color:var(--amber); }
+    #header .deck { width:690px; margin:22px 0 0; color:var(--cream); font-size:24px; line-height:1.28; }
+    #header .chips { display:flex; flex-wrap:wrap; gap:9px; margin-top:24px; }
+    #header .tower-halo { position:absolute; z-index:1; right:70px; top:26px; width:600px; height:540px; border-radius:50%; background:radial-gradient(circle,rgba(224,173,61,.12),rgba(115,201,210,.08) 48%,transparent 72%); }
+    #header .tower { position:absolute; z-index:4; right:94px; top:42px; width:530px; height:510px; object-fit:contain; border-radius:26px; mix-blend-mode:screen; filter:saturate(1.05) contrast(1.03) drop-shadow(0 24px 32px rgba(0,0,0,.45)); }
+
+    /* Mission flow */
+    #mission .flow { position:absolute; z-index:3; top:322px; left:60px; right:60px; display:grid; grid-template-columns:repeat(5,1fr); gap:27px; }
+    #mission .stage { position:relative; min-height:327px; padding:25px 21px; border-top:5px solid var(--accent); }
+    #mission .stage:not(:last-child)::after { content:"→"; position:absolute; right:-25px; top:124px; color:var(--amber); font:31px var(--mono); }
+    #mission .stage:nth-child(1) { --accent:var(--teal); }
+    #mission .stage:nth-child(2) { --accent:var(--green); }
+    #mission .stage:nth-child(3) { --accent:var(--amber); }
+    #mission .stage:nth-child(4) { --accent:var(--coral); }
+    #mission .stage:nth-child(5) { --accent:var(--teal); }
+    #mission .stage-no { color:var(--accent); font:12px var(--mono); letter-spacing:.1em; }
+    #mission .stage h3 { margin:16px 0 0; font:400 34px/1 Instrument,Georgia,serif; }
+    #mission .stage p { margin:16px 0 0; color:var(--muted); font-size:16px; line-height:1.45; }
+    #mission .outcome { margin-top:21px; padding-top:15px; border-top:1px solid var(--line); color:var(--cream); font:12px/1.45 var(--mono); text-transform:uppercase; letter-spacing:.04em; }
+    #mission .custody-rail { position:absolute; z-index:3; left:120px; right:120px; bottom:102px; display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+    #mission .custody-rail div { padding:17px 20px; border:1px solid rgba(103,191,136,.48); border-radius:12px; background:rgba(19,28,31,.7); color:var(--green); text-align:center; font:14px var(--mono); letter-spacing:.05em; }
+
+    /* Vision comparison */
+    #vision .compare { position:absolute; z-index:3; left:75px; right:75px; top:310px; display:grid; grid-template-columns:1fr 1fr; gap:100px; }
+    #vision .side { position:relative; min-height:480px; padding:28px 30px; }
+    #vision .side.old { border-top:5px solid var(--danger); }
+    #vision .side.new { border-top:5px solid var(--green); }
+    #vision .side h3 { margin:10px 0 0; font:400 47px/1 Instrument,Georgia,serif; }
+    #vision .side .side-note { margin-top:9px; color:var(--muted); font:13px var(--mono); text-transform:uppercase; letter-spacing:.06em; }
+    #vision .rows { display:grid; gap:11px; margin-top:24px; }
+    #vision .row { display:grid; grid-template-columns:118px 1fr; gap:16px; align-items:center; padding:14px 15px; border:1px solid var(--line); border-radius:11px; background:rgba(19,28,31,.56); }
+    #vision .row b { color:var(--cream); font-size:14px; }
+    #vision .row span { color:var(--muted); font:13px/1.38 var(--mono); }
+    #vision .bridge { position:absolute; z-index:5; left:530px; top:263px; width:540px; padding:10px 18px; border:1px solid var(--amber); border-radius:999px; background:var(--night); color:var(--amber); text-align:center; font:12px/1.35 var(--mono); letter-spacing:.06em; text-transform:uppercase; box-shadow:0 14px 38px rgba(0,0,0,.35); }
+  </style>
+</head>
+<body>
+  <section class="canvas" id="header" aria-label="Claude Company mission and vision article header">
+    <div class="brand"><div class="brand-left"><span class="mark"></span><span>Claude Company · founding note</span></div><span>claudedotcompany.com</span></div>
+    <div class="copy">
+      <div class="eyebrow">Mission &amp; vision</div>
+      <h1>Build intelligence.<span>Keep agency.</span></h1>
+      <p class="deck">The vision for sourced, adversarial AI research—with bounded authority and operator-controlled trading custody.</p>
+      <div class="chips"><span class="pill coral">EVIDENCE FIRST</span><span class="pill teal">ADVERSARIAL BY DESIGN</span><span class="pill green">NONCUSTODIAL</span></div>
+    </div>
+    <div class="tower-halo"></div>
+    <img class="tower" src="../../token/claudeco-tower-512.png" alt="" aria-hidden="true">
+    <div class="footer"><strong>RESEARCH IS HOSTED · EXECUTION AUTHORITY STAYS LOCAL</strong><span>THE CHARTER IS THE CONSTITUTION</span></div>
+  </section>
+
+  <section class="canvas" id="mission" aria-label="Claude Company mission in practice diagram">
+    <div class="brand"><div class="brand-left"><span class="mark"></span><span>Claude Company · mission in practice</span></div><span>FIG. 01</span></div>
+    <h2 class="figure-title">The mission, translated into machinery.</h2>
+    <p class="figure-sub">Turn a hostile, noisy market into inspectable research—then stop before custody.</p>
+    <div class="flow">
+      <article class="stage ui-card"><div class="stage-no">01 · DISCOVER</div><h3>Search widely</h3><p>Scout and deterministic code search the field for candidates worth a first look.</p><div class="outcome">Attention is not a recommendation</div></article>
+      <article class="stage ui-card"><div class="stage-no">02 · VERIFY</div><h3>Kill traps</h3><p>Price, authorities, liquidity and executable exit conditions are checked before paid judgment.</p><div class="outcome">Bad mechanics stop here</div></article>
+      <article class="stage ui-card"><div class="stage-no">03 · REASON</div><h3>Disagree</h3><p>Five blind specialists interpret the same sourced evidence without reading one another.</p><div class="outcome">Independent views, one record</div></article>
+      <article class="stage ui-card"><div class="stage-no">04 · REFUTE + VETO</div><h3>Attack it</h3><p>Red Team tries to break the thesis. Risk reduces size. Deterministic Compliance can stop it.</p><div class="outcome">A refusal outranks a yes</div></article>
+      <article class="stage ui-card"><div class="stage-no">05 · PUBLISH + LEARN</div><h3>Show the work</h3><p>An unsigned call—or refusal—is retained with its evidence and later outcome marks.</p><div class="outcome">Research leaves · custody does not</div></article>
+    </div>
+    <div class="custody-rail"><div>NO HOSTED TRADING KEYS</div><div>NO HOSTED SIGNING</div><div>NO HOSTED TRADING CUSTODY</div></div>
+    <div class="footer"><strong>EVIDENCE BEFORE OPINION · REFUSAL BEFORE HYPE</strong><span>FIG. 01 · CLAUDE COMPANY</span></div>
+  </section>
+
+  <section class="canvas" id="vision" aria-label="Claude Company vision comparison">
+    <div class="brand"><div class="brand-left"><span class="mark"></span><span>Claude Company · the vision</span></div><span>FIG. 02</span></div>
+    <h2 class="figure-title">From black-box bots to accountable AI desks.</h2>
+    <p class="figure-sub">The goal is not one more powerful model. It is an organization whose reasoning and authority can be inspected.</p>
+    <div class="compare">
+      <article class="side old ui-card"><div class="label">The pattern to leave behind</div><h3>Black-box bot</h3><div class="side-note">Trust the output · ignore the process</div><div class="rows">
+        <div class="row"><b>Authority</b><span>One system sees, decides and may sign</span></div>
+        <div class="row"><b>Evidence</b><span>An unexplained signal or confident summary</span></div>
+        <div class="row"><b>Custody</b><span>Remote, pooled or operationally opaque</span></div>
+        <div class="row"><b>Record</b><span>Selected wins shown after the outcome</span></div>
+      </div></article>
+      <article class="side new ui-card"><div class="label">The standard we are building toward</div><h3>Accountable AI desk</h3><div class="side-note">Inspect the process · keep the decision</div><div class="rows">
+        <div class="row"><b>Authority</b><span>Specialist roles, independent checks and vetoes</span></div>
+        <div class="row"><b>Evidence</b><span>Sourced thesis, explicit uncertainty and invalidation</span></div>
+        <div class="row"><b>Custody</b><span>Trading execution authority stays with the operator</span></div>
+        <div class="row"><b>Record</b><span>Scoped decisions and outcomes retained and graded</span></div>
+      </div></article>
+    </div>
+    <div class="bridge">Make the system legible—not just fast</div>
+    <div class="footer"><strong>MANY MINDS · SEPARATE POWERS · TENANT CONTROL</strong><span>THE VISION · CLAUDE COMPANY</span></div>
+  </section>
+
+  <script>
+    const cards=new Set(["header","mission","vision"]);
+    const requested=new URLSearchParams(location.search).get("card")||"header";
+    document.body.dataset.card=cards.has(requested)?requested:"header";
+    Promise.all([document.fonts.ready,...[...document.images].map(img=>img.complete?Promise.resolve():new Promise(resolve=>{img.onload=img.onerror=resolve;}))]).then(()=>{window.__ART_READY__=true;});
+  </script>
+</body>
+</html>

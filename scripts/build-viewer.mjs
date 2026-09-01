@@ -39,6 +39,40 @@ const PAGES = [
 const ASSETS = [
   "claudeco-512.png", "claudeco-256.png", "claudeco-64.png",
   "banner-1500x500.png", "banner-1200x630.png",
+  "codex-turntable-cover.png", "codex-turntable.gif", "codex-turntable.mp4",
+  "grox-mulder-front.png",
+];
+const PUBLIC_FONTS = ["Archivo-Bold.ttf", "InstrumentSerif-Regular.ttf"];
+// Publish only the finished article artifacts. README files, render templates,
+// source-only hero imagery and generator scripts stay out of the static site.
+const MARKETING_ARTICLES = [
+  {
+    source: "wall-st-e-article",
+    slug: "wall-st-e",
+    files: [
+      "article.md",
+      "wall-st-e-article-cover.png", "wall-st-e-article-cover-16x9.png",
+      "01-custody-boundary.png", "02-two-ways-to-trade.png",
+      "03-install-rehearse-arm-fund.png", "04-entry-gauntlet.png",
+      "05-position-policy.png", "06-local-brakes.png",
+    ],
+  },
+  {
+    source: "claude-grok-codex-article",
+    slug: "claude-grok-codex",
+    files: [
+      "article.md", "claude-grok-codex-header.png",
+      "01-three-bounded-jobs.png", "02-integration-loop.png",
+    ],
+  },
+  {
+    source: "mission-vision-article",
+    slug: "mission-vision",
+    files: [
+      "article.md", "mission-vision-header.png",
+      "01-mission-in-practice.png", "02-vision-shift.png",
+    ],
+  },
 ];
 const SITE_URL = (process.env.SITE_URL || "https://claudedotcompany.com").replace(/\/$/, "");
 // Where the API lives. Empty means "same origin", which is right for local dev and wrong
@@ -59,9 +93,49 @@ const THREE_REV = JSON.parse(
 fs.mkdirSync(OUT, { recursive: true });
 fs.mkdirSync(path.join(OUT, "assets"), { recursive: true });
 for (const a of ASSETS) {
-  fs.copyFileSync(path.join(ROOT, "token", a), path.join(OUT, "assets", a));
+  const src = path.join(ROOT, "token", a);
+  if (!fs.existsSync(src)) throw new Error(`missing public asset: ${a}`);
+  fs.copyFileSync(src, path.join(OUT, "assets", a));
 }
 fs.copyFileSync(path.join(ROOT, "token", "claudeco-64.png"), path.join(OUT, "assets", "favicon.png"));
+
+const publicFontsDir = path.join(OUT, "assets", "fonts");
+fs.mkdirSync(publicFontsDir, { recursive: true });
+for (const font of PUBLIC_FONTS) {
+  const src = path.join(ROOT, "token", "fonts", font);
+  if (!fs.existsSync(src)) throw new Error(`missing public font: ${font}`);
+  fs.copyFileSync(src, path.join(publicFontsDir, font));
+}
+
+// Every article is available at both /articles/<slug>/ and the explicit
+// /articles/<slug>/x-paste.html path used by the publishing checklist.
+const articlesOut = path.join(OUT, "articles");
+fs.rmSync(articlesOut, { recursive: true, force: true });
+for (const article of MARKETING_ARTICLES) {
+  const sourceDir = path.join(ROOT, "marketing", article.source);
+  const articleOut = path.join(articlesOut, article.slug);
+  const pasteSource = path.join(sourceDir, "x-paste.html");
+  if (!fs.existsSync(pasteSource)) {
+    throw new Error(`missing article page: ${article.source}/x-paste.html`);
+  }
+  fs.mkdirSync(articleOut, { recursive: true });
+  const articleHtml = fs.readFileSync(pasteSource, "utf8")
+    .replaceAll("../../token/fonts/", "../../assets/fonts/");
+  fs.writeFileSync(path.join(articleOut, "index.html"), articleHtml);
+  fs.writeFileSync(path.join(articleOut, "x-paste.html"), articleHtml);
+  for (const file of article.files) {
+    const src = path.join(sourceDir, file);
+    if (!fs.existsSync(src)) throw new Error(`missing article artifact: ${article.source}/${file}`);
+    fs.copyFileSync(src, path.join(articleOut, file));
+  }
+}
+
+const marketingOut = path.join(OUT, "marketing");
+const marketingIndex = path.join(ROOT, "marketing", "index.html");
+if (!fs.existsSync(marketingIndex)) throw new Error("missing public marketing index");
+fs.rmSync(marketingOut, { recursive: true, force: true });
+fs.mkdirSync(marketingOut, { recursive: true });
+fs.copyFileSync(marketingIndex, path.join(marketingOut, "index.html"));
 
 // The self-hosted executor, served static so the one-command install resolves.
 fs.mkdirSync(path.join(OUT, "executor"), { recursive: true });
