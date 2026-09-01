@@ -194,6 +194,11 @@ function resolveLock(values, workdir) {
   return canonical;
 }
 
+function resolvePauseEntries(values, workdir) {
+  const state = path.resolve(workdir, values.STATE_DB || ".cc-executor.sqlite");
+  return path.resolve(workdir, values.PAUSE_ENTRIES_FILE || `${state}.pause-entries`);
+}
+
 function activeLockOwner(lock) {
   let stat;
   try { stat = fs.lstatSync(lock); }
@@ -322,11 +327,23 @@ function upgradeEnvironment(options, { requirePaused = false, requireStopped = f
     MAX_SOL_PER_TRADE: 0.005,
     DAILY_SOL_CAP: 0.01,
     DAILY_LOSS_LIMIT_SOL: 0.01,
+    // Gross ATA creation rent is a transaction-compatibility rail, not market
+    // exposure. A missing value adopts the reviewed two-ATA ceiling; an explicitly
+    // lower operator value remains untouched by the migration.
+    MAX_RENT_LAMPORTS: 4_200_000,
   });
   const capReplacements = Object.create(null);
+  const capDefaultsApplied = [];
+  const capsLowered = [];
   for (const [name, ceiling] of Object.entries(capCeilings)) {
     const configured = nonNegativeNumber(values, name, ceiling);
-    if (values[name] === undefined || configured > ceiling) capReplacements[name] = String(ceiling);
+    if (values[name] === undefined) {
+      capReplacements[name] = String(ceiling);
+      capDefaultsApplied.push(name);
+    } else if (configured > ceiling) {
+      capReplacements[name] = String(ceiling);
+      capsLowered.push(name);
+    }
   }
 
   const resolveLegacy = (value, fallback, label) => {
@@ -371,7 +388,7 @@ function upgradeEnvironment(options, { requirePaused = false, requireStopped = f
     ...capReplacements,
   });
   return { environment, replacements, commit, pause, hardStop, originalLock, canonicalLock,
-    capsLowered: Object.keys(capReplacements) };
+    capDefaultsApplied, capsLowered };
 }
 
 function updateUpgradeEnvironment(options) {
@@ -508,8 +525,10 @@ if (command === "render-plist") {
   const prepared = upgradeEnvironment(options);
   console.log(`live environment can be safely normalized for commit ${prepared.commit}; no secret value was printed`);
   console.log(prepared.capsLowered.length
-    ? `install will only lower canary caps: ${prepared.capsLowered.join(",")}`
-    : "existing canary caps are already at or below the frozen ceilings");
+    ? `install will lower values above reviewed ceilings: ${prepared.capsLowered.join(",")}`
+    : "all explicitly configured caps are already at or below the reviewed ceilings");
+  if (prepared.capDefaultsApplied.length)
+    console.log(`install will apply reviewed defaults to missing values: ${prepared.capDefaultsApplied.join(",")}`);
   console.log(`entry-pause sentinel required before install: ${prepared.pause}`);
   console.log(`hard-stop sentinel preserved if present: ${prepared.hardStop}`);
 } else if (command === "update-upgrade-env") {
@@ -526,11 +545,29 @@ if (command === "render-plist") {
   const owner = activeLockOwner(resolveLock(environment.values, workdir));
   if (owner !== expectedPid) abort("LaunchAgent pid does not own the canonical executor lock", 4);
   if (process.platform === "darwin") {
-    const { verifyMacSleepAssertion } = await import(
+    const {
+      batteryPowerIsOperational, inspectOwnerControlFile, sleepAssertionFaultPath,
+      verifyMacSleepAssertion,
+    } = await import(
       pathToFileURL(path.join(workdir, "sleep-assertion.mjs")).href);
+    const fault = inspectOwnerControlFile(
+      sleepAssertionFaultPath(resolveLock(environment.values, workdir)), {
+        label: "sleep assertion fault latch",
+      });
+    if (fault.present)
+      abort(fault.valid
+        ? "sleep assertion fault is latched; explicit operator repair and review are required"
+        : `sleep assertion fault latch is unsafe (${fault.reason})`, 6);
     const assertion = verifyMacSleepAssertion({ ownerPid: expectedPid,
       lockFile: resolveLock(environment.values, workdir) });
-    if (!assertion.ok) abort(`LaunchAgent sleep assertion is not ready (${assertion.reason})`, 5);
+    if (!assertion.ok) {
+      const pause = inspectOwnerControlFile(resolvePauseEntries(environment.values, workdir), {
+        label: "entry-pause sentinel",
+      });
+      if (!batteryPowerIsOperational(assertion) || !pause.present || !pause.valid)
+        abort(`LaunchAgent sleep assertion is not ready (${assertion.reason})`, 5);
+      console.log("LaunchAgent is operational on battery with entries durably paused");
+    }
   }
   console.log("LaunchAgent process owns the canonical executor lock");
 } else if (command === "run") {
@@ -550,7 +587,8 @@ if (command === "render-plist") {
   if (process.platform === "darwin") {
     const { startMacSleepAssertion } = await import(
       pathToFileURL(path.join(workdir, "sleep-assertion.mjs")).href);
-    await startMacSleepAssertion({ ownerPid: process.pid, lockFile });
+    await startMacSleepAssertion({ ownerPid: process.pid, lockFile,
+      pauseEntriesFile: resolvePauseEntries(environment.values, workdir) });
   }
   await import(pathToFileURL(poller).href);
 } else {

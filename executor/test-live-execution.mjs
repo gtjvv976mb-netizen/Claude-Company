@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import bs58 from "bs58";
 import {
-  ComputeBudgetProgram, Keypair, PublicKey, SystemProgram, TransactionInstruction,
+  ComputeBudgetProgram, Connection, Keypair, PublicKey, SystemProgram, TransactionInstruction,
   TransactionMessage, VersionedTransaction,
 } from "@solana/web3.js";
 import { ExecutionJournal } from "./journal.mjs";
@@ -12,10 +12,18 @@ import { validateEntryPreflightContext } from "./entry-quote-guard.mjs";
 import {
   ATA_PROGRAM, JUPITER_EVENT_AUTHORITY, JUPITER_V6, JupiterV2Executor,
   EXECUTION_READINESS_AMOUNT_LAMPORTS, EXECUTION_READINESS_RESERVE_LAMPORTS,
-  MAINNET_USDC, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, WSOL, decodeJupiterExactIn, validateOrderEnvelope,
+  MAINNET_USDC, MAX_GROSS_RENT_LAMPORTS, MIN_SIGNABLE_BLOCKS_REMAINING,
+  TOKEN_2022_PROGRAM, TOKEN_PROGRAM, WSOL,
+  coherentAccountSnapshot, decodeJupiterExactIn,
+  fencedProcessedEpochHeight,
+  isClosedAccountTombstone, validateOrderEnvelope,
   validateSimulationEffects, validateTransaction, verifyFinalizedFill, priceImpactCapForIntent,
-  classicMintDecimals, independentClassicMintDecimals,
+  classicMintDecimals, independentClassicMintDecimals, processedSlotFreshnessAnchor,
+  writableAccountSafetyFingerprint,
 } from "./jupiter.mjs";
+import {
+  createSolanaRpcDeadlineFetch, solanaRpcConnectionConfig,
+} from "./sol-usd-oracle.mjs";
 
 let pass = 0;
 const ok = async (name, fn) => {
@@ -30,6 +38,108 @@ const cfg = {
   slippageBps: 300, maxPriceImpactPct: 5, maxFeeBps: 100,
   maxNetworkFeeLamports: 3_000_000, maxComputeUnits: 1_400_000,
 };
+
+await ok("Solana Connection HTTP deadlines abort every transport without accumulating requests", async () => {
+  let inFlight = 0;
+  let peakInFlight = 0;
+  let aborts = 0;
+  const seenSignals = new Set();
+  const seenMethods = new Set();
+  const hangingFetch = (_input, init = {}) => new Promise((resolve, reject) => {
+    const signal = init.signal;
+    assert.ok(signal instanceof AbortSignal, "web3 transport must receive the owned abort signal");
+    const payload = JSON.parse(String(init.body));
+    seenMethods.add(payload.method);
+    inFlight++;
+    peakInFlight = Math.max(peakInFlight, inFlight);
+    seenSignals.add(signal);
+    const aborted = () => {
+      inFlight--;
+      aborts++;
+      reject(signal.reason);
+    };
+    if (signal.aborted) aborted();
+    else signal.addEventListener("abort", aborted, { once: true });
+  });
+  const connection = new Connection("https://rpc.invalid", solanaRpcConnectionConfig({
+    fetchFn: hangingFetch, requestTimeoutMs: 15,
+  }));
+  const rpcWallet = Keypair.generate();
+  const rpcAddress = Keypair.generate().publicKey;
+  const rpcSignature = bs58.encode(Buffer.alloc(64));
+  const rpcTransaction = new VersionedTransaction(new TransactionMessage({
+    payerKey: rpcWallet.publicKey,
+    recentBlockhash: Keypair.generate().publicKey.toBase58(),
+    instructions: [],
+  }).compileToV0Message());
+  const requestWave = () => [
+    connection.getGenesisHash(),
+    // Address-table and mint/custody reads all traverse getAccountInfo.
+    connection.getAddressLookupTable(rpcAddress),
+    connection.getAccountInfo(rpcAddress, "confirmed"),
+    connection.getMinimumBalanceForRentExemption(165, "processed"),
+    connection.getBlockHeight("confirmed"),
+    connection.simulateTransaction(rpcTransaction, {
+      commitment: "processed", sigVerify: false, replaceRecentBlockhash: false,
+    }),
+    connection.getSignatureStatuses([rpcSignature], { searchTransactionHistory: true }),
+    connection.getTransaction(rpcSignature, {
+      commitment: "finalized", maxSupportedTransactionVersion: 0,
+    }),
+  ];
+
+  for (let wave = 0; wave < 2; wave++) {
+    const results = await Promise.allSettled(requestWave());
+    assert.ok(results.every((result) => result.status === "rejected" &&
+      /Solana RPC HTTP request timed out after 15ms/.test(result.reason?.message)));
+    assert.equal(inFlight, 0, "every timed-out HTTP attempt must observe cancellation before settlement");
+  }
+  assert.equal(aborts, 16);
+  assert.equal(seenSignals.size, 16, "each HTTP attempt needs its own AbortController");
+  assert.equal(peakInFlight, 8,
+    "a later wave must not stack on transports abandoned by the prior timeout");
+  assert.deepEqual([...seenMethods].sort(), [
+    "getAccountInfo", "getBlockHeight", "getGenesisHash", "getMinimumBalanceForRentExemption",
+    "getSignatureStatuses", "getTransaction", "simulateTransaction",
+  ]);
+
+  assert.throws(() => solanaRpcConnectionConfig({ requestTimeoutMs: 4_001 }),
+    /request timeout is invalid/);
+  assert.equal(solanaRpcConnectionConfig({ requestTimeoutMs: 1 }).disableRetryOnRateLimit, true,
+    "web3.js must not create a hidden 429 retry queue outside executor recovery policy");
+
+  let lateAborts = 0;
+  const quickFetch = createSolanaRpcDeadlineFetch({
+    requestTimeoutMs: 15,
+    fetchFn: async (_input, init = {}) => {
+      init.signal.addEventListener("abort", () => { lateAborts++; }, { once: true });
+      return new Response("ok");
+    },
+  });
+  assert.equal((await quickFetch("https://rpc.invalid")).status, 200);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(lateAborts, 0, "a completed request must clear its deadline timer");
+
+  let bodyReads = 0;
+  let bodyAborts = 0;
+  const stalledBodyFetch = createSolanaRpcDeadlineFetch({
+    requestTimeoutMs: 15,
+    fetchFn: async (_input, init = {}) => ({
+      status: 200, statusText: "OK", headers: new Headers(),
+      arrayBuffer: async () => new Promise((resolve, reject) => {
+        bodyReads++;
+        const aborted = () => { bodyAborts++; reject(init.signal.reason); };
+        if (init.signal.aborted) aborted();
+        else init.signal.addEventListener("abort", aborted, { once: true });
+      }),
+    }),
+  });
+  await assert.rejects(() => stalledBodyFetch("https://rpc.invalid"),
+    /Solana RPC HTTP request timed out after 15ms/);
+  assert.equal(bodyReads, 1);
+  assert.equal(bodyAborts, 1,
+    "headers alone must not release the deadline while the JSON response body is hung");
+});
 
 const wallet = Keypair.generate();
 const mint = Keypair.generate().publicKey.toBase58();
@@ -140,7 +250,18 @@ const makeTx = (instructions = [wrap, jupiterIx], payer = wallet.publicKey) => n
 const validationConnection = {
   getAddressLookupTable: async () => ({ value: null }),
   getAccountInfo: async () => ({ owner: new PublicKey(TOKEN_PROGRAM) }),
-  getMultipleAccountsInfo: async (keys) => keys.map(() => null),
+  getSlot: async (commitment) => {
+    assert.equal(commitment, "processed");
+    return 699;
+  },
+  getMultipleAccountsInfoAndContext: async () => {
+    throw new Error("atomic validation snapshot unexpectedly used getMultipleAccounts");
+  },
+  simulateTransaction: async (tx, options) => atomicCapabilitySnapshot(tx, options, {
+    slot: 700,
+    accountFor: (address) => address === wallet.publicKey.toBase58()
+      ? systemAccount(20_000_000) : null,
+  }),
 };
 const expectedTx = {
   wallet: wallet.publicKey.toBase58(), inputMint: WSOL, outputMint: mint,
@@ -154,7 +275,8 @@ const systemAccount = (lamports, simulated = false) => ({
   executable: false, rentEpoch: 0,
 });
 const tokenAccount = ({ tokenMint, owner, amount, simulated = false, delegate = null,
-  delegatedAmount = 0n, state = 1, closeAuthority = null, lamports = 2_039_280 }) => {
+  delegatedAmount = 0n, state = 1, closeAuthority = null, isNative = false,
+  lamports = 2_039_280 }) => {
   const data = Buffer.alloc(165);
   new PublicKey(tokenMint).toBuffer().copy(data, 0);
   new PublicKey(owner).toBuffer().copy(data, 32);
@@ -164,6 +286,10 @@ const tokenAccount = ({ tokenMint, owner, amount, simulated = false, delegate = 
     new PublicKey(delegate).toBuffer().copy(data, 76);
   }
   data[108] = state;
+  if (isNative) {
+    data.writeUInt32LE(1, 109);
+    data.writeBigUInt64LE(2_039_280n, 113);
+  }
   data.writeBigUInt64LE(BigInt(delegatedAmount), 121);
   if (closeAuthority) {
     data.writeUInt32LE(1, 129);
@@ -175,6 +301,251 @@ const tokenAccount = ({ tokenMint, owner, amount, simulated = false, delegate = 
     executable: false, rentEpoch: 0,
   };
 };
+
+const SNAPSHOT_MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+const simulatedAccount = (account, lamports = account?.lamports) => {
+  if (account == null) return null;
+  const owner = account.owner?.toBase58?.() || String(account.owner);
+  const data = Buffer.isBuffer(account.data)
+    ? [account.data.toString("base64"), "base64"] : account.data;
+  return { ...account, owner, data, lamports };
+};
+const atomicCapabilitySnapshot = (tx, options, { slot, accountFor, fee = 5_000 } = {}) => {
+  assert.equal(options.sigVerify, false);
+  assert.equal(options.replaceRecentBlockhash, false);
+  assert.equal(options.innerInstructions, false);
+  assert.equal(options.accounts.encoding, "base64");
+  assert.ok(Number.isSafeInteger(options.minContextSlot));
+  assert.ok(slot >= options.minContextSlot);
+  assert.equal(tx.message.recentBlockhash, recentBlockhash);
+  assert.equal(tx.message.addressTableLookups.length, 0);
+  assert.equal(tx.message.compiledInstructions.length, 1);
+  assert.ok(tx.signatures.every((signature) =>
+    Buffer.from(signature).every((byte) => byte === 0)), "snapshot probe must stay unsigned");
+  const staticAddresses = tx.message.staticAccountKeys.map((key) => key.toBase58());
+  assert.equal(new Set(staticAddresses).size, staticAddresses.length);
+  const memoIndex = staticAddresses.indexOf(SNAPSHOT_MEMO_PROGRAM);
+  assert.ok(memoIndex > 0);
+  const memo = tx.message.compiledInstructions[0];
+  assert.equal(memo.programIdIndex, memoIndex);
+  assert.deepEqual(memo.accountKeyIndexes, []);
+  assert.equal(Buffer.from(memo.data).toString("utf8"), "W");
+  const payer = staticAddresses[0];
+  const accountAt = (address) => {
+    if (address === SNAPSHOT_MEMO_PROGRAM) return systemAccount(1);
+    return accountFor?.(address, options.commitment) ??
+      (address === payer ? systemAccount(20_000_000) : null);
+  };
+  for (const address of options.accounts.addresses) {
+    const index = staticAddresses.indexOf(address);
+    assert.ok(index >= 0, "every requested address must be a direct static probe key");
+    if (index !== 0) assert.equal(tx.message.isAccountWritable(index), false);
+  }
+  const preBalances = staticAddresses.map((address) => accountAt(address)?.lamports ?? 0);
+  const postBalances = [...preBalances];
+  postBalances[0] -= fee;
+  assert.ok(postBalances[0] >= 0);
+  const accounts = options.accounts.addresses.map((address) => {
+    const account = accountAt(address);
+    if (account == null) return null;
+    const lamports = address === payer ? account.lamports - fee : account.lamports;
+    assert.ok(Number.isSafeInteger(lamports) && lamports >= 0);
+    return simulatedAccount(account, lamports);
+  });
+  return { context: { slot }, value: {
+    err: null, accounts, logs: [], fee, preBalances, postBalances,
+  } };
+};
+
+await ok("one atomic Memo snapshot covers more than five accounts and advances its retry floor", async () => {
+  const keys = Array.from({ length: 12 }, () => Keypair.generate().publicKey);
+  const index = new Map(keys.map((key, i) => [key.toBase58(), i]));
+  let wholeAttempt = 0;
+  const seenFloors = [];
+  const connection = {
+    simulateTransaction: async (tx, options) => {
+      wholeAttempt++;
+      seenFloors.push({ attempt: wholeAttempt, floor: options.minContextSlot });
+      if (wholeAttempt === 1) {
+        const error = new Error("synthetic lagging backend");
+        error.data = { contextSlot: 101 };
+        throw error;
+      }
+      const response = atomicCapabilitySnapshot(tx, options, {
+        slot: wholeAttempt === 2 ? 102 : 103,
+        accountFor: (address) => index.has(address)
+          ? systemAccount(wholeAttempt * 100 + index.get(address)) : null,
+      });
+      if (wholeAttempt === 2) response.value.accounts = [];
+      return response;
+    },
+  };
+  const source = makeTx();
+  const sourceBytes = Buffer.from(source.serialize());
+  const snapshot = await coherentAccountSnapshot(connection, keys, { transaction: source });
+  assert.equal(snapshot.slot, 103);
+  assert.deepEqual(snapshot.accounts.map((account) => account.lamports),
+    Array.from({ length: 12 }, (_, i) => 300 + i),
+  "rows from the discarded malformed attempt must never leak into the retry");
+  assert.deepEqual(seenFloors, [
+    { attempt: 1, floor: 0 },
+    { attempt: 2, floor: 101 },
+    { attempt: 3, floor: 102 },
+  ], "returned error and response context slots must monotonically advance the retry floor");
+  assert.deepEqual(Buffer.from(source.serialize()), sourceBytes,
+    "snapshotting must not mutate or sign the Jupiter source transaction");
+  assert.ok(Object.isFrozen(snapshot) && Object.isFrozen(snapshot.accounts));
+});
+
+await ok("failed and hanging atomic snapshot simulations fail closed within bounded attempts", async () => {
+  const keys = Array.from({ length: 7 }, () => Keypair.generate().publicKey);
+  let attempt = 0;
+  const failed = {
+    simulateTransaction: async (tx, options) => {
+      attempt++;
+      const response = atomicCapabilitySnapshot(tx, options, {
+        slot: options.minContextSlot + 1, accountFor: () => null,
+      });
+      response.value.err = { InstructionError: [0, "InvalidInstructionData"] };
+      return response;
+    },
+  };
+  await assert.rejects(() => coherentAccountSnapshot(failed, keys, { transaction: makeTx() }),
+    /could not produce one coherent exact-slot account snapshot after 3 attempts/);
+  assert.equal(attempt, 3);
+  const hanging = {
+    simulateTransaction: async () => new Promise(() => {}),
+  };
+  await assert.rejects(() => coherentAccountSnapshot(hanging, [keys[0]], {
+    transaction: makeTx(), attempts: 1, requestTimeoutMs: 5,
+  }), /could not produce one coherent exact-slot account snapshot/);
+});
+
+await ok("processed epoch height retries lagging backends and proves its returned bank slot", async () => {
+  const replies = [
+    new Error("Minimum context slot has not been reached"),
+    { absoluteSlot: 699, blockHeight: 650 },
+    { absoluteSlot: 705, blockHeight: null },
+    { absoluteSlot: 705, blockHeight: 651 },
+  ];
+  const configs = [];
+  const delays = [];
+  const evidence = await fencedProcessedEpochHeight({
+    getEpochInfo: async (config) => {
+      configs.push(config);
+      const reply = replies.shift();
+      if (reply instanceof Error) throw reply;
+      return reply;
+    },
+  }, 700, { sleep: async (ms) => { delays.push(ms); } });
+  assert.deepEqual(evidence, { absoluteSlot: 705, blockHeight: 651 });
+  assert.ok(Object.isFrozen(evidence));
+  assert.deepEqual(configs, [
+    { commitment: "processed", minContextSlot: 700 },
+    { commitment: "processed", minContextSlot: 700 },
+    { commitment: "processed", minContextSlot: 700 },
+    { commitment: "processed", minContextSlot: 705 },
+  ], "a malformed newer-bank response must monotonically advance the retry floor");
+  assert.deepEqual(delays, [100, 200, 300]);
+});
+
+await ok("processed epoch height has no unfenced or impossible-height fallback", async () => {
+  let reads = 0;
+  await assert.rejects(() => fencedProcessedEpochHeight({
+    getEpochInfo: async (config) => {
+      reads++;
+      assert.equal(config.commitment, "processed");
+      return { absoluteSlot: 700, blockHeight: 701 };
+    },
+  }, 700, { retryDelayMs: 0 }),
+  /could not produce a processed epoch height at or above slot 700 after 4 attempts/);
+  assert.equal(reads, 4);
+  await assert.rejects(() => fencedProcessedEpochHeight({
+    getEpochInfo: async () => new Promise(() => {}),
+  }, 700, { attempts: 1, requestTimeoutMs: 5, retryDelayMs: 0 }),
+  /could not produce a processed epoch height/);
+  await assert.rejects(() => fencedProcessedEpochHeight({ getBlockHeight: async () => 650 }, 700),
+    /lacks context-fenced epoch-height support/);
+});
+
+await ok("atomic snapshot probes reject duplicate keys, signed sources and oversized packets", async () => {
+  const key = Keypair.generate().publicKey;
+  await assert.rejects(() => coherentAccountSnapshot(validationConnection, [key, key], {
+    transaction: makeTx(),
+  }), /addresses must be unique/);
+  const signed = makeTx();
+  signed.signatures[0] = new Uint8Array(64).fill(1);
+  await assert.rejects(() => coherentAccountSnapshot(validationConnection, [key], {
+    transaction: signed,
+  }), /not unsigned/);
+  const tooMany = Array.from({ length: 40 }, () => Keypair.generate().publicKey);
+  await assert.rejects(() => coherentAccountSnapshot(validationConnection, tooMany, {
+    transaction: makeTx(),
+  }), /atomic account-snapshot probe .*Solana max 1232|cannot be serialized safely/);
+});
+
+await ok("atomic snapshots require internally consistent same-response balance evidence", async () => {
+  const key = Keypair.generate().publicKey;
+  const mutations = [
+    (response) => { delete response.value.err; },
+    (response) => { delete response.value.preBalances; },
+    (response) => { response.value.fee = null; },
+    (response) => { response.value.fee = "5000"; },
+    (response) => { response.value.fee = 0; response.value.postBalances[0] = response.value.preBalances[0]; },
+    (response) => { response.value.postBalances[0]++; },
+    (response, tx) => {
+      const index = tx.message.staticAccountKeys.findIndex((candidate) => candidate.equals(key));
+      response.value.postBalances[index]++;
+    },
+    (response) => { response.value.accounts[0].lamports++; },
+  ];
+  for (const mutate of mutations) {
+    const connection = {
+      simulateTransaction: async (tx, options) => {
+        const response = atomicCapabilitySnapshot(tx, options, {
+          slot: 700, accountFor: (address) => address === key.toBase58()
+            ? systemAccount(123_456) : null,
+        });
+        mutate(response, tx);
+        return response;
+      },
+    };
+    await assert.rejects(() => coherentAccountSnapshot(connection, [key], {
+      transaction: makeTx(), attempts: 1,
+    }), /could not produce one coherent exact-slot account snapshot/);
+  }
+});
+
+await ok("writable safety fingerprints ignore balances but retain authority capabilities", async () => {
+  const addresses = [wallet.publicKey.toBase58(), destinationAta.toBase58()];
+  const first = [systemAccount(20_000_000), tokenAccount({
+    tokenMint: mint, owner: wallet.publicKey, amount: 1, delegatedAmount: 0n,
+  })];
+  first[0].rentEpoch = 1;
+  const second = [systemAccount(99_000_000), tokenAccount({
+    tokenMint: mint, owner: wallet.publicKey, amount: 999_999, delegatedAmount: 77n,
+  })];
+  second[0].rentEpoch = 999;
+  assert.equal(writableAccountSafetyFingerprint(addresses, first),
+    writableAccountSafetyFingerprint(addresses, second));
+  const delegate = Keypair.generate().publicKey;
+  const changed = [second[0], tokenAccount({
+    tokenMint: mint, owner: wallet.publicKey, amount: 999_999,
+    delegate, delegatedAmount: 77n,
+  })];
+  assert.notEqual(writableAccountSafetyFingerprint(addresses, first),
+    writableAccountSafetyFingerprint(addresses, changed));
+});
+
+await ok("only the exact numeric-zero closed-account tombstone is treated as missing", async () => {
+  const exact = systemAccount(0);
+  assert.equal(isClosedAccountTombstone(exact), true);
+  assert.equal(isClosedAccountTombstone({ ...exact, lamports: "0" }), false);
+  assert.equal(isClosedAccountTombstone({ ...exact, lamports: 1 }), false);
+  assert.equal(isClosedAccountTombstone({ ...exact, executable: true }), false);
+  assert.equal(isClosedAccountTombstone({ ...exact, owner: new PublicKey(TOKEN_PROGRAM) }), false);
+  assert.equal(isClosedAccountTombstone({ ...exact, data: Buffer.from([0]) }), false);
+});
 
 const exitAmountRaw = "1000";
 const exitQuotedOutputRaw = "5000000";
@@ -197,7 +568,9 @@ const exitRoute = new TransactionInstruction({
 });
 const makeExitMarkHarness = ({ payer = wallet.publicKey, presigned = false,
   chainHeight = 600, postOutputRaw = "4900000", secondaryPostOutputRaw = postOutputRaw,
-  secondarySimulationError = null, orderOverrides = {} } = {}) => {
+  secondarySimulationError = null, orderOverrides = {}, finalChainHeight = chainHeight,
+  secondaryWritableOverride = null, primaryPostWritableOverride = null,
+  simulationContextSlot = 702 } = {}) => {
   const transaction = new VersionedTransaction(new TransactionMessage({
     payerKey: payer, recentBlockhash, instructions: [exitRoute],
   }).compileToV0Message());
@@ -216,26 +589,50 @@ const makeExitMarkHarness = ({ payer = wallet.publicKey, presigned = false,
     ...orderOverrides,
   };
   const calls = { order: 0, execute: 0, simulate: 0, journal: 0, secretKey: 0 };
-  const connectionFor = (simulatedOutputRaw, simulationError = null) => ({
+  const connectionFor = (simulatedOutputRaw, simulationError = null, writableOverride = null,
+    postWritableOverride = null) => {
+    let heightReads = 0;
+    let didSimulate = false;
+    return {
     getAddressLookupTable: async () => ({ value: null }),
     getAccountInfo: async () => ({ owner: new PublicKey(TOKEN_PROGRAM) }),
-    getMultipleAccountsInfo: async (keys, commitment) => {
-      if (commitment === "confirmed") return keys.map(() => null);
+    getSlot: async (commitment) => {
       assert.equal(commitment, "processed");
-      assert.deepEqual(keys.map((key) => key.toBase58()), [
-        wallet.publicKey.toBase58(), destinationAta.toBase58(), sourceAta.toBase58(),
-      ]);
-      return [
-        systemAccount(20_000_000),
-        tokenAccount({ tokenMint: mint, owner: wallet.publicKey, amount: exitAmountRaw }),
-        tokenAccount({ tokenMint: WSOL, owner: wallet.publicKey, amount: "0" }),
-      ];
+      return 701;
+    },
+    getMultipleAccountsInfoAndContext: async () => {
+      throw new Error("atomic snapshot path unexpectedly used getMultipleAccounts");
     },
     getBlockHeight: async (commitment) => {
       assert.equal(commitment, "confirmed");
+      assert.equal(heightReads++, 0, "final height must use same-bank epoch evidence");
       return chainHeight;
     },
+    getEpochInfo: async (config) => {
+      assert.deepEqual(config, { commitment: "processed", minContextSlot: 702 });
+      return { absoluteSlot: Math.max(702, finalChainHeight), blockHeight: finalChainHeight };
+    },
+    getMinimumBalanceForRentExemption: async (_size, commitment) => {
+      assert.equal(commitment, "processed");
+      return 2_039_280;
+    },
     simulateTransaction: async (tx, options) => {
+      const accountFor = (address) => {
+        if (address === wallet.publicKey.toBase58()) return systemAccount(20_000_000);
+        let account = null;
+        if (address === destinationAta.toBase58())
+          account = tokenAccount({ tokenMint: mint, owner: wallet.publicKey, amount: exitAmountRaw });
+        else if (address === sourceAta.toBase58())
+          account = tokenAccount({ tokenMint: WSOL, owner: wallet.publicKey, amount: "0" });
+        if (writableOverride) account = writableOverride(address, account, options.commitment);
+        if (didSimulate && postWritableOverride)
+          account = postWritableOverride(address, account, options.commitment);
+        return account;
+      };
+      if (options.innerInstructions === false) {
+        const slot = options.commitment === "processed" ? 702 : 700;
+        return atomicCapabilitySnapshot(tx, options, { slot, accountFor });
+      }
       calls.simulate++;
       if (simulationError) throw simulationError;
       assert.equal(options.sigVerify, false);
@@ -243,7 +640,9 @@ const makeExitMarkHarness = ({ payer = wallet.publicKey, presigned = false,
       assert.ok(tx.signatures.every((signature) =>
         Buffer.from(signature).every((byte) => byte === 0)), "simulation must receive unsigned bytes");
       const output = BigInt(simulatedOutputRaw);
-      return { value: {
+      assert.equal(options.minContextSlot, 702);
+      didSimulate = true;
+      return { context: { slot: simulationContextSlot }, value: {
         err: null,
         accounts: [
           systemAccount(20_000_000, true),
@@ -254,9 +653,11 @@ const makeExitMarkHarness = ({ payer = wallet.publicKey, presigned = false,
         innerInstructions: [],
       } };
     },
-  });
-  const connection = connectionFor(postOutputRaw);
-  const secondaryConnection = connectionFor(secondaryPostOutputRaw, secondarySimulationError);
+  };
+  };
+  const connection = connectionFor(postOutputRaw, null, null, primaryPostWritableOverride);
+  const secondaryConnection = connectionFor(secondaryPostOutputRaw, secondarySimulationError,
+    secondaryWritableOverride);
   const fetchFn = async (url) => {
     if (String(url).includes("/order?")) {
       calls.order++;
@@ -278,7 +679,7 @@ const makeExitMarkHarness = ({ payer = wallet.publicKey, presigned = false,
   } });
   const executor = new JupiterV2Executor({
     connection, secondaryConnection, keypair, journal, apiKey: "test-key", fetchFn,
-    hardStop: () => true, now: () => 1_000, config: cfg,
+    hardStop: () => true, now: () => 1_000, sleep: async () => {}, config: cfg,
   });
   const spec = { mint, amountRaw: exitAmountRaw,
     position: { mint, qtyRaw: exitAmountRaw, costBasisLamports: "5000000" } };
@@ -333,6 +734,52 @@ await ok("entry mint metadata requires two valid, matching RPC views", async () 
 await ok("one locally authorized Jupiter route passes instruction validation", async () => {
   const result = await validateTransaction(makeTx(), expectedTx, cfg, validationConnection);
   assert.equal(result.jupiterRoutes, 1);
+});
+await ok("initial merged snapshots require one valid processed-slot freshness anchor", async () => {
+  let slotReads = 0;
+  let snapshots = 0;
+  const invalid = {
+    ...validationConnection,
+    getSlot: async (commitment) => {
+      slotReads++;
+      assert.equal(commitment, "processed");
+      return 0;
+    },
+    simulateTransaction: async () => {
+      snapshots++;
+      throw new Error("an invalid anchor must stop before the snapshot");
+    },
+  };
+  await assert.rejects(() => validateTransaction(makeTx(), expectedTx, cfg, invalid),
+    /invalid processed-slot freshness anchor/);
+  assert.equal(slotReads, 1);
+  assert.equal(snapshots, 0);
+
+  const unavailable = {
+    ...validationConnection,
+    getSlot: async () => { throw new Error("synthetic provider outage"); },
+  };
+  await assert.rejects(() => validateTransaction(makeTx(), expectedTx, cfg, unavailable),
+    /could not obtain a processed-slot freshness anchor/);
+
+  let hangingReads = 0;
+  const startedAt = Date.now();
+  await assert.rejects(() => processedSlotFreshnessAnchor({
+    getSlot: async () => {
+      hangingReads++;
+      return new Promise(() => {});
+    },
+  }, { requestTimeoutMs: 5 }), /could not obtain a processed-slot freshness anchor/);
+  assert.equal(hangingReads, 1, "the timeout must not retry or duplicate the provider read");
+  assert.ok(Date.now() - startedAt < 500,
+    "a never-settling provider must fail closed near the injected timeout");
+
+  let invalidTimeoutReads = 0;
+  await assert.rejects(() => processedSlotFreshnessAnchor({
+    getSlot: async () => { invalidTimeoutReads++; return 700; },
+  }, { requestTimeoutMs: Number.MAX_SAFE_INTEGER }),
+  /freshness-anchor request timeout is invalid/);
+  assert.equal(invalidTimeoutReads, 0, "an unbounded timeout must be rejected before RPC access");
 });
 await ok("real finalized v2 headers decode while legacy v1 routes fail closed", async () => {
   const data = Buffer.from(bs58.decode("37MZM8vwf4KFuQQxitaiaxCSbqJvxP37NUwZZG8Y3qFRiyEpohx2Wt"));
@@ -403,11 +850,43 @@ await ok("an unrelated wallet-owned token account cannot be writable", async () 
   });
   const connection = {
     ...validationConnection,
-    getMultipleAccountsInfo: async (keys) => keys.map((key) => key.equals(auxiliary)
-      ? tokenAccount({ tokenMint: mint, owner: wallet.publicKey, amount: 1 }) : null),
+    simulateTransaction: async (tx, options) => atomicCapabilitySnapshot(tx, options, {
+      slot: 700,
+      accountFor: (address) => address === auxiliary.toBase58()
+        ? tokenAccount({ tokenMint: mint, owner: wallet.publicKey, amount: 1 })
+        : address === wallet.publicKey.toBase58() ? systemAccount(20_000_000) : null,
+    }),
   };
   await assert.rejects(() => validateTransaction(makeTx([wrap, route]), expectedTx, cfg, connection),
     /unexpected wallet-owned token account/);
+});
+await ok("a wallet-owned capability beyond a provider's five-account tier is rejected atomically", async () => {
+  const auxiliaries = Array.from({ length: 7 }, () => Keypair.generate().publicKey);
+  const hidden = auxiliaries.at(-1);
+  const route = new TransactionInstruction({
+    programId: new PublicKey(JUPITER_V6),
+    keys: [...jupiterIx.keys, ...auxiliaries.map((pubkey) => ({
+      pubkey, isSigner: false, isWritable: true,
+    }))],
+    data: jupiterIx.data,
+  });
+  let snapshots = 0;
+  const connection = {
+    ...validationConnection,
+    simulateTransaction: async (tx, options) => {
+      snapshots++;
+      assert.ok(options.accounts.addresses.length > 5);
+      return atomicCapabilitySnapshot(tx, options, {
+        slot: 700,
+        accountFor: (address) => address === hidden.toBase58()
+          ? tokenAccount({ tokenMint: mint, owner: wallet.publicKey, amount: 1 })
+          : address === wallet.publicKey.toBase58() ? systemAccount(20_000_000) : null,
+      });
+    },
+  };
+  await assert.rejects(() => validateTransaction(makeTx([wrap, route]), expectedTx, cfg, connection),
+    /unexpected wallet-owned token account/);
+  assert.equal(snapshots, 1, "every adversarial capability must come from one bank response");
 });
 await ok("Token-2022 mints and truncated writable-account RPC data fail closed", async () => {
   await assert.rejects(() => validateTransaction(makeTx(), expectedTx, cfg, {
@@ -418,8 +897,14 @@ await ok("Token-2022 mints and truncated writable-account RPC data fail closed",
   }), /Token-2022/);
   await assert.rejects(() => validateTransaction(makeTx(), expectedTx, cfg, {
     ...validationConnection,
-    getMultipleAccountsInfo: async () => [],
-  }), /omitted writable-account capability data/);
+    simulateTransaction: async (tx, options) => {
+      const response = atomicCapabilitySnapshot(tx, options, {
+        slot: 700, accountFor: () => null,
+      });
+      response.value.accounts = [];
+      return response;
+    },
+  }), /coherent exact-slot account snapshot/);
 });
 await ok("compute priority fees are capped relative to the signed trade basis", async () => {
   const expensivePriority = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 500_000 });
@@ -438,6 +923,11 @@ await ok("simulation must show the exact SOL spend and minimum token receipt", a
   const after = { wallet: systemAccount(12_960_720, true), input: null,
     output: tokenAccount({ tokenMint: mint, owner: wallet.publicKey, amount: 987, simulated: true }) };
   assert.deepEqual(validateSimulationEffects(before, after, expected, cfg), { actualOutputRaw: "987" });
+  const tombstone = systemAccount(0, true);
+  assert.deepEqual(validateSimulationEffects({ ...before, input: tombstone },
+    { ...after, input: tombstone }, expected, cfg), { actualOutputRaw: "987" });
+  assert.throws(() => validateSimulationEffects({ ...before, input: { ...tombstone, lamports: "0" } },
+    { ...after, input: tombstone }, expected, cfg), /supported token account/);
   await assert.rejects(async () => validateSimulationEffects(before, {
     ...after,
     output: tokenAccount({ tokenMint: mint, owner: wallet.publicKey, amount: 969, simulated: true }),
@@ -541,6 +1031,65 @@ await ok("read-only exit mark fails closed on malicious bytes, expiry and simula
   assert.equal(secondaryOutage.calls.simulate, 2);
 });
 
+await ok("both providers must agree on stable writable capabilities", async () => {
+  const forged = makeExitMarkHarness({
+    secondaryWritableOverride: (address, account) => address === sourceAta.toBase58()
+      ? tokenAccount({ tokenMint: WSOL, owner: wallet.publicKey, amount: "0", isNative: true })
+      : account,
+  });
+  await assert.rejects(() => forged.executor.preflightExitMark(forged.spec),
+    /RPC providers disagree on writable-account safety capabilities/);
+  assert.deepEqual(forged.calls,
+    { order: 1, execute: 0, simulate: 2, journal: 0, secretKey: 0 });
+});
+
+await ok("a capability change after simulation invalidates the unsigned order", async () => {
+  const changed = makeExitMarkHarness({
+    primaryPostWritableOverride: (address, account) => address === sourceAta.toBase58()
+      ? tokenAccount({ tokenMint: WSOL, owner: wallet.publicKey, amount: "0", isNative: true })
+      : account,
+  });
+  await assert.rejects(() => changed.executor.preflightExitMark(changed.spec),
+    /writable-account capabilities changed across simulation/);
+  assert.deepEqual(changed.calls,
+    { order: 1, execute: 0, simulate: 2, journal: 0, secretKey: 0 });
+});
+
+await ok("simulation context and the post-scan expiry margin remain hard fences", async () => {
+  const staleSimulation = makeExitMarkHarness({ simulationContextSlot: 701 });
+  await assert.rejects(() => staleSimulation.executor.preflightExitMark(staleSimulation.spec),
+    /simulation returned a missing, invalid, or below-fence context slot/);
+  assert.equal(staleSimulation.calls.execute, 0);
+  assert.equal(staleSimulation.calls.secretKey, 0);
+  assert.equal(staleSimulation.calls.journal, 0);
+
+  const consumed = makeExitMarkHarness({ finalChainHeight: 968 });
+  await assert.rejects(() => consumed.executor.preflightExitMark(consumed.spec),
+    new RegExp(`only 31 blocks left.*minimum ${MIN_SIGNABLE_BLOCKS_REMAINING}`));
+  assert.equal(consumed.calls.simulate, 2);
+  assert.equal(consumed.calls.execute, 0);
+  const exactMargin = makeExitMarkHarness({ finalChainHeight: 967 });
+  const mark = await exactMargin.executor.preflightExitMark(exactMargin.spec);
+  assert.equal(mark.chainHeight, 967, "exactly 32 remaining blocks remains signable");
+  const regressed = makeExitMarkHarness({ chainHeight: 600, finalChainHeight: 599 });
+  await assert.rejects(() => regressed.executor.preflightExitMark(regressed.spec),
+    /block height regressed after the final capability fence/);
+  assert.equal(regressed.calls.execute, 0);
+});
+
+await ok("gross rent is independently bound and capped without raising exposure limits", async () => {
+  const expected = { inputMint: WSOL, outputMint: mint, amountRaw: "5000000",
+    wallet: wallet.publicKey.toBase58() };
+  assert.equal(validateOrderEnvelope({ ...orderBase, rentFeeLamports: 4_078_560 },
+    expected, cfg).rentFeeLamports, 4_078_560);
+  assert.throws(() => validateOrderEnvelope({ ...orderBase,
+    rentFeeLamports: MAX_GROSS_RENT_LAMPORTS + 1 }, expected, cfg), /rent .* exceeds cap/);
+  const unearned = makeExitMarkHarness({ orderOverrides: { rentFeeLamports: 4_078_560 } });
+  await assert.rejects(() => unearned.executor.preflightExitMark(unearned.spec),
+    /canonical ATA rent facts do not match Jupiter's gross rent estimate/);
+  assert.equal(unearned.calls.simulate, 0);
+});
+
 await ok("execution-readiness probe exercises both providers without signing, journaling or executing", async () => {
   const usdcAta = ata(wallet.publicKey, MAINNET_USDC);
   const amount = BigInt(EXECUTION_READINESS_AMOUNT_LAMPORTS);
@@ -575,27 +1124,73 @@ await ok("execution-readiness probe exercises both providers without signing, jo
     signatureFeeLamports: 5000, prioritizationFeeLamports: 0,
     transaction: Buffer.from(transaction.serialize()).toString("base64"),
   };
-  const calls = { order: 0, execute: 0, simulate: 0, journal: 0, secretKey: 0 };
-  const provider = () => ({
+  const calls = {
+    order: 0, execute: 0, simulate: 0, snapshot: 0, getSlot: 0,
+    height: 0, rent: 0, epoch: 0, journal: 0, secretKey: 0,
+  };
+  const provider = () => {
+    let snapshotReads = 0;
+    let slotReads = 0;
+    return ({
     getAddressLookupTable: async () => ({ value: null }),
     getAccountInfo: async () => ({ owner: new PublicKey(TOKEN_PROGRAM) }),
-    getMultipleAccountsInfo: async (keys, commitment) => commitment === "confirmed"
-      ? keys.map(() => null)
-      : [systemAccount(20_000_000), null, null],
-    getBlockHeight: async () => 600,
+    getSlot: async (commitment) => {
+      calls.getSlot++;
+      slotReads++;
+      assert.equal(commitment, "processed");
+      assert.equal(slotReads, 1, "each provider gets exactly one initial freshness anchor");
+      return 701;
+    },
+    getMultipleAccountsInfoAndContext: async () => {
+      throw new Error("atomic readiness snapshot unexpectedly used getMultipleAccounts");
+    },
+    getBlockHeight: async (commitment) => {
+      calls.height++;
+      assert.equal(commitment, "confirmed");
+      return 600;
+    },
+    getEpochInfo: async (config) => {
+      calls.epoch++;
+      assert.deepEqual(config, { commitment: "processed", minContextSlot: 702 });
+      return { absoluteSlot: 702, blockHeight: 600 };
+    },
+    getMinimumBalanceForRentExemption: async (_size, commitment) => {
+      calls.rent++;
+      assert.equal(commitment, "processed");
+      return 2_039_280;
+    },
     simulateTransaction: async (tx, options) => {
+      if (options.innerInstructions === false) {
+        calls.snapshot++;
+        snapshotReads++;
+        assert.equal(options.commitment, "processed");
+        if (snapshotReads === 1) {
+          assert.equal(options.minContextSlot, 701,
+            "the nonzero provider anchor must fence the initial merged snapshot");
+          assert.ok(options.accounts.addresses.includes(wallet.publicKey.toBase58()));
+          assert.ok(options.accounts.addresses.includes(sourceAta.toBase58()));
+          assert.ok(options.accounts.addresses.includes(usdcAta.toBase58()));
+        }
+        return atomicCapabilitySnapshot(tx, options, {
+          slot: 702,
+          accountFor: (address) => address === wallet.publicKey.toBase58()
+            ? systemAccount(30_000_000) : null,
+        });
+      }
       calls.simulate++;
       assert.equal(options.sigVerify, false);
+      assert.equal(options.minContextSlot, 702);
       assert.ok(tx.signatures.every((signature) =>
         Buffer.from(signature).every((byte) => byte === 0)));
-      return { value: { err: null, accounts: [
-        systemAccount(17_855_720, true),
+      return { context: { slot: 702 }, value: { err: null, accounts: [
+        systemAccount(22_955_720, true),
         null,
         tokenAccount({ tokenMint: MAINNET_USDC, owner: wallet.publicKey,
           amount: quoted, simulated: true }),
       ] } };
     },
   });
+  };
   const fetchFn = async (url) => {
     if (String(url).includes("/order?")) { calls.order++; return response(order); }
     calls.execute++;
@@ -619,8 +1214,15 @@ await ok("execution-readiness probe exercises both providers without signing, jo
     providerDivergencePct: 0, chainHeight: 600, lastValidBlockHeight: 999,
   });
   assert.ok(Object.isFrozen(result));
-  assert.deepEqual(calls, { order: 1, execute: 0, simulate: 2, journal: 0, secretKey: 0 });
-  assert.ok(20_000_000n > amount + BigInt(EXECUTION_READINESS_RESERVE_LAMPORTS));
+  assert.deepEqual(calls, {
+    order: 1, execute: 0, simulate: 2, snapshot: 4, getSlot: 2,
+    height: 2, rent: 2, epoch: 2, journal: 0, secretKey: 0,
+  });
+  assert.equal(calls.snapshot, 4,
+    "each provider needs one merged pre-state snapshot and one post-simulation snapshot");
+  assert.equal(EXECUTION_READINESS_AMOUNT_LAMPORTS, 5_000_000);
+  assert.equal(MAX_GROSS_RENT_LAMPORTS, 4_200_000);
+  assert.ok(30_000_000n > amount + BigInt(EXECUTION_READINESS_RESERVE_LAMPORTS));
 });
 
 await ok("a signable exit cannot cross the journaled-signature boundary on one RPC's approval", async () => {
@@ -741,23 +1343,36 @@ await ok("transport retry reuses byte-identical signed transaction and signature
   const builtOrder = { ...orderBase, transaction: Buffer.from(unsigned.serialize()).toString("base64") };
   let orderCalls = 0;
   let executeCalls = 0;
+  let submissionGateCalls = 0;
   let executeSucceeded = false;
   let chainSignature = "";
   const signedBodies = [];
   const connection = {
     getAddressLookupTable: async () => ({ value: null }),
     getAccountInfo: async () => ({ owner: new PublicKey(TOKEN_PROGRAM) }),
-    getMultipleAccountsInfo: async (keys) => keys.map((key) =>
-      key.toBase58() === wallet.publicKey.toBase58() ? systemAccount(20_000_000) : null),
-    simulateTransaction: async () => ({ value: {
-      err: null,
-      accounts: [
-        systemAccount(12_960_720, true),
-        null,
-        tokenAccount({ tokenMint: mint, owner: wallet.publicKey, amount: 987, simulated: true }),
-      ],
-      innerInstructions: [],
-    } }),
+    getSlot: async (commitment) => commitment === "processed" ? 702 : 700,
+    getMultipleAccountsInfoAndContext: async () => {
+      throw new Error("atomic execution snapshot unexpectedly used getMultipleAccounts");
+    },
+    getMinimumBalanceForRentExemption: async () => 2_039_280,
+    simulateTransaction: async (tx, options) => {
+      if (options.innerInstructions === false) {
+        return atomicCapabilitySnapshot(tx, options, {
+          slot: options.commitment === "processed" ? 702 : 700,
+          accountFor: (address) => address === wallet.publicKey.toBase58()
+            ? systemAccount(20_000_000) : null,
+        });
+      }
+      return { context: { slot: 702 }, value: {
+        err: null,
+        accounts: [
+          systemAccount(12_960_720, true),
+          null,
+          tokenAccount({ tokenMint: mint, owner: wallet.publicKey, amount: 987, simulated: true }),
+        ],
+        innerInstructions: [],
+      } };
+    },
     getSignatureStatuses: async () => ({ value: [executeSucceeded ? {
       err: null, confirmationStatus: "finalized", confirmations: null,
     } : null] }),
@@ -766,6 +1381,10 @@ await ok("transport retry reuses byte-identical signed transaction and signature
     // added 2026-09-01 refuses to sign an order more than blockHeightWindow (600)
     // blocks ahead of the REAL chain. 999 - 600 = 399 ahead — a plausible fresh order.
     getBlockHeight: async () => 600,
+    getEpochInfo: async (config) => {
+      assert.deepEqual(config, { commitment: "processed", minContextSlot: 702 });
+      return { absoluteSlot: 702, blockHeight: 600 };
+    },
     isBlockhashValid: async () => ({ value: true }),
   };
   const secondaryConnection = {
@@ -793,6 +1412,7 @@ await ok("transport retry reuses byte-identical signed transaction and signature
   };
   const executor = new JupiterV2Executor({
     connection, secondaryConnection, keypair: wallet, journal, apiKey: "test-key", fetchFn,
+    submissionGate: () => { submissionGateCalls++; },
     now: () => 1000, sleep: async () => {},
     config: { ...cfg, finalityTimeoutMs: 0, maxAttempts: 3 },
   });
@@ -807,6 +1427,8 @@ await ok("transport retry reuses byte-identical signed transaction and signature
   assert.equal(fill.networkFeeLamports, "5000");
   assert.equal(orderCalls, 1, "must not obtain a replacement order while signature is live");
   assert.equal(executeCalls, 2);
+  assert.equal(submissionGateCalls, 4,
+    "entry safety is rechecked before build, before signing, and before each disclosure");
   assert.equal(signedBodies[0], signedBodies[1], "retry must reuse exact signed bytes");
   assert.equal(journal.attempts(spec.id).length, 1);
   journal.close();
@@ -1417,13 +2039,13 @@ await ok("an unversioned signed-era attempt is observation-only and can never be
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-await ok("a pre-dual-RPC v1 signed attempt is observation-only and never disclosed", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-v1-signed-"));
+await ok("a pre-coherent-snapshot v2 signed attempt is observation-only and never disclosed", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-v2-signed-"));
   const journal = new ExecutionJournal(path.join(dir, "state.sqlite"), {
     wallet: wallet.publicKey.toBase58(),
   });
   const spec = {
-    id: "risk-exit:v1-signed", kind: "risk_exit", eventId: null, feedId: null,
+    id: "risk-exit:v2-signed", kind: "risk_exit", eventId: null, feedId: null,
     mint, inputMint: mint, outputMint: WSOL, amountRaw: "987",
     context: { wallet: wallet.publicKey.toBase58(), position: {
       mint, qtyRaw: "987", costBasisLamports: "5000000",
@@ -1431,13 +2053,13 @@ await ok("a pre-dual-RPC v1 signed attempt is observation-only and never disclos
   };
   journal.ensureIntent(spec);
   journal.recordSigned(spec.id, {
-    attempt: 1, requestId: "v1-signed", signedTx: Buffer.from("pre-dual-rpc-bytes"),
-    signature: "sig-v1-signed", blockhash: recentBlockhash,
+    attempt: 1, requestId: "v2-signed", signedTx: Buffer.from("pre-coherent-snapshot-bytes"),
+    signature: "sig-v2-signed", blockhash: recentBlockhash,
     lastValidBlockHeight: 100, quotedOutputRaw: "5000000",
     minOutputRaw: "4850000", order: {},
   });
   journal.db.prepare("UPDATE tx_attempts SET protocol=? WHERE intent_id=?")
-    .run("jupiter-unsigned-preflight-v1", spec.id);
+    .run("jupiter-dual-rpc-unsigned-preflight-v2", spec.id);
   const rpc = () => ({
     getSignatureStatuses: async () => ({ value: [null] }),
     getBlockHeight: async () => 50,
@@ -1446,14 +2068,14 @@ await ok("a pre-dual-RPC v1 signed attempt is observation-only and never disclos
   let executeCalls = 0;
   const executor = new JupiterV2Executor({
     connection: rpc(), secondaryConnection: rpc(), keypair: wallet, journal, apiKey: "test",
-    fetchFn: async () => { executeCalls++; throw new Error("v1 bytes must never be disclosed"); },
+    fetchFn: async () => { executeCalls++; throw new Error("v2 bytes must never be disclosed"); },
     now: () => 1_000, sleep: async () => {}, config: { finalityTimeoutMs: 0 },
   });
   await executor.recoverPending();
   assert.equal(executeCalls, 0,
-    "bytes built before dual-provider validation cannot inherit current disclosure authority");
+    "bytes built before coherent snapshots cannot inherit current disclosure authority");
   assert.equal(journal.getIntent(spec.id).state, "signed");
-  assert.equal(journal.latestAttempt(spec.id).protocol, "jupiter-unsigned-preflight-v1");
+  assert.equal(journal.latestAttempt(spec.id).protocol, "jupiter-dual-rpc-unsigned-preflight-v2");
   journal.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });

@@ -54,12 +54,17 @@ fs.writeFileSync(process.env.STATE_FILE, JSON.stringify({
   secret: process.env.CC_SECRET,
   inheritedExecute: process.env.EXECUTE ?? null,
   inheritedProxy: process.env.HTTPS_PROXY ?? null,
+  supervisor: process.env["WALLSTE_SUPERVISOR"] ?? null,
+  serviceLabel: process.env["WALLSTE_SERVICE_LABEL"] ?? null,
 }), { mode: 0o600 });
 `, { mode: 0o600 });
 for (const file of runtimeFiles) {
   const source = file.endsWith(".json") ? "{}\n" : file === "sleep-assertion.mjs"
     ? `export async function startMacSleepAssertion() { return { assertionPid: 1 }; }
 export function verifyMacSleepAssertion() { return { ok: true }; }
+export function batteryPowerIsOperational() { return false; }
+export function inspectOwnerControlFile() { return { present: false, valid: true }; }
+export function sleepAssertionFaultPath(lockFile) { return lockFile + ".sleep-assertion-fault"; }
 `
     : "export {};\n";
   fs.writeFileSync(path.join(runtimeDir, file), source, { mode: 0o600 });
@@ -82,7 +87,8 @@ try {
 
   const executed = invoke(["run", "--env", envFile, "--poller", poller,
     "--label", "com.claudeco.wallste"], {
-    env: { ...process.env, EXECUTE: "1", HTTPS_PROXY: "https://attacker.invalid" },
+    env: { ...process.env, EXECUTE: "1", HTTPS_PROXY: "https://attacker.invalid",
+      WALLSTE_SUPERVISOR: "untrusted", WALLSTE_SERVICE_LABEL: "untrusted" },
   });
   check("runner imports the poller without a shell", executed.status === 0, executed.stderr.trim());
   const observedEnvironment = fs.existsSync(outputFile)
@@ -91,6 +97,9 @@ try {
     observedEnvironment.secret === payload);
   check("inherited executor and proxy settings are cleared before poller import",
     observedEnvironment.inheritedExecute === null && observedEnvironment.inheritedProxy === null);
+  check("reserved supervisor identity is injected by the runner, never inherited",
+    observedEnvironment.supervisor === "launchd" &&
+    observedEnvironment.serviceLabel === "com.claudeco.wallste");
   check("shell metacharacters in a secret are never evaluated", !fs.existsSync(marker));
   check("runtime output does not disclose the protected value",
     !`${executed.stdout}${executed.stderr}`.includes(payload));
@@ -176,6 +185,14 @@ try {
   check("TLS bypass variables are rejected", tlsInjection.status !== 0 &&
     tlsInjection.stderr.includes("NODE_TLS_REJECT_UNAUTHORIZED is not allowed"));
 
+  for (const reservedName of ["WALLSTE_SUPERVISOR", "WALLSTE_SERVICE_LABEL"]) {
+    writeEnvironment([`${reservedName}=untrusted`]);
+    const reservedInjection = invoke(["validate", "--env", envFile, "--poller", poller]);
+    check(`${reservedName} cannot be persisted in the protected environment`,
+      reservedInjection.status !== 0 &&
+      reservedInjection.stderr.includes(`${reservedName} is not allowed`));
+  }
+
   const alternateLock = path.join(runtimeDir, ".alternate.lock");
   writeEnvironment([`STATE_DB=${stateDb}`, `LOCK_FILE=${alternateLock}`, "CC_SECRET=redacted"]);
   const noncanonical = invoke(["preflight", "--env", envFile, "--poller", poller]);
@@ -197,6 +214,39 @@ try {
     "--pid", String(holder.pid)]);
   check("post-start readiness binds the service pid to the canonical lock",
     ready.status === 0, ready.stderr.trim());
+  if (process.platform === "darwin") {
+    fs.writeFileSync(path.join(runtimeDir, "sleep-assertion.mjs"), `import fs from "node:fs";
+export async function startMacSleepAssertion() { return { assertionPid: 1 }; }
+export function verifyMacSleepAssertion() { return { ok: false, commandBound: true,
+  powerSource: "battery", idleSystemSleep: true, reason: "host is drawing battery power" }; }
+export function batteryPowerIsOperational(value) { return value.commandBound === true &&
+  value.powerSource === "battery" && value.idleSystemSleep === true; }
+export function inspectOwnerControlFile(file) { return { present: fs.existsSync(file),
+  valid: fs.existsSync(file) }; }
+export function sleepAssertionFaultPath(lockFile) { return lockFile + ".sleep-assertion-fault"; }
+`, { mode: 0o600 });
+    const defaultPauseFile = `${stateDb}.pause-entries`;
+    fs.writeFileSync(defaultPauseFile, "battery pause\n", { mode: 0o600 });
+    const batteryReady = invoke(["ready", "--env", envFile, "--poller", poller,
+      "--pid", String(holder.pid)]);
+    check("battery startup is operational only with a durable entry pause",
+      batteryReady.status === 0 && batteryReady.stdout.includes("operational on battery"),
+      batteryReady.stderr.trim());
+    const faultFile = `${lockFile}.sleep-assertion-fault`;
+    fs.writeFileSync(faultFile, "synthetic automatic-pause failure\n", { mode: 0o600 });
+    const faultLatched = invoke(["ready", "--env", envFile, "--poller", poller,
+      "--pid", String(holder.pid)]);
+    check("readiness refuses a durable sleep-assertion fault until explicit review",
+      faultLatched.status === 6 && faultLatched.stderr.includes("fault is latched"),
+      faultLatched.stderr.trim());
+    fs.unlinkSync(faultFile);
+    fs.unlinkSync(defaultPauseFile);
+    const unpausedBattery = invoke(["ready", "--env", envFile, "--poller", poller,
+      "--pid", String(holder.pid)]);
+    check("battery startup without a validated pause cannot report readiness",
+      unpausedBattery.status === 5 && unpausedBattery.stderr.includes("not ready"),
+      unpausedBattery.stderr.trim());
+  }
   const wrongReady = invoke(["ready", "--env", envFile, "--poller", poller,
     "--pid", String(process.pid)]);
   check("readiness rejects a registered pid that does not own the lock",
@@ -247,6 +297,11 @@ try {
   check("versioned adoption validates relative paths against one explicit old working directory",
     upgradeCheck.status === 0 && fs.readFileSync(envFile, "utf8") === originalEnvironment,
     upgradeCheck.stderr.trim());
+  check("upgrade preview distinguishes lowered caps from newly applied defaults",
+    upgradeCheck.stdout.includes("will lower values above reviewed ceilings: " +
+      "MAX_SOL_PER_TRADE,DAILY_SOL_CAP,DAILY_LOSS_LIMIT_SOL") &&
+    upgradeCheck.stdout.includes("will apply reviewed defaults to missing values: MAX_RENT_LAMPORTS") &&
+    !upgradeCheck.stdout.includes("lower canary caps"));
   check("upgrade validation prints control paths but never a secret",
     upgradeCheck.stdout.includes(pauseFile) &&
     !`${upgradeCheck.stdout}${upgradeCheck.stderr}`.includes(payload));
@@ -288,11 +343,12 @@ try {
     upgradedText.includes(`PAUSE_ENTRIES_FILE=${quoteEnvironmentValue(pauseFile)}`) &&
     upgradedText.includes(`HARD_STOP_FILE=${quoteEnvironmentValue(hardStopFile)}`),
     upgraded.stderr.trim());
-  check("secret bytes survive while known legacy caps can only be lowered to frozen ceilings",
+  check("secret bytes survive while exposure caps lower and missing rent adopts its reviewed default",
     upgradedText.includes(`CC_SECRET=${quoteEnvironmentValue(payload)}`) &&
     upgradedText.includes('MAX_SOL_PER_TRADE="0.005"\n') &&
     upgradedText.includes('DAILY_SOL_CAP="0.01"\n') &&
     upgradedText.includes('DAILY_LOSS_LIMIT_SOL="0.01"\n') &&
+    upgradedText.includes('MAX_RENT_LAMPORTS="4200000"\n') &&
     !`${upgraded.stdout}${upgraded.stderr}`.includes(payload));
   check("pause, hard stop, wallet, journal and owner-only recovery environment are preserved",
     fs.readFileSync(pauseFile, "utf8") === "keep-entry-pause\n" &&
@@ -308,10 +364,11 @@ try {
     restored.status === 0 && fs.readFileSync(envFile, "utf8") === originalEnvironment &&
     !fs.existsSync(environmentBackup), restored.stderr.trim());
 
-  writeEnvironment(liveEnvironmentLines.map((line) =>
+  writeEnvironment([...liveEnvironmentLines.map((line) =>
     line.startsWith("MAX_SOL_PER_TRADE=") ? "MAX_SOL_PER_TRADE=0.001"
       : line.startsWith("DAILY_SOL_CAP=") ? "DAILY_SOL_CAP=0.005"
-        : line.startsWith("DAILY_LOSS_LIMIT_SOL=") ? "DAILY_LOSS_LIMIT_SOL=0.004" : line));
+        : line.startsWith("DAILY_LOSS_LIMIT_SOL=") ? "DAILY_LOSS_LIMIT_SOL=0.004" : line),
+    "MAX_RENT_LAMPORTS=3000000"]);
   const lowerCapsText = fs.readFileSync(envFile, "utf8");
   const lowerBackup = `${envFile}.previous-lower-caps`;
   const lowerUpgrade = invoke(["update-upgrade-env", ...upgradeArgs, "--backup", lowerBackup]);
@@ -320,11 +377,25 @@ try {
     lowerUpgrade.status === 0 &&
     lowerUpgradedText.includes("MAX_SOL_PER_TRADE=0.001\n") &&
     lowerUpgradedText.includes("DAILY_SOL_CAP=0.005\n") &&
-    lowerUpgradedText.includes("DAILY_LOSS_LIMIT_SOL=0.004\n"));
+    lowerUpgradedText.includes("DAILY_LOSS_LIMIT_SOL=0.004\n") &&
+    lowerUpgradedText.includes("MAX_RENT_LAMPORTS=3000000\n"));
   const lowerRestore = invoke(["restore-upgrade-env", "--env", envFile,
     "--backup", lowerBackup, "--commit", releaseCommit]);
   check("lower-cap migration retains an exact owner-only rollback copy",
     lowerRestore.status === 0 && fs.readFileSync(envFile, "utf8") === lowerCapsText);
+
+  writeEnvironment([...liveEnvironmentLines, "MAX_RENT_LAMPORTS=5000000"]);
+  const highRentText = fs.readFileSync(envFile, "utf8");
+  const highRentBackup = `${envFile}.previous-high-rent`;
+  const highRentUpgrade = invoke(["update-upgrade-env", ...upgradeArgs,
+    "--backup", highRentBackup]);
+  check("versioned adoption lowers gross rent above the reviewed compatibility ceiling",
+    highRentUpgrade.status === 0 &&
+    fs.readFileSync(envFile, "utf8").includes('MAX_RENT_LAMPORTS="4200000"\n'));
+  const highRentRestore = invoke(["restore-upgrade-env", "--env", envFile,
+    "--backup", highRentBackup, "--commit", releaseCommit]);
+  check("gross-rent migration retains an exact owner-only rollback copy",
+    highRentRestore.status === 0 && fs.readFileSync(envFile, "utf8") === highRentText);
 
   writeEnvironment(liveEnvironmentLines.map((line) =>
     line.startsWith("MAX_SOL_PER_TRADE=") ? "MAX_SOL_PER_TRADE=0"
@@ -349,6 +420,8 @@ try {
   const shell = fs.readFileSync(controller, "utf8");
   const releaseShell = fs.readFileSync(releaseController, "utf8");
   const runnerSource = fs.readFileSync(runner, "utf8");
+  const pollerSource = fs.readFileSync(path.join(executorDir, "poller.mjs"), "utf8");
+  const jupiterSource = fs.readFileSync(path.join(executorDir, "jupiter.mjs"), "utf8");
   const sleepAssertionSource = fs.readFileSync(path.join(executorDir, "sleep-assertion.mjs"), "utf8");
   const buildSource = fs.readFileSync(path.join(executorDir, "..", "scripts", "build-viewer.mjs"), "utf8");
   const pagesWorkflow = fs.readFileSync(path.join(executorDir, "..", ".github", "workflows", "pages.yml"), "utf8");
@@ -357,12 +430,23 @@ try {
   const referencedEnvironment = new Set();
   for (const file of productionRuntime.filter((name) => name.endsWith(".mjs"))) {
     const source = fs.readFileSync(path.join(executorDir, file), "utf8");
-    for (const match of source.matchAll(/process\.env\.([A-Z_][A-Z0-9_]*)/g))
-      referencedEnvironment.add(match[1]);
+    for (const match of source.matchAll(
+      /process\.env(?:\.([A-Z_][A-Z0-9_]*)|\[["']([A-Z_][A-Z0-9_]*)["']\])/g))
+      referencedEnvironment.add(match[1] || match[2]);
   }
+  const allowlistSource = runnerSource.slice(runnerSource.indexOf("const ALLOWED_ENV"),
+    runnerSource.indexOf("const SAFE_INHERITED_ENV"));
+  const internalEnvironment = new Set(["WALLSTE_SUPERVISOR", "WALLSTE_SERVICE_LABEL"]);
   check("the exact environment allowlist covers every current runtime setting",
-    [...referencedEnvironment].every((name) => runnerSource.includes(`"${name}"`)),
-    [...referencedEnvironment].filter((name) => !runnerSource.includes(`"${name}"`)).join(", "));
+    [...referencedEnvironment].every((name) => internalEnvironment.has(name) ||
+      allowlistSource.includes(`"${name}"`)),
+    [...referencedEnvironment].filter((name) => !internalEnvironment.has(name) &&
+      !allowlistSource.includes(`"${name}"`)).join(", "));
+  check("supervisor identity remains runner-owned and outside the file allowlist",
+    !allowlistSource.includes('"WALLSTE_SUPERVISOR"') &&
+    !allowlistSource.includes('"WALLSTE_SERVICE_LABEL"') &&
+    runnerSource.includes('process.env.WALLSTE_SUPERVISOR = "launchd"') &&
+    runnerSource.includes("process.env.WALLSTE_SERVICE_LABEL = options"));
   check("the validator names every imported signing/runtime artifact",
     productionRuntime.every((name) => runnerSource.includes(`"${name}"`)));
   check("published executor instructions pin the exact CI build commit, never a stale fallback",
@@ -429,6 +513,25 @@ try {
     !sleepAssertionSource.includes('["sleep"') &&
     !sleepAssertionSource.includes('["displaysleep"') &&
     !sleepAssertionSource.includes('["hibernatemode"'));
+  check("battery degradation pauses entries while preserving the exact idle-bound runner",
+    runnerSource.includes("pauseEntriesFile: resolvePauseEntries") &&
+    runnerSource.includes("batteryPowerIsOperational") &&
+    sleepAssertionSource.includes("ensureEntryPauseFile(pauseEntriesFile") &&
+    sleepAssertionSource.includes("batteryPowerIsOperational(current)") &&
+    sleepAssertionSource.includes("entry pause remains until explicit readiness review") &&
+    !/(?:unlinkSync|rmSync)\(pauseEntriesFile/.test(sleepAssertionSource));
+  check("a failed automatic pause remains latched across launchd restarts",
+    sleepAssertionSource.includes("sleepAssertionFaultPath") &&
+    sleepAssertionSource.includes("ensureSleepAssertionFault") &&
+    sleepAssertionSource.includes("explicit operator repair and review") &&
+    pollerSource.includes("SLEEP_ASSERTION_FAULT_FILE") &&
+    runnerSource.includes("sleep assertion fault is latched") &&
+    !/(?:unlinkSync|rmSync)\([^\n]*sleepAssertionFault/.test(sleepAssertionSource));
+  check("the launchd entry gate re-proves strict AC power before signing or disclosure",
+    pollerSource.includes('process.env["WALLSTE_SUPERVISOR"] === "launchd"') &&
+    pollerSource.includes("requireMacEntryPower({ ownerPid: process.pid") &&
+    pollerSource.includes("assertEntriesUnpaused();") &&
+    [...jupiterSource.matchAll(/this\.submissionGate\(intent\)/g)].length >= 3);
   check("versioned release stages a clean exact commit before one atomic publication",
     releaseShell.includes("verify_git_release") &&
     releaseShell.includes("git") && releaseShell.includes("cat-file") &&

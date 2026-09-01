@@ -87,10 +87,29 @@ The agent then uses `RunAtLoad`, `KeepAlive`, a 15-second restart backoff, an ab
 working directory, and durable logs under `~/Library/Logs/ClaudeCompany/`. On macOS the
 lock-owning Node runner also starts `/usr/bin/caffeinate -i -s -w` directly and verifies
 that its exact child PID holds both no-idle-sleep and no-system-sleep assertions while
-the host is on AC power. Losing the assertion stops the runner fail-closed so launchd
-cannot leave an apparently live trader asleep. This does not change persistent Energy
-Saver settings, and the assertion ends with the runner. Control the service without
-editing the environment, wallet, journal, or safety sentinels:
+the host is on AC power. If the Mac moves to battery, the runner atomically creates and
+validates the owner-only entry-pause sentinel but keeps the exact idle-sleep assertion
+and lock-owning poller alive, so exits and reconciliation continue while the Mac remains
+awake. AC restoration never removes that pause. Every launchd entry boundary also
+re-proves AC plus both assertions synchronously before signing or disclosing bytes.
+Losing the child identity, idle assertion, or an AC-side system assertion pauses first
+and then restarts fail-closed. This does not change persistent Energy Saver settings,
+and the assertion ends with the runner. Control the service without editing the
+environment, wallet, journal, or safety sentinels:
+
+If the configured entry-pause sentinel cannot be safely published, the runner creates
+an owner-only `${LOCK_FILE}.sleep-assertion-fault` latch beside the canonical process
+lock. The poller treats that latch as an entry pause, readiness refuses it, and the
+monitor reports it as critical. No executor component clears the latch automatically;
+an operator must repair the pause control, review the incident, and explicitly remove
+that exact latch before entries can be reconsidered. If neither control can be written,
+the supervisor retains its fsynced assertion-identity record; a restart cannot replace
+that record until it first succeeds in publishing one of the durable entry blocks.
+The same rule applies to an otherwise healthy runner stopping for any reason: a
+handled signal, fatal poller startup, uncaught exit, or explicit unload publishes the
+pause (or fault latch) before the assertion record can be removed. A clean unload
+therefore leaves entries paused for the next explicit readiness review; no process
+exit is treated as permission to resume exposure.
 
 ```bash
 bash executor/macos-launchagent.sh status
@@ -153,10 +172,13 @@ pmset -g assertions
 `install` does not load the agent. It requires the pause sentinel, checks the immutable
 `0.005` SOL/trade, `0.01` SOL/rolling-24h deployment, and `0.01` SOL loss ceilings,
 canonicalizes relative wallet/state/control paths against the explicitly supplied old
-working directory, lowers any legacy `0.05`/`0.5`/`0.15` caps to those frozen ceilings
-(while retaining any already lower value), and updates `EXECUTOR_SOURCE_COMMIT`. The old
-environment is retained beside it as an owner-only rollback file. Secret values, wallet,
-journal, pause, and hard-stop files are never exposed or replaced; caps are never raised.
+working directory, lowers any legacy `0.05`/`0.5`/`0.15` exposure caps to those frozen
+ceilings (while retaining any already lower value), and updates `EXECUTOR_SOURCE_COMMIT`.
+The reviewed gross ATA-rent default is `4200000` lamports so one temporary WSOL ATA and
+one destination ATA can be built; an explicitly lower `MAX_RENT_LAMPORTS` remains lower.
+The old environment is retained beside it as an owner-only rollback file. Secret values,
+wallet, journal, pause, and hard-stop files are never exposed or replaced; core exposure
+caps are never raised.
 Keep entries paused until
 the new monitor reports `safeToUnpause: true`; no release command removes that sentinel.
 
@@ -239,6 +261,16 @@ Live polling uses `jupiter.mjs` for Jupiter Swap API v2 order validation and exe
 and `journal.mjs` for durable intent/attempt records. Before a transaction is signed,
 the executor checks the intended wallet, mints, amount, fees, price impact, expiry,
 resolved v0 program instructions, payer/signers, transaction size, and RPC simulation.
+Both independent RPC providers must deserialize, validate, and simulate the exact same
+unsigned bytes. Every writable address is then loaded as a direct, read-only static key
+in one separate unsigned Memo simulation: no account batching, address lookup table,
+signature, journal write, or broadcast path is involved. The same response must bind
+every row to one context slot and internally consistent fee/pre/post balance evidence.
+A second atomic snapshot after the swap simulation must preserve the same
+authority/capability fingerprint. Routes that cannot fit the 1,232-byte snapshot packet,
+or providers that omit the required evidence, fail the no-sign readiness gate rather
+than weakening it. After the final scan, each provider must still report at least 32
+blocks of order lifetime from chain-height evidence fenced to that scan slot.
 A final entry order must still match the monitored authored entry zone; a price-only
 exit needs two next-tick witnesses and the final executable order must still breach its
 stored stop or target.
@@ -389,7 +421,7 @@ not evidence of an edge.
 | `MAX_EXIT_PRICE_IMPACT_PCT` | `50` | Emergency impact ceiling for a managed exit; above it requires manual action |
 | `MAX_NETWORK_FEE_LAMPORTS` | `500000` live ceiling | Absolute network-fee cap, checked before signing and at finality |
 | `MAX_NETWORK_FEE_PCT` | `10` live ceiling | Network-fee cap relative to exact trade basis |
-| `MAX_RENT_LAMPORTS` | `3000000` live ceiling | Separate account-rent cap; rent is not treated as a network fee |
+| `MAX_RENT_LAMPORTS` | `4200000` live ceiling | Gross account-rent cap for at most the canonical temporary WSOL and destination ATAs; independently bound to both RPCs' classic-token rent facts. Rent is not a network fee, and an explicitly lower value remains lower on upgrade |
 | `MAX_ENTRY_ROUND_TRIP_LOSS_PCT` | `12` live ceiling | Maximum measured forward/reverse entry preflight loss |
 | `MAX_ENTRY_MARK_AGE_MIN` | `15` | Maximum monitored USD-mark age at entry submission |
 | `MAX_ENTRY_QUOTE_DRIFT_PCT` | `5` live ceiling | Maximum preflight/final executable USD-price drift from the monitored market mark |

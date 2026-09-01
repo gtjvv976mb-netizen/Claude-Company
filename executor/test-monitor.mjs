@@ -62,6 +62,15 @@ const heartbeat = (now, extra = {}) => ({
 });
 
 {
+  const source = fs.readFileSync(new URL("./monitor.mjs", import.meta.url), "utf8");
+  const boundedOracleConnections = source.match(
+    /new Connection\((?:primaryUrl|secondaryUrl), solanaRpcConnectionConfig\(\)\)/g,
+  ) || [];
+  assert.equal(boundedOracleConnections.length, 2,
+    "both recurring monitor oracle providers must use the shared aborting RPC transport");
+}
+
+{
   const dir = "/private/tmp/Claude Company/executor";
   const runnerCommand = `/usr/local/bin/node ${dir}/launchd-runner.mjs run ` +
     `--env ${dir}/.cc-executor.env --poller ${dir}/poller.mjs ` +
@@ -332,4 +341,80 @@ const heartbeat = (now, extra = {}) => ({
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
-console.log("\n11 monitor scenarios passed\n");
+{
+  const dir = tmp(); writeConfig(dir);
+  makeDb(path.join(dir, ".cc-executor.sqlite"));
+  fs.writeFileSync(path.join(dir, ".cc-executor.sqlite.lock"), `${process.pid}\n`, { mode: 0o600 });
+  fs.writeFileSync(path.join(dir, ".cc-executor.sqlite.pause-entries"), "power pause\n", { mode: 0o600 });
+  const report = await inspect({
+    executorDir: dir, environment: {}, now: 1_000_000, processProbe,
+    runtimeFingerprintFn, oracleProbe, requireSleepAssertion: true,
+    sleepAssertionProbe: async () => ({ ok: false, commandBound: true,
+      powerSource: "battery", assertionPid: 12345, acPower: false,
+      idleSystemSleep: true, systemSleep: false }),
+    fetchFn: async (url) => url.endsWith("/heartbeat")
+      ? response({ heartbeat: heartbeat(1_000_000, { health: {
+          ...heartbeat(1_000_000).health, state: "entries-paused", entriesPaused: true,
+        } }) })
+      : response({ cluster: "mainnet-beta", latest_id: 12, events: [] }),
+  });
+  assert.equal(report.process.alive, true, "the lock owner remains available for exits on battery");
+  assert.equal(report.controls.entriesPaused, true);
+  assert.equal(report.controls.entryPauseValid, true);
+  assert.equal(report.sleepAssertion.powerSource, "battery");
+  assert.equal(report.safeToUnpause, false,
+    "battery power cannot be certified for unpause even when the idle assertion survives");
+  assert.ok(report.issues.some((item) => item.code === "sleep_assertion_missing"));
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+{
+  const dir = tmp(); writeConfig(dir);
+  makeDb(path.join(dir, ".cc-executor.sqlite"));
+  fs.writeFileSync(path.join(dir, ".cc-executor.sqlite.lock"), `${process.pid}\n`, { mode: 0o600 });
+  fs.symlinkSync(path.join(dir, "dangling-pause-target"),
+    path.join(dir, ".cc-executor.sqlite.pause-entries"));
+  const report = await inspect({
+    executorDir: dir, environment: {}, now: 1_000_000, processProbe,
+    runtimeFingerprintFn, oracleProbe,
+    fetchFn: async (url) => url.endsWith("/heartbeat")
+      ? response({ heartbeat: heartbeat(1_000_000, { health: {
+          ...heartbeat(1_000_000).health, state: "entries-paused", entriesPaused: true,
+        } }) })
+      : response({ cluster: "mainnet-beta", latest_id: 12, events: [] }),
+  });
+  assert.equal(report.controls.entriesPaused, true,
+    "a dangling pause symlink is active rather than misreported as absent");
+  assert.equal(report.controls.entryPauseValid, false);
+  assert.equal(report.safeToUnpause, false);
+  assert.ok(report.issues.some((item) => item.code === "entry_pause_invalid"));
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+{
+  const dir = tmp(); writeConfig(dir);
+  makeDb(path.join(dir, ".cc-executor.sqlite"));
+  const lockFile = path.join(dir, ".cc-executor.sqlite.lock");
+  fs.writeFileSync(lockFile, `${process.pid}\n`, { mode: 0o600 });
+  fs.writeFileSync(`${lockFile}.sleep-assertion-fault`, "synthetic publication failure\n",
+    { mode: 0o600 });
+  const report = await inspect({
+    executorDir: dir, environment: {}, now: 1_000_000, processProbe,
+    runtimeFingerprintFn, oracleProbe,
+    fetchFn: async (url) => url.endsWith("/heartbeat")
+      ? response({ heartbeat: heartbeat(1_000_000, { health: {
+          ...heartbeat(1_000_000).health, state: "entries-paused", entriesPaused: true,
+        } }) })
+      : response({ cluster: "mainnet-beta", latest_id: 12, events: [] }),
+  });
+  assert.equal(report.controls.entriesPaused, true,
+    "the canonical sleep fault latch is an entry pause even without the configured pause file");
+  assert.equal(report.controls.sleepAssertionFault, true);
+  assert.equal(report.controls.sleepAssertionFaultValid, true);
+  assert.equal(report.safeToUnpause, false,
+    "monitoring can never certify unpause while the durable fault is latched");
+  assert.ok(report.issues.some((item) => item.code === "sleep_assertion_fault_latched"));
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+console.log("\n14 monitor scenarios passed\n");

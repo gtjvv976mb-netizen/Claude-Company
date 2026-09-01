@@ -72,7 +72,7 @@ ok("live deployment and transaction ceilings cannot be raised by environment", (
     ["MAX_JUPITER_FEE_BPS", "101"],
     ["MAX_NETWORK_FEE_LAMPORTS", "500001"],
     ["MAX_NETWORK_FEE_PCT", "10.01"],
-    ["MAX_RENT_LAMPORTS", "3000001"],
+    ["MAX_RENT_LAMPORTS", "4200001"],
     ["MAX_ENTRY_ROUND_TRIP_LOSS_PCT", "12.01"],
     ["MAX_TX_ATTEMPTS", "4"],
     ["SOL_USD_CACHE_MAX_AGE_MS", "1800001"],

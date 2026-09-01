@@ -33,8 +33,8 @@ Additional options:
 
 The install command refuses a loaded LaunchAgent or any active old/canonical process
 lock. It requires the existing entry-pause sentinel, preserves every secret, lowers
-legacy caps only to the frozen ceilings, atomically normalizes data paths and
-EXECUTOR_SOURCE_COMMIT, then installs a
+values above the reviewed ceilings, applies reviewed defaults where a cap is missing,
+atomically normalizes data paths and EXECUTOR_SOURCE_COMMIT, then installs a
 persistently disabled plist. Starting remains a separate explicit load command.
 HELP
 }
@@ -224,7 +224,8 @@ case "$COMMAND" in
     ENV_UPDATED=0
     trap - EXIT
     echo "Installed disabled versioned release $EXPECTED_COMMIT."
-    echo "Entry pause, hard stop, wallet, journal, and secrets were preserved; caps were never raised."
+    echo "Entry pause, hard stop, wallet, journal, and secrets were preserved; core exposure caps were never raised."
+    echo "This release defaults gross ATA rent to 4,200,000 lamports while retaining any explicit lower value."
     echo "Owner-only rollback environment: $ENV_BACKUP"
     echo "Next, explicitly load only after reviewing the pause and monitor plan:"
     printf '  bash %q load --executor-dir %q --env-file %q\n' \

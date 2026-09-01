@@ -25,6 +25,48 @@ assert.equal(health.runtimeCommit, "a".repeat(40));
 assert.equal(health.runtimeFingerprint, "b".repeat(32));
 assert.ok(!JSON.stringify(health).includes("must-not-cross"));
 
+const now = Date.now();
+const ready = sanitizeExecutorHealth({ state: "entries-paused", feedRollback: false,
+  executionReadiness: { ready: true, lastSuccessAt: now - 1000, observedAt: now - 1200,
+    route: "wsol-usdc", providers: 2, secret: "readiness-secret-must-not-cross" } });
+assert.equal(ready.state, "entries-paused");
+assert.equal(ready.feedRollback, false);
+assert.deepEqual(ready.executionReadiness, {
+  ready: true, lastSuccessAt: now - 1000, observedAt: now - 1200,
+  route: "wsol-usdc", providers: 2,
+});
+assert.ok(!JSON.stringify(ready).includes("readiness-secret-must-not-cross"));
+
+const rollback = sanitizeExecutorHealth({ state: "healthy", feedRollback: true,
+  executionReadiness: ready.executionReadiness });
+assert.equal(rollback.feedRollback, true);
+assert.equal(rollback.state, "degraded", "a feed rollback cannot persist as healthy");
+
+const failedReadiness = sanitizeExecutorHealth({ state: "healthy", feedRollback: false,
+  executionReadiness: { ...ready.executionReadiness, ready: false } });
+assert.equal(failedReadiness.executionReadiness.ready, false);
+assert.equal(failedReadiness.state, "degraded",
+  "a failed execution probe cannot persist as healthy");
+
+const malformed = sanitizeExecutorHealth({ state: "healthy", feedRollback: "false",
+  executionReadiness: { ready: true, lastSuccessAt: String(now), observedAt: now,
+    route: { secret: "nested-route-secret" }, providers: "2",
+    endpoint: "https://rpc.invalid/private" } });
+assert.equal(malformed.feedRollback, false, "only a literal boolean is retained");
+assert.deepEqual(malformed.executionReadiness, {
+  ready: false, lastSuccessAt: 0, observedAt: now, route: null, providers: 0,
+});
+assert.equal(malformed.state, "degraded",
+  "malformed rollback/readiness evidence fails status closed");
+assert.ok(!JSON.stringify(malformed).includes("nested-route-secret"));
+assert.ok(!JSON.stringify(malformed).includes("rpc.invalid"));
+
+const nonObjectReadiness = sanitizeExecutorHealth({ state: "healthy",
+  executionReadiness: "secret-bearing-invalid-readiness" });
+assert.equal(nonObjectReadiness.executionReadiness, null);
+assert.equal(nonObjectReadiness.state, "degraded");
+assert.ok(!JSON.stringify(nonObjectReadiness).includes("secret-bearing"));
+
 const source = fs.readFileSync(new URL("./src/office.js", import.meta.url), "utf8");
 const route = source.slice(source.indexOf("const hbMatch"), source.indexOf("RETIRED BROWSER RPC LANE"));
 assert.match(route, /cryptoTimingEqual\(auth, secret\)/,
@@ -32,5 +74,7 @@ assert.match(route, /cryptoTimingEqual\(auth, secret\)/,
 assert.match(route, /req\.method === "GET"/);
 assert.match(route, /cache-control", "no-store"/);
 assert.match(route, /req\.method !== "POST"/);
+assert.match(route, /health: sanitizeExecutorHealth\(body\.health\)/,
+  "the authenticated heartbeat route must persist only sanitized health evidence");
 
 console.log("\nexecutor heartbeat readback is authenticated, read-only and secret-safe\n");

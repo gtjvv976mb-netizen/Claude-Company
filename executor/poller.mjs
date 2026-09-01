@@ -15,7 +15,7 @@ import {
   deskExitDecisionForPosition, positionEntryBlock, requirePositiveCallId, validateRiskState,
 } from "./journal.mjs";
 import {
-  JupiterV2Executor, TOKEN_PROGRAM, WSOL, associatedTokenAddress,
+  JupiterV2Executor, MAX_GROSS_RENT_LAMPORTS, TOKEN_PROGRAM, WSOL, associatedTokenAddress,
   classicWalletTokenAmount, independentClassicMintDecimals,
 } from "./jupiter.mjs";
 import {
@@ -31,7 +31,11 @@ import {
 import { executorHeartbeatHealth, executorRuntimeFingerprint } from "./heartbeat-health.mjs";
 import { validateEntryPreflightContext } from "./entry-quote-guard.mjs";
 import {
-  independentSolUsdPrice, PYTH_SOL_USD_CACHE_SOURCE, usableSolUsdCache,
+  inspectOwnerControlFile, requireMacEntryPower, sleepAssertionFaultPath,
+} from "./sleep-assertion.mjs";
+import {
+  independentSolUsdPrice, PYTH_SOL_USD_CACHE_SOURCE, solanaRpcConnectionConfig,
+  usableSolUsdCache,
 } from "./sol-usd-oracle.mjs";
 import { DEFAULTS, planEntry, openPosition, stepPosition, freshState } from "./strategy.mjs";
 import { policyConfigForPosition, resolveTakeProfitRule, validateEntryReference } from "./trade-policy.mjs";
@@ -57,6 +61,7 @@ const STATE_DB = path.resolve(process.env.STATE_DB || "./.cc-executor.sqlite");
 const LOCK_FILE = path.resolve(process.env.LOCK_FILE || `${STATE_DB}.lock`);
 const PAUSE_ENTRIES_FILE = path.resolve(process.env.PAUSE_ENTRIES_FILE || `${STATE_DB}.pause-entries`);
 const HARD_STOP_FILE = path.resolve(process.env.HARD_STOP_FILE || `${STATE_DB}.hard-stop`);
+const SLEEP_ASSERTION_FAULT_FILE = sleepAssertionFaultPath(LOCK_FILE);
 // Compute once, before the loop starts. A release changed on disk without restarting
 // cannot make an old in-memory process impersonate the newly published runtime.
 const RUNTIME_FINGERPRINT = executorRuntimeFingerprint(path.dirname(fileURLToPath(import.meta.url)));
@@ -78,7 +83,10 @@ const LIVE_LIMITS = Object.freeze({
   maxFeeBps: 100,
   maxNetworkFeeLamports: 500_000,
   maxNetworkFeePct: 10,
-  maxRentLamports: 3_000_000,
+  // Gross creation rent for one temporary WSOL ATA plus one destination ATA is
+  // currently 4,078,560 lamports. The reviewed ceiling leaves only a narrow buffer;
+  // core 0.005/0.01-SOL exposure caps are unchanged.
+  maxRentLamports: MAX_GROSS_RENT_LAMPORTS,
   maxEntryRoundTripLossPct: 12,
   maxEntryQuoteDriftPct: 5,
   maxEntryPreflightAgeMs: 60_000,
@@ -147,8 +155,22 @@ function loadKeypair() {
 
 const kp = loadKeypair();
 const WALLET = kp.publicKey.toBase58();
-const pauseEntries = () => fs.existsSync(PAUSE_ENTRIES_FILE);
-const hardStop = () => fs.existsSync(HARD_STOP_FILE);
+const controlActive = (file, label) => inspectOwnerControlFile(file, { label }).present;
+const pauseEntries = () => controlActive(PAUSE_ENTRIES_FILE, "entry-pause sentinel") ||
+  controlActive(SLEEP_ASSERTION_FAULT_FILE, "sleep assertion fault latch");
+const hardStop = () => controlActive(HARD_STOP_FILE, "hard-stop sentinel");
+const assertEntriesUnpaused = () => {
+  const pause = inspectOwnerControlFile(PAUSE_ENTRIES_FILE, { label: "entry-pause sentinel" });
+  if (pause.present) throw new Error(pause.valid
+    ? "PAUSE ENTRIES file appeared before submission"
+    : `PAUSE ENTRIES control is unsafe (${pause.reason})`);
+  const fault = inspectOwnerControlFile(SLEEP_ASSERTION_FAULT_FILE, {
+    label: "sleep assertion fault latch",
+  });
+  if (fault.present) throw new Error(fault.valid
+    ? "sleep assertion fault is latched; explicit operator repair and review are required"
+    : `sleep assertion fault latch is unsafe (${fault.reason})`);
+};
 
 if (EXECUTE) {
   if (process.env.LIVE_TRADING_ACK !== WALLET)
@@ -331,8 +353,13 @@ process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("exit", releaseLock);
 
-const conn = new Connection(RPC, "confirmed");
-const secondaryConn = EXECUTE ? new Connection(SECONDARY_RPC, "confirmed") : null;
+// Both independent providers use an actually aborting HTTP transport. A logical
+// Promise.race elsewhere may fail closed sooner, but no abandoned socket/request can
+// survive this fixed ceiling or accumulate without bound across recovery passes.
+const conn = new Connection(RPC, solanaRpcConnectionConfig());
+const secondaryConn = EXECUTE
+  ? new Connection(SECONDARY_RPC, solanaRpcConnectionConfig())
+  : null;
 if (EXECUTE) {
   let genesis, secondaryGenesis;
   try { [genesis, secondaryGenesis] = await Promise.all([conn.getGenesisHash(), secondaryConn.getGenesisHash()]); }
@@ -421,7 +448,7 @@ function validEntryEvent(ev) {
 
 function entryEventSubmissionGate(intent) {
   if (intent?.kind !== "entry") return;
-  if (pauseEntries()) throw new Error("PAUSE ENTRIES file appeared before submission");
+  assertEntriesUnpaused();
   const event = intent.context?.event;
   validEntryEvent(event);
   if (Date.now() - Number(event.ts) > MAX_CALL_AGE_MS)
@@ -434,6 +461,13 @@ function entryEventSubmissionGate(intent) {
 
 function entrySubmissionGate(intent) {
   entryEventSubmissionGate(intent);
+  if (intent?.kind === "entry" && EXECUTE && process.env["WALLSTE_SUPERVISOR"] === "launchd") {
+    requireMacEntryPower({ ownerPid: process.pid, lockFile: LOCK_FILE,
+      pauseEntriesFile: PAUSE_ENTRIES_FILE });
+    // The synchronous pmset/ps proof takes time. A concurrent power watcher or
+    // operator pause that appeared during those reads must still close this gate.
+    assertEntriesUnpaused();
+  }
   validateEntryPreflightContext(intent, {
     nowMs: Date.now(), maxEntryPreflightAgeMs: JUPITER_CFG.maxEntryPreflightAgeMs,
     requireFresh: true,
@@ -1353,7 +1387,8 @@ async function tick() {
 
 log(`up — floor ${FLOOR} — wallet ${WALLET} — ${EXECUTE ? "LIVE MAINNET" : "PAPER"}`);
 log(`caps: ${CFG.maxSolPerTrade} SOL/trade, ${CFG.dailySolCap} SOL/rolling 24h deploy, ${CFG.dailyLossLimitSol} SOL/rolling 24h loss, ${CFG.maxOpenPositions} open`);
-log(`journal: ${STATE_DB}; entries pause: ${PAUSE_ENTRIES_FILE}; hard stop: ${HARD_STOP_FILE}`);
+log(`journal: ${STATE_DB}; entries pause: ${PAUSE_ENTRIES_FILE}; ` +
+  `sleep fault: ${SLEEP_ASSERTION_FAULT_FILE}; hard stop: ${HARD_STOP_FILE}`);
 log(`resuming ${openList().length} position(s) from cursor ${S.cursor}`);
 await tick();
 setInterval(tick, POLL_MS);

@@ -22,7 +22,7 @@ export const LEGACY_CALL_IDENTITY_POLICY = "liquidate-on-next-valid-same-mint-de
 // Bump only when the rules that authorize construction/disclosure of signed bytes
 // change. Recovery compares this durable provenance marker; a null value is an
 // explicitly unversioned attempt built before this invariant existed.
-export const CURRENT_TX_ATTEMPT_PROTOCOL = "jupiter-dual-rpc-unsigned-preflight-v2";
+export const CURRENT_TX_ATTEMPT_PROTOCOL = "jupiter-dual-rpc-coherent-snapshot-v3";
 
 const json = (value) => JSON.stringify(value ?? null);
 const parse = (value, { fallback = null, label = "journal JSON" } = {}) => {

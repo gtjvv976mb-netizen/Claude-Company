@@ -8,6 +8,7 @@
 import bs58 from "bs58";
 import {
   ComputeBudgetProgram,
+  MessageV0,
   PublicKey,
   SystemInstruction,
   SystemProgram,
@@ -21,8 +22,16 @@ import { CURRENT_TX_ATTEMPT_PROTOCOL } from "./journal.mjs";
 export const WSOL = "So11111111111111111111111111111111111111112";
 export const MAINNET_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 export const EXECUTION_READINESS_ROUTE = "wsol-usdc";
-export const EXECUTION_READINESS_AMOUNT_LAMPORTS = 100_000;
+// Exercise the full first-release entry boundary. The probe never signs or submits,
+// so using the 0.005-SOL canary ceiling adds no spend risk and prevents ordinary
+// priority fees from looking unsafe only because a tiny synthetic basis was used.
+export const EXECUTION_READINESS_AMOUNT_LAMPORTS = 5_000_000;
 export const EXECUTION_READINESS_RESERVE_LAMPORTS = 10_000_000;
+export const MAX_GROSS_RENT_LAMPORTS = 4_200_000;
+export const WRITABLE_SNAPSHOT_ATTEMPTS = 3;
+export const WRITABLE_SNAPSHOT_REQUEST_TIMEOUT_MS = 4_000;
+export const PROCESSED_SLOT_ANCHOR_REQUEST_TIMEOUT_MS = 2_000;
+export const MIN_SIGNABLE_BLOCKS_REMAINING = 32;
 export const JUPITER_V6 = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
 export const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 export const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
@@ -30,6 +39,10 @@ export const ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 export const JUPITER_EVENT_AUTHORITY = "D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf";
 const SYSTEM_PROGRAM = SystemProgram.programId.toBase58();
 const COMPUTE_PROGRAM = ComputeBudgetProgram.programId.toBase58();
+const SNAPSHOT_MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+const FINAL_HEIGHT_ATTEMPTS = 4;
+const FINAL_HEIGHT_REQUEST_TIMEOUT_MS = 2_000;
+const FINAL_HEIGHT_RETRY_DELAY_MS = 100;
 
 // Anchor's eight-byte instruction discriminators. The first live canary accepts only
 // v2 exact-in routes, whose safety fields have fixed offsets. Legacy v1 route plans put
@@ -137,8 +150,8 @@ export function validateOrderEnvelope(order, expected, cfg) {
   if (feeBasis <= 0n || !Number.isFinite(maxNetworkFeePct) || maxNetworkFeePct < 0 ||
       BigInt(Math.ceil(networkFees)) * 10_000n > feeBasis * BigInt(Math.floor(maxNetworkFeePct * 100)))
     throw new Error(`estimated network fees exceed ${maxNetworkFeePct}% of the trade basis`);
-  if (rentFee > (cfg.maxRentLamports ?? 3_000_000))
-    throw new Error(`rent ${rentFee} lamports exceeds cap ${cfg.maxRentLamports ?? 3_000_000}`);
+  if (rentFee > (cfg.maxRentLamports ?? MAX_GROSS_RENT_LAMPORTS))
+    throw new Error(`rent ${rentFee} lamports exceeds cap ${cfg.maxRentLamports ?? MAX_GROSS_RENT_LAMPORTS}`);
   return order;
 }
 
@@ -260,6 +273,18 @@ const accountData = (account) => {
   throw new Error("RPC returned an unsupported account encoding");
 };
 
+/** Solana simulation providers use both `null` and this exact object shape for an
+ * account closed by the simulated transaction. It is safe to treat as absent only
+ * where the caller already permits absence: no lamports, no data, no executable
+ * capability, and System Program ownership. Any near miss remains an account. */
+export function isClosedAccountTombstone(account) {
+  if (!account || account.lamports !== 0 || account.executable !== false ||
+      accountOwner(account) !== SYSTEM_PROGRAM) return false;
+  let data;
+  try { data = accountData(account); } catch { return false; }
+  return data?.length === 0;
+}
+
 function tokenAccountDetails(account) {
   const program = accountOwner(account);
   const data = accountData(account);
@@ -273,6 +298,9 @@ function tokenAccountDetails(account) {
     if (tag !== 1) throw new Error(`token account has an invalid ${label} option`);
     return new PublicKey(data.subarray(offset + 4, offset + 36)).toBase58();
   };
+  const nativeTag = data.readUInt32LE(109);
+  if (nativeTag !== 0 && nativeTag !== 1)
+    throw new Error("token account has an invalid native-reserve option");
   return {
     program,
     mint: new PublicKey(data.subarray(0, 32)).toBase58(),
@@ -280,6 +308,7 @@ function tokenAccountDetails(account) {
     amount: data.readBigUInt64LE(64),
     delegate: optionKey(72, "delegate"),
     state: data[108],
+    isNative: nativeTag === 1,
     delegatedAmount: data.readBigUInt64LE(121),
     closeAuthority: optionKey(129, "close authority"),
   };
@@ -293,7 +322,7 @@ function assertSafeTokenAccount(details, label) {
 }
 
 function checkedTokenAmount(account, { program, mint, wallet, label, allowMissing = false }) {
-  if (!account && allowMissing) return 0n;
+  if (allowMissing && (!account || isClosedAccountTombstone(account))) return 0n;
   const details = tokenAccountDetails(account);
   if (!details) throw new Error(`${label} is not a supported token account`);
   if (details.program !== program || details.mint !== mint || details.owner !== wallet)
@@ -516,6 +545,304 @@ function validateRouteAccounts(ix, route, expected, tokenPrograms, atas) {
   }
 }
 
+/** Obtain the one freshness floor used by the initial merged snapshot.
+ *
+ * The successful path performs exactly one RPC read. A transport that never settles
+ * cannot wedge entry or emergency-exit preparation indefinitely; it loses authority
+ * after the same strict, capped deadline used for every provider. */
+export async function processedSlotFreshnessAnchor(connection, {
+  requestTimeoutMs = PROCESSED_SLOT_ANCHOR_REQUEST_TIMEOUT_MS,
+} = {}) {
+  if (!connection || typeof connection.getSlot !== "function")
+    throw new Error("RPC lacks processed-slot freshness-anchor support");
+  if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 1 ||
+      requestTimeoutMs > PROCESSED_SLOT_ANCHOR_REQUEST_TIMEOUT_MS)
+    throw new Error("processed-slot freshness-anchor request timeout is invalid");
+  let timer;
+  let slot;
+  try {
+    slot = await Promise.race([
+      Promise.resolve().then(() => connection.getSlot("processed")),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("RPC processed-slot freshness anchor timed out")),
+          requestTimeoutMs);
+      }),
+    ]);
+  } catch {
+    throw new Error("RPC could not obtain a processed-slot freshness anchor");
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+  if (!Number.isSafeInteger(slot) || slot <= 0)
+    throw new Error("RPC returned an invalid processed-slot freshness anchor");
+  return slot;
+}
+
+/** Read every requested account from one simulated bank.
+ *
+ * Provider-sized `getMultipleAccounts` chunks cannot prove an exact-bank view:
+ * `minContextSlot` is only a lower bound, and consecutive chunks routinely land on
+ * different slots. This probe instead includes every requested address as a static,
+ * read-only transaction key and asks one `simulateTransaction` response to return
+ * them. The fixed Memo ensures the probe actually executes while taking zero account
+ * metas; the instruction has no path to mutate any loaded account. The probe stays
+ * unsigned and is never broadcastable.
+ *
+ * Simulation account rows are post-state. A successful Memo changes only the fee
+ * payer's lamports, so the same response's pre/post balance vectors and fee are
+ * required and checked before the payer row is restored to its atomic pre-state. */
+export async function coherentAccountSnapshot(connection, publicKeys, {
+  transaction, commitment = "confirmed", minContextSlot = 0,
+  attempts = WRITABLE_SNAPSHOT_ATTEMPTS,
+  requestTimeoutMs = WRITABLE_SNAPSHOT_REQUEST_TIMEOUT_MS,
+} = {}) {
+  if (!connection || typeof connection.simulateTransaction !== "function")
+    throw new Error("RPC lacks context-fenced account snapshot support");
+  if (!Array.isArray(publicKeys) || !publicKeys.length)
+    throw new Error("coherent account snapshot requires at least one address");
+  if (!Number.isSafeInteger(attempts) || attempts < 1 ||
+      attempts > WRITABLE_SNAPSHOT_ATTEMPTS)
+    throw new Error("coherent account snapshot attempt count is invalid");
+  if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 1 ||
+      requestTimeoutMs > WRITABLE_SNAPSHOT_REQUEST_TIMEOUT_MS)
+    throw new Error("coherent account snapshot request timeout is invalid");
+  const floor = minContextSlot;
+  if (!Number.isSafeInteger(floor) || floor < 0)
+    throw new Error("coherent account snapshot minContextSlot is invalid");
+  const keys = publicKeys.map((key) => key instanceof PublicKey ? key : new PublicKey(key));
+  const addresses = keys.map((key) => key.toBase58());
+  if (new Set(addresses).size !== addresses.length)
+    throw new Error("coherent account snapshot addresses must be unique");
+  if (!transaction?.message || transaction.message.header?.numRequiredSignatures !== 1 ||
+      transaction.signatures?.length !== 1 ||
+      Buffer.from(transaction.signatures[0] || []).length !== 64 ||
+      Buffer.from(transaction.signatures[0] || []).some((byte) => byte !== 0))
+    throw new Error("coherent account snapshot source transaction is not unsigned or not exactly one-payer");
+  const payer = transaction.message.staticAccountKeys?.[0];
+  const recentBlockhash = transaction.message.recentBlockhash;
+  if (!(payer instanceof PublicKey) || typeof recentBlockhash !== "string")
+    throw new Error("coherent account snapshot source transaction is malformed");
+  const memoProgram = new PublicKey(SNAPSHOT_MEMO_PROGRAM);
+  const staticAccountKeys = [payer];
+  const included = new Set([payer.toBase58()]);
+  for (const key of keys) {
+    const address = key.toBase58();
+    if (!included.has(address)) {
+      staticAccountKeys.push(key);
+      included.add(address);
+    }
+  }
+  if (!included.has(SNAPSHOT_MEMO_PROGRAM)) staticAccountKeys.push(memoProgram);
+  const memoProgramIdIndex = staticAccountKeys.findIndex((key) => key.equals(memoProgram));
+  const probe = new VersionedTransaction(new MessageV0({
+    header: {
+      numRequiredSignatures: 1,
+      numReadonlySignedAccounts: 0,
+      numReadonlyUnsignedAccounts: staticAccountKeys.length - 1,
+    },
+    staticAccountKeys,
+    recentBlockhash,
+    compiledInstructions: [{
+      programIdIndex: memoProgramIdIndex,
+      accountKeyIndexes: [],
+      // One fixed UTF-8 byte gives every compatibility Memo deterministic content.
+      data: Buffer.from("W"),
+    }],
+    addressTableLookups: [],
+  }));
+  let probeLength;
+  try { probeLength = probe.serialize().length; }
+  catch { throw new Error("atomic account-snapshot probe cannot be serialized safely"); }
+  if (probeLength > 1232)
+    throw new Error(`atomic account-snapshot probe is ${probeLength} bytes (Solana max 1232)`);
+  if (probe.signatures.length !== 1 || Buffer.from(probe.signatures[0] || []).length !== 64 ||
+      probe.signatures.some((signature) => Buffer.from(signature).some((byte) => byte !== 0)))
+    throw new Error("atomic account-snapshot probe is not unsigned");
+
+  const bounded = async (promise) => {
+    let timer;
+    try {
+      return await Promise.race([
+        Promise.resolve(promise),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error("RPC account snapshot request timed out")),
+            requestTimeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+  // Some RPC clients preserve a newer bank slot on a failed JSON-RPC response.
+  // Treating that only as a stricter retry floor is safe: forged high evidence can
+  // make the probe fail closed, but can never make an older bank acceptable.
+  const errorContextSlot = (error) => {
+    const candidates = [
+      error?.context?.slot,
+      error?.data?.context?.slot,
+      error?.data?.contextSlot,
+      error?.data?.slot,
+      error?.slot,
+    ].filter((slot) => Number.isSafeInteger(slot) && slot > 0);
+    return candidates.length ? Math.max(...candidates) : 0;
+  };
+  let retryFloor = floor;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const requestedFloor = retryFloor;
+    try {
+      const response = await bounded(connection.simulateTransaction(probe, {
+        commitment, sigVerify: false, replaceRecentBlockhash: false,
+        accounts: { encoding: "base64", addresses },
+        innerInstructions: false, minContextSlot: requestedFloor,
+      }));
+      const slot = response?.context?.slot;
+      if (Number.isSafeInteger(slot) && slot > 0) retryFloor = Math.max(retryFloor, slot);
+      if (!Number.isSafeInteger(slot) || slot <= 0 || slot < requestedFloor)
+        throw new Error("RPC returned a missing, invalid, or below-anchor account context slot");
+      if (response?.value?.err !== null)
+        throw new Error("atomic account-snapshot Memo simulation failed");
+      const accounts = response?.value?.accounts;
+      if (!Array.isArray(accounts) || accounts.length !== keys.length)
+        throw new Error("RPC omitted or reordered coherent account snapshot rows");
+      const preBalances = response?.value?.preBalances;
+      const postBalances = response?.value?.postBalances;
+      const fee = response?.value?.fee;
+      if (!Array.isArray(preBalances) || !Array.isArray(postBalances) ||
+          preBalances.length !== staticAccountKeys.length ||
+          postBalances.length !== staticAccountKeys.length ||
+          typeof fee !== "number" || !Number.isSafeInteger(fee) || fee <= 0 ||
+          [...preBalances, ...postBalances].some((balance) =>
+            !Number.isSafeInteger(balance) || balance < 0))
+        throw new Error("RPC omitted atomic account-snapshot balance evidence");
+      if (preBalances[0] - postBalances[0] !== fee)
+        throw new Error("atomic account-snapshot payer delta does not equal the simulated fee");
+      for (let i = 1; i < staticAccountKeys.length; i++) {
+        if (preBalances[i] !== postBalances[i])
+          throw new Error("atomic account-snapshot Memo changed a non-payer balance");
+      }
+      const keyIndexes = new Map(staticAccountKeys.map((key, index) => [key.toBase58(), index]));
+      const normalized = accounts.map((account, index) => {
+        const keyIndex = keyIndexes.get(addresses[index]);
+        if (!Number.isSafeInteger(keyIndex))
+          throw new Error("atomic account-snapshot response address was not loaded by the probe");
+        const observedLamports = account == null ? 0 : account.lamports;
+        if (!Number.isSafeInteger(observedLamports) || observedLamports < 0 ||
+            observedLamports !== postBalances[keyIndex])
+          throw new Error("atomic account-snapshot row does not match its post-balance evidence");
+        if (keyIndex !== 0) return account;
+        if (account == null)
+          throw new Error("atomic account-snapshot probe omitted its fee payer");
+        return Object.freeze({ ...account, lamports: preBalances[0] });
+      });
+      return Object.freeze({ accounts: Object.freeze(normalized), slot });
+    } catch (error) {
+      retryFloor = Math.max(retryFloor, errorContextSlot(error));
+      // Retry the complete snapshot only. No partial rows survive this attempt.
+    }
+  }
+  throw new Error(`RPC could not produce one coherent exact-slot account snapshot after ${attempts} attempts`);
+}
+
+function writableAccountSafetyClass(account) {
+  if (account == null) return Object.freeze({ exists: false });
+  if (!Number.isSafeInteger(account.lamports) || account.lamports < 0 ||
+      typeof account.executable !== "boolean")
+    throw new Error("RPC returned malformed writable-account metadata");
+  const program = accountOwner(account);
+  try { new PublicKey(program); } catch { throw new Error("RPC returned an invalid writable-account program owner"); }
+  const data = accountData(account);
+  const details = tokenAccountDetails(account);
+  if (!details) return Object.freeze({
+    exists: true, program, executable: account.executable, dataLength: data.length,
+  });
+  return Object.freeze({
+    exists: true, program, executable: account.executable, dataLength: data.length,
+    token: true, mint: details.mint, authority: details.owner,
+    delegate: details.delegate, state: details.state,
+    isNative: details.isNative,
+    closeAuthority: details.closeAuthority,
+  });
+}
+
+/** Stable capability facts only: address/order and authority-bearing metadata are
+ * retained, while lamports, token balances, rent epochs and arbitrary program bytes
+ * are excluded so independently confirmed providers may agree across active slots. */
+export function writableAccountSafetyFingerprint(addresses, accounts) {
+  if (!Array.isArray(addresses) || !Array.isArray(accounts) || addresses.length !== accounts.length)
+    throw new Error("writable-account fingerprint input is incomplete");
+  return JSON.stringify(addresses.map((address, index) => [
+    String(address), writableAccountSafetyClass(accounts[index]),
+  ]));
+}
+
+/** Read a processed block height from the same bank that proves its own slot fence.
+ *
+ * `getBlockHeight` returns only a scalar, so a load-balanced RPC cannot give us
+ * independent evidence that the answering backend actually evaluated the requested
+ * `minContextSlot`. `getEpochInfo` returns `absoluteSlot` and `blockHeight` together.
+ * We still send the official min-context fence, then independently reject a response
+ * below it. Bounded retries tolerate a provider routing the first request to a backend
+ * that has not yet caught up to a just-observed simulation slot; no unfenced fallback
+ * is permitted. */
+export async function fencedProcessedEpochHeight(connection, minContextSlot, {
+  attempts = FINAL_HEIGHT_ATTEMPTS,
+  requestTimeoutMs = FINAL_HEIGHT_REQUEST_TIMEOUT_MS,
+  retryDelayMs = FINAL_HEIGHT_RETRY_DELAY_MS,
+  sleep = sleepDefault,
+} = {}) {
+  if (!connection || typeof connection.getEpochInfo !== "function")
+    throw new Error("RPC lacks context-fenced epoch-height support");
+  if (!Number.isSafeInteger(minContextSlot) || minContextSlot <= 0)
+    throw new Error("final epoch-height minContextSlot is invalid");
+  if (!Number.isSafeInteger(attempts) || attempts < 1 || attempts > FINAL_HEIGHT_ATTEMPTS)
+    throw new Error("final epoch-height attempt count is invalid");
+  if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 1 ||
+      requestTimeoutMs > FINAL_HEIGHT_REQUEST_TIMEOUT_MS)
+    throw new Error("final epoch-height request timeout is invalid");
+  if (!Number.isSafeInteger(retryDelayMs) || retryDelayMs < 0 ||
+      retryDelayMs > FINAL_HEIGHT_RETRY_DELAY_MS)
+    throw new Error("final epoch-height retry delay is invalid");
+  if (typeof sleep !== "function") throw new Error("final epoch-height sleep function is invalid");
+
+  const bounded = async (promise) => {
+    let timer;
+    try {
+      return await Promise.race([
+        Promise.resolve(promise),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error("RPC epoch-height request timed out")),
+            requestTimeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+  let retryFloor = minContextSlot;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const requestedFloor = retryFloor;
+    try {
+      const info = await bounded(connection.getEpochInfo({
+        commitment: "processed", minContextSlot: requestedFloor,
+      }));
+      const absoluteSlot = info?.absoluteSlot;
+      const blockHeight = info?.blockHeight;
+      if (Number.isSafeInteger(absoluteSlot) && absoluteSlot > 0)
+        retryFloor = Math.max(retryFloor, absoluteSlot);
+      if (!Number.isSafeInteger(absoluteSlot) || absoluteSlot < requestedFloor)
+        throw new Error("RPC returned a missing, invalid, or below-fence epoch slot");
+      if (!Number.isSafeInteger(blockHeight) || blockHeight <= 0 || blockHeight > absoluteSlot)
+        throw new Error("RPC returned a missing, invalid, or impossible epoch block height");
+      return Object.freeze({ absoluteSlot, blockHeight });
+    } catch {
+      // Retry the complete same-bank observation only. No scalar height is retained.
+    }
+    if (attempt < attempts && retryDelayMs > 0) await sleep(retryDelayMs * attempt);
+  }
+  throw new Error(`RPC could not produce a processed epoch height at or above slot ` +
+    `${minContextSlot} after ${attempts} attempts`);
+}
+
 /** Resolve every v0 lookup and reject top-level capabilities the swap does not need. */
 export async function validateTransaction(transaction, expected, cfg, connection) {
   const tx = transaction;
@@ -542,10 +869,23 @@ export async function validateTransaction(transaction, expected, cfg, connection
   const writableAddresses = [...new Set(message.instructions.flatMap((ix) =>
     ix.keys.filter((key) => key.isWritable).map((key) => key.pubkey.toBase58())))];
   if (writableAddresses.length > 64) throw new Error("transaction has too many writable accounts for safe inspection");
-  const writableInfos = writableAddresses.length ? await connection.getMultipleAccountsInfo(
-    writableAddresses.map((key) => new PublicKey(key)), "confirmed") : [];
-  if (!Array.isArray(writableInfos) || writableInfos.length !== writableAddresses.length)
-    throw new Error("RPC omitted writable-account capability data");
+  // One processed-bank response supplies both the capability scan and every custody
+  // account needed as the actual swap simulation's pre-state. This removes the
+  // formerly separate wallet/input/output snapshot without weakening either check.
+  const observedAddresses = [wallet, inputAta, outputAta];
+  const snapshotAddresses = [...new Set([...writableAddresses, ...observedAddresses])];
+  const initialSnapshotMinContextSlot = await processedSlotFreshnessAnchor(connection);
+  const writableSnapshot = await coherentAccountSnapshot(connection,
+    snapshotAddresses.map((key) => new PublicKey(key)), {
+      transaction: tx, commitment: "processed",
+      minContextSlot: initialSnapshotMinContextSlot,
+    });
+  const snapshotByAddress = new Map(snapshotAddresses.map((address, index) =>
+    [address, writableSnapshot.accounts[index]]));
+  const writableInfos = writableAddresses.map((address) => snapshotByAddress.get(address));
+  const preAccounts = observedAddresses.map((address) => snapshotByAddress.get(address));
+  const writableCapabilityFingerprint = writableAccountSafetyFingerprint(
+    writableAddresses, writableInfos);
   for (let i = 0; i < writableAddresses.length; i++) {
     const details = tokenAccountDetails(writableInfos[i]);
     if (details?.owner === wallet && !ata.has(writableAddresses[i]))
@@ -555,6 +895,7 @@ export async function validateTransaction(transaction, expected, cfg, connection
   let systemTransferLamports = 0n;
   let computeLimit = 1_400_000;
   let computePrice = 0n;
+  const createdAtas = new Set();
 
   // First collect only wallet-owned ATAs for the two expected mints.
   for (const ix of message.instructions) {
@@ -569,6 +910,7 @@ export async function validateTransaction(transaction, expected, cfg, connection
     const expectedAta = mint === expected.inputMint ? inputAta : outputAta;
     exactKey(ix.keys[1], expectedAta, "associated token account", { writable: true });
     exactKey(ix.keys[5], tokenProgram, "associated-account token program");
+    createdAtas.add(expectedAta);
   }
 
   for (const ix of message.instructions) {
@@ -645,6 +987,9 @@ export async function validateTransaction(transaction, expected, cfg, connection
   return {
     message, tables, computeLimit, computePrice, jupiterRoutes,
     inputProgram, outputProgram, inputAta, outputAta,
+    writableAddresses, writableSnapshotSlot: writableSnapshot.slot,
+    writableCapabilityFingerprint, createdAtas: [...createdAtas],
+    observedAddresses, preAccounts,
   };
 }
 
@@ -805,7 +1150,7 @@ export class JupiterV2Executor {
       maxFeeBps: 100,
       maxNetworkFeeLamports: 500_000,
       maxNetworkFeePct: 10,
-      maxRentLamports: 3_000_000,
+      maxRentLamports: MAX_GROSS_RENT_LAMPORTS,
       maxEntryRoundTripLossPct: 12,
       maxEntryQuoteDriftPct: 5,
       maxEntryPreflightAgeMs: 60_000,
@@ -914,12 +1259,33 @@ export class JupiterV2Executor {
       platformFeeBps: Number(order.platformFee?.feeBps ?? 0),
       feeBasisLamports,
     }, this.cfg, connection);
-    const observedAddresses = [this.wallet, validation.inputAta, validation.outputAta];
-    const preAccounts = await connection.getMultipleAccountsInfo(
-      observedAddresses.map((address) => new PublicKey(address)), "processed");
-    if (!Array.isArray(preAccounts) || preAccounts.length !== observedAddresses.length || !preAccounts[0])
+    const { observedAddresses, preAccounts } = validation;
+    if (!preAccounts[0])
       throw new Error(`${label} RPC omitted pre-simulation wallet/account state`);
-    const chainHeight = await connection.getBlockHeight("confirmed");
+    // These independent scalar facts do not depend on one another, so read them in
+    // parallel. The fresh-blockhash compatibility check already ran against the
+    // processed atomic bank; retain the independently reviewed confirmed-height
+    // bound here, then require a processed same-bank height again at the final fence.
+    const [rentExemptionValue, chainHeight] = await Promise.all([
+      connection.getMinimumBalanceForRentExemption(165, "processed"),
+      connection.getBlockHeight("confirmed"),
+    ]);
+    const rentExemptionLamports = Number(rentExemptionValue);
+    if (!Number.isSafeInteger(rentExemptionLamports) || rentExemptionLamports <= 0)
+      throw new Error(`${label} RPC returned an invalid classic-token account rent exemption`);
+    const createdAtas = new Set(validation.createdAtas);
+    const missingCreatedAtas = [
+      [validation.inputAta, preAccounts[1]],
+      [validation.outputAta, preAccounts[2]],
+    ].filter(([address, account]) => createdAtas.has(address) &&
+      (!account || isClosedAccountTombstone(account))).length;
+    const expectedGrossRentLamports = missingCreatedAtas * rentExemptionLamports;
+    const reportedGrossRentLamports = Number(order.rentFeeLamports ?? 0);
+    if (!Number.isSafeInteger(reportedGrossRentLamports) ||
+        reportedGrossRentLamports !== expectedGrossRentLamports)
+      throw new Error(`${label} RPC canonical ATA rent facts do not match Jupiter's gross rent estimate`);
+    if (expectedGrossRentLamports > Number(this.cfg.maxRentLamports ?? MAX_GROSS_RENT_LAMPORTS))
+      throw new Error(`${label} RPC canonical ATA rent exceeds the reviewed gross rent cap`);
     const claimedExpiry = Number(order.lastValidBlockHeight);
     if (!Number.isSafeInteger(chainHeight) || chainHeight <= 0)
       throw new Error(`${label} RPC could not read the chain block height to bound the order expiry`);
@@ -930,8 +1296,40 @@ export class JupiterV2Executor {
         `(cap ${this.cfg.blockHeightWindow ?? 600}) — an unbounded expiry wedges the journal and disarms every exit`);
     const simulation = await this._simulateUnsigned({
       connection, tx, observedAddresses, preAccounts, validation, order, intent,
+      minContextSlot: validation.writableSnapshotSlot,
     });
-    return { tx, validation, observedAddresses, preAccounts, chainHeight, simulation };
+    const postWritableSnapshot = await coherentAccountSnapshot(connection,
+      validation.writableAddresses.map((address) => new PublicKey(address)), {
+        // The simulation itself is processed. Asking a lagging confirmed bank to
+        // satisfy its head slot would systematically fail until confirmation and
+        // burn the order's expiry window. Re-read the exact processed-or-newer bank;
+        // the initial capability snapshot remains independently checked by both RPCs.
+        transaction: tx, commitment: "processed", minContextSlot: simulation.contextSlot,
+      });
+    const postWritableFingerprint = writableAccountSafetyFingerprint(
+      validation.writableAddresses, postWritableSnapshot.accounts);
+    if (postWritableFingerprint !== validation.writableCapabilityFingerprint)
+      throw new Error(`${label} RPC writable-account capabilities changed across simulation`);
+    // Use a processed epoch-info observation whose returned bank slot independently
+    // proves it is at-or-after the post-simulation capability scan. A bare scalar
+    // getBlockHeight cannot provide that same-response slot evidence behind an RPC
+    // load balancer.
+    const finalHeightEvidence = await fencedProcessedEpochHeight(
+      connection, postWritableSnapshot.slot, { sleep: this.sleep });
+    const finalChainHeight = finalHeightEvidence.blockHeight;
+    if (finalChainHeight < chainHeight)
+      throw new Error(`${label} RPC block height regressed after the final capability fence`);
+    const remainingBlocks = claimedExpiry - finalChainHeight;
+    if (remainingBlocks < MIN_SIGNABLE_BLOCKS_REMAINING)
+      throw new Error(`order has only ${remainingBlocks} blocks left after the ${label} final safety fence ` +
+        `(minimum ${MIN_SIGNABLE_BLOCKS_REMAINING})`);
+    if (remainingBlocks > (this.cfg.blockHeightWindow ?? 600))
+      throw new Error(`order expiry remains outside the ${label} bounded block-height window`);
+    return {
+      tx, validation, observedAddresses, preAccounts, chainHeight: finalChainHeight,
+      simulation, postWritableSnapshotSlot: postWritableSnapshot.slot,
+      rentExemptionLamports, expectedGrossRentLamports,
+    };
   }
 
   /** Build, independently inspect and independently chain-simulate a transaction
@@ -973,6 +1371,12 @@ export class JupiterV2Executor {
         primary.validation.inputProgram !== secondary.validation.inputProgram ||
         primary.validation.outputProgram !== secondary.validation.outputProgram)
       throw new Error("RPC providers disagree on the validated transaction custody accounts");
+    if (primary.validation.writableCapabilityFingerprint !==
+        secondary.validation.writableCapabilityFingerprint)
+      throw new Error("RPC providers disagree on writable-account safety capabilities");
+    if (primary.rentExemptionLamports !== secondary.rentExemptionLamports ||
+        primary.expectedGrossRentLamports !== secondary.expectedGrossRentLamports)
+      throw new Error("RPC providers disagree on canonical ATA gross rent facts");
     const simulation = agreeSimulationOutputs(primary.simulation, secondary.simulation,
       this.cfg.maxSimulationProviderDivergencePct ??
         this.cfg.maxExitMarkProviderDivergencePct ?? 1);
@@ -1013,7 +1417,7 @@ export class JupiterV2Executor {
   }
 
   /** Exercise the complete execution boundary without creating broadcastable bytes.
-   * The fixed tiny WSOL→mainnet-USDC route checks Jupiter authentication/order
+   * The fixed full-canary WSOL→mainnet-USDC route checks Jupiter authentication/order
    * construction, ALT/account reads, both independent validators/simulators, and a
    * conservative wallet spend+fee+rent reserve on BOTH views. No signature, journal
    * mutation or /execute request exists anywhere on this path. */
@@ -1026,7 +1430,7 @@ export class JupiterV2Executor {
     const prepared = await this._prepareUnsigned(intent);
     const requiredLamports = BigInt(EXECUTION_READINESS_AMOUNT_LAMPORTS) +
       BigInt(Math.ceil(Number(this.cfg.maxNetworkFeeLamports ?? 500_000))) +
-      BigInt(Math.ceil(Number(this.cfg.maxRentLamports ?? 3_000_000))) +
+      BigInt(Math.ceil(Number(this.cfg.maxRentLamports ?? MAX_GROSS_RENT_LAMPORTS))) +
       BigInt(EXECUTION_READINESS_RESERVE_LAMPORTS);
     if (prepared.walletLamportsByProvider.some((balance) => BigInt(balance) < requiredLamports))
       throw new Error("execution-readiness wallet reserve is insufficient on one or both RPC providers");
@@ -1120,20 +1524,23 @@ export class JupiterV2Executor {
   /** Pre-signing simulation of the UNSIGNED transaction — nothing disclosed here can
    * be broadcast, so a refusal is free and safe to retry with a fresh quote. */
   async _simulateUnsigned({ connection = this.connection, tx, observedAddresses, preAccounts,
-    validation, order, intent }) {
+    validation, order, intent, minContextSlot }) {
     if (!Array.isArray(tx?.signatures) || tx.signatures.length !== 1 ||
         tx.signatures.some((signature) => Buffer.from(signature).some((byte) => byte !== 0)))
       throw new Error("Jupiter transaction is not unsigned");
     const simulation = await connection.simulateTransaction(tx, {
       commitment: "processed", sigVerify: false, replaceRecentBlockhash: false,
       accounts: { encoding: "base64", addresses: observedAddresses },
-      innerInstructions: true,
+      innerInstructions: true, minContextSlot,
     });
+    const contextSlot = Number(simulation?.context?.slot);
+    if (!Number.isSafeInteger(contextSlot) || contextSlot < minContextSlot)
+      throw new Error("simulation returned a missing, invalid, or below-fence context slot");
     if (simulation?.value?.err) throw new Error(`unsigned transaction simulation failed: ${JSON.stringify(simulation.value.err)}`);
     const postAccounts = simulation?.value?.accounts;
     if (!Array.isArray(postAccounts) || postAccounts.length !== observedAddresses.length)
       throw new Error("simulation omitted requested wallet/token account state");
-    return validateSimulationEffects({ wallet: preAccounts[0], input: preAccounts[1], output: preAccounts[2] },
+    const effects = validateSimulationEffects({ wallet: preAccounts[0], input: preAccounts[1], output: preAccounts[2] },
       { wallet: postAccounts[0], input: postAccounts[1], output: postAccounts[2] }, {
         wallet: this.wallet,
         inputMint: intent.inputMint,
@@ -1144,6 +1551,7 @@ export class JupiterV2Executor {
         inputProgram: validation.inputProgram,
         outputProgram: validation.outputProgram,
       }, this.cfg);
+    return { ...effects, contextSlot };
   }
 
   async _status(signature, connection = this.connection) {

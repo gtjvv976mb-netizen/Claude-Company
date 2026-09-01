@@ -12,6 +12,92 @@
  */
 import { PublicKey } from "@solana/web3.js";
 
+// This is an HTTP-transport ceiling, not a finality/recovery deadline. Every RPC
+// request must either return or have its underlying fetch aborted within four
+// seconds. More restrictive, operation-specific fences remain in force.
+export const SOLANA_RPC_HTTP_REQUEST_TIMEOUT_MS = 4_000;
+
+/** Build the only fetch transport used by executor and monitor Solana Connections.
+ *
+ * Promise.race can release a caller while leaving its socket/request alive. This
+ * wrapper instead owns an AbortController for every HTTP attempt and does not settle
+ * its promise until the underlying fetch observes success, failure, or cancellation.
+ * An upstream signal is preserved, timers/listeners are always released, and thrown
+ * non-Errors are normalized because web3.js otherwise leaves its callback pending.
+ */
+export function createSolanaRpcDeadlineFetch({
+  fetchFn = globalThis.fetch,
+  requestTimeoutMs = SOLANA_RPC_HTTP_REQUEST_TIMEOUT_MS,
+} = {}) {
+  if (typeof fetchFn !== "function")
+    throw new Error("Solana RPC HTTP fetch implementation is unavailable");
+  if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 1 ||
+      requestTimeoutMs > SOLANA_RPC_HTTP_REQUEST_TIMEOUT_MS)
+    throw new Error("Solana RPC HTTP request timeout is invalid");
+
+  return async function solanaRpcDeadlineFetch(input, init = {}) {
+    const upstream = init?.signal;
+    if (upstream != null && (typeof upstream.addEventListener !== "function" ||
+        typeof upstream.removeEventListener !== "function"))
+      throw new Error("Solana RPC HTTP request signal is invalid");
+    if (upstream?.aborted)
+      throw new Error("Solana RPC HTTP request was aborted before dispatch");
+
+    const controller = new AbortController();
+    let timeoutError = null;
+    let upstreamAborted = false;
+    const abortFromUpstream = () => {
+      upstreamAborted = true;
+      controller.abort(upstream.reason);
+    };
+    upstream?.addEventListener("abort", abortFromUpstream, { once: true });
+    const timer = setTimeout(() => {
+      timeoutError = new Error(
+        `Solana RPC HTTP request timed out after ${requestTimeoutMs}ms`,
+      );
+      timeoutError.code = "SOLANA_RPC_HTTP_TIMEOUT";
+      controller.abort(timeoutError);
+    }, requestTimeoutMs);
+
+    try {
+      const response = await fetchFn(input, { ...init, signal: controller.signal });
+      if (!response || typeof response.arrayBuffer !== "function" ||
+          !Number.isInteger(response.status))
+        throw new Error("Solana RPC HTTP transport returned an invalid response");
+      // Fetch resolves after response headers, before the JSON body is necessarily
+      // complete. Buffer it while this controller is still armed; otherwise a peer
+      // can send headers and leave web3.js's later response.text() hung forever.
+      const bytes = await response.arrayBuffer();
+      return new Response(bytes.byteLength ? bytes : null, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    } catch (error) {
+      if (timeoutError) throw timeoutError;
+      if (upstreamAborted || controller.signal.aborted)
+        throw new Error("Solana RPC HTTP request was aborted");
+      if (error instanceof Error) throw error;
+      throw new Error("Solana RPC HTTP transport failed");
+    } finally {
+      clearTimeout(timer);
+      upstream?.removeEventListener("abort", abortFromUpstream);
+    }
+  };
+}
+
+/** A fresh config creates a fresh transport controller domain for each provider.
+ * Hidden web3.js 429 retries are disabled: the executor's explicit fail-closed and
+ * recovery loops retain authority over retries instead of an invisible HTTP queue.
+ */
+export function solanaRpcConnectionConfig(options = {}) {
+  return {
+    commitment: "confirmed",
+    disableRetryOnRateLimit: true,
+    fetch: createSolanaRpcDeadlineFetch(options),
+  };
+}
+
 export const PYTH_SOL_USD_ACCOUNT = "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE";
 export const PYTH_SOL_USD_FEED_ID = "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d";
 export const PYTH_RECEIVER_PROGRAM = "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ";

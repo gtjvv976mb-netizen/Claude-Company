@@ -11,8 +11,10 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { Connection } from "@solana/web3.js";
 import { executorRuntimeFingerprint } from "./heartbeat-health.mjs";
-import { independentSolUsdPrice } from "./sol-usd-oracle.mjs";
-import { verifyMacSleepAssertion } from "./sleep-assertion.mjs";
+import { independentSolUsdPrice, solanaRpcConnectionConfig } from "./sol-usd-oracle.mjs";
+import {
+  inspectOwnerControlFile, sleepAssertionFaultPath, verifyMacSleepAssertion,
+} from "./sleep-assertion.mjs";
 
 const BLOCKING_STATES = ["signed", "submitted", "confirmed", "ambiguous"];
 const EXECUTION_READINESS_MAX_AGE_MS = 5 * 60_000;
@@ -164,8 +166,8 @@ function issue(list, code, severity, message) {
 }
 
 async function defaultOracleProbe({ primaryUrl, secondaryUrl, now }) {
-  const primary = new Connection(primaryUrl, "confirmed");
-  const secondary = new Connection(secondaryUrl, "confirmed");
+  const primary = new Connection(primaryUrl, solanaRpcConnectionConfig());
+  const secondary = new Connection(secondaryUrl, solanaRpcConnectionConfig());
   return independentSolUsdPrice(primary, secondary, { nowMs: now });
 }
 
@@ -423,6 +425,7 @@ export async function inspectExecutor({
   const lockFile = resolveAt(cfg.LOCK_FILE, `${stateDb}.lock`);
   const pauseFile = resolveAt(cfg.PAUSE_ENTRIES_FILE, `${stateDb}.pause-entries`);
   const hardStopFile = resolveAt(cfg.HARD_STOP_FILE, `${stateDb}.hard-stop`);
+  const sleepFaultFile = sleepAssertionFaultPath(lockFile);
   const pollMs = positiveInteger(cfg.POLL_MS, 15_000);
   const issues = [];
   const mode = cfg.EXECUTE === "1" ? "live" : "paper";
@@ -481,13 +484,17 @@ export async function inspectExecutor({
 
   const sleepRequired = mode === "live" && requireSleepAssertion;
   let sleepAssertion = { required: sleepRequired, ok: !sleepRequired, assertionPid: null,
-    acPower: null, idleSystemSleep: null, systemSleep: null };
+    commandBound: null, powerSource: null, acPower: null,
+    idleSystemSleep: null, systemSleep: null };
   if (sleepRequired) {
     try {
       const observed = await sleepAssertionProbe({ ownerPid: pid, lockFile });
       sleepAssertion = {
         required: true, ok: observed?.ok === true,
         assertionPid: Number.isInteger(observed?.assertionPid) ? observed.assertionPid : null,
+        commandBound: observed?.commandBound === true,
+        powerSource: ["ac", "battery"].includes(observed?.powerSource)
+          ? observed.powerSource : null,
         acPower: observed?.acPower === true,
         idleSystemSleep: observed?.idleSystemSleep === true,
         systemSleep: observed?.systemSleep === true,
@@ -501,7 +508,28 @@ export async function inspectExecutor({
     }
   }
 
-  const controls = { entriesPaused: fs.existsSync(pauseFile), hardStop: fs.existsSync(hardStopFile) };
+  const pauseControl = inspectOwnerControlFile(pauseFile, { label: "entry-pause sentinel" });
+  const hardStopControl = inspectOwnerControlFile(hardStopFile, { label: "hard-stop sentinel" });
+  const sleepFaultControl = inspectOwnerControlFile(sleepFaultFile, {
+    label: "sleep assertion fault latch",
+  });
+  const controls = {
+    entriesPaused: pauseControl.present || sleepFaultControl.present,
+    entryPauseValid: pauseControl.valid && sleepFaultControl.valid,
+    hardStop: hardStopControl.present,
+    hardStopValid: hardStopControl.valid,
+    sleepAssertionFault: sleepFaultControl.present,
+    sleepAssertionFaultValid: sleepFaultControl.valid,
+  };
+  if (pauseControl.present && !pauseControl.valid)
+    issue(issues, "entry_pause_invalid", "critical", pauseControl.reason);
+  if (hardStopControl.present && !hardStopControl.valid)
+    issue(issues, "hard_stop_invalid", "critical", hardStopControl.reason);
+  if (sleepFaultControl.present && !sleepFaultControl.valid)
+    issue(issues, "sleep_assertion_fault_invalid", "critical", sleepFaultControl.reason);
+  if (sleepFaultControl.present)
+    issue(issues, "sleep_assertion_fault_latched", "critical",
+      "an automatic entry-pause publication failed; explicit operator repair and review are required");
   if (controls.hardStop) issue(issues, "hard_stop", "critical", "hard-stop file is present; automated exits are blocked");
   const journal = readJournal(stateDb, now, issues);
   if (journal.primed !== true)

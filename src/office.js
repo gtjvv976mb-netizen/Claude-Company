@@ -117,16 +117,40 @@ export function executorHeartbeatPayload(floorNo) {
 export function sanitizeExecutorHealth(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const allowed = new Set(["healthy", "entries-paused", "degraded", "exits-blocked", "manual-action"]);
-  const state = allowed.has(String(value.state)) ? String(value.state) : "degraded";
+  let state = allowed.has(String(value.state)) ? String(value.state) : "degraded";
   const count = (input) => Math.min(1_000_000, Math.max(0, Math.floor(Number(input) || 0)));
   const timestamp = (input) => {
     const number = Number(input);
     return Number.isSafeInteger(number) && number > 0 ? number : 0;
   };
+  const strictTimestamp = (input) => Number.isSafeInteger(input) && input > 0 ? input : 0;
   const commit = /^[0-9a-f]{7,40}$/i.test(String(value.runtimeCommit || ""))
     ? String(value.runtimeCommit).slice(0, 40).toLowerCase() : null;
   const runtimeFingerprint = /^[0-9a-f]{32}$/i.test(String(value.runtimeFingerprint || ""))
     ? String(value.runtimeFingerprint).toLowerCase() : null;
+  const hasRollback = Object.prototype.hasOwnProperty.call(value, "feedRollback");
+  const malformedRollback = hasRollback && typeof value.feedRollback !== "boolean";
+  const feedRollback = value.feedRollback === true;
+  const rawReadiness = value.executionReadiness;
+  const readinessObject = rawReadiness && typeof rawReadiness === "object" &&
+    !Array.isArray(rawReadiness) ? rawReadiness : null;
+  let readinessFailed = rawReadiness != null && !readinessObject;
+  let executionReadiness = null;
+  if (readinessObject) {
+    const lastSuccessAt = strictTimestamp(readinessObject.lastSuccessAt);
+    const observedAt = strictTimestamp(readinessObject.observedAt);
+    const route = readinessObject.route === "wsol-usdc" ? "wsol-usdc" : null;
+    const providers = readinessObject.providers === 2 ? 2 : 0;
+    const ready = readinessObject.ready === true && lastSuccessAt > 0 && observedAt > 0 &&
+      route === "wsol-usdc" && providers === 2;
+    executionReadiness = { ready, lastSuccessAt, observedAt, route, providers };
+    readinessFailed = !ready;
+  }
+  // Health is self-reported, but malformed or failed safety evidence can only make
+  // the persisted status more conservative. It can never turn a degraded condition
+  // into a healthy/paused readiness claim.
+  if ((feedRollback || malformedRollback || readinessFailed) &&
+      (state === "healthy" || state === "entries-paused")) state = "degraded";
   return {
     state,
     entriesPaused: value.entriesPaused === true,
@@ -139,6 +163,8 @@ export function sanitizeExecutorHealth(value) {
     lastFeedSuccessAt: timestamp(value.lastFeedSuccessAt),
     consecutiveFeedFailures: count(value.consecutiveFeedFailures),
     consecutiveTickFailures: count(value.consecutiveTickFailures),
+    feedRollback,
+    executionReadiness,
     runtimeCommit: commit,
     runtimeFingerprint,
   };
