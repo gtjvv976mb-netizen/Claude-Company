@@ -24,7 +24,7 @@ the state database to force a replay; reconcile the journal and wallet first.
 
 Install from the exact 40-character release commit shown by the floor UI. Review the
 checkout before running it; live mode refuses piped/mutable runtime downloads. Node
-22.13+ must already be installed from a package source you trust. The installer asks for
+>=22.13 and <25 must already be installed from a package source you trust. The installer asks for
 the floor’s executor feed secret through `/dev/tty`, creates a dedicated unfunded burner
 locally, stores secrets at mode `0600`, and installs a systemd service.
 
@@ -55,6 +55,110 @@ bash executor/install.sh --floor <YOUR_FLOOR_NUMBER> \
 
 `CC_SECRET` authenticates the read-only floor feed. It is not a wallet key and
 cannot move funds.
+
+### macOS LaunchAgent lifecycle
+
+This is a supervisor-adoption path for an **already configured macOS executor**, not
+a fresh-wallet installer. It does not create an environment, wallet, journal, or live
+acknowledgement, and never funds anything. From the stable executor directory, install
+the locked dependencies and per-user supervisor. It consumes the existing owner-only
+`.cc-executor.env`; it never sources that file through a shell:
+
+```bash
+chmod 600 executor/.cc-executor.env
+npm ci --prefix executor --ignore-scripts
+bash executor/macos-launchagent.sh install --executor-dir "$PWD/executor"
+bash executor/macos-launchagent.sh load --executor-dir "$PWD/executor"
+```
+
+`install` only writes the plist. The separate `load` command validates the runtime,
+requires the installed plist to match it byte-for-byte, and refuses to start while a
+manually launched poller still owns the executor lock. It does not terminate that
+process; stop it deliberately, verify it released the lock, and retry `load`.
+The runner also rejects unknown environment names and any imported runtime file that
+is symlinked, owned by another user, or writable by group/other. `LOCK_FILE`, if
+present, must resolve exactly to `STATE_DB` plus `.lock`; alternate lock names are
+refused so two pollers cannot mutate one journal.
+
+`install` persistently disables the label before writing the auto-discovered plist, so
+login cannot bypass the separate `load` preflight. `load` enables it only after the
+conflict check and reports success only when the launched pid owns the canonical lock.
+The agent then uses `RunAtLoad`, `KeepAlive`, a 15-second restart backoff, an absolute
+working directory, and durable logs under `~/Library/Logs/ClaudeCompany/`. On macOS the
+lock-owning Node runner also starts `/usr/bin/caffeinate -i -s -w` directly and verifies
+that its exact child PID holds both no-idle-sleep and no-system-sleep assertions while
+the host is on AC power. Losing the assertion stops the runner fail-closed so launchd
+cannot leave an apparently live trader asleep. This does not change persistent Energy
+Saver settings, and the assertion ends with the runner. Control the service without
+editing the environment, wallet, journal, or safety sentinels:
+
+```bash
+bash executor/macos-launchagent.sh status
+bash executor/macos-launchagent.sh unload
+bash executor/macos-launchagent.sh uninstall
+```
+
+`unload` persistently disables and stops only the supervised process; it does not close
+an on-chain position or restart at the next login. `uninstall` requires an explicit
+unload first and removes only the plist. Neither operation removes logs, state,
+`PAUSE_ENTRIES_FILE`, or `HARD_STOP_FILE`.
+
+For a live upgrade, never mutate the directory from which a running process imports.
+Stage a complete, detached, versioned checkout first. The release workflow requires the
+existing environment path explicitly, binds every tracked runtime file to the reviewed
+commit, installs locked dependencies, and runs focused signing/supervisor tests before
+one atomic rename makes the release visible:
+
+```bash
+RELEASE_SHA="paste-reviewed-40-character-commit-here"
+LEGACY_EXECUTOR=/absolute/path/to/the/current/executor
+ENV_FILE=/absolute/path/to/the/current/executor/.cc-executor.env
+RELEASES_DIR="$HOME/Library/Application Support/ClaudeCompany/releases"
+
+bash executor/macos-release.sh stage \
+  --expected-commit "$RELEASE_SHA" \
+  --env-file "$ENV_FILE" \
+  --legacy-workdir "$LEGACY_EXECUTOR" \
+  --releases-dir "$RELEASES_DIR"
+```
+
+`stage` prints the canonical entry-pause path, but never a credential. Create that exact
+sentinel and wait for the current executor to report entries paused. Then explicitly
+unload the existing LaunchAgent, or deliberately stop the known manual poller from the
+terminal/service that started it. The updater never kills a PID and refuses adoption
+while either the old configured lock or the canonical state lock still has a live owner.
+With the old process stopped and the pause still present:
+
+```bash
+RELEASE_DIR="$RELEASES_DIR/$RELEASE_SHA"
+bash "$RELEASE_DIR/executor/macos-release.sh" install \
+  --expected-commit "$RELEASE_SHA" \
+  --env-file "$ENV_FILE" \
+  --legacy-workdir "$LEGACY_EXECUTOR" \
+  --release-dir "$RELEASE_DIR"
+
+bash "$RELEASE_DIR/executor/macos-launchagent.sh" load \
+  --executor-dir "$RELEASE_DIR/executor" \
+  --env-file "$ENV_FILE"
+
+node "$RELEASE_DIR/executor/monitor.mjs" \
+  --executor-dir "$RELEASE_DIR/executor" \
+  --env-file "$ENV_FILE" --json
+
+launchctl print "gui/$(id -u)/com.claudeco.wallste"
+pmset -g batt
+pmset -g assertions
+```
+
+`install` does not load the agent. It requires the pause sentinel, checks the immutable
+`0.005` SOL/trade, `0.01` SOL/rolling-24h deployment, and `0.01` SOL loss ceilings,
+canonicalizes relative wallet/state/control paths against the explicitly supplied old
+working directory, lowers any legacy `0.05`/`0.5`/`0.15` caps to those frozen ceilings
+(while retaining any already lower value), and updates `EXECUTOR_SOURCE_COMMIT`. The old
+environment is retained beside it as an owner-only rollback file. Secret values, wallet,
+journal, pause, and hard-stop files are never exposed or replaced; caps are never raised.
+Keep entries paused until
+the new monitor reports `safeToUnpause: true`; no release command removes that sentinel.
 
 ## Explicit live installation
 
@@ -135,6 +239,9 @@ Live polling uses `jupiter.mjs` for Jupiter Swap API v2 order validation and exe
 and `journal.mjs` for durable intent/attempt records. Before a transaction is signed,
 the executor checks the intended wallet, mints, amount, fees, price impact, expiry,
 resolved v0 program instructions, payer/signers, transaction size, and RPC simulation.
+A final entry order must still match the monitored authored entry zone; a price-only
+exit needs two next-tick witnesses and the final executable order must still breach its
+stored stop or target.
 
 The first live canary accepts only Jupiter Metis exact-in routes and classic SPL Token
 mints. Token-2022 routes fail closed. Source and destination custody must be the wallet’s
@@ -183,11 +290,45 @@ sudo systemctl stop cc-executor
 
 Stopping the process does not close an on-chain position.
 
-## Shared snipe-v2 policy
+## Independent health monitor
 
-The server record and executor import the same `trade-policy.mjs` rules:
+Run the read-only monitor from a separate scheduler or terminal:
 
-- The desk’s explicit exit closes the recorded position in full.
+```bash
+npm run monitor -- --executor-dir /absolute/path/to/executor
+```
+
+It checks the process-lock owner, SQLite integrity, pending transaction states,
+position reconciliation flags, pause/stop files, authenticated feed lag, and the
+server's copy of the executor heartbeat. Output is sanitized JSON; it never imports
+the signer, prints credentials, changes controls, restarts the process, or submits a
+transaction. Exit code `2` means critical/manual action, `1` means degraded, and `0`
+means healthy or intentionally entry-paused.
+
+An intentional pause remains reported as `status: "entries-paused"`; it is never
+described as actively healthy. In that state only, `safeToUnpause: true` and
+`unpauseReadiness: "ready"` certify that every other check passed, including the
+exact LaunchAgent supervisor topology, canonical lock owner, working directory, AC
+sleep assertion, journal wallet, configured source commit, and the running process's
+byte-for-byte runtime fingerprint. For live mode it also reads the pinned Pyth SOL/USD
+account through both configured RPC providers and requires a successful heartbeat probe
+from the fixed WSOL-to-USDC Jupiter route. That probe must have used both RPC providers
+within the last five minutes without signing, journaling, or calling Jupiter's execute
+endpoint. A manual poller, missing sleep assertion, feed rollback, absent or stale
+execution-readiness probe, or unavailable/stale/divergent oracle view blocks
+`safeToUnpause` without printing an endpoint or credential. When no pause exists the
+readiness value is `"not-paused"`, not a standing recommendation to change controls.
+
+## Snipe-v3 policy and local execution guards
+
+The server record and executor import the same `trade-policy.mjs` decision core:
+
+- The desk’s explicit exit closes the recorded position in full only when its mint
+  and `call_id` both match the originating call persisted with that position.
+- On upgrade, a legacy position missing `call_id` is recovered from its exact durable
+  entry intent when possible. If it cannot be proven, new exposure stays blocked and
+  the next valid same-mint desk exit closes that legacy holding in full. This explicit
+  risk-reducing fallback can exit early, but cannot open or enlarge exposure.
 - The authored stop is enforced.
 - At `1.35x`, the stop ratchets to breakeven.
 - At `1.5x`, a 25% trailing stop begins ratcheting behind the high.
@@ -195,7 +336,27 @@ The server record and executor import the same `trade-policy.mjs` rules:
   arrives first. An explicit multiple such as `10x` overrides the authored target;
   a later desk exit still wins.
 - An unresolved position reaches its age exit at 12 hours.
-- Snipe-v2 does not emit a partial exit; legacy `SCALE_OUT_PCT` values are ignored.
+- Snipe-v3 does not emit a partial exit; legacy `SCALE_OUT_PCT` values are ignored.
+
+The local executor adds signing-path guards around that core. Price-only stops and
+targets need two consecutive local observations and a still-breached final executable
+order; explicit desk, rug, and age exits do not wait for a price witness. The position
+mark comes from the actual net SOL custody delta of a fully validated, unsigned on-chain
+simulation, never from Jupiter's displayed `outAmount`. Both independent RPC providers
+must simulate that same unsigned exit, validate the same custody account, and agree on
+the proceeds within 1%; the lower result is used. If no valid executable mark can be
+produced on two consecutive ticks, the executor freezes new exposure and latches a
+risk-reducing exit; it does not silently reinterpret missing data as a hold. The final
+exit may remain latched if no safe route can be built, requiring manual action.
+
+Entries reconcile the feed's monitored USD mark with mint metadata that matches across
+both RPCs, an independent Pyth SOL/USD anchor, and the final Jupiter order before any
+signature is created. The executor reads Pyth's pinned, sponsored shard-0 SOL/USD
+account through both private RPC providers. Both views must be fully verified, no more
+than three minutes old, within 2% confidence width, and within 1% of each other. Jupiter
+never supplies the USD anchor used to judge its own order. Two-of-two consensus is
+deliberately fail-closed: after the bounded Pyth cache expires, one unavailable provider
+can force risk reduction rather than leave price protection silently disarmed.
 
 Sizing also applies the stop requirement, estimated round-trip costs, sample/Kelly
 gate, per-name risk ceiling, book-heat ceiling, rolling 24-hour deployment cap and
@@ -214,7 +375,8 @@ not evidence of an edge.
 | `LIVE_TRADING_ACK` | unset | Must exactly match the loaded burner public key in live mode |
 | `JUPITER_API_KEY` | unset | Required locally for Jupiter Swap API v2 in live mode |
 | `SOLANA_RPC` | public default in dry run | A private HTTPS provider is required in live mode |
-| `SOLANA_RPC_SECONDARY` | required in live mode | Independent private-provider expiry cross-check; an outage halts instead of risking a duplicate |
+| `SOLANA_RPC_SECONDARY` | required in live mode | Independent private provider for expiry, custody, and Pyth SOL/USD consensus checks; an outage fails closed or uses only the bounded Pyth exit cache |
+| `SOL_USD_CACHE_MAX_AGE_MS` | `1800000` live ceiling | Maximum age of both the local observation and retained Pyth publish time before the exit-price cache fails closed |
 | `STATE_DB` | installer-managed | Durable cursor, positions, transaction journal, and wallet binding |
 | `PAUSE_ENTRIES_FILE` | installer-managed | Presence blocks new entries while allowing managed exits |
 | `HARD_STOP_FILE` | installer-managed | Presence blocks new submissions while reconciliation continues |
@@ -230,8 +392,11 @@ not evidence of an edge.
 | `MAX_RENT_LAMPORTS` | `3000000` live ceiling | Separate account-rent cap; rent is not treated as a network fee |
 | `MAX_ENTRY_ROUND_TRIP_LOSS_PCT` | `12` live ceiling | Maximum measured forward/reverse entry preflight loss |
 | `MAX_ENTRY_MARK_AGE_MIN` | `15` | Maximum monitored USD-mark age at entry submission |
+| `MAX_ENTRY_QUOTE_DRIFT_PCT` | `5` live ceiling | Maximum preflight/final executable USD-price drift from the monitored market mark |
+| `MAX_ENTRY_PREFLIGHT_AGE_MS` | `60000` live ceiling | Maximum executable-entry preflight age before signing |
+| `MAX_EXIT_TRIGGER_AGE_MS` | `60000` live ceiling | Maximum price-exit trigger age before two fresh witnesses are required |
 | `TRAIL_PCT` | `0.25` | Trail distance after the shared 1.5x arm |
-| `MAX_AGE_HOURS` | `12` | Time exit used by snipe-v2 |
+| `MAX_AGE_HOURS` | `12` | Time exit used by snipe-v3 |
 
 Do not hand-edit `LIVE_TRADING_ACK` to bypass the installer. Re-run the reviewed
 installer if you intentionally change modes, wallets, credentials, RPCs, or caps. An

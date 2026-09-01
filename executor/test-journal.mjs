@@ -4,7 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Keypair } from "@solana/web3.js";
-import { ExecutionJournal, acquireProcessLock, positionEntryBlock, trackedBalanceDecision } from "./journal.mjs";
+import {
+  CURRENT_TX_ATTEMPT_PROTOCOL, ExecutionJournal, acquireProcessLock,
+  positionEntryBlock, trackedBalanceDecision,
+} from "./journal.mjs";
 import { freshState } from "./strategy.mjs";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-journal-"));
@@ -43,6 +46,7 @@ ok("signed bytes are durable before submission", () => {
   const a = j.latestAttempt(spec.id);
   assert.equal(a.state, "signed");
   assert.equal(a.signedTx.toString(), "exact signed bytes");
+  assert.equal(a.protocol, CURRENT_TX_ATTEMPT_PROTOCOL);
 });
 j.close();
 
@@ -51,6 +55,7 @@ ok("restart recovers the identical signature and bytes", () => {
   const a = j.latestAttempt(spec.id);
   assert.equal(a.signature, "signature-1");
   assert.equal(a.signedTx.toString(), "exact signed bytes");
+  assert.equal(a.protocol, CURRENT_TX_ATTEMPT_PROTOCOL);
   assert.equal(j.pendingIntents()[0].id, spec.id);
 });
 j.markSubmitted(spec.id, 1);
@@ -70,8 +75,9 @@ const runtime = {
   state: freshState(1),
   positions: { [spec.mint]: { mint: spec.mint, symbol: "TEST", qtyRaw: "987",
     paidSol: 0.005005, costBasisLamports: "5005000", entryInputLamports: "5000000",
-    solUsdAtEntry: 150, entryIntentId: spec.id, openedAtMs: 1, entry: 1, stop: 0.6,
-    takeProfitX: 2, honorDeskTarget: true, riskF: 0.02 } },
+    solUsdAtEntry: 150, solUsdSource: "pyth-sol-usd-shard0-v1",
+    entryIntentId: spec.id, openedAtMs: 1, entry: 1, stop: 0.6,
+    callId: 7, takeProfitX: 2, honorDeskTarget: true, riskF: 0.02 } },
 };
 j.markAccounted(spec.id, runtime);
 const accountedRisk = j.rollingRisk();
@@ -200,6 +206,132 @@ ok("legacy nonzero counters without ledger events trigger a 24-hour entry quaran
   assert.ok(status.incompleteUntil > Date.now() + 23 * 60 * 60_000);
 });
 incomplete.close();
+
+const anchoredHistoryFile = path.join(dir, "anchored-incomplete-history.sqlite");
+const firstSeenAt = 1_800_000_000_000;
+const riskHistoryWindowMs = 24 * 60 * 60_000;
+let anchored = new ExecutionJournal(anchoredHistoryFile, {
+  wallet, now: () => firstSeenAt,
+});
+anchored.saveRuntime({ cursor: 1, primed: true, state: {
+  ...freshState(firstSeenAt), deployedTodaySol: 0.005, realizedTodaySol: -0.001,
+}, positions: {} });
+anchored.close();
+anchored = new ExecutionJournal(anchoredHistoryFile, {
+  wallet, create: false, now: () => firstSeenAt,
+});
+const anchoredDeadline = anchored.riskHistoryStatus(firstSeenAt).incompleteUntil;
+ok("first legacy discovery sets an exact durable risk-history deadline", () => {
+  assert.equal(anchoredDeadline, firstSeenAt + riskHistoryWindowMs);
+  assert.equal(anchored.riskHistoryStatus(firstSeenAt).complete, false);
+  assert.equal(anchored.getMeta("risk_history_incomplete_first_seen_at"), firstSeenAt);
+});
+anchored.close();
+anchored = new ExecutionJournal(anchoredHistoryFile, {
+  wallet, create: false, now: () => firstSeenAt + 12 * 60 * 60_000,
+});
+ok("legacy risk-history quarantine deadline is anchored once across reopen", () => {
+  assert.equal(anchored.riskHistoryStatus(firstSeenAt + 12 * 60 * 60_000).incompleteUntil,
+    anchoredDeadline);
+  assert.equal(anchored.getMeta("risk_history_incomplete_first_seen_at"), firstSeenAt);
+});
+anchored.close();
+anchored = new ExecutionJournal(anchoredHistoryFile, {
+  wallet, create: false, now: () => firstSeenAt + 2 * 60 * 60_000,
+});
+ok("clock rollback neither extends nor prematurely clears the anchored quarantine", () => {
+  const status = anchored.riskHistoryStatus(firstSeenAt + 2 * 60 * 60_000);
+  assert.equal(status.complete, false);
+  assert.equal(status.incompleteUntil, anchoredDeadline);
+  assert.equal(anchored.getMeta("risk_history_incomplete_first_seen_at"), firstSeenAt);
+});
+anchored.close();
+anchored = new ExecutionJournal(anchoredHistoryFile, {
+  wallet, create: false, now: () => firstSeenAt + 25 * 60 * 60_000,
+});
+ok("persisting legacy counters do not renew an elapsed risk-history quarantine", () => {
+  const status = anchored.riskHistoryStatus(firstSeenAt + 25 * 60 * 60_000);
+  assert.equal(status.complete, true);
+  assert.equal(status.incompleteUntil, anchoredDeadline);
+});
+anchored.close();
+
+const freshCompleteFile = path.join(dir, "fresh-complete-history.sqlite");
+let freshComplete = new ExecutionJournal(freshCompleteFile, {
+  wallet, now: () => firstSeenAt,
+});
+freshComplete.saveRuntime({ cursor: 1, primed: true,
+  state: freshState(firstSeenAt), positions: {} });
+freshComplete.close();
+freshComplete = new ExecutionJournal(freshCompleteFile, {
+  wallet, create: false, now: () => firstSeenAt + 12 * 60 * 60_000,
+});
+ok("fresh complete journals remain free of risk-history migration quarantine", () => {
+  assert.deepEqual(freshComplete.riskHistoryStatus(), {
+    complete: true, incompleteUntil: null,
+  });
+  assert.equal(freshComplete.getMeta("risk_history_incomplete_first_seen_at"), null);
+  assert.equal(freshComplete.getMeta("risk_history_incomplete_until"), null);
+});
+freshComplete.close();
+
+// Recreate the exact pre-invariant shape by removing the new nullable column from
+// an otherwise real journal. Reopening must add it without laundering old signed
+// bytes into the current protocol era.
+const legacyProtocolFile = path.join(dir, "legacy-attempt-protocol.sqlite");
+let legacyProtocol = new ExecutionJournal(legacyProtocolFile, { wallet });
+const legacyProtocolSpec = {
+  ...spec,
+  id: "entry:50:entry:legacy-protocol",
+  eventId: "50:entry:legacy-protocol",
+  feedId: 103,
+  mint: Keypair.generate().publicKey.toBase58(),
+};
+legacyProtocol.ensureIntent(legacyProtocolSpec);
+legacyProtocol.recordSigned(legacyProtocolSpec.id, {
+  attempt: 1, requestId: "legacy-protocol", signedTx: Buffer.from("pre-invariant bytes"),
+  signature: "legacy-protocol-signature", blockhash: "legacy-protocol-blockhash",
+  lastValidBlockHeight: 999, quotedOutputRaw: "1000", minOutputRaw: "900",
+  order: { router: "metis" },
+});
+legacyProtocol.close();
+raw = new DatabaseSync(legacyProtocolFile);
+raw.exec("ALTER TABLE tx_attempts DROP COLUMN protocol");
+assert.equal(raw.prepare("PRAGMA table_info(tx_attempts)").all()
+  .some((column) => column.name === "protocol"), false);
+raw.close();
+
+legacyProtocol = new ExecutionJournal(legacyProtocolFile, { wallet, create: false });
+ok("legacy attempt migration adds nullable protocol provenance without backfilling", () => {
+  const column = legacyProtocol.db.prepare("PRAGMA table_info(tx_attempts)").all()
+    .find((value) => value.name === "protocol");
+  assert.equal(column.notnull, 0);
+  assert.equal(column.dflt_value, null);
+  assert.equal(legacyProtocol.db.prepare("SELECT protocol FROM tx_attempts WHERE intent_id=?")
+    .get(legacyProtocolSpec.id).protocol, null);
+  assert.equal(legacyProtocol.latestAttempt(legacyProtocolSpec.id).protocol, null);
+});
+const migratedProtocolSpec = {
+  ...spec,
+  id: "entry:50:entry:migrated-protocol",
+  eventId: "50:entry:migrated-protocol",
+  feedId: 104,
+  mint: Keypair.generate().publicKey.toBase58(),
+};
+legacyProtocol.ensureIntent(migratedProtocolSpec);
+legacyProtocol.recordSigned(migratedProtocolSpec.id, {
+  attempt: 1, requestId: "migrated-protocol", signedTx: Buffer.from("current bytes"),
+  signature: "migrated-protocol-signature", blockhash: "migrated-protocol-blockhash",
+  lastValidBlockHeight: 999, quotedOutputRaw: "1000", minOutputRaw: "900",
+  order: { router: "metis" }, protocol: "caller-spoofed-protocol",
+});
+ok("recordSigned marks new attempts with the exported current protocol", () => {
+  assert.equal(legacyProtocol.latestAttempt(migratedProtocolSpec.id).protocol,
+    CURRENT_TX_ATTEMPT_PROTOCOL);
+  assert.equal(legacyProtocol.db.prepare("SELECT protocol FROM tx_attempts WHERE intent_id=?")
+    .get(migratedProtocolSpec.id).protocol, CURRENT_TX_ATTEMPT_PROTOCOL);
+});
+legacyProtocol.close();
 
 j.close();
 fs.rmSync(dir, { recursive: true, force: true });

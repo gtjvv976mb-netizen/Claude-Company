@@ -9,7 +9,6 @@ import { Keypair } from "@solana/web3.js";
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-gates-"));
 const keyFile = path.join(dir, "burner.json");
 const stateDb = path.join(dir, "state.sqlite");
-const lockFile = path.join(dir, "state.lock");
 const keypair = Keypair.generate();
 fs.writeFileSync(keyFile, JSON.stringify(Array.from(keypair.secretKey)), { mode: 0o600 });
 const wallet = keypair.publicKey.toBase58();
@@ -17,7 +16,7 @@ const poller = path.join(path.dirname(fileURLToPath(import.meta.url)), "poller.m
 const base = {
   ...process.env,
   CC_SECRET: "a".repeat(64), CC_FLOOR: "50", EXECUTE: "1",
-  KEYPAIR: keyFile, STATE_DB: stateDb, LOCK_FILE: lockFile,
+  KEYPAIR: keyFile, STATE_DB: stateDb, LOCK_FILE: `${stateDb}.lock`,
   SOLANA_RPC: "https://primary-private-rpc.invalid",
   SOLANA_RPC_SECONDARY: "https://secondary-private-rpc.invalid", JUPITER_API_KEY: "test-key",
   SOLANA_RPC_SECONDARY: "https://independent-rpc.invalid",
@@ -28,6 +27,12 @@ const run = (extra = {}) => spawnSync(process.execPath, [poller], {
 });
 let pass = 0;
 const ok = (name, fn) => { fn(); pass++; console.log(`  ok   ${name}`); };
+
+ok("a state database cannot be split across a different process lock", () => {
+  const result = run({ LOCK_FILE: path.join(dir, "different.lock") });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /canonical STATE_DB lock/);
+});
 
 ok("wrong public-key acknowledgement rejects live mode before network", () => {
   const result = run({ LIVE_TRADING_ACK: "wrong" });
@@ -70,18 +75,11 @@ ok("live deployment and transaction ceilings cannot be raised by environment", (
     ["MAX_RENT_LAMPORTS", "3000001"],
     ["MAX_ENTRY_ROUND_TRIP_LOSS_PCT", "12.01"],
     ["MAX_TX_ATTEMPTS", "4"],
+    ["SOL_USD_CACHE_MAX_AGE_MS", "1800001"],
   ]) {
     const result = run({ [name]: value, LIVE_STATE_INIT_ACK: wallet });
     assert.notEqual(result.status, 0, `${name} unexpectedly bypassed its live ceiling`);
-    /* The three MONEY caps are now raisable by an operator who types the
-     * acknowledgement (see test-operator-caps.mjs), so raising one by env alone is
-     * refused EARLIER and more usefully — naming the ceremony rather than the range.
-     * The invariant this test guards is unchanged and is what is asserted: env alone
-     * can never bypass a live ceiling. Everything else still refuses on range. */
-    const MONEY = ["MAX_SOL_PER_TRADE", "DAILY_SOL_CAP", "DAILY_LOSS_LIMIT_SOL"];
-    assert.match(result.stderr, MONEY.includes(name)
-      ? /ALL THREE set explicitly|typed acknowledgement/
-      : new RegExp(`${name} must be between`));
+    assert.match(result.stderr, new RegExp(`${name} must be between`));
   }
 });
 

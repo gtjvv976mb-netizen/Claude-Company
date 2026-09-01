@@ -105,6 +105,45 @@ export function executorFeedPayload(floorNo, rawAfter = 0) {
     })) };
 }
 
+/** Authenticated route payload for the last self-reported executor pulse. */
+export function executorHeartbeatPayload(floorNo) {
+  const raw = db.prepare("SELECT executor_heartbeat FROM copy_settings WHERE floor_no=?")
+    .get(Number(floorNo))?.executor_heartbeat;
+  let heartbeat = null;
+  try { heartbeat = raw ? JSON.parse(raw) : null; } catch { heartbeat = null; }
+  return { heartbeat };
+}
+
+export function sanitizeExecutorHealth(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const allowed = new Set(["healthy", "entries-paused", "degraded", "exits-blocked", "manual-action"]);
+  const state = allowed.has(String(value.state)) ? String(value.state) : "degraded";
+  const count = (input) => Math.min(1_000_000, Math.max(0, Math.floor(Number(input) || 0)));
+  const timestamp = (input) => {
+    const number = Number(input);
+    return Number.isSafeInteger(number) && number > 0 ? number : 0;
+  };
+  const commit = /^[0-9a-f]{7,40}$/i.test(String(value.runtimeCommit || ""))
+    ? String(value.runtimeCommit).slice(0, 40).toLowerCase() : null;
+  const runtimeFingerprint = /^[0-9a-f]{32}$/i.test(String(value.runtimeFingerprint || ""))
+    ? String(value.runtimeFingerprint).toLowerCase() : null;
+  return {
+    state,
+    entriesPaused: value.entriesPaused === true,
+    hardStop: value.hardStop === true,
+    blockingIntent: value.blockingIntent === true,
+    blockedPositions: count(value.blockedPositions),
+    manualAction: value.manualAction === true,
+    exitBlocked: value.exitBlocked === true,
+    lastTickCompletedAt: timestamp(value.lastTickCompletedAt),
+    lastFeedSuccessAt: timestamp(value.lastFeedSuccessAt),
+    consecutiveFeedFailures: count(value.consecutiveFeedFailures),
+    consecutiveTickFailures: count(value.consecutiveTickFailures),
+    runtimeCommit: commit,
+    runtimeFingerprint,
+  };
+}
+
 /** Serves the trading floor and streams the desk's real events to it. */
 export function startOffice(port = Number(process.env.PORT) || 4949) {
   const server = http.createServer(async (req, res) => {
@@ -297,7 +336,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
            self-reported. Still no control channel, no keys, no custody —
            the server cannot start, stop, or steer the executor with this. */
         const hbMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/executor\/heartbeat$/);
-        if (hbMatch && req.method === "POST") {
+        if (hbMatch) {
           const floorNo = Number(hbMatch[1]);
           const secret = db.prepare("SELECT executor_secret FROM copy_settings WHERE floor_no=?").get(floorNo)?.executor_secret;
           const auth = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
@@ -305,6 +344,11 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             try { return cryptoTimingEqual(auth, secret); } catch { return false; }
           })();
           if (!okAuth) return json(401, { error: "bad or missing executor secret" });
+          if (req.method === "GET") {
+            res.setHeader("cache-control", "no-store");
+            return json(200, executorHeartbeatPayload(floorNo));
+          }
+          if (req.method !== "POST") return json(405, { error: "method not allowed" });
           const body = await readBody();
           if (!body || typeof body !== "object") return json(400, { error: "malformed heartbeat" });
           const hb = {
@@ -317,6 +361,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               mint: String(h?.mint ?? "").slice(0, 64),
               sol: Number(h?.sol) || 0,
             })).filter((h) => h.mint) : [],
+            health: sanitizeExecutorHealth(body.health),
             ts: Number(body.ts) || Date.now(),
             seenAt: Date.now(),
           };

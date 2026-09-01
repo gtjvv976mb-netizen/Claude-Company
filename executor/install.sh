@@ -79,7 +79,8 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ "$(uname -s)" != "Linux" ] || ! command -v systemctl >/dev/null 2>&1; then
-  echo "install.sh currently supports Linux hosts using systemd; use README.md for manual setup" >&2
+  echo "install.sh provisions Linux hosts using systemd only" >&2
+  echo "macos-launchagent.sh can supervise an existing configured macOS executor; it is not a fresh-wallet installer" >&2
   exit 1
 fi
 case "$FLOOR" in
@@ -155,7 +156,7 @@ if [ "$MODE" = "live" ]; then
     echo "live --expected-commit must exactly match the published commit $SOURCE_COMMIT" >&2
     exit 1
   fi
-  for source_file in poller.mjs journal.mjs jupiter.mjs strategy.mjs trade-policy.mjs package.json package-lock.json; do
+  for source_file in poller.mjs journal.mjs jupiter.mjs balance-verification.mjs entry-quote-guard.mjs exit-trigger.mjs feed-drain.mjs sol-usd-oracle.mjs heartbeat-health.mjs sleep-assertion.mjs monitor.mjs strategy.mjs trade-policy.mjs package.json package-lock.json; do
     if [ -n "$(git -C "$source_root" status --porcelain -- "executor/$source_file")" ]; then
       echo "live source file executor/$source_file differs from commit $SOURCE_COMMIT" >&2
       exit 1
@@ -248,7 +249,7 @@ fi
 INSTALL_DIR="$HOME/claudeco-executor"
 ENV_FILE="$INSTALL_DIR/.cc-executor.env"
 STATE_DB="$INSTALL_DIR/.cc-executor.sqlite"
-LOCK_FILE="$INSTALL_DIR/.cc-executor.lock"
+LOCK_FILE="${STATE_DB}.lock"
 PAUSE_FILE="$INSTALL_DIR/PAUSE_ENTRIES"
 HARD_STOP_FILE="$INSTALL_DIR/HARD_STOP"
 RELEASES_DIR="$INSTALL_DIR/releases"
@@ -258,14 +259,14 @@ echo "▶ installing WALL-ST-E ($MODE mode) into $INSTALL_DIR"
 
 node_ok=0
 if command -v node >/dev/null 2>&1; then
-  node_ok="$(node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.stdout.write(String(a>22||(a===22&&b>=13)?1:0))')"
+  node_ok="$(node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.stdout.write(String(a<25&&(a>22||(a===22&&b>=13))?1:0))')"
 fi
 if [ "$node_ok" != "1" ]; then
-  echo "Node 22.13+ is required; install it from a package source you trust, then rerun" >&2
+  echo "Node >=22.13 and <25 is required; install it from a package source you trust, then rerun" >&2
   exit 1
 fi
-node_ok="$(node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.stdout.write(String(a>22||(a===22&&b>=13)?1:0))')"
-if [ "$node_ok" != "1" ]; then echo "Node 22.13+ is required for the durable SQLite journal" >&2; exit 1; fi
+node_ok="$(node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.stdout.write(String(a<25&&(a>22||(a===22&&b>=13))?1:0))')"
+if [ "$node_ok" != "1" ]; then echo "Node >=22.13 and <25 is required for the durable SQLite journal" >&2; exit 1; fi
 
 if [ "$MODE" = "live" ]; then
   PRIMARY_RPC="$RPC" SECONDARY_RPC_VALUE="$SECONDARY_RPC" node - <<'NODE'
@@ -378,7 +379,7 @@ rollback_install() {
 trap rollback_install EXIT
 
 echo "▶ fetching the executor and shared policy…"
-RUNTIME_FILES=(poller.mjs journal.mjs jupiter.mjs strategy.mjs trade-policy.mjs)
+RUNTIME_FILES=(poller.mjs journal.mjs jupiter.mjs balance-verification.mjs entry-quote-guard.mjs exit-trigger.mjs feed-drain.mjs sol-usd-oracle.mjs heartbeat-health.mjs sleep-assertion.mjs monitor.mjs strategy.mjs trade-policy.mjs)
 SOURCE_FILES=("${RUNTIME_FILES[@]}" package.json package-lock.json)
 if [ "$MODE" = "live" ]; then
   echo "▶ staging immutable runtime blobs from commit $SOURCE_COMMIT"
@@ -452,6 +453,7 @@ fi
   write_env_line MAX_SOL_PER_TRADE "$MAX_SOL"
   write_env_line DAILY_SOL_CAP "$DAILY_CAP"
   write_env_line EXECUTE "$EXECUTE_VALUE"
+  write_env_line EXECUTOR_SOURCE_COMMIT "$SOURCE_COMMIT"
   if [ "$MODE" = "live" ]; then
     write_env_line LIVE_TRADING_ACK "$LIVE_ACK"
     write_env_line JUPITER_API_KEY "$JUPITER_KEY"

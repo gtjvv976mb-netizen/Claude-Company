@@ -9,11 +9,20 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { validateEntryPreflightContext } from "./entry-quote-guard.mjs";
+import { PYTH_SOL_USD_CACHE_SOURCE } from "./sol-usd-oracle.mjs";
 
 const INTENT_STATES = new Set([
   "planned", "signed", "submitted", "confirmed", "accounted",
   "failed", "expired", "ambiguous",
 ]);
+const INTENT_KINDS = new Set(["entry", "risk_exit", "desk_exit"]);
+const WRAPPED_SOL_MINT = "So11111111111111111111111111111111111111112";
+export const LEGACY_CALL_IDENTITY_POLICY = "liquidate-on-next-valid-same-mint-desk-exit";
+// Bump only when the rules that authorize construction/disclosure of signed bytes
+// change. Recovery compares this durable provenance marker; a null value is an
+// explicitly unversioned attempt built before this invariant existed.
+export const CURRENT_TX_ATTEMPT_PROTOCOL = "jupiter-dual-rpc-unsigned-preflight-v2";
 
 const json = (value) => JSON.stringify(value ?? null);
 const parse = (value, { fallback = null, label = "journal JSON" } = {}) => {
@@ -23,6 +32,13 @@ const parse = (value, { fallback = null, label = "journal JSON" } = {}) => {
 };
 
 const record = (value) => value && typeof value === "object" && !Array.isArray(value);
+
+export function requirePositiveCallId(value, label = "call_id") {
+  const callId = Number(value);
+  if (!Number.isSafeInteger(callId) || callId <= 0)
+    throw new Error(`${label} is invalid`);
+  return callId;
+}
 
 const finiteNumber = (value, label, { min = -Infinity, integer = false } = {}) => {
   const number = Number(value);
@@ -49,6 +65,7 @@ export function validateRiskState(value, { now = Date.now() } = {}) {
 }
 
 const POSITION_BLOCK_FLAGS = [
+  ["callIdentityIncomplete", "callIdentityIncompleteReason", "legacy call identity is incomplete"],
   ["accountingIncomplete", "accountingIncompleteReason", "legacy accounting is incomplete"],
   ["balanceReconciliationRequired", "balanceReconciliationReason", "balance reconciliation"],
   ["riskDataUnavailable", "riskDataUnavailableReason", "risk data unavailable"],
@@ -63,6 +80,35 @@ export function positionEntryBlock(value) {
     }
   }
   return null;
+}
+
+/**
+ * Route an authenticated desk-exit row to a durable position. New positions match
+ * the originating call exactly; mint equality alone is never sufficient. A legacy
+ * row whose call identity could not be recovered is already quarantined from new
+ * exposure and takes the explicitly persisted risk-reducing fallback: the next
+ * valid same-mint desk exit closes it rather than leaving an unidentifiable holding.
+ */
+export function deskExitDecisionForPosition(position, event) {
+  if (!record(position) || typeof position.mint !== "string" || !position.mint)
+    throw new Error("desk exit position identity is invalid");
+  if (!record(event)) throw new Error("desk exit event is invalid");
+  if (String(event.mint || "") !== position.mint)
+    return { action: "ignore", reason: "different-mint" };
+  const eventCallId = requirePositiveCallId(event.call_id, "desk exit call_id");
+
+  const positionCallId = Number(position.callId);
+  if (Number.isSafeInteger(positionCallId) && positionCallId > 0) {
+    return positionCallId === eventCallId
+      ? { action: "exit", reason: "exact-call", callId: eventCallId }
+      : { action: "ignore", reason: "different-call", callId: eventCallId,
+          positionCallId };
+  }
+  if (position.callIdentityIncomplete === true &&
+      position.callIdentityPolicy === LEGACY_CALL_IDENTITY_POLICY) {
+    return { action: "exit", reason: "legacy-risk-reduction", callId: eventCallId };
+  }
+  throw new Error(`position ${position.mint} has no durable call identity`);
 }
 
 function validatePosition(mint, value) {
@@ -80,8 +126,26 @@ function validatePosition(mint, value) {
     throw new Error(`position ${mint} has invalid entryInputLamports`);
   if (!Number.isFinite(Number(value.solUsdAtEntry)) || Number(value.solUsdAtEntry) <= 0)
     throw new Error(`position ${mint} has invalid solUsdAtEntry`);
+  if (value.solUsdSource !== PYTH_SOL_USD_CACHE_SOURCE && value.accountingIncomplete !== true)
+    throw new Error(`position ${mint} has no independent SOL/USD entry source`);
   if (typeof value.entryIntentId !== "string" || !value.entryIntentId)
     throw new Error(`position ${mint} has no durable entryIntentId`);
+  const callId = Number(value.callId);
+  const hasExactCallId = Number.isSafeInteger(callId) && callId > 0;
+  const hasLegacyFallback = value.callIdentityIncomplete === true;
+  if (hasExactCallId && hasLegacyFallback)
+    throw new Error(`position ${mint} has conflicting call identity state`);
+  if (value.callId != null && !hasExactCallId)
+    throw new Error(`position ${mint} has invalid callId`);
+  if (!hasExactCallId && !hasLegacyFallback)
+    throw new Error(`position ${mint} has no durable callId`);
+  if (hasLegacyFallback) {
+    if (value.callIdentityPolicy !== LEGACY_CALL_IDENTITY_POLICY)
+      throw new Error(`position ${mint} has no valid legacy call identity policy`);
+    if (typeof value.callIdentityIncompleteReason !== "string" ||
+        !value.callIdentityIncompleteReason.trim())
+      throw new Error(`position ${mint} has no legacy call identity reason`);
+  }
   if (!Number.isFinite(Number(value.openedAtMs)) || Number(value.openedAtMs) <= 0)
     throw new Error(`position ${mint} has invalid openedAtMs`);
   for (const key of ["entry", "stop", "takeProfitX"]) {
@@ -152,6 +216,15 @@ export class ExecutionJournal {
         updated_at INTEGER NOT NULL
       ) STRICT;
       CREATE UNIQUE INDEX IF NOT EXISTS idx_intents_event ON intents(event_id) WHERE event_id IS NOT NULL;
+      CREATE TABLE IF NOT EXISTS deferred_desk_exits (
+        entry_intent_id TEXT PRIMARY KEY REFERENCES intents(id) ON DELETE RESTRICT,
+        event_id TEXT NOT NULL UNIQUE,
+        feed_id INTEGER NOT NULL,
+        call_id INTEGER NOT NULL,
+        mint TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        observed_at INTEGER NOT NULL
+      ) STRICT;
       CREATE TABLE IF NOT EXISTS tx_attempts (
         intent_id TEXT NOT NULL REFERENCES intents(id) ON DELETE RESTRICT,
         attempt INTEGER NOT NULL,
@@ -164,6 +237,7 @@ export class ExecutionJournal {
         quoted_output_raw TEXT NOT NULL,
         min_output_raw TEXT NOT NULL,
         order_json TEXT NOT NULL,
+        protocol TEXT,
         execute_json TEXT,
         error TEXT,
         created_at INTEGER NOT NULL,
@@ -194,6 +268,12 @@ export class ExecutionJournal {
       this.db.exec("ALTER TABLE intents ADD COLUMN network_fee_lamports TEXT");
     if (!intentColumns.has("confirmed_at"))
       this.db.exec("ALTER TABLE intents ADD COLUMN confirmed_at INTEGER");
+    const attemptColumns = new Set(this.db.prepare("PRAGMA table_info(tx_attempts)").all()
+      .map((column) => column.name));
+    if (!attemptColumns.has("protocol"))
+      // SQLite fills the new nullable column with NULL for every pre-invariant row.
+      // Never backfill CURRENT_TX_ATTEMPT_PROTOCOL onto bytes this build did not make.
+      this.db.exec("ALTER TABLE tx_attempts ADD COLUMN protocol TEXT");
     ensurePrivateFile(this.file);
     try {
       this.legacyPositionMigrated = this._migrateLegacyPositions();
@@ -225,6 +305,9 @@ export class ExecutionJournal {
       if (row.key === "risk_history_incomplete_until" &&
           (!Number.isSafeInteger(value) || value < 0))
         throw new Error("journal risk-history quarantine is invalid");
+      if (row.key === "risk_history_incomplete_first_seen_at" &&
+          (!Number.isSafeInteger(value) || value < 0))
+        throw new Error("journal risk-history first-seen marker is invalid");
     }
     for (const row of this.db.prepare("SELECT mint,data FROM positions").all())
       validatePosition(row.mint, parse(row.data, { label: `position ${row.mint}` }));
@@ -244,21 +327,98 @@ export class ExecutionJournal {
   _migrateLegacyPositions() {
     let changed = false;
     const update = this.db.prepare("UPDATE positions SET data=?,updated_at=? WHERE mint=?");
+    const entryIntent = this.db.prepare("SELECT kind,mint,context FROM intents WHERE id=?");
     for (const row of this.db.prepare("SELECT mint,data FROM positions").all()) {
       const value = parse(row.data, { label: `position ${row.mint}` });
       if (!record(value)) continue;
+      let rowChanged = false;
       const missing = value.costBasisLamports == null || value.entryInputLamports == null ||
         value.solUsdAtEntry == null;
-      if (!missing) continue;
-      const paidLamports = Math.round(Number(value.paidSol) * 1_000_000_000);
-      if (!Number.isSafeInteger(paidLamports) || paidLamports <= 0) continue;
-      value.costBasisLamports ||= String(paidLamports);
-      value.entryInputLamports ||= String(paidLamports);
-      value.solUsdAtEntry ||= 1;
-      value.accountingIncomplete = true;
-      value.accountingIncompleteReason = "pre-ledger position has unknown finalized fees/SOL-USD basis; reconcile manually";
-      update.run(json(value), this.now(), row.mint);
-      changed = true;
+      if (missing) {
+        const paidLamports = Math.round(Number(value.paidSol) * 1_000_000_000);
+        if (Number.isSafeInteger(paidLamports) && paidLamports > 0) {
+          value.costBasisLamports ||= String(paidLamports);
+          value.entryInputLamports ||= String(paidLamports);
+          value.solUsdAtEntry ||= 1;
+          value.accountingIncomplete = true;
+          value.accountingIncompleteReason = "pre-ledger position has unknown finalized fees/SOL-USD basis; reconcile manually";
+          rowChanged = true;
+        }
+      }
+
+      // Before the independent-oracle release, positions stored a Jupiter-derived
+      // SOL/USDC denominator. It must never silently become the basis for Pyth-priced
+      // stops after an upgrade. Recover provenance only from the exact durable entry
+      // context; otherwise quarantine automatic price accounting for reconciliation.
+      {
+        const intent = typeof value.entryIntentId === "string"
+          ? entryIntent.get(value.entryIntentId) : null;
+        const context = intent ? parse(intent.context,
+          { label: `intent ${value.entryIntentId} context` }) : null;
+        const contextSolUsd = Number(context?.entryPreflight?.solUsd);
+        const sameBasis = Number.isFinite(contextSolUsd) && contextSolUsd > 0 &&
+          Math.abs(contextSolUsd - Number(value.solUsdAtEntry)) <=
+            Math.max(1e-12, Math.abs(contextSolUsd) * 1e-12);
+        let independentlyVerified = false;
+        if (intent?.kind === "entry" && intent.mint === row.mint && sameBasis) {
+          try {
+            validateEntryPreflightContext({ ...intent, context }, {
+              nowMs: Number(context?.entryPreflight?.observedAt) || this.now(),
+              maxEntryPreflightAgeMs: 60_000,
+              requireFresh: false,
+            });
+            independentlyVerified = true;
+          } catch {}
+        }
+        if (independentlyVerified) {
+          if (value.solUsdSource !== PYTH_SOL_USD_CACHE_SOURCE) {
+            value.solUsdSource = PYTH_SOL_USD_CACHE_SOURCE;
+            rowChanged = true;
+          }
+        } else {
+          if (value.solUsdSource !== "legacy-unverified") {
+            value.solUsdSource = "legacy-unverified";
+            rowChanged = true;
+          }
+          if (value.accountingIncomplete !== true ||
+              !String(value.accountingIncompleteReason || "").includes("no provable independent SOL/USD")) {
+            value.accountingIncomplete = true;
+            value.accountingIncompleteReason =
+              "legacy position has no provable independent SOL/USD entry basis; reconcile manually";
+            rowChanged = true;
+          }
+        }
+      }
+
+      // Old position JSON did not persist call_id. Recover it only when the exact
+      // durable entry intent proves kind, mint, event mint and a positive call_id.
+      // Otherwise persist a visible quarantine and the risk-reducing legacy policy.
+      if (value.callId == null) {
+        const intent = typeof value.entryIntentId === "string"
+          ? entryIntent.get(value.entryIntentId) : null;
+        const context = intent ? parse(intent.context,
+          { label: `intent ${value.entryIntentId} context` }) : null;
+        const recoveredCallId = Number(context?.event?.call_id);
+        const recoverable = intent?.kind === "entry" && intent.mint === row.mint &&
+          String(context?.event?.mint || "") === row.mint &&
+          Number.isSafeInteger(recoveredCallId) && recoveredCallId > 0;
+        if (recoverable) {
+          value.callId = recoveredCallId;
+          delete value.callIdentityIncomplete;
+          delete value.callIdentityIncompleteReason;
+          delete value.callIdentityPolicy;
+        } else {
+          value.callIdentityIncomplete = true;
+          value.callIdentityIncompleteReason =
+            "legacy position has no provable originating call_id; new entries remain blocked until it closes";
+          value.callIdentityPolicy = LEGACY_CALL_IDENTITY_POLICY;
+        }
+        rowChanged = true;
+      }
+      if (rowChanged) {
+        update.run(json(value), this.now(), row.mint);
+        changed = true;
+      }
     }
     return changed;
   }
@@ -277,8 +437,17 @@ export class ExecutionJournal {
       (Number(state.deployedTodaySol) !== 0 || Number(state.realizedTodaySol) !== 0);
     if (!legacyAccounted && !legacyConfirmed && !legacyCounters && !this.legacyPositionMigrated) return;
     const existingUntil = Number(this.getMeta("risk_history_incomplete_until") || 0);
-    const until = Math.max(existingUntil, this.now() + 24 * 60 * 60_000);
-    this.setMeta("risk_history_incomplete_until", until);
+    let firstSeen = Number(this.getMeta("risk_history_incomplete_first_seen_at") || 0);
+    // Older releases persisted only the deadline. Recover its original anchor rather
+    // than treating this upgrade/reopen as a new discovery and extending quarantine.
+    if (!Number.isSafeInteger(firstSeen) || firstSeen <= 0) {
+      firstSeen = Number.isSafeInteger(existingUntil) && existingUntil > 0
+        ? Math.max(1, existingUntil - 24 * 60 * 60_000)
+        : Math.max(1, Math.floor(this.now()));
+      this.setMeta("risk_history_incomplete_first_seen_at", firstSeen);
+    }
+    if (!Number.isSafeInteger(existingUntil) || existingUntil <= 0)
+      this.setMeta("risk_history_incomplete_until", firstSeen + 24 * 60 * 60_000);
   }
 
   _bindWallet() {
@@ -387,6 +556,8 @@ export class ExecutionJournal {
   ensureIntent(spec) {
     for (const key of ["id", "kind", "mint", "inputMint", "outputMint", "amountRaw"])
       if (spec[key] == null || spec[key] === "") throw new Error(`intent ${key} is required`);
+    if (!INTENT_KINDS.has(String(spec.kind)))
+      throw new Error(`unsupported intent kind ${spec.kind}`);
     const amountRaw = String(spec.amountRaw);
     if (!/^\d+$/.test(amountRaw) || BigInt(amountRaw) <= 0n) throw new Error("intent amountRaw must be positive");
     const existing = this.getIntent(spec.id);
@@ -452,6 +623,98 @@ export class ExecutionJournal {
     return row?.id || null;
   }
 
+  /**
+   * Return the unresolved intent that conflicts with a candidate submission.
+   *
+   * New exposure remains globally serialized: an entry may not pass while any
+   * signed/submitted/confirmed/ambiguous intent still needs reconciliation or
+   * accounting. Risk-reducing exits are narrower. They may proceed around an
+   * unrelated position, but never around another unresolved operation for the
+   * same mint. Unknown intent kinds intentionally receive the stricter entry
+   * policy instead of being allowed to masquerade as safety exits.
+   */
+  hasConflictingIntent(candidate, exceptId = candidate?.id ?? null) {
+    if (!record(candidate)) throw new Error("candidate intent is invalid");
+    const kind = String(candidate.kind || "");
+    const mint = String(candidate.mint || "");
+    if (!kind || !mint) throw new Error("candidate intent kind and mint are required");
+    // Kind alone is not authority to bypass the global exposure lock. The route
+    // and immutable position snapshot must prove this is actually reducing the
+    // named position into wrapped SOL.
+    const isSafetyExit = (kind === "risk_exit" || kind === "desk_exit") &&
+      String(candidate.inputMint || "") === mint &&
+      String(candidate.outputMint || "") === WRAPPED_SOL_MINT &&
+      String(candidate.context?.position?.mint || "") === mint;
+    const row = this.db.prepare(`SELECT id FROM intents
+      WHERE state IN ('signed','submitted','confirmed','ambiguous')
+        AND (? IS NULL OR id<>?)
+        AND (?=0 OR mint=? OR kind NOT IN ('entry','risk_exit','desk_exit'))
+      ORDER BY created_at,id LIMIT 1`)
+      .get(exceptId, exceptId, isSafetyExit ? 1 : 0, mint);
+    return row?.id || null;
+  }
+
+  /** Locate the exact unresolved buy that a later desk exit belongs to. */
+  blockingEntryForDeskExit({ mint, callId }) {
+    const expectedMint = String(mint || "");
+    if (!expectedMint) throw new Error("desk exit mint is required");
+    const expectedCallId = requirePositiveCallId(callId, "desk exit call_id");
+    const rows = this.db.prepare(`SELECT * FROM intents
+      WHERE kind='entry' AND mint=?
+        AND state IN ('signed','submitted','confirmed','ambiguous')
+      ORDER BY created_at,id`).all(expectedMint);
+    for (const row of rows) {
+      const intent = this._intent(row);
+      if (Number(intent.context?.event?.call_id) === expectedCallId) return intent;
+    }
+    return null;
+  }
+
+  /**
+   * Persist an exit that arrived after a buy was disclosed but before its position
+   * could be accounted. The feed cursor may then advance without losing the exit.
+   */
+  deferDeskExitForEntry({ entryIntentId, eventId, feedId, callId, mint, reason,
+    observedAt = this.now() }) {
+    const entry = this.getIntent(entryIntentId);
+    if (!entry || entry.kind !== "entry" ||
+        !["signed", "submitted", "confirmed", "ambiguous"].includes(entry.state))
+      throw new Error("deferred desk exit requires an unresolved entry intent");
+    const values = {
+      entryIntentId: String(entryIntentId), eventId: String(eventId || ""),
+      feedId: Number(feedId), callId: Number(callId), mint: String(mint || ""),
+      reason: String(reason || "desk exit"), observedAt: Number(observedAt),
+    };
+    if (!values.eventId || !Number.isSafeInteger(values.feedId) || values.feedId <= 0 ||
+        !Number.isSafeInteger(values.callId) || values.callId <= 0 ||
+        !values.mint || values.mint !== entry.mint ||
+        Number(entry.context?.event?.call_id) !== values.callId ||
+        !Number.isSafeInteger(values.observedAt) || values.observedAt <= 0)
+      throw new Error("deferred desk exit does not match its entry/call context");
+    const existing = this.deferredDeskExitForEntry(values.entryIntentId);
+    if (existing) {
+      for (const key of ["eventId", "feedId", "callId", "mint", "reason"]) {
+        if (String(existing[key]) !== String(values[key]))
+          throw new Error(`deferred desk exit changed ${key}; refusing replay`);
+      }
+      return existing;
+    }
+    this.db.prepare(`INSERT INTO deferred_desk_exits
+      (entry_intent_id,event_id,feed_id,call_id,mint,reason,observed_at)
+      VALUES(?,?,?,?,?,?,?)`).run(values.entryIntentId, values.eventId, values.feedId,
+        values.callId, values.mint, values.reason, values.observedAt);
+    return this.deferredDeskExitForEntry(values.entryIntentId);
+  }
+
+  deferredDeskExitForEntry(entryIntentId) {
+    const row = this.db.prepare("SELECT * FROM deferred_desk_exits WHERE entry_intent_id=?")
+      .get(String(entryIntentId));
+    return row ? {
+      entryIntentId: row.entry_intent_id, eventId: row.event_id, feedId: row.feed_id,
+      callId: row.call_id, mint: row.mint, reason: row.reason, observedAt: row.observed_at,
+    } : null;
+  }
+
   attempts(id) {
     return this.db.prepare("SELECT * FROM tx_attempts WHERE intent_id=? ORDER BY attempt").all(id)
       .map((row) => this._attempt(row));
@@ -469,6 +732,7 @@ export class ExecutionJournal {
       requestId: row.request_id, signedTx: Buffer.from(row.signed_tx), signature: row.signature,
       blockhash: row.blockhash, lastValidBlockHeight: row.last_valid_block_height,
       quotedOutputRaw: row.quoted_output_raw, minOutputRaw: row.min_output_raw,
+      protocol: row.protocol ?? null,
       order: parse(row.order_json, { fallback: {}, label: `attempt ${row.intent_id}/${row.attempt} order` }),
       execute: parse(row.execute_json, { label: `attempt ${row.intent_id}/${row.attempt} execute` }), error: row.error,
       createdAt: row.created_at, updatedAt: row.updated_at,
@@ -486,11 +750,11 @@ export class ExecutionJournal {
     this.immediate(() => {
       this.db.prepare(`INSERT INTO tx_attempts
         (intent_id,attempt,state,request_id,signed_tx,signature,blockhash,last_valid_block_height,
-         quoted_output_raw,min_output_raw,order_json,created_at,updated_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+         quoted_output_raw,min_output_raw,order_json,protocol,created_at,updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
           id, n, "signed", attempt.requestId, Buffer.from(attempt.signedTx), attempt.signature,
           attempt.blockhash, Number(attempt.lastValidBlockHeight), String(attempt.quotedOutputRaw),
-          String(attempt.minOutputRaw), json(attempt.order), now, now,
+          String(attempt.minOutputRaw), json(attempt.order), CURRENT_TX_ATTEMPT_PROTOCOL, now, now,
         );
       this.db.prepare("UPDATE intents SET state='signed',signature=?,error=NULL,updated_at=? WHERE id=?")
         .run(attempt.signature, now, id);
@@ -561,7 +825,7 @@ export class ExecutionJournal {
     return this.getIntent(id);
   }
 
-  markAccounted(id, runtime) {
+  markAccounted(id, runtime, { consumeDeferredDeskExit = false } = {}) {
     const intent = this.getIntent(id);
     if (!intent) throw new Error(`unknown intent ${id}`);
     if (intent.state === "accounted") return intent;
@@ -586,6 +850,11 @@ export class ExecutionJournal {
       for (const [mint, value] of Object.entries(runtime.positions || {})) upsert.run(mint, json(value), now);
       for (const row of this.db.prepare("SELECT mint FROM positions").all()) {
         if (!keep.has(row.mint)) this.db.prepare("DELETE FROM positions WHERE mint=?").run(row.mint);
+      }
+      if (consumeDeferredDeskExit) {
+        const removed = this.db.prepare("DELETE FROM deferred_desk_exits WHERE entry_intent_id=?").run(id);
+        if (Number(removed.changes) !== 1)
+          throw new Error(`deferred desk exit for ${id} disappeared before accounting`);
       }
     });
     return this.getIntent(id);

@@ -11,6 +11,20 @@ const VIEWER = path.join(ROOT, "viewer");
 const OUT = path.join(ROOT, "dist");
 
 const IMPORT_LINE = /^import \* as THREE from "\/vendor\/three\/three\.module\.js";.*$/m;
+const executorCommitInput = String(process.env.EXECUTOR_COMMIT || process.env.GITHUB_SHA || "").trim();
+const releaseBuild = Boolean(executorCommitInput);
+if (releaseBuild && !/^[0-9a-f]{40}$/i.test(executorCommitInput)) {
+  throw new Error("EXECUTOR_COMMIT (or CI GITHUB_SHA) must identify the exact 40-character build commit");
+}
+if (!releaseBuild && (process.env.CI || process.env.GITHUB_ACTIONS)) {
+  throw new Error("release builds require EXECUTOR_COMMIT or GITHUB_SHA");
+}
+// A local preview remains buildable without pretending its uncommitted executor
+// graph belongs to HEAD. The viewer detects this non-SHA sentinel, disables both
+// copy buttons, and displays a deliberately non-runnable instruction instead.
+const EXECUTOR_COMMIT = releaseBuild
+  ? executorCommitInput.toLowerCase()
+  : "LOCAL_PREVIEW_NOT_INSTALLABLE";
 
 // Source pages use the dev server's routes. The static build has no server, so every
 // route becomes a plain relative link — which also keeps the site working when GitHub
@@ -52,7 +66,7 @@ fs.copyFileSync(path.join(ROOT, "token", "claudeco-64.png"), path.join(OUT, "ass
 // The self-hosted executor, served static so the one-command install resolves.
 fs.mkdirSync(path.join(OUT, "executor"), { recursive: true });
 const EXECUTOR_FILES = [
-  "poller.mjs", "journal.mjs", "jupiter.mjs", "install.sh", "executor.mjs",
+  "poller.mjs", "journal.mjs", "jupiter.mjs", "balance-verification.mjs", "entry-quote-guard.mjs", "exit-trigger.mjs", "feed-drain.mjs", "sol-usd-oracle.mjs", "heartbeat-health.mjs", "sleep-assertion.mjs", "monitor.mjs", "install.sh", "macos-launchagent.sh", "macos-release.sh", "launchd-runner.mjs", "executor.mjs",
   "README.md", "strategy.mjs", "trade-policy.mjs", "simulate.mjs",
   "package.json", "package-lock.json",
 ];
@@ -72,13 +86,9 @@ for (const { src: name, out } of PAGES) {
   const src = path.join(VIEWER, name);
   if (!fs.existsSync(src)) continue;
   let html = fs.readFileSync(src, "utf8");
-  /* The install command pins the EXECUTOR repo's commit, not this one. They are
-     separate repositories now: the desk is private, the executor is public
-     precisely so a tenant can read what they are about to run. Bump this when
-     you publish a new executor release (and only after reviewing it). */
-  const EXECUTOR_COMMIT = /^[0-9a-f]{40}$/i.test(String(process.env.EXECUTOR_COMMIT || ""))
-    ? String(process.env.EXECUTOR_COMMIT).toLowerCase()
-    : "04f728808713f7856290265bb00120f7aa88e8a4";
+  /* A release installer pin is the exact reviewed build commit. CI supplies github.sha;
+     local release builds must supply EXECUTOR_COMMIT explicitly. Ordinary local builds
+     get a non-installable preview sentinel, never a stale or inferred SHA. */
   html = html.replaceAll("__CLAUDE_COMPANY_SOURCE_COMMIT__", EXECUTOR_COMMIT);
   const srcClosers = (html.match(/<\/script/gi) || []).length;
 

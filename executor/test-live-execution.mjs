@@ -8,10 +8,13 @@ import {
   TransactionMessage, VersionedTransaction,
 } from "@solana/web3.js";
 import { ExecutionJournal } from "./journal.mjs";
+import { validateEntryPreflightContext } from "./entry-quote-guard.mjs";
 import {
   ATA_PROGRAM, JUPITER_EVENT_AUTHORITY, JUPITER_V6, JupiterV2Executor,
-  TOKEN_2022_PROGRAM, TOKEN_PROGRAM, WSOL, decodeJupiterExactIn, validateOrderEnvelope,
+  EXECUTION_READINESS_AMOUNT_LAMPORTS, EXECUTION_READINESS_RESERVE_LAMPORTS,
+  MAINNET_USDC, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, WSOL, decodeJupiterExactIn, validateOrderEnvelope,
   validateSimulationEffects, validateTransaction, verifyFinalizedFill, priceImpactCapForIntent,
+  classicMintDecimals, independentClassicMintDecimals,
 } from "./jupiter.mjs";
 
 let pass = 0;
@@ -42,6 +45,14 @@ const orderBase = {
   transaction: "base64", lastValidBlockHeight: "999", requestId: "request-1",
   taker: wallet.publicKey.toBase58(),
 };
+const entryGuardContext = (now = 1000) => ({
+  event: { stop: 0.8, target: 1.5 },
+  entryReference: { marketMark: 1, entryLow: 0.9, entryHigh: 1.1 },
+  entryPreflight: { inputAmountRaw: "5000000", forwardOutputRaw: "1000",
+    tokenDecimals: 3, solUsd: 200, observedAt: now,
+    solUsdSource: "pyth-sol-usd-shard0-v1", solUsdPublishTime: Math.floor(now / 1_000),
+    solUsdConfidencePct: 0.01, solUsdProviderDivergencePct: 0.1 },
+});
 
 await ok("order envelope is exact-in, Metis-only and capped", async () => {
   assert.equal(validateOrderEnvelope(orderBase, {
@@ -143,7 +154,7 @@ const systemAccount = (lamports, simulated = false) => ({
   executable: false, rentEpoch: 0,
 });
 const tokenAccount = ({ tokenMint, owner, amount, simulated = false, delegate = null,
-  delegatedAmount = 0n, state = 1, closeAuthority = null }) => {
+  delegatedAmount = 0n, state = 1, closeAuthority = null, lamports = 2_039_280 }) => {
   const data = Buffer.alloc(165);
   new PublicKey(tokenMint).toBuffer().copy(data, 0);
   new PublicKey(owner).toBuffer().copy(data, 32);
@@ -159,11 +170,165 @@ const tokenAccount = ({ tokenMint, owner, amount, simulated = false, delegate = 
     new PublicKey(closeAuthority).toBuffer().copy(data, 133);
   }
   return {
-    lamports: 2_039_280, owner: simulated ? TOKEN_PROGRAM : new PublicKey(TOKEN_PROGRAM),
+    lamports, owner: simulated ? TOKEN_PROGRAM : new PublicKey(TOKEN_PROGRAM),
     data: simulated ? [data.toString("base64"), "base64"] : data,
     executable: false, rentEpoch: 0,
   };
 };
+
+const exitAmountRaw = "1000";
+const exitQuotedOutputRaw = "5000000";
+const exitMinOutputRaw = "4850000";
+const exitRoute = new TransactionInstruction({
+  programId: new PublicKey(JUPITER_V6),
+  keys: [
+    { pubkey: wallet.publicKey, isSigner: true, isWritable: false },
+    { pubkey: destinationAta, isSigner: false, isWritable: true },
+    { pubkey: sourceAta, isSigner: false, isWritable: true },
+    { pubkey: new PublicKey(mint), isSigner: false, isWritable: false },
+    { pubkey: new PublicKey(WSOL), isSigner: false, isWritable: false },
+    { pubkey: new PublicKey(TOKEN_PROGRAM), isSigner: false, isWritable: false },
+    { pubkey: new PublicKey(TOKEN_PROGRAM), isSigner: false, isWritable: false },
+    { pubkey: new PublicKey(JUPITER_V6), isSigner: false, isWritable: false },
+    { pubkey: new PublicKey(JUPITER_EVENT_AUTHORITY), isSigner: false, isWritable: false },
+    { pubkey: new PublicKey(JUPITER_V6), isSigner: false, isWritable: false },
+  ],
+  data: routeV2Data({ amount: 1_000n, quoted: 5_000_000n }),
+});
+const makeExitMarkHarness = ({ payer = wallet.publicKey, presigned = false,
+  chainHeight = 600, postOutputRaw = "4900000", secondaryPostOutputRaw = postOutputRaw,
+  secondarySimulationError = null, orderOverrides = {} } = {}) => {
+  const transaction = new VersionedTransaction(new TransactionMessage({
+    payerKey: payer, recentBlockhash, instructions: [exitRoute],
+  }).compileToV0Message());
+  if (presigned) transaction.signatures[0] = new Uint8Array(64).fill(7);
+  const order = {
+    ...orderBase,
+    inputMint: mint,
+    outputMint: WSOL,
+    inAmount: exitAmountRaw,
+    outAmount: exitQuotedOutputRaw,
+    otherAmountThreshold: exitMinOutputRaw,
+    priceImpact: 25,
+    feeMint: mint,
+    platformFee: { amount: "5", feeBps: 10, feeMint: WSOL },
+    transaction: Buffer.from(transaction.serialize()).toString("base64"),
+    ...orderOverrides,
+  };
+  const calls = { order: 0, execute: 0, simulate: 0, journal: 0, secretKey: 0 };
+  const connectionFor = (simulatedOutputRaw, simulationError = null) => ({
+    getAddressLookupTable: async () => ({ value: null }),
+    getAccountInfo: async () => ({ owner: new PublicKey(TOKEN_PROGRAM) }),
+    getMultipleAccountsInfo: async (keys, commitment) => {
+      if (commitment === "confirmed") return keys.map(() => null);
+      assert.equal(commitment, "processed");
+      assert.deepEqual(keys.map((key) => key.toBase58()), [
+        wallet.publicKey.toBase58(), destinationAta.toBase58(), sourceAta.toBase58(),
+      ]);
+      return [
+        systemAccount(20_000_000),
+        tokenAccount({ tokenMint: mint, owner: wallet.publicKey, amount: exitAmountRaw }),
+        tokenAccount({ tokenMint: WSOL, owner: wallet.publicKey, amount: "0" }),
+      ];
+    },
+    getBlockHeight: async (commitment) => {
+      assert.equal(commitment, "confirmed");
+      return chainHeight;
+    },
+    simulateTransaction: async (tx, options) => {
+      calls.simulate++;
+      if (simulationError) throw simulationError;
+      assert.equal(options.sigVerify, false);
+      assert.equal(options.replaceRecentBlockhash, false);
+      assert.ok(tx.signatures.every((signature) =>
+        Buffer.from(signature).every((byte) => byte === 0)), "simulation must receive unsigned bytes");
+      const output = BigInt(simulatedOutputRaw);
+      return { value: {
+        err: null,
+        accounts: [
+          systemAccount(20_000_000, true),
+          tokenAccount({ tokenMint: mint, owner: wallet.publicKey, amount: "0", simulated: true }),
+          tokenAccount({ tokenMint: WSOL, owner: wallet.publicKey, amount: simulatedOutputRaw,
+            lamports: Number(2_039_280n + output), simulated: true }),
+        ],
+        innerInstructions: [],
+      } };
+    },
+  });
+  const connection = connectionFor(postOutputRaw);
+  const secondaryConnection = connectionFor(secondaryPostOutputRaw, secondarySimulationError);
+  const fetchFn = async (url) => {
+    if (String(url).includes("/order?")) {
+      calls.order++;
+      const parsed = new URL(url);
+      assert.equal(parsed.searchParams.get("swapMode"), "ExactIn");
+      assert.equal(parsed.searchParams.get("taker"), wallet.publicKey.toBase58());
+      return response(order);
+    }
+    calls.execute++;
+    throw new Error("read-only exit mark attempted a non-order Jupiter request");
+  };
+  const keypair = {
+    publicKey: wallet.publicKey,
+    get secretKey() { calls.secretKey++; throw new Error("read-only exit mark attempted to sign"); },
+  };
+  const journal = new Proxy({}, { get() {
+    calls.journal++;
+    throw new Error("read-only exit mark touched the execution journal");
+  } });
+  const executor = new JupiterV2Executor({
+    connection, secondaryConnection, keypair, journal, apiKey: "test-key", fetchFn,
+    hardStop: () => true, now: () => 1_000, config: cfg,
+  });
+  const spec = { mint, amountRaw: exitAmountRaw,
+    position: { mint, qtyRaw: exitAmountRaw, costBasisLamports: "5000000" } };
+  return { executor, spec, calls, connection, secondaryConnection, fetchFn };
+};
+const mintAccount = ({ decimals = 6, initialized = true, owner = TOKEN_PROGRAM } = {}) => {
+  const data = Buffer.alloc(82);
+  data[44] = decimals;
+  data[45] = initialized ? 1 : 0;
+  return { owner: new PublicKey(owner), data };
+};
+
+await ok("classic mint decimals are read from the on-chain mint layout", async () => {
+  assert.equal(await classicMintDecimals({
+    getAccountInfo: async () => mintAccount({ decimals: 6 }),
+  }, mint), 6);
+  await assert.rejects(() => classicMintDecimals({
+    getAccountInfo: async () => mintAccount({ decimals: 19 }),
+  }, mint), /outside the live canary range/);
+  await assert.rejects(() => classicMintDecimals({
+    getAccountInfo: async () => ({ owner: new PublicKey(TOKEN_PROGRAM), data: Buffer.alloc(12) }),
+  }, mint), /classic SPL mint layout/);
+});
+
+await ok("entry mint metadata requires two valid, matching RPC views", async () => {
+  const connection = (value, rejection = null) => ({
+    async getAccountInfo() { if (rejection) throw rejection; return value; },
+  });
+  assert.equal(await independentClassicMintDecimals(
+    connection(mintAccount({ decimals: 6 })), connection(mintAccount({ decimals: 6 })), mint), 6);
+  await assert.rejects(() => independentClassicMintDecimals(
+    connection(mintAccount({ decimals: 6 })), connection(mintAccount({ decimals: 9 })), mint),
+  /disagree on decimals/);
+  await assert.rejects(() => independentClassicMintDecimals(
+    connection(mintAccount()), connection(mintAccount({ owner: PublicKey.default.toBase58() })), mint),
+  /rejected.*not owned by classic SPL Token/);
+  await assert.rejects(() => independentClassicMintDecimals(
+    connection(mintAccount()), {
+      getAccountInfo: async () => ({ owner: new PublicKey(TOKEN_PROGRAM), data: Buffer.alloc(12) }),
+    }, mint), /rejected.*classic SPL mint layout/);
+  await assert.rejects(() => independentClassicMintDecimals(
+    connection(mintAccount()), connection(mintAccount({ initialized: false })), mint),
+  /rejected.*not initialized/);
+  await assert.rejects(() => independentClassicMintDecimals(
+    connection(mintAccount()), connection(null, new Error("secret RPC endpoint")), mint),
+  /successful reads from both RPC providers/);
+  const same = connection(mintAccount());
+  await assert.rejects(() => independentClassicMintDecimals(same, same, mint),
+    /two distinct RPC connections/);
+});
 
 await ok("one locally authorized Jupiter route passes instruction validation", async () => {
   const result = await validateTransaction(makeTx(), expectedTx, cfg, validationConnection);
@@ -272,7 +437,7 @@ await ok("simulation must show the exact SOL spend and minimum token receipt", a
   const before = { wallet: systemAccount(20_000_000), input: null, output: null };
   const after = { wallet: systemAccount(12_960_720, true), input: null,
     output: tokenAccount({ tokenMint: mint, owner: wallet.publicKey, amount: 987, simulated: true }) };
-  assert.equal(validateSimulationEffects(before, after, expected, cfg), true);
+  assert.deepEqual(validateSimulationEffects(before, after, expected, cfg), { actualOutputRaw: "987" });
   await assert.rejects(async () => validateSimulationEffects(before, {
     ...after,
     output: tokenAccount({ tokenMint: mint, owner: wallet.publicKey, amount: 969, simulated: true }),
@@ -307,6 +472,184 @@ await ok("simulation must show the exact SOL spend and minimum token receipt", a
   assert.throws(() => validateSimulationEffects(before, {
     ...after, wallet: { ...after.wallet, executable: true },
   }, expected, cfg), /executable flag is invalid/);
+  assert.throws(() => validateSimulationEffects(before, {
+    ...after, wallet: { ...after.wallet, lamports: Number.MAX_SAFE_INTEGER + 1 },
+  }, expected, cfg), /invalid lamport balance/);
+});
+
+await ok("read-only exit mark returns the chain-simulated SOL delta without signing or execution", async () => {
+  const { executor, spec, calls } = makeExitMarkHarness();
+  const mark = await executor.preflightExitMark(spec);
+  assert.deepEqual(mark, {
+    inputMint: mint,
+    outputMint: WSOL,
+    inputAmountRaw: exitAmountRaw,
+    actualOutputRaw: "4900000",
+    quotedOutputRaw: exitQuotedOutputRaw,
+    minOutputRaw: exitMinOutputRaw,
+    priceImpactPct: 25,
+    slippageBps: 300,
+    router: "metis",
+    measurement: "simulated_net_wallet_custody_delta",
+    finalized: false,
+    providers: 2,
+    providerDivergencePct: 0,
+    chainHeight: 600,
+    lastValidBlockHeight: 999,
+    observedAt: 1_000,
+  });
+  assert.ok(Object.isFrozen(mark));
+  assert.equal("transaction" in mark, false);
+  assert.equal("requestId" in mark, false);
+  assert.deepEqual(calls, { order: 1, execute: 0, simulate: 2, journal: 0, secretKey: 0 });
+});
+
+await ok("read-only exit mark fails closed on malicious bytes, expiry and simulated custody", async () => {
+  const wrongPayer = makeExitMarkHarness({ payer: Keypair.generate().publicKey });
+  await assert.rejects(() => wrongPayer.executor.preflightExitMark(wrongPayer.spec), /signer set|fee payer/);
+  assert.deepEqual(wrongPayer.calls, { order: 1, execute: 0, simulate: 0, journal: 0, secretKey: 0 });
+
+  const prefilledSignature = makeExitMarkHarness({ presigned: true });
+  await assert.rejects(() => prefilledSignature.executor.preflightExitMark(prefilledSignature.spec), /not unsigned/);
+  assert.deepEqual(prefilledSignature.calls,
+    { order: 1, execute: 0, simulate: 0, journal: 0, secretKey: 0 });
+
+  const expired = makeExitMarkHarness({ chainHeight: 999 });
+  await assert.rejects(() => expired.executor.preflightExitMark(expired.spec), /already behind/);
+  assert.deepEqual(expired.calls, { order: 1, execute: 0, simulate: 0, journal: 0, secretKey: 0 });
+
+  const noProceeds = makeExitMarkHarness({ postOutputRaw: "0" });
+  await assert.rejects(() => noProceeds.executor.preflightExitMark(noProceeds.spec), /proceeds are not positive/);
+  assert.deepEqual(noProceeds.calls, { order: 1, execute: 0, simulate: 2, journal: 0, secretKey: 0 });
+
+  const badEnvelope = makeExitMarkHarness({ orderOverrides: { router: "jupiterz" } });
+  await assert.rejects(() => badEnvelope.executor.preflightExitMark(badEnvelope.spec), /Metis-only/);
+  assert.deepEqual(badEnvelope.calls, { order: 1, execute: 0, simulate: 0, journal: 0, secretKey: 0 });
+
+  const forgedPrimary = makeExitMarkHarness({
+    postOutputRaw: "4950000", secondaryPostOutputRaw: "4900000",
+  });
+  await assert.rejects(() => forgedPrimary.executor.preflightExitMark(forgedPrimary.spec),
+    /independent RPC simulations diverge/);
+  assert.equal(forgedPrimary.calls.simulate, 2);
+
+  const secondaryOutage = makeExitMarkHarness({
+    secondarySimulationError: new Error("private secondary endpoint unavailable"),
+  });
+  await assert.rejects(() => secondaryOutage.executor.preflightExitMark(secondaryOutage.spec),
+    /private secondary endpoint unavailable/);
+  assert.equal(secondaryOutage.calls.simulate, 2);
+});
+
+await ok("execution-readiness probe exercises both providers without signing, journaling or executing", async () => {
+  const usdcAta = ata(wallet.publicKey, MAINNET_USDC);
+  const amount = BigInt(EXECUTION_READINESS_AMOUNT_LAMPORTS);
+  const quoted = 20_000n;
+  const route = new TransactionInstruction({
+    programId: new PublicKey(JUPITER_V6),
+    keys: [
+      { pubkey: wallet.publicKey, isSigner: true, isWritable: false },
+      { pubkey: sourceAta, isSigner: false, isWritable: true },
+      { pubkey: usdcAta, isSigner: false, isWritable: true },
+      { pubkey: new PublicKey(WSOL), isSigner: false, isWritable: false },
+      { pubkey: new PublicKey(MAINNET_USDC), isSigner: false, isWritable: false },
+      { pubkey: new PublicKey(TOKEN_PROGRAM), isSigner: false, isWritable: false },
+      { pubkey: new PublicKey(TOKEN_PROGRAM), isSigner: false, isWritable: false },
+      { pubkey: new PublicKey(JUPITER_V6), isSigner: false, isWritable: false },
+      { pubkey: new PublicKey(JUPITER_EVENT_AUTHORITY), isSigner: false, isWritable: false },
+      { pubkey: new PublicKey(JUPITER_V6), isSigner: false, isWritable: false },
+    ],
+    data: routeV2Data({ amount, quoted }),
+  });
+  const wrapProbe = SystemProgram.transfer({
+    fromPubkey: wallet.publicKey, toPubkey: sourceAta,
+    lamports: EXECUTION_READINESS_AMOUNT_LAMPORTS,
+  });
+  const transaction = new VersionedTransaction(new TransactionMessage({
+    payerKey: wallet.publicKey, recentBlockhash, instructions: [wrapProbe, route],
+  }).compileToV0Message());
+  const order = {
+    ...orderBase, inputMint: WSOL, outputMint: MAINNET_USDC,
+    inAmount: String(amount), outAmount: String(quoted), otherAmountThreshold: "19400",
+    feeMint: WSOL, platformFee: { amount: "1", feeBps: 10, feeMint: WSOL },
+    signatureFeeLamports: 5000, prioritizationFeeLamports: 0,
+    transaction: Buffer.from(transaction.serialize()).toString("base64"),
+  };
+  const calls = { order: 0, execute: 0, simulate: 0, journal: 0, secretKey: 0 };
+  const provider = () => ({
+    getAddressLookupTable: async () => ({ value: null }),
+    getAccountInfo: async () => ({ owner: new PublicKey(TOKEN_PROGRAM) }),
+    getMultipleAccountsInfo: async (keys, commitment) => commitment === "confirmed"
+      ? keys.map(() => null)
+      : [systemAccount(20_000_000), null, null],
+    getBlockHeight: async () => 600,
+    simulateTransaction: async (tx, options) => {
+      calls.simulate++;
+      assert.equal(options.sigVerify, false);
+      assert.ok(tx.signatures.every((signature) =>
+        Buffer.from(signature).every((byte) => byte === 0)));
+      return { value: { err: null, accounts: [
+        systemAccount(17_855_720, true),
+        null,
+        tokenAccount({ tokenMint: MAINNET_USDC, owner: wallet.publicKey,
+          amount: quoted, simulated: true }),
+      ] } };
+    },
+  });
+  const fetchFn = async (url) => {
+    if (String(url).includes("/order?")) { calls.order++; return response(order); }
+    calls.execute++;
+    throw new Error("execution-readiness probe attempted /execute");
+  };
+  const keypair = {
+    publicKey: wallet.publicKey,
+    get secretKey() { calls.secretKey++; throw new Error("probe attempted to sign"); },
+  };
+  const journal = new Proxy({}, { get() {
+    calls.journal++;
+    throw new Error("probe touched the execution journal");
+  } });
+  const executor = new JupiterV2Executor({
+    connection: provider(), secondaryConnection: provider(), keypair, journal,
+    apiKey: "test", fetchFn, now: () => 5_000, config: cfg,
+  });
+  const result = await executor.probeExecutionReadiness();
+  assert.deepEqual(result, {
+    ready: true, observedAt: 5_000, route: "wsol-usdc", providers: 2,
+    providerDivergencePct: 0, chainHeight: 600, lastValidBlockHeight: 999,
+  });
+  assert.ok(Object.isFrozen(result));
+  assert.deepEqual(calls, { order: 1, execute: 0, simulate: 2, journal: 0, secretKey: 0 });
+  assert.ok(20_000_000n > amount + BigInt(EXECUTION_READINESS_RESERVE_LAMPORTS));
+});
+
+await ok("a signable exit cannot cross the journaled-signature boundary on one RPC's approval", async () => {
+  const harness = makeExitMarkHarness({
+    secondarySimulationError: new Error("secondary rejects the exact unsigned exit"),
+  });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-dual-sign-boundary-"));
+  const journal = new ExecutionJournal(path.join(dir, "state.sqlite"), {
+    wallet: wallet.publicKey.toBase58(),
+  });
+  const executor = new JupiterV2Executor({
+    connection: harness.connection, secondaryConnection: harness.secondaryConnection,
+    keypair: wallet, journal, apiKey: "test", fetchFn: harness.fetchFn,
+    now: () => 1_000, sleep: async () => {}, config: cfg,
+  });
+  const spec = {
+    id: "risk-exit:dual-sign-boundary", kind: "risk_exit", eventId: null, feedId: null,
+    mint, inputMint: mint, outputMint: WSOL, amountRaw: exitAmountRaw,
+    context: { wallet: wallet.publicKey.toBase58(), position: {
+      mint, qtyRaw: exitAmountRaw, costBasisLamports: "5000000",
+    } },
+  };
+  await assert.rejects(() => executor.executeIntent(spec), /secondary rejects the exact unsigned exit/);
+  assert.equal(journal.getIntent(spec.id).state, "planned");
+  assert.equal(journal.latestAttempt(spec.id), null,
+    "one provider's safe simulation must never create broadcastable journaled bytes");
+  assert.equal(harness.calls.execute, 0);
+  journal.close();
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 const finalized = (signature, output = "987") => ({
@@ -319,6 +662,24 @@ const finalized = (signature, output = "987") => ({
     preTokenBalances: [],
     postTokenBalances: [{ accountIndex: 1, owner: wallet.publicKey.toBase58(), mint,
       uiTokenAmount: { amount: output } }],
+  },
+});
+const finalizedExit = (signature, output = "5000000") => ({
+  transaction: { signatures: [signature], message: { staticAccountKeys: [wallet.publicKey] } },
+  meta: {
+    err: null, fee: 5000,
+    preBalances: [20_000_000, 2_039_280, 2_039_280],
+    postBalances: [Number(22_034_280n + BigInt(output)), 0, 2_039_280],
+    preTokenBalances: [
+      { accountIndex: 1, owner: wallet.publicKey.toBase58(), mint: WSOL,
+        uiTokenAmount: { amount: "0" } },
+      { accountIndex: 2, owner: wallet.publicKey.toBase58(), mint,
+        uiTokenAmount: { amount: "1000" } },
+    ],
+    postTokenBalances: [
+      { accountIndex: 2, owner: wallet.publicKey.toBase58(), mint,
+        uiTokenAmount: { amount: "0" } },
+    ],
   },
 });
 await ok("finalized accounting cross-checks actual owner token deltas", async () => {
@@ -405,6 +766,14 @@ await ok("transport retry reuses byte-identical signed transaction and signature
     // added 2026-09-01 refuses to sign an order more than blockHeightWindow (600)
     // blocks ahead of the REAL chain. 999 - 600 = 399 ahead — a plausible fresh order.
     getBlockHeight: async () => 600,
+    isBlockhashValid: async () => ({ value: true }),
+  };
+  const secondaryConnection = {
+    ...connection,
+    getSignatureStatuses: (...args) => connection.getSignatureStatuses(...args),
+    getTransaction: (...args) => connection.getTransaction(...args),
+    getBlockHeight: async () => 600,
+    isBlockhashValid: async () => ({ value: true }),
   };
   const fetchFn = async (url, options = {}) => {
     if (String(url).includes("/order?")) { orderCalls++; return response(builtOrder); }
@@ -423,13 +792,13 @@ await ok("transport retry reuses byte-identical signed transaction and signature
     });
   };
   const executor = new JupiterV2Executor({
-    connection, keypair: wallet, journal, apiKey: "test-key", fetchFn,
+    connection, secondaryConnection, keypair: wallet, journal, apiKey: "test-key", fetchFn,
     now: () => 1000, sleep: async () => {},
     config: { ...cfg, finalityTimeoutMs: 0, maxAttempts: 3 },
   });
   const spec = {
     id: "entry:50:entry:9", kind: "entry", eventId: "50:entry:9", feedId: 9,
-    mint, inputMint: WSOL, outputMint: mint, amountRaw: "5000000", context: {},
+    mint, inputMint: WSOL, outputMint: mint, amountRaw: "5000000", context: entryGuardContext(),
   };
   await assert.rejects(() => executor.executeIntent(spec), /unresolved/);
   const fill = await executor.executeIntent(spec);
@@ -460,13 +829,14 @@ await ok("a post-submit entry pause still reconciles and records a landed buy", 
   });
   journal.markSubmitted(spec.id, 1);
   let executeCalls = 0;
+  const landedRpc = () => ({
+    getSignatureStatuses: async () => ({ value: [{
+      err: null, confirmationStatus: "finalized", confirmations: null,
+    }] }),
+    getTransaction: async () => finalized("sig-paused"),
+  });
   const executor = new JupiterV2Executor({
-    connection: {
-      getSignatureStatuses: async () => ({ value: [{
-        err: null, confirmationStatus: "finalized", confirmations: null,
-      }] }),
-      getTransaction: async () => finalized("sig-paused"),
-    },
+    connection: landedRpc(), secondaryConnection: landedRpc(),
     keypair: wallet, journal, apiKey: "test",
     submissionGate: () => { throw new Error("entries paused after submission"); },
     fetchFn: async () => { executeCalls++; throw new Error("must not resubmit after the gate closes"); },
@@ -478,6 +848,122 @@ await ok("a post-submit entry pause still reconciles and records a landed buy", 
   assert.equal(recovered.actualInputRaw, "5000000");
   assert.equal(recovered.actualOutputRaw, "987");
   assert.equal(executeCalls, 0);
+  journal.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await ok("one provider's phantom finalized exit cannot retire durable custody", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-phantom-finalized-exit-"));
+  const journal = new ExecutionJournal(path.join(dir, "state.sqlite"), {
+    wallet: wallet.publicKey.toBase58(),
+  });
+  const spec = {
+    id: "risk-exit:phantom-finality", kind: "risk_exit", eventId: null, feedId: null,
+    mint, inputMint: mint, outputMint: WSOL, amountRaw: "1000",
+    context: { wallet: wallet.publicKey.toBase58(), position: {
+      mint, qtyRaw: "1000", costBasisLamports: "5000000",
+    } },
+  };
+  journal.ensureIntent(spec);
+  journal.recordSigned(spec.id, {
+    attempt: 1, requestId: "phantom-finality", signedTx: Buffer.from("signed-exit"),
+    signature: "sig-phantom-finality", blockhash: recentBlockhash,
+    lastValidBlockHeight: 100, quotedOutputRaw: "5000000",
+    minOutputRaw: "4850000", order: {},
+  });
+  journal.markSubmitted(spec.id, 1);
+  const primary = {
+    getSignatureStatuses: async () => ({ value: [{
+      err: null, confirmationStatus: "finalized", confirmations: null,
+    }] }),
+    getTransaction: async () => finalizedExit("sig-phantom-finality"),
+  };
+  const secondary = {
+    getSignatureStatuses: async () => ({ value: [null] }),
+    getTransaction: async () => null,
+  };
+  const executor = new JupiterV2Executor({
+    connection: primary, secondaryConnection: secondary, keypair: wallet, journal,
+    apiKey: "test", hardStop: () => true, now: () => 1_000, sleep: async () => {},
+    config: { finalityTimeoutMs: 0 },
+  });
+  await executor.recoverPending();
+  assert.equal(journal.getIntent(spec.id).state, "submitted",
+    "one-provider success remains recoverable and cannot become accounting authority");
+  assert.equal(journal.getIntent(spec.id).actualOutputRaw, null);
+  journal.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await ok("one provider cannot backdate a finalized fill outside the rolling risk window", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-finalized-time-disagree-"));
+  const journal = new ExecutionJournal(path.join(dir, "state.sqlite"), {
+    wallet: wallet.publicKey.toBase58(),
+  });
+  const spec = {
+    id: "entry:finalized-time-disagree", kind: "entry", eventId: "time-disagree", feedId: 17,
+    mint, inputMint: WSOL, outputMint: mint, amountRaw: "5000000",
+    context: { wallet: wallet.publicKey.toBase58() },
+  };
+  journal.ensureIntent(spec);
+  journal.recordSigned(spec.id, {
+    attempt: 1, requestId: "time-disagree", signedTx: Buffer.from("signed-entry"),
+    signature: "sig-time-disagree", blockhash: recentBlockhash,
+    lastValidBlockHeight: 100, quotedOutputRaw: "987", minOutputRaw: "970", order: {},
+  });
+  const status = { err: null, confirmationStatus: "finalized", confirmations: null };
+  const rpc = (blockTime) => ({
+    getSignatureStatuses: async () => ({ value: [status] }),
+    getTransaction: async () => ({ ...finalized("sig-time-disagree"), blockTime }),
+  });
+  const executor = new JupiterV2Executor({
+    connection: rpc(100), secondaryConnection: rpc(1_000), keypair: wallet, journal,
+    apiKey: "test", now: () => 1_000_000, sleep: async () => {},
+    config: { finalityTimeoutMs: 0 },
+  });
+  await assert.rejects(() => executor._acceptFinalized(
+    journal.getIntent(spec.id), journal.latestAttempt(spec.id), null, null,
+  ), /finalizedAtMs/);
+  assert.equal(journal.getIntent(spec.id).state, "ambiguous");
+  assert.equal(journal.db.prepare("SELECT COUNT(*) n FROM risk_events").get().n, 0);
+  journal.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await ok("dual-RPC finalized chain truth outranks false Jupiter success totals and signature", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-chain-truth-success-"));
+  const journal = new ExecutionJournal(path.join(dir, "state.sqlite"), {
+    wallet: wallet.publicKey.toBase58(),
+  });
+  const spec = {
+    id: "entry:chain-truth-success", kind: "entry", eventId: "chain-truth", feedId: 19,
+    mint, inputMint: WSOL, outputMint: mint, amountRaw: "5000000",
+    context: { wallet: wallet.publicKey.toBase58() },
+  };
+  journal.ensureIntent(spec);
+  journal.recordSigned(spec.id, {
+    attempt: 1, requestId: "chain-truth", signedTx: Buffer.from("signed-entry"),
+    signature: "sig-chain-truth", blockhash: recentBlockhash,
+    lastValidBlockHeight: 100, quotedOutputRaw: "987", minOutputRaw: "970", order: {},
+  });
+  const status = { err: null, confirmationStatus: "finalized", confirmations: null };
+  const rpc = () => ({
+    getSignatureStatuses: async () => ({ value: [status] }),
+    getTransaction: async () => finalized("sig-chain-truth"),
+  });
+  const executor = new JupiterV2Executor({
+    connection: rpc(), secondaryConnection: rpc(), keypair: wallet, journal,
+    apiKey: "test", now: () => 1_000, sleep: async () => {},
+  });
+  const recovered = await executor._acceptFinalized(
+    journal.getIntent(spec.id), journal.latestAttempt(spec.id),
+    { status: "Success", code: 0, signature: "jupiter-lied", totalInputAmount: "1",
+      totalOutputAmount: "999999999" }, null,
+  );
+  assert.equal(recovered.state, "confirmed");
+  assert.equal(recovered.signature, "sig-chain-truth");
+  assert.equal(recovered.actualInputRaw, "5000000");
+  assert.equal(recovered.actualOutputRaw, "987");
   journal.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -517,6 +1003,535 @@ await ok("a closed entry gate reconciles never-submitted bytes to proven expiry"
   });
   assert.equal(journal.hasBlockingIntent(exitId), null);
   assert.equal(executeCalls, 0);
+  journal.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await ok("a lagging primary cannot strand an exit whose exact blockhash both RPCs reject", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-split-height-expiry-"));
+  const journal = new ExecutionJournal(path.join(dir, "state.sqlite"), {
+    wallet: wallet.publicKey.toBase58(),
+  });
+  const spec = {
+    id: "risk-exit:split-height", kind: "risk_exit", eventId: null, feedId: null,
+    mint, inputMint: mint, outputMint: WSOL, amountRaw: "987",
+    context: { wallet: wallet.publicKey.toBase58(), position: {
+      mint, qtyRaw: "987", costBasisLamports: "5000000",
+    } },
+  };
+  journal.ensureIntent(spec);
+  journal.recordSigned(spec.id, {
+    attempt: 1, requestId: "split-height", signedTx: Buffer.from("signed-exit"),
+    signature: "sig-split-height", blockhash: recentBlockhash,
+    lastValidBlockHeight: 100, quotedOutputRaw: "5000000",
+    minOutputRaw: "4850000", order: {},
+  });
+  let executeCalls = 0;
+  let secondaryHeightReads = 0;
+  const primary = {
+    getSignatureStatuses: async () => ({ value: [null] }),
+    getBlockHeight: async () => 50,
+    isBlockhashValid: async () => ({ value: false }),
+  };
+  const secondary = {
+    getSignatureStatuses: async () => ({ value: [null] }),
+    getBlockHeight: async () => { secondaryHeightReads++; return 101; },
+    isBlockhashValid: async () => ({ value: false }),
+  };
+  const executor = new JupiterV2Executor({
+    connection: primary, secondaryConnection: secondary,
+    keypair: wallet, journal, apiKey: "test",
+    fetchFn: async () => { executeCalls++; throw new Error("expired bytes must remain undisclosed"); },
+    now: () => 1_000, sleep: async () => {}, config: { finalityTimeoutMs: 0 },
+  });
+  await executor.recoverPending();
+  assert.equal(secondaryHeightReads > 0, true,
+    "first disclosure must consult the independent secondary height even when primary succeeds");
+  assert.equal(executeCalls, 0);
+  assert.equal(journal.getIntent(spec.id).state, "expired",
+    "two dead-blockhash views plus two absent histories must release an undisclosed stop despite a stale height");
+  journal.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await ok("both RPCs must independently place an exit expiry inside the live block window", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-split-height-window-"));
+  const journal = new ExecutionJournal(path.join(dir, "state.sqlite"), {
+    wallet: wallet.publicKey.toBase58(),
+  });
+  const expiry = 9_000_000_000_000_000;
+  const spec = {
+    id: "risk-exit:split-height-window", kind: "risk_exit", eventId: null, feedId: null,
+    mint, inputMint: mint, outputMint: WSOL, amountRaw: "987",
+    context: { wallet: wallet.publicKey.toBase58(), position: {
+      mint, qtyRaw: "987", costBasisLamports: "5000000",
+    } },
+  };
+  journal.ensureIntent(spec);
+  journal.recordSigned(spec.id, {
+    attempt: 1, requestId: "split-height-window", signedTx: Buffer.from("signed-exit"),
+    signature: "sig-split-height-window", blockhash: recentBlockhash,
+    lastValidBlockHeight: expiry, quotedOutputRaw: "5000000",
+    minOutputRaw: "4850000", order: {},
+  });
+  let executeCalls = 0;
+  const rpc = (height) => ({
+    getSignatureStatuses: async () => ({ value: [null] }),
+    getBlockHeight: async () => height,
+  });
+  const executor = new JupiterV2Executor({
+    connection: rpc(expiry - 500), secondaryConnection: rpc(100),
+    keypair: wallet, journal, apiKey: "test",
+    fetchFn: async () => { executeCalls++; throw new Error("unbounded expiry must remain undisclosed"); },
+    now: () => 1_000, sleep: async () => {},
+    config: { finalityTimeoutMs: 0, blockHeightWindow: 600 },
+  });
+  await executor.recoverPending();
+  assert.equal(executeCalls, 0);
+  assert.equal(journal.getIntent(spec.id).state, "signed",
+    "one forged near-expiry view cannot override the independent provider's impossible window");
+  journal.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await ok("a plausible authored expiry cannot disclose a blockhash both RPCs say is dead", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-dead-blockhash-"));
+  const journal = new ExecutionJournal(path.join(dir, "state.sqlite"), {
+    wallet: wallet.publicKey.toBase58(),
+  });
+  const spec = {
+    id: "risk-exit:dead-blockhash", kind: "risk_exit", eventId: null, feedId: null,
+    mint, inputMint: mint, outputMint: WSOL, amountRaw: "987",
+    context: { wallet: wallet.publicKey.toBase58(), position: {
+      mint, qtyRaw: "987", costBasisLamports: "5000000",
+    } },
+  };
+  journal.ensureIntent(spec);
+  journal.recordSigned(spec.id, {
+    attempt: 1, requestId: "dead-blockhash", signedTx: Buffer.from("signed-exit"),
+    signature: "sig-dead-blockhash", blockhash: recentBlockhash,
+    lastValidBlockHeight: 100, quotedOutputRaw: "5000000",
+    minOutputRaw: "4850000", order: {},
+  });
+  let executeCalls = 0;
+  const rpc = () => ({
+    getSignatureStatuses: async () => ({ value: [null] }),
+    getBlockHeight: async () => 50,
+    isBlockhashValid: async () => ({ value: false }),
+  });
+  const executor = new JupiterV2Executor({
+    connection: rpc(), secondaryConnection: rpc(), keypair: wallet, journal, apiKey: "test",
+    fetchFn: async () => { executeCalls++; throw new Error("dead bytes must not be disclosed"); },
+    now: () => 1_000, sleep: async () => {}, config: { finalityTimeoutMs: 0 },
+  });
+  await executor.recoverPending();
+  assert.equal(executeCalls, 0);
+  assert.equal(journal.getIntent(spec.id).state, "expired",
+    "two-RPC-invalid, never-observed undisclosed bytes expire despite Jupiter's inflated height claim");
+  journal.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await ok("a height-method outage cannot strand a two-RPC-dead undisclosed blockhash", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-dead-blockhash-height-outage-"));
+  const journal = new ExecutionJournal(path.join(dir, "state.sqlite"), {
+    wallet: wallet.publicKey.toBase58(),
+  });
+  const spec = {
+    id: "risk-exit:dead-height-outage", kind: "risk_exit", eventId: null, feedId: null,
+    mint, inputMint: mint, outputMint: WSOL, amountRaw: "987",
+    context: { wallet: wallet.publicKey.toBase58(), position: {
+      mint, qtyRaw: "987", costBasisLamports: "5000000",
+    } },
+  };
+  journal.ensureIntent(spec);
+  journal.recordSigned(spec.id, {
+    attempt: 1, requestId: "dead-height-outage", signedTx: Buffer.from("signed-exit"),
+    signature: "sig-dead-height-outage", blockhash: recentBlockhash,
+    lastValidBlockHeight: 100, quotedOutputRaw: "5000000",
+    minOutputRaw: "4850000", order: {},
+  });
+  const rpc = (heightFails = false) => ({
+    getSignatureStatuses: async () => ({ value: [null] }),
+    getBlockHeight: async () => {
+      if (heightFails) throw new Error("height method unavailable");
+      return 50;
+    },
+    isBlockhashValid: async () => ({ value: false }),
+  });
+  const executor = new JupiterV2Executor({
+    connection: rpc(true), secondaryConnection: rpc(), keypair: wallet, journal, apiKey: "test",
+    now: () => 1_000, sleep: async () => {}, config: { finalityTimeoutMs: 0 },
+  });
+  await executor.recoverPending();
+  assert.equal(journal.getIntent(spec.id).state, "expired",
+    "exact dead-hash consensus plus dual history absence outranks an unrelated height-method outage");
+  journal.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await ok("one unavailable history cannot authorize expiry despite two dead blockhash views", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-expiry-history-outage-"));
+  const journal = new ExecutionJournal(path.join(dir, "state.sqlite"), {
+    wallet: wallet.publicKey.toBase58(),
+  });
+  const spec = {
+    id: "risk-exit:history-outage", kind: "risk_exit", eventId: null, feedId: null,
+    mint, inputMint: mint, outputMint: WSOL, amountRaw: "987",
+    context: { wallet: wallet.publicKey.toBase58(), position: {
+      mint, qtyRaw: "987", costBasisLamports: "5000000",
+    } },
+  };
+  journal.ensureIntent(spec);
+  journal.recordSigned(spec.id, {
+    attempt: 1, requestId: "history-outage", signedTx: Buffer.from("signed-exit"),
+    signature: "sig-history-outage", blockhash: recentBlockhash,
+    lastValidBlockHeight: 100, quotedOutputRaw: "5000000",
+    minOutputRaw: "4850000", order: {},
+  });
+  const primary = {
+    getSignatureStatuses: async () => { throw new Error("primary history unavailable"); },
+    getBlockHeight: async () => 101,
+    isBlockhashValid: async () => ({ value: false }),
+  };
+  const secondary = {
+    getSignatureStatuses: async () => ({ value: [null] }),
+    getBlockHeight: async () => 101,
+    isBlockhashValid: async () => ({ value: false }),
+  };
+  const executor = new JupiterV2Executor({
+    connection: primary, secondaryConnection: secondary, keypair: wallet, journal, apiKey: "test",
+    now: () => 1_000, sleep: async () => {}, config: { finalityTimeoutMs: 0 },
+  });
+  await executor.recoverPending({ observationOnly: true, maxIntents: 1 });
+  assert.equal(journal.getIntent(spec.id).state, "signed",
+    "replacement needs an explicit fulfilled-null read from both independent histories");
+  assert.equal(journal.attempts(spec.id).length, 1);
+  journal.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await ok("a disappearing signature observation is durably denied replacement authority", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-dead-blockhash-observed-"));
+  const journal = new ExecutionJournal(path.join(dir, "state.sqlite"), {
+    wallet: wallet.publicKey.toBase58(),
+  });
+  const spec = {
+    id: "risk-exit:dead-blockhash-observed", kind: "risk_exit", eventId: null, feedId: null,
+    mint, inputMint: mint, outputMint: WSOL, amountRaw: "987",
+    context: { wallet: wallet.publicKey.toBase58(), position: {
+      mint, qtyRaw: "987", costBasisLamports: "5000000",
+    } },
+  };
+  journal.ensureIntent(spec);
+  journal.recordSigned(spec.id, {
+    attempt: 1, requestId: "dead-blockhash-observed", signedTx: Buffer.from("signed-exit"),
+    signature: "sig-dead-blockhash-observed", blockhash: recentBlockhash,
+    lastValidBlockHeight: 100, quotedOutputRaw: "5000000",
+    minOutputRaw: "4850000", order: {},
+  });
+  const observed = { err: null, confirmationStatus: "confirmed", confirmations: 1 };
+  let primaryStatusReads = 0;
+  const primary = {
+    getSignatureStatuses: async () => ({
+      value: [++primaryStatusReads === 1 ? observed : null],
+    }),
+    getBlockHeight: async () => 50,
+    isBlockhashValid: async () => ({ value: false }),
+  };
+  const secondary = {
+    getSignatureStatuses: async () => ({ value: [null] }),
+    getBlockHeight: async () => 50,
+    isBlockhashValid: async () => ({ value: false }),
+  };
+  const executor = new JupiterV2Executor({
+    connection: primary, secondaryConnection: secondary, keypair: wallet, journal, apiKey: "test",
+    now: () => 1_000, sleep: async () => {}, config: { finalityTimeoutMs: 0 },
+  });
+  await executor.recoverPending();
+  assert.equal(journal.getIntent(spec.id).state, "ambiguous",
+    "the first observation must cross a durable no-replacement boundary");
+  await executor.recoverPending();
+  assert.equal(journal.getIntent(spec.id).state, "ambiguous",
+    "later null/pruned histories cannot erase an earlier chain observation");
+  assert.equal(journal.attempts(spec.id).length, 1);
+  journal.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await ok("one-provider finalized success durably removes signed replacement authority", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-finalized-observation-lag-"));
+  const journal = new ExecutionJournal(path.join(dir, "state.sqlite"), {
+    wallet: wallet.publicKey.toBase58(),
+  });
+  const spec = {
+    id: "entry:finalized-observation-lag", kind: "entry", eventId: "finalized-lag", feedId: 18,
+    mint, inputMint: WSOL, outputMint: mint, amountRaw: "5000000",
+    context: { wallet: wallet.publicKey.toBase58() },
+  };
+  journal.ensureIntent(spec);
+  journal.recordSigned(spec.id, {
+    attempt: 1, requestId: "finalized-lag", signedTx: Buffer.from("signed-entry"),
+    signature: "sig-finalized-lag", blockhash: recentBlockhash,
+    lastValidBlockHeight: 100, quotedOutputRaw: "987", minOutputRaw: "970", order: {},
+  });
+  let primaryVisible = true;
+  const finalizedStatus = { err: null, confirmationStatus: "finalized", confirmations: null };
+  const primary = {
+    getSignatureStatuses: async () => ({ value: [primaryVisible ? finalizedStatus : null] }),
+    getTransaction: async () => primaryVisible ? finalized("sig-finalized-lag") : null,
+    getBlockHeight: async () => 50,
+  };
+  const secondary = {
+    getSignatureStatuses: async () => ({ value: [null] }),
+    getTransaction: async () => null,
+    getBlockHeight: async () => 50,
+  };
+  const executor = new JupiterV2Executor({
+    connection: primary, secondaryConnection: secondary, keypair: wallet, journal, apiKey: "test",
+    now: () => 1_000, sleep: async () => {}, config: { finalityTimeoutMs: 0 },
+  });
+  await executor.recoverPending({ observationOnly: true, maxIntents: 1 });
+  assert.equal(journal.getIntent(spec.id).state, "ambiguous",
+    "a lagging second provider may delay accounting but cannot leave observed bytes rebuildable");
+  primaryVisible = false;
+  await executor.recoverPending({ observationOnly: true, maxIntents: 1 });
+  assert.equal(journal.getIntent(spec.id).state, "ambiguous");
+  assert.equal(journal.attempts(spec.id).length, 1);
+  journal.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await ok("a crash-window submitted attempt never POSTs a dead exact blockhash", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-submitted-dead-blockhash-"));
+  const journal = new ExecutionJournal(path.join(dir, "state.sqlite"), {
+    wallet: wallet.publicKey.toBase58(),
+  });
+  const spec = {
+    id: "risk-exit:submitted-dead-blockhash", kind: "risk_exit", eventId: null, feedId: null,
+    mint, inputMint: mint, outputMint: WSOL, amountRaw: "987",
+    context: { wallet: wallet.publicKey.toBase58(), position: {
+      mint, qtyRaw: "987", costBasisLamports: "5000000",
+    } },
+  };
+  journal.ensureIntent(spec);
+  journal.recordSigned(spec.id, {
+    attempt: 1, requestId: "submitted-dead", signedTx: Buffer.from("signed-exit"),
+    signature: "sig-submitted-dead", blockhash: recentBlockhash,
+    lastValidBlockHeight: 100, quotedOutputRaw: "5000000",
+    minOutputRaw: "4850000", order: {},
+  });
+  journal.markSubmitted(spec.id, 1); // crash may have occurred before the actual POST
+  const rpc = () => ({
+    getSignatureStatuses: async () => ({ value: [null] }),
+    getBlockHeight: async () => 50,
+    isBlockhashValid: async () => ({ value: false }),
+  });
+  let executeCalls = 0;
+  const executor = new JupiterV2Executor({
+    connection: rpc(), secondaryConnection: rpc(), keypair: wallet, journal, apiKey: "test",
+    fetchFn: async () => { executeCalls++; throw new Error("dead submitted bytes must not be POSTed"); },
+    now: () => 1_000, sleep: async () => {}, config: { finalityTimeoutMs: 0 },
+  });
+  await executor.recoverPending();
+  assert.equal(executeCalls, 0);
+  assert.equal(journal.getIntent(spec.id).state, "submitted",
+    "unexpired authored height cannot override two dead exact-blockhash views");
+  assert.equal(journal.attempts(spec.id).length, 1);
+  journal.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await ok("a legacy signed entry without independent provenance is never POSTed", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-legacy-signed-gate-"));
+  const journal = new ExecutionJournal(path.join(dir, "state.sqlite"), { wallet: wallet.publicKey.toBase58() });
+  const spec = {
+    id: "entry:50:entry:legacy-signed", kind: "entry",
+    eventId: "50:entry:legacy-signed", feedId: 18,
+    mint, inputMint: WSOL, outputMint: mint, amountRaw: "5000000",
+    // This is the pre-independent-oracle shape: enough for the old runtime, but no
+    // Pyth publish/confidence/dual-RPC proof and therefore no new submission authority.
+    context: { wallet: wallet.publicKey.toBase58(), event: { mint, stop: 0.8, target: 1.5 },
+      entryReference: { marketMark: 1, entryLow: 0.9, entryHigh: 1.1 },
+      entryPreflight: { inputAmountRaw: "5000000", forwardOutputRaw: "1000", solUsd: 200 } },
+  };
+  journal.ensureIntent(spec);
+  journal.recordSigned(spec.id, {
+    attempt: 1, requestId: "legacy-signed", signedTx: Buffer.from("legacy-signed"),
+    signature: "sig-legacy-signed", blockhash: recentBlockhash,
+    lastValidBlockHeight: 100, quotedOutputRaw: "1000", minOutputRaw: "970", order: {},
+  });
+  const rpc = {
+    getSignatureStatuses: async () => ({ value: [null] }),
+    getBlockHeight: async () => 50,
+  };
+  let executeCalls = 0;
+  const executor = new JupiterV2Executor({
+    connection: rpc, secondaryConnection: rpc, keypair: wallet, journal, apiKey: "test",
+    submissionGate: (intent) => validateEntryPreflightContext(intent, {
+      nowMs: 1_000, maxEntryPreflightAgeMs: 60_000,
+    }),
+    fetchFn: async () => { executeCalls++; throw new Error("legacy bytes must remain undisclosed"); },
+    now: () => 1_000, sleep: async () => {}, config: { finalityTimeoutMs: 0 },
+  });
+  await executor.recoverPending();
+  assert.equal(executeCalls, 0);
+  assert.equal(journal.getIntent(spec.id).state, "signed",
+    "unexpired never-disclosed bytes stay held until expiry can be proven");
+  journal.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await ok("an unversioned signed-era attempt is observation-only and can never be replaced", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-unversioned-signed-"));
+  const journal = new ExecutionJournal(path.join(dir, "state.sqlite"), { wallet: wallet.publicKey.toBase58() });
+  const spec = {
+    id: "entry:50:entry:unversioned", kind: "entry", eventId: "unversioned", feedId: 19,
+    mint, inputMint: WSOL, outputMint: mint, amountRaw: "5000000",
+    context: { wallet: wallet.publicKey.toBase58() },
+  };
+  journal.ensureIntent(spec);
+  journal.recordSigned(spec.id, {
+    attempt: 1, requestId: "unversioned", signedTx: Buffer.from("old-era-bytes"),
+    signature: "sig-unversioned", blockhash: recentBlockhash,
+    lastValidBlockHeight: 100, quotedOutputRaw: "1000", minOutputRaw: "970", order: {},
+  });
+  journal.db.prepare("UPDATE tx_attempts SET protocol=NULL WHERE intent_id=?").run(spec.id);
+  const rpc = {
+    getSignatureStatuses: async () => ({ value: [null] }),
+    getBlockHeight: async () => 101,
+    isBlockhashValid: async () => ({ value: false }),
+  };
+  let executeCalls = 0;
+  const executor = new JupiterV2Executor({
+    connection: rpc, secondaryConnection: rpc, keypair: wallet, journal, apiKey: "test",
+    fetchFn: async () => { executeCalls++; throw new Error("unversioned bytes must not be disclosed"); },
+    now: () => 1_000, sleep: async () => {}, config: { finalityTimeoutMs: 0 },
+  });
+  await executor.recoverPending();
+  assert.equal(executeCalls, 0);
+  assert.equal(journal.getIntent(spec.id).state, "ambiguous");
+  assert.match(journal.getIntent(spec.id).error, /unversioned signed-era protocol missing/);
+  await assert.rejects(() => executor.executeIntent(spec), /AMBIGUOUS/);
+  journal.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await ok("a pre-dual-RPC v1 signed attempt is observation-only and never disclosed", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-v1-signed-"));
+  const journal = new ExecutionJournal(path.join(dir, "state.sqlite"), {
+    wallet: wallet.publicKey.toBase58(),
+  });
+  const spec = {
+    id: "risk-exit:v1-signed", kind: "risk_exit", eventId: null, feedId: null,
+    mint, inputMint: mint, outputMint: WSOL, amountRaw: "987",
+    context: { wallet: wallet.publicKey.toBase58(), position: {
+      mint, qtyRaw: "987", costBasisLamports: "5000000",
+    } },
+  };
+  journal.ensureIntent(spec);
+  journal.recordSigned(spec.id, {
+    attempt: 1, requestId: "v1-signed", signedTx: Buffer.from("pre-dual-rpc-bytes"),
+    signature: "sig-v1-signed", blockhash: recentBlockhash,
+    lastValidBlockHeight: 100, quotedOutputRaw: "5000000",
+    minOutputRaw: "4850000", order: {},
+  });
+  journal.db.prepare("UPDATE tx_attempts SET protocol=? WHERE intent_id=?")
+    .run("jupiter-unsigned-preflight-v1", spec.id);
+  const rpc = () => ({
+    getSignatureStatuses: async () => ({ value: [null] }),
+    getBlockHeight: async () => 50,
+    isBlockhashValid: async () => ({ value: true }),
+  });
+  let executeCalls = 0;
+  const executor = new JupiterV2Executor({
+    connection: rpc(), secondaryConnection: rpc(), keypair: wallet, journal, apiKey: "test",
+    fetchFn: async () => { executeCalls++; throw new Error("v1 bytes must never be disclosed"); },
+    now: () => 1_000, sleep: async () => {}, config: { finalityTimeoutMs: 0 },
+  });
+  await executor.recoverPending();
+  assert.equal(executeCalls, 0,
+    "bytes built before dual-provider validation cannot inherit current disclosure authority");
+  assert.equal(journal.getIntent(spec.id).state, "signed");
+  assert.equal(journal.latestAttempt(spec.id).protocol, "jupiter-unsigned-preflight-v1");
+  journal.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await ok("an unversioned submitted-era exit is observation-only and is never POSTed", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-unversioned-submitted-"));
+  const journal = new ExecutionJournal(path.join(dir, "state.sqlite"), {
+    wallet: wallet.publicKey.toBase58(),
+  });
+  const spec = {
+    id: "risk-exit:unversioned-submitted", kind: "risk_exit", eventId: null, feedId: null,
+    mint, inputMint: mint, outputMint: WSOL, amountRaw: "987",
+    context: { wallet: wallet.publicKey.toBase58(), position: {
+      mint, qtyRaw: "987", costBasisLamports: "5000000",
+    } },
+  };
+  journal.ensureIntent(spec);
+  journal.recordSigned(spec.id, {
+    attempt: 1, requestId: "unversioned-submitted", signedTx: Buffer.from("old-era-exit"),
+    signature: "sig-unversioned-submitted", blockhash: recentBlockhash,
+    lastValidBlockHeight: 100, quotedOutputRaw: "5000000",
+    minOutputRaw: "4850000", order: {},
+  });
+  journal.db.prepare("UPDATE tx_attempts SET protocol=NULL WHERE intent_id=?").run(spec.id);
+  journal.markSubmitted(spec.id, 1);
+  const rpc = () => ({
+    getSignatureStatuses: async () => ({ value: [null] }),
+    getBlockHeight: async () => 50,
+  });
+  let executeCalls = 0;
+  const executor = new JupiterV2Executor({
+    connection: rpc(), secondaryConnection: rpc(), keypair: wallet, journal, apiKey: "test",
+    fetchFn: async () => { executeCalls++; throw new Error("old submitted bytes must not be disclosed"); },
+    now: () => 1_000, sleep: async () => {}, config: { finalityTimeoutMs: 0 },
+  });
+  await executor.recoverPending();
+  assert.equal(executeCalls, 0);
+  assert.equal(journal.getIntent(spec.id).state, "submitted",
+    "unexpired legacy submitted bytes remain observation-only pending chain evidence");
+  await assert.rejects(() => executor.executeIntent(spec), /unresolved/);
+  assert.equal(executeCalls, 0, "direct resume must enforce the same protocol boundary");
+  journal.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await ok("an unversioned signed-era attempt may still reconcile a finalized fill", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-unversioned-finalized-"));
+  const journal = new ExecutionJournal(path.join(dir, "state.sqlite"), { wallet: wallet.publicKey.toBase58() });
+  const spec = {
+    id: "entry:50:entry:unversioned-finalized", kind: "entry",
+    eventId: "unversioned-finalized", feedId: 20,
+    mint, inputMint: WSOL, outputMint: mint, amountRaw: "5000000",
+    context: { wallet: wallet.publicKey.toBase58() },
+  };
+  journal.ensureIntent(spec);
+  journal.recordSigned(spec.id, {
+    attempt: 1, requestId: "unversioned-finalized", signedTx: Buffer.from("old-era-bytes"),
+    signature: "sig-unversioned-finalized", blockhash: recentBlockhash,
+    lastValidBlockHeight: 100, quotedOutputRaw: "987", minOutputRaw: "970", order: {},
+  });
+  journal.db.prepare("UPDATE tx_attempts SET protocol=NULL WHERE intent_id=?").run(spec.id);
+  let executeCalls = 0;
+  const finalizedRpc = () => ({
+    getSignatureStatuses: async () => ({ value: [{
+      err: null, confirmationStatus: "finalized", confirmations: null,
+    }] }),
+    getTransaction: async () => finalized("sig-unversioned-finalized"),
+  });
+  const executor = new JupiterV2Executor({
+    connection: finalizedRpc(), secondaryConnection: finalizedRpc(),
+    keypair: wallet, journal, apiKey: "test",
+    fetchFn: async () => { executeCalls++; throw new Error("must reconcile without disclosure"); },
+    now: () => 1_000, sleep: async () => {}, config: { finalityTimeoutMs: 0 },
+  });
+  await executor.recoverPending();
+  assert.equal(executeCalls, 0);
+  assert.equal(journal.getIntent(spec.id).state, "confirmed");
+  assert.equal(journal.getIntent(spec.id).actualOutputRaw, "987");
   journal.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -612,26 +1627,161 @@ await ok("matching finalized errors on both RPCs may safely fail the attempt", a
     blockhash: recentBlockhash, lastValidBlockHeight: 100, quotedOutputRaw: "1000",
     minOutputRaw: "970", order: {},
   });
+  journal.recordExecuteResponse(spec.id, 1, {
+    status: "Success", code: 0, signature: "sig-error-both",
+  });
   const errorStatus = { err: { InstructionError: [1, { Custom: 6001 }] },
     confirmationStatus: "finalized", confirmations: null };
-  const rpc = {
+  const rpc = () => ({
     getSignatureStatuses: async () => ({ value: [errorStatus] }),
     getTransaction: async () => ({
-      transaction: { signatures: ["sig-error-both"] },
+      transaction: { signatures: ["sig-error-both"],
+        message: { staticAccountKeys: [wallet.publicKey] } },
       meta: { err: errorStatus.err, fee: 5000 },
     }),
     // The signed-attempt expiry bound in _resume reads the chain first; 50 < 100
     // keeps this test about finalized-error consensus, not expiry.
     getBlockHeight: async () => 50,
-  };
+  });
   const executor = new JupiterV2Executor({
-    connection: rpc, secondaryConnection: rpc, keypair: wallet, journal, apiKey: "test",
+    connection: rpc(), secondaryConnection: rpc(), keypair: wallet, journal, apiKey: "test",
     hardStop: () => true, now: () => 1000, sleep: async () => {},
     config: { finalityTimeoutMs: 0 },
   });
   await executor.recoverPending();
   assert.equal(journal.getIntent(spec.id).state, "failed");
   assert.equal(journal.rollingRisk().realizedTodaySol, -0.000005);
+  journal.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await ok("matching failure statuses cannot hide mismatched one-provider fee evidence", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-error-fee-disagree-"));
+  const journal = new ExecutionJournal(path.join(dir, "state.sqlite"), {
+    wallet: wallet.publicKey.toBase58(),
+  });
+  const spec = {
+    id: "entry:50:entry:error-fee-disagree", kind: "entry", eventId: "error-fee", feedId: 21,
+    mint, inputMint: WSOL, outputMint: mint, amountRaw: "5000000",
+    context: { wallet: wallet.publicKey.toBase58() },
+  };
+  journal.ensureIntent(spec);
+  journal.recordSigned(spec.id, {
+    attempt: 1, requestId: "error-fee", signedTx: Buffer.from("signed"),
+    signature: "sig-error-fee", blockhash: recentBlockhash,
+    lastValidBlockHeight: 100, quotedOutputRaw: "1000", minOutputRaw: "970", order: {},
+  });
+  const errorStatus = { err: { InstructionError: [1, { Custom: 6001 }] },
+    confirmationStatus: "finalized", confirmations: null };
+  const rpc = (fee) => ({
+    getSignatureStatuses: async () => ({ value: [errorStatus] }),
+    getTransaction: async () => ({
+      transaction: { signatures: ["sig-error-fee"],
+        message: { staticAccountKeys: [wallet.publicKey] } },
+      meta: { err: errorStatus.err, fee },
+    }),
+    getBlockHeight: async () => 50,
+  });
+  const executor = new JupiterV2Executor({
+    connection: rpc(5000), secondaryConnection: rpc(6000), keypair: wallet, journal,
+    apiKey: "test", hardStop: () => true, now: () => 1_000, sleep: async () => {},
+    config: { finalityTimeoutMs: 0 },
+  });
+  await executor.recoverPending();
+  assert.equal(journal.getIntent(spec.id).state, "ambiguous");
+  assert.match(journal.getIntent(spec.id).error, /different finalized network fees/);
+  assert.equal(journal.db.prepare("SELECT COUNT(*) n FROM attempt_fee_events").get().n, 0);
+  journal.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await ok("matching failure fees cannot hide mismatched one-provider block times", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-error-time-disagree-"));
+  const journal = new ExecutionJournal(path.join(dir, "state.sqlite"), {
+    wallet: wallet.publicKey.toBase58(),
+  });
+  const spec = {
+    id: "entry:error-time-disagree", kind: "entry", eventId: "error-time", feedId: 22,
+    mint, inputMint: WSOL, outputMint: mint, amountRaw: "5000000",
+    context: { wallet: wallet.publicKey.toBase58() },
+  };
+  journal.ensureIntent(spec);
+  journal.recordSigned(spec.id, {
+    attempt: 1, requestId: "error-time", signedTx: Buffer.from("signed"),
+    signature: "sig-error-time", blockhash: recentBlockhash,
+    lastValidBlockHeight: 100, quotedOutputRaw: "1000", minOutputRaw: "970", order: {},
+  });
+  const errorStatus = { err: { InstructionError: [1, { Custom: 6001 }] },
+    confirmationStatus: "finalized", confirmations: null };
+  const rpc = (blockTime) => ({
+    getSignatureStatuses: async () => ({ value: [errorStatus] }),
+    getTransaction: async () => ({
+      transaction: { signatures: ["sig-error-time"],
+        message: { staticAccountKeys: [wallet.publicKey] } },
+      meta: { err: errorStatus.err, fee: 5000 }, blockTime,
+    }),
+  });
+  const executor = new JupiterV2Executor({
+    connection: rpc(100), secondaryConnection: rpc(1_000), keypair: wallet, journal,
+    apiKey: "test", now: () => 1_000_000, sleep: async () => {},
+    config: { finalityTimeoutMs: 0 },
+  });
+  const consensus = await executor._confirmFinalizedFailure("sig-error-time",
+    journal.getIntent(spec.id));
+  assert.equal(consensus.confirmed, false);
+  assert.match(consensus.reason, /different finalized block times/);
+  assert.equal(journal.db.prepare("SELECT COUNT(*) n FROM attempt_fee_events").get().n, 0);
+  journal.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await ok("expiry-path failure evidence also requires matching metadata from both providers", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-expiry-error-fee-disagree-"));
+  const journal = new ExecutionJournal(path.join(dir, "state.sqlite"), {
+    wallet: wallet.publicKey.toBase58(),
+  });
+  const spec = {
+    id: "risk-exit:expiry-error-fee", kind: "risk_exit", eventId: null, feedId: null,
+    mint, inputMint: mint, outputMint: WSOL, amountRaw: "1000",
+    context: { wallet: wallet.publicKey.toBase58(), position: {
+      mint, qtyRaw: "1000", costBasisLamports: "5000000",
+    } },
+  };
+  journal.ensureIntent(spec);
+  journal.recordSigned(spec.id, {
+    attempt: 1, requestId: "expiry-error-fee", signedTx: Buffer.from("signed"),
+    signature: "sig-expiry-error-fee", blockhash: recentBlockhash,
+    lastValidBlockHeight: 100, quotedOutputRaw: "5000000", minOutputRaw: "4850000", order: {},
+  });
+  journal.markSubmitted(spec.id, 1);
+  const errorStatus = { err: { InstructionError: [1, { Custom: 6001 }] },
+    confirmationStatus: "finalized", confirmations: null };
+  let primaryStatusReads = 0;
+  let secondaryStatusReads = 0;
+  const failedTx = (fee) => ({
+    transaction: { signatures: ["sig-expiry-error-fee"],
+      message: { staticAccountKeys: [wallet.publicKey] } },
+    meta: { err: errorStatus.err, fee },
+  });
+  const primary = {
+    getSignatureStatuses: async () => ({ value: [++primaryStatusReads === 1 ? null : errorStatus] }),
+    getTransaction: async () => failedTx(5000),
+    getBlockHeight: async () => 101,
+  };
+  const secondary = {
+    getSignatureStatuses: async () => ({ value: [++secondaryStatusReads === 1 ? null : errorStatus] }),
+    getTransaction: async () => failedTx(6000),
+    getBlockHeight: async () => 101,
+  };
+  const executor = new JupiterV2Executor({
+    connection: primary, secondaryConnection: secondary, keypair: wallet, journal,
+    apiKey: "test", hardStop: () => true, now: () => 1_000, sleep: async () => {},
+    config: { finalityTimeoutMs: 0 },
+  });
+  await executor.recoverPending();
+  assert.equal(journal.getIntent(spec.id).state, "ambiguous");
+  assert.match(journal.getIntent(spec.id).error, /different finalized network fees/);
+  assert.equal(journal.db.prepare("SELECT COUNT(*) n FROM attempt_fee_events").get().n, 0);
   journal.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });

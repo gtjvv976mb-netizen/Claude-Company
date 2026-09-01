@@ -14,9 +14,15 @@ import {
   TransactionMessage,
   VersionedTransaction,
 } from "@solana/web3.js";
+import { validateExecutableEntryOrder } from "./entry-quote-guard.mjs";
+import { validateExecutableExitOrder } from "./exit-trigger.mjs";
+import { CURRENT_TX_ATTEMPT_PROTOCOL } from "./journal.mjs";
 
 export const WSOL = "So11111111111111111111111111111111111111112";
-export const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+export const MAINNET_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+export const EXECUTION_READINESS_ROUTE = "wsol-usdc";
+export const EXECUTION_READINESS_AMOUNT_LAMPORTS = 100_000;
+export const EXECUTION_READINESS_RESERVE_LAMPORTS = 10_000_000;
 export const JUPITER_V6 = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
 export const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 export const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
@@ -186,6 +192,66 @@ async function mintTokenProgram(connection, mint) {
   return TOKEN_PROGRAM;
 }
 
+/** Read the immutable decimals byte from a classic SPL mint account.
+ *
+ * Entry-price validation needs an on-chain unit conversion. Without this, a
+ * Jupiter token/lamport rate can be declared equivalent to an unrelated USD mark
+ * merely by treating the first quote as the conversion anchor. The first canary
+ * deliberately rejects unusual (>18) decimal counts instead of doing floating
+ * point arithmetic over an impractical scale.
+ */
+function classicMintMetadata(account, mint) {
+  if (!account) throw new Error(`mint account is unavailable: ${mint}`);
+  const owner = account.owner?.toBase58?.() || String(account.owner || "");
+  if (owner === TOKEN_2022_PROGRAM)
+    throw new Error(`mint ${mint} uses Token-2022; the first live canary accepts classic SPL Token only`);
+  if (owner !== TOKEN_PROGRAM) throw new Error(`mint ${mint} is not owned by classic SPL Token`);
+  const data = accountData(account);
+  if (!data || data.length !== 82) throw new Error(`mint ${mint} does not have the classic SPL mint layout`);
+  if (data[45] !== 1) throw new Error(`mint ${mint} is not initialized`);
+  const decimals = Number(data[44]);
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 18)
+    throw new Error(`mint ${mint} decimal count ${decimals} is outside the live canary range`);
+  return { owner, dataLength: data.length, initialized: data[45], decimals };
+}
+
+export async function classicMintDecimals(connection, mint) {
+  if (mint === WSOL) return 9;
+  const account = await connection.getAccountInfo(new PublicKey(mint), "confirmed");
+  return classicMintMetadata(account, mint).decimals;
+}
+
+/**
+ * Resolve entry unit conversion only when both independent RPC providers agree on
+ * the classic SPL mint metadata that controls it. A forged decimals byte from one
+ * provider would otherwise move the absolute USD entry anchor by powers of ten.
+ */
+export async function independentClassicMintDecimals(primaryConnection, secondaryConnection, mint) {
+  if (mint === WSOL) return 9;
+  if (!primaryConnection || !secondaryConnection || primaryConnection === secondaryConnection)
+    throw new Error("classic mint consensus requires two distinct RPC connections");
+  const mintKey = new PublicKey(mint);
+  const reads = await Promise.allSettled([
+    primaryConnection.getAccountInfo(mintKey, "confirmed"),
+    secondaryConnection.getAccountInfo(mintKey, "confirmed"),
+  ]);
+  if (reads[0].status !== "fulfilled" || reads[1].status !== "fulfilled")
+    throw new Error("classic mint consensus requires successful reads from both RPC providers");
+
+  let primary, secondary;
+  try {
+    primary = classicMintMetadata(reads[0].value, mint);
+    secondary = classicMintMetadata(reads[1].value, mint);
+  } catch (error) {
+    throw new Error(`classic mint consensus rejected an RPC view: ${error.message}`);
+  }
+  for (const field of ["owner", "dataLength", "initialized", "decimals"]) {
+    if (primary[field] !== secondary[field])
+      throw new Error(`classic mint RPC views disagree on ${field}`);
+  }
+  return primary.decimals;
+}
+
 const accountOwner = (account) => account?.owner?.toBase58?.() || String(account?.owner || "");
 const accountData = (account) => {
   if (!account) return null;
@@ -251,8 +317,13 @@ export function validateSimulationEffects(before, after, expected, cfg) {
     const data = accountData(account);
     if (!data || data.length !== 0) throw new Error(`${label} contains unexpected account data`);
   }
-  const walletBefore = BigInt(before.wallet.lamports);
-  const walletAfter = BigInt(after.wallet.lamports);
+  const walletLamports = (account, label) => {
+    if (!Number.isSafeInteger(account.lamports) || account.lamports < 0)
+      throw new Error(`${label} has an invalid lamport balance`);
+    return BigInt(account.lamports);
+  };
+  walletLamports(before.wallet, "pre-simulation wallet");
+  walletLamports(after.wallet, "post-simulation wallet");
   // A wrapped-SOL ATA may legitimately be absent before creation or after
   // CloseAccount. Whenever it does exist, it must still be canonical custody
   // with no delegate or close authority left behind by an inner CPI.
@@ -325,6 +396,7 @@ export function validateSimulationEffects(before, after, expected, cfg) {
   const quotedOutput = BigInt(positiveRaw(expected.quotedOutputRaw, "quoted output for simulation cross-check"));
   const shortfallCapPct = BigInt(Math.round(cfg.maxQuoteShortfallPct ?? 15));
 
+  let actualOutput;
   if (expected.outputMint !== WSOL) {
     const pre = checkedTokenAmount(before.output, {
       program: expected.outputProgram, mint: expected.outputMint, wallet: expected.wallet,
@@ -334,20 +406,45 @@ export function validateSimulationEffects(before, after, expected, cfg) {
       program: expected.outputProgram, mint: expected.outputMint, wallet: expected.wallet,
       label: "post-simulation destination token account",
     });
-    if (post < pre || post - pre < minOutput)
+    actualOutput = post - pre;
+    if (post < pre || actualOutput < minOutput)
       throw new Error("simulation destination-token delta is below the signed minimum output");
-    if ((post - pre) * 100n > quotedOutput * (100n + shortfallCapPct))
-      throw new Error(`the chain delivers ${post - pre} against a quote of ${quotedOutput} — the quote is more than ` +
+    if (actualOutput * 100n > quotedOutput * (100n + shortfallCapPct))
+      throw new Error(`the chain delivers ${actualOutput} against a quote of ${quotedOutput} — the quote is more than ` +
         `${cfg.maxQuoteShortfallPct ?? 15}% below reality, so the signed minimum-output floor protects nothing; refusing`);
   } else {
     const receivedNet = custodyAfter - custodyBefore;
+    if (receivedNet <= 0n)
+      throw new Error("simulation SOL proceeds are not positive");
     if (receivedNet + BigInt(cfg.maxNetworkFeeLamports) < minOutput)
       throw new Error("simulation SOL proceeds are below the signed minimum after capped fees");
     if (receivedNet * 100n > quotedOutput * (100n + shortfallCapPct))
       throw new Error(`the chain delivers ${receivedNet} lamports against a quote of ${quotedOutput} — the quote is ` +
         `more than ${cfg.maxQuoteShortfallPct ?? 15}% below reality, so the signed minimum-output floor protects nothing; refusing`);
+    actualOutput = receivedNet;
   }
-  return true;
+  return { actualOutputRaw: String(actualOutput) };
+}
+
+/** Require independently simulated custody deltas to describe the same executable
+ * transaction. The lower output is the only value safe to expose to policy. */
+function agreeSimulationOutputs(primary, secondary, capPct = 1) {
+  const primaryOutput = BigInt(positiveRaw(primary?.actualOutputRaw,
+    "primary chain-simulated output"));
+  const secondaryOutput = BigInt(positiveRaw(secondary?.actualOutputRaw,
+    "secondary chain-simulated output"));
+  const lower = primaryOutput < secondaryOutput ? primaryOutput : secondaryOutput;
+  const upper = primaryOutput > secondaryOutput ? primaryOutput : secondaryOutput;
+  const cap = Number(capPct);
+  if (!Number.isFinite(cap) || cap <= 0 || cap > 5)
+    throw new Error("simulation RPC divergence cap is invalid");
+  const capPartsPerMillion = BigInt(Math.round(cap * 10_000));
+  if ((upper - lower) * 1_000_000n > lower * capPartsPerMillion)
+    throw new Error("independent RPC simulations diverge beyond the executable-output cap");
+  return {
+    actualOutputRaw: lower.toString(),
+    divergencePct: Number((upper - lower) * 100_000_000n / lower) / 1_000_000,
+  };
 }
 
 /** Decode and bind the fixed safety-critical fields of a Jupiter exact-in ix. */
@@ -592,6 +689,12 @@ export function verifyFinalizedFailure(transaction, intent, signature, config = 
     throw new Error("transaction is not a finalized on-chain failure");
   if (finalizedSignature(transaction) !== signature)
     throw new Error("finalized failed transaction signature mismatch");
+  const owner = String(intent?.context?.wallet || "");
+  const message = transaction.transaction?.message;
+  const payer = message?.staticAccountKeys?.[0]?.toBase58?.() ||
+    message?.accountKeys?.[0]?.toBase58?.() || String(message?.accountKeys?.[0] || "");
+  if (!owner || payer !== owner)
+    throw new Error("finalized failed transaction payer is not the intent wallet");
   const { feeNumber } = finalizedNetworkFee(transaction.meta, intent, config);
   return { networkFeeLamports: String(feeNumber), finalizedAtMs: finalizedAtMs(transaction) };
 }
@@ -687,6 +790,14 @@ export class JupiterV2Executor {
     this.sleep = sleep;
     this.hardStop = hardStop;
     this.submissionGate = submissionGate;
+    // The process lock prevents a second poller, while this map closes the smaller
+    // async race inside one process: two callers must not both pass the durable
+    // conflict check while their transactions are still being built/simulated.
+    this.inFlightIntents = new Map();
+    // Bounded poller recovery must be fair across positions. Without a rotating
+    // cursor, maxIntents:1 selected the oldest ambiguous/submitted exit on every tick
+    // and later stops never received even a chain-observation pass.
+    this.lastBoundedRecoveryIntentId = null;
     this.cfg = {
       slippageBps: 300,
       maxPriceImpactPct: 5,
@@ -696,6 +807,10 @@ export class JupiterV2Executor {
       maxNetworkFeePct: 10,
       maxRentLamports: 3_000_000,
       maxEntryRoundTripLossPct: 12,
+      maxEntryQuoteDriftPct: 5,
+      maxEntryPreflightAgeMs: 60_000,
+      maxExitTriggerAgeMs: 60_000,
+      maxExitMarkProviderDivergencePct: 1,
       maxComputeUnits: 1_400_000,
       maxAttempts: 3,
       finalityTimeoutMs: 30_000,
@@ -705,6 +820,45 @@ export class JupiterV2Executor {
 
   get wallet() { return this.keypair.publicKey.toBase58(); }
   headers(extra = {}) { return { "x-api-key": this.apiKey, ...extra }; }
+
+  _isSafetyExit(intent) {
+    return (intent.kind === "risk_exit" || intent.kind === "desk_exit") &&
+      intent.inputMint === intent.mint && intent.outputMint === WSOL &&
+      intent.context?.position?.mint === intent.mint;
+  }
+
+  _validateIntentSpec(intent) {
+    if (intent.kind === "entry") {
+      if (intent.inputMint !== WSOL || intent.outputMint !== intent.mint)
+        throw new Error("entry intent must swap wrapped SOL into its named mint");
+      return;
+    }
+    if (!this._isSafetyExit(intent))
+      throw new Error("exit intent must reduce its durable named position into wrapped SOL");
+  }
+
+  _inFlightConflict(intent, exceptId = null) {
+    const isSafetyExit = this._isSafetyExit(intent);
+    for (const active of this.inFlightIntents.values()) {
+      if (active.id === exceptId) continue;
+      const activeIsSafetyExit = this._isSafetyExit(active);
+      // Entries and unknown kinds take the strict global lock. Safety exits take
+      // only their position lock, so an unrelated stop is never head-of-line
+      // blocked by another mint's unresolved work.
+      if (!isSafetyExit || (!activeIsSafetyExit && active.kind !== "entry") || active.mint === intent.mint)
+        return active.id;
+    }
+    return null;
+  }
+
+  async _withIntentScope(intent, fn) {
+    const conflict = this._inFlightConflict(intent);
+    if (conflict)
+      throw new Error(`in-flight intent ${conflict} conflicts with ${intent.id}; submission serialized`);
+    this.inFlightIntents.set(intent.id, intent);
+    try { return await fn(); }
+    finally { this.inFlightIntents.delete(intent.id); }
+  }
 
   async order({ inputMint, outputMint, amountRaw, taker = true }) {
     positiveRaw(amountRaw, "order amount");
@@ -732,10 +886,7 @@ export class JupiterV2Executor {
   }
 
   async preflightEntry(inputMint, outputMint, amountRaw) {
-    const [forward, solUsd] = await Promise.all([
-      this.quote(inputMint, outputMint, amountRaw),
-      this.solUsdPrice(),
-    ]);
+    const forward = await this.quote(inputMint, outputMint, amountRaw);
     const reverse = await this.quote(outputMint, inputMint, String(forward.outAmount));
     const input = BigInt(positiveRaw(amountRaw, "preflight input"));
     const returned = BigInt(positiveRaw(reverse.outAmount, "preflight returned amount"));
@@ -743,18 +894,52 @@ export class JupiterV2Executor {
     const cap = Number(this.cfg.maxEntryRoundTripLossPct);
     if (!Number.isFinite(cap) || cap < 0 || cap > 100) throw new Error("invalid entry round-trip-loss cap");
     if (lossPct > cap) throw new Error(`entry round-trip loss ${lossPct}% exceeds cap ${cap}%`);
-    return { forward, reverse, lossPct, solUsd };
+    return { forward, reverse, lossPct };
   }
 
-  async solUsdPrice() {
-    const quote = await this.quote(WSOL, USDC, "1000000000");
-    const price = Number(BigInt(positiveRaw(quote.outAmount, "SOL/USDC quote output"))) / 1_000_000;
-    if (!Number.isFinite(price) || price <= 0) throw new Error("SOL/USD quote is invalid");
-    return price;
+  async _prepareUnsignedProvider({ connection, transactionBytes, order, intent,
+    feeBasisLamports, label }) {
+    let tx;
+    try { tx = VersionedTransaction.deserialize(transactionBytes); }
+    catch { throw new Error(`${label} RPC could not deserialize the exact unsigned transaction`); }
+    const serializedUnsigned = Buffer.from(tx.serialize());
+    if (serializedUnsigned.length > 1232)
+      throw new Error(`serialized transaction is ${serializedUnsigned.length} bytes (Solana max 1232)`);
+    const validation = await validateTransaction(tx, {
+      inputMint: intent.inputMint, outputMint: intent.outputMint,
+      amountRaw: intent.amountRaw, wallet: this.wallet,
+      quotedOutputRaw: String(order.outAmount),
+      minOutputRaw: String(order.otherAmountThreshold),
+      slippageBps: Number(order.slippageBps),
+      platformFeeBps: Number(order.platformFee?.feeBps ?? 0),
+      feeBasisLamports,
+    }, this.cfg, connection);
+    const observedAddresses = [this.wallet, validation.inputAta, validation.outputAta];
+    const preAccounts = await connection.getMultipleAccountsInfo(
+      observedAddresses.map((address) => new PublicKey(address)), "processed");
+    if (!Array.isArray(preAccounts) || preAccounts.length !== observedAddresses.length || !preAccounts[0])
+      throw new Error(`${label} RPC omitted pre-simulation wallet/account state`);
+    const chainHeight = await connection.getBlockHeight("confirmed");
+    const claimedExpiry = Number(order.lastValidBlockHeight);
+    if (!Number.isSafeInteger(chainHeight) || chainHeight <= 0)
+      throw new Error(`${label} RPC could not read the chain block height to bound the order expiry`);
+    if (claimedExpiry <= chainHeight)
+      throw new Error(`order expiry ${claimedExpiry} is already behind the ${label} chain height ${chainHeight}`);
+    if (claimedExpiry > chainHeight + (this.cfg.blockHeightWindow ?? 600))
+      throw new Error(`order expiry ${claimedExpiry} is ${claimedExpiry - chainHeight} blocks ahead of the ${label} chain ` +
+        `(cap ${this.cfg.blockHeightWindow ?? 600}) — an unbounded expiry wedges the journal and disarms every exit`);
+    const simulation = await this._simulateUnsigned({
+      connection, tx, observedAddresses, preAccounts, validation, order, intent,
+    });
+    return { tx, validation, observedAddresses, preAccounts, chainHeight, simulation };
   }
 
-  async _buildSigned(intent) {
-    if (this.hardStop()) throw new Error("HARD STOP is present — no transaction will be built");
+  /** Build, independently inspect and independently chain-simulate a transaction
+   * while every signature slot is still empty. Every signable entry/exit and the
+   * read-only exit mark share this two-provider boundary. */
+  async _prepareUnsigned(intent) {
+    if (!this.secondaryConnection || this.secondaryConnection === this.connection)
+      throw new Error("independent secondary RPC is required before any transaction may be signed");
     const order = await this.order({
       inputMint: intent.inputMint, outputMint: intent.outputMint,
       amountRaw: intent.amountRaw, taker: true,
@@ -776,41 +961,21 @@ export class JupiterV2Executor {
       inputMint: intent.inputMint, outputMint: intent.outputMint,
       amountRaw: intent.amountRaw, wallet: this.wallet, feeBasisLamports,
     }, { ...this.cfg, maxPriceImpactPct: impactCap });
-    let tx;
-    try { tx = VersionedTransaction.deserialize(Buffer.from(order.transaction, "base64")); }
-    catch { throw new Error("Jupiter returned an invalid versioned transaction"); }
-    const validation = await validateTransaction(tx, {
-      inputMint: intent.inputMint, outputMint: intent.outputMint,
-      amountRaw: intent.amountRaw, wallet: this.wallet,
-      quotedOutputRaw: String(order.outAmount),
-      minOutputRaw: String(order.otherAmountThreshold),
-      slippageBps: Number(order.slippageBps),
-      platformFeeBps: Number(order.platformFee?.feeBps ?? 0),
-      feeBasisLamports,
-    }, this.cfg, this.connection);
-    const observedAddresses = [this.wallet, validation.inputAta, validation.outputAta];
-    const preAccounts = await this.connection.getMultipleAccountsInfo(
-      observedAddresses.map((address) => new PublicKey(address)), "processed");
-    if (!Array.isArray(preAccounts) || preAccounts.length !== observedAddresses.length || !preAccounts[0])
-      throw new Error("RPC omitted pre-simulation wallet/account state");
-
-    /* BOUND THE EXPIRY AGAINST THE CHAIN, NOT AGAINST THE ORDER'S OWN CLAIM.
-     * validateOrderEnvelope only checks lastValidBlockHeight is a positive integer —
-     * one order carrying 9e15 produced an attempt whose "wait for expiry" branch could
-     * never fire: the journal held it as unresolved forever, and because an unresolved
-     * intent blocks every new submission, EXITS included, all stops were disarmed
-     * until a human intervened. The chain's real height is the one number the
-     * counterparty does not author; a blockhash is only valid ~150 blocks, so an
-     * expiry more than blockHeightWindow ahead is a lie whatever the intent. */
-    const chainHeight = await this.connection.getBlockHeight("confirmed");
-    const claimedExpiry = Number(order.lastValidBlockHeight);
-    if (!Number.isSafeInteger(chainHeight) || chainHeight <= 0)
-      throw new Error("could not read the chain block height to bound the order expiry");
-    if (claimedExpiry <= chainHeight)
-      throw new Error(`order expiry ${claimedExpiry} is already behind the chain height ${chainHeight}`);
-    if (claimedExpiry > chainHeight + (this.cfg.blockHeightWindow ?? 600))
-      throw new Error(`order expiry ${claimedExpiry} is ${claimedExpiry - chainHeight} blocks ahead of the chain ` +
-        `(cap ${this.cfg.blockHeightWindow ?? 600}) — an unbounded expiry wedges the journal and disarms every exit`);
+    const transactionBytes = Buffer.from(order.transaction, "base64");
+    const [primary, secondary] = await Promise.all([
+      this._prepareUnsignedProvider({ connection: this.connection, transactionBytes,
+        order, intent, feeBasisLamports, label: "primary" }),
+      this._prepareUnsignedProvider({ connection: this.secondaryConnection, transactionBytes,
+        order, intent, feeBasisLamports, label: "secondary" }),
+    ]);
+    if (primary.validation.inputAta !== secondary.validation.inputAta ||
+        primary.validation.outputAta !== secondary.validation.outputAta ||
+        primary.validation.inputProgram !== secondary.validation.inputProgram ||
+        primary.validation.outputProgram !== secondary.validation.outputProgram)
+      throw new Error("RPC providers disagree on the validated transaction custody accounts");
+    const simulation = agreeSimulationOutputs(primary.simulation, secondary.simulation,
+      this.cfg.maxSimulationProviderDivergencePct ??
+        this.cfg.maxExitMarkProviderDivergencePct ?? 1);
 
     /* SIMULATE BEFORE SIGNING — the invariant that dissolves a whole class of bug.
      *
@@ -832,7 +997,109 @@ export class JupiterV2Executor {
      * disclosure of broadcastable bytes anywhere is the /execute POST, which happens
      * strictly after recordSigned and markSubmitted — the states the reconciliation
      * machinery was built to fence. "signed" once again truly means "undisclosed". */
-    await this._simulateUnsigned({ tx, observedAddresses, preAccounts, validation, order, intent });
+    return {
+      order, tx: primary.tx, validation: primary.validation,
+      chainHeight: Math.max(primary.chainHeight, secondary.chainHeight),
+      primaryChainHeight: primary.chainHeight, secondaryChainHeight: secondary.chainHeight,
+      simulation, primarySimulation: primary.simulation, secondarySimulation: secondary.simulation,
+      walletLamportsByProvider: [primary, secondary].map(({ preAccounts }) => {
+        const value = Number(preAccounts?.[0]?.lamports);
+        if (!Number.isSafeInteger(value) || value < 0)
+          throw new Error("RPC returned an invalid pre-simulation wallet balance");
+        return value;
+      }),
+      feeBasisLamports,
+    };
+  }
+
+  /** Exercise the complete execution boundary without creating broadcastable bytes.
+   * The fixed tiny WSOL→mainnet-USDC route checks Jupiter authentication/order
+   * construction, ALT/account reads, both independent validators/simulators, and a
+   * conservative wallet spend+fee+rent reserve on BOTH views. No signature, journal
+   * mutation or /execute request exists anywhere on this path. */
+  async probeExecutionReadiness() {
+    const amountRaw = String(EXECUTION_READINESS_AMOUNT_LAMPORTS);
+    const intent = {
+      kind: "entry", mint: MAINNET_USDC, inputMint: WSOL, outputMint: MAINNET_USDC,
+      amountRaw, context: {},
+    };
+    const prepared = await this._prepareUnsigned(intent);
+    const requiredLamports = BigInt(EXECUTION_READINESS_AMOUNT_LAMPORTS) +
+      BigInt(Math.ceil(Number(this.cfg.maxNetworkFeeLamports ?? 500_000))) +
+      BigInt(Math.ceil(Number(this.cfg.maxRentLamports ?? 3_000_000))) +
+      BigInt(EXECUTION_READINESS_RESERVE_LAMPORTS);
+    if (prepared.walletLamportsByProvider.some((balance) => BigInt(balance) < requiredLamports))
+      throw new Error("execution-readiness wallet reserve is insufficient on one or both RPC providers");
+    const observedAt = Number(this.now());
+    if (!Number.isSafeInteger(observedAt) || observedAt <= 0)
+      throw new Error("execution-readiness observation time is invalid");
+    return Object.freeze({
+      ready: true,
+      observedAt,
+      route: EXECUTION_READINESS_ROUTE,
+      providers: 2,
+      providerDivergencePct: prepared.simulation.divergencePct,
+      chainHeight: prepared.chainHeight,
+      lastValidBlockHeight: Number(prepared.order.lastValidBlockHeight),
+    });
+  }
+
+  /** Read-only executable exit mark. It requests a wallet-bound ExactIn order and
+   * runs the same envelope, transaction, program, account, expiry and unsigned
+   * simulation checks as execution. It never signs, journals, or calls /execute. */
+  async preflightExitMark({ mint, amountRaw, position } = {}) {
+    const inputMint = String(mint || "");
+    try { new PublicKey(inputMint); }
+    catch { throw new Error("exit mark mint must be a valid public key"); }
+    if (inputMint === WSOL) throw new Error("exit mark input must be a non-WSOL token mint");
+    const amount = positiveRaw(amountRaw, "exit mark amount");
+    const positionMint = String(position?.mint || "");
+    const positionQtyRaw = positiveRaw(position?.qtyRaw, "exit mark position quantity");
+    const costBasisLamports = positiveRaw(position?.costBasisLamports, "exit mark position cost basis");
+    const intent = {
+      kind: "risk_exit", mint: inputMint, inputMint, outputMint: WSOL, amountRaw: amount,
+      context: { position: { mint: positionMint, qtyRaw: positionQtyRaw, costBasisLamports } },
+    };
+    this._validateIntentSpec(intent);
+    if (!this.secondaryConnection || this.secondaryConnection === this.connection)
+      throw new Error("independent secondary RPC is required for an executable exit mark");
+    const { order, chainHeight, simulation } = await this._prepareUnsigned(intent);
+    const actualOutputRaw = simulation.actualOutputRaw;
+    const observedAt = Number(this.now());
+    if (!Number.isSafeInteger(observedAt) || observedAt < 0)
+      throw new Error("exit mark observation time is invalid");
+    return Object.freeze({
+      inputMint,
+      outputMint: WSOL,
+      inputAmountRaw: amount,
+      actualOutputRaw,
+      quotedOutputRaw: String(order.outAmount),
+      minOutputRaw: String(order.otherAmountThreshold),
+      priceImpactPct: priceImpactPercent(order),
+      slippageBps: Number(order.slippageBps),
+      router: "metis",
+      measurement: "simulated_net_wallet_custody_delta",
+      finalized: false,
+      providers: 2,
+      providerDivergencePct: simulation.divergencePct,
+      chainHeight,
+      lastValidBlockHeight: Number(order.lastValidBlockHeight),
+      observedAt,
+    });
+  }
+
+  async _buildSigned(intent) {
+    if (this.hardStop()) throw new Error("HARD STOP is present — no transaction will be built");
+    const { order, tx } = await this._prepareUnsigned(intent);
+
+    // The order and chain simulation are the last executable facts before signing.
+    // Recheck the local entry gate after those network calls, then bind the final
+    // quote/minOut to the independently monitored authored zone. Nothing signed
+    // exists if either condition changed while the transaction was being built.
+    if (intent.kind === "entry") {
+      this.submissionGate(intent);
+      validateExecutableEntryOrder(intent, order, { ...this.cfg, nowMs: this.now() });
+    } else validateExecutableExitOrder(intent, order, { ...this.cfg, nowMs: this.now() });
 
     tx.sign([this.keypair]);
     const signed = Buffer.from(tx.serialize());
@@ -852,17 +1119,21 @@ export class JupiterV2Executor {
 
   /** Pre-signing simulation of the UNSIGNED transaction — nothing disclosed here can
    * be broadcast, so a refusal is free and safe to retry with a fresh quote. */
-  async _simulateUnsigned({ tx, observedAddresses, preAccounts, validation, order, intent }) {
-    const simulation = await this.connection.simulateTransaction(tx, {
+  async _simulateUnsigned({ connection = this.connection, tx, observedAddresses, preAccounts,
+    validation, order, intent }) {
+    if (!Array.isArray(tx?.signatures) || tx.signatures.length !== 1 ||
+        tx.signatures.some((signature) => Buffer.from(signature).some((byte) => byte !== 0)))
+      throw new Error("Jupiter transaction is not unsigned");
+    const simulation = await connection.simulateTransaction(tx, {
       commitment: "processed", sigVerify: false, replaceRecentBlockhash: false,
       accounts: { encoding: "base64", addresses: observedAddresses },
       innerInstructions: true,
     });
-    if (simulation?.value?.err) throw new Error(`signed transaction simulation failed: ${JSON.stringify(simulation.value.err)}`);
+    if (simulation?.value?.err) throw new Error(`unsigned transaction simulation failed: ${JSON.stringify(simulation.value.err)}`);
     const postAccounts = simulation?.value?.accounts;
     if (!Array.isArray(postAccounts) || postAccounts.length !== observedAddresses.length)
       throw new Error("simulation omitted requested wallet/token account state");
-    validateSimulationEffects({ wallet: preAccounts[0], input: preAccounts[1], output: preAccounts[2] },
+    return validateSimulationEffects({ wallet: preAccounts[0], input: preAccounts[1], output: preAccounts[2] },
       { wallet: postAccounts[0], input: postAccounts[1], output: postAccounts[2] }, {
         wallet: this.wallet,
         inputMint: intent.inputMint,
@@ -873,7 +1144,6 @@ export class JupiterV2Executor {
         inputProgram: validation.inputProgram,
         outputProgram: validation.outputProgram,
       }, this.cfg);
-    return true;
   }
 
   async _status(signature, connection = this.connection) {
@@ -896,7 +1166,11 @@ export class JupiterV2Executor {
    * before the fast path's observedStatus OR could run, evaporating the exact
    * observation the replacement guard needed. */
   async _readEither(fn) {
-    try { return await fn(this.connection); }
+    try {
+      const value = await fn(this.connection);
+      if (value != null || !this.secondaryConnection) return value;
+      return fn(this.secondaryConnection);
+    }
     catch (error) {
       if (!this.secondaryConnection) throw error;
       return fn(this.secondaryConnection);
@@ -908,15 +1182,19 @@ export class JupiterV2Executor {
    * passed downstream labeled as the PRIMARY's error, whereupon the two-RPC
    * consensus check read only the secondary again and confirmed it against itself. */
   async _readEitherTagged(fn) {
-    try { return { value: await fn(this.connection), source: "primary" }; }
+    try {
+      const value = await fn(this.connection);
+      if (value != null || !this.secondaryConnection) return { value, source: "primary" };
+      return { value: await fn(this.secondaryConnection), source: "secondary" };
+    }
     catch (error) {
       if (!this.secondaryConnection) throw error;
       return { value: await fn(this.secondaryConnection), source: "secondary" };
     }
   }
 
-  async _waitFinalized(signature) {
-    const deadline = this.now() + this.cfg.finalityTimeoutMs;
+  async _waitFinalized(signature, timeoutMs = this.cfg.finalityTimeoutMs) {
+    const deadline = this.now() + timeoutMs;
     let observedStatus = false;
     let observedFinalized = false;
     do {
@@ -943,14 +1221,17 @@ export class JupiterV2Executor {
     return { outcome: "pending", observedStatus, observedFinalized };
   }
 
-  async _confirmFinalizedFailure(signature, { primaryError = null, secondaryError = null } = {}) {
-    if (!this.secondaryConnection)
+  async _confirmFinalizedFailure(signature, intent,
+    { primaryError = null, secondaryError = null } = {}) {
+    if (!this.secondaryConnection || this.secondaryConnection === this.connection)
       return { confirmed: false, reason: "no independent secondary RPC is configured" };
-    let primaryStatus, secondaryStatus;
+    let primaryStatus, secondaryStatus, primaryTransaction, secondaryTransaction;
     try {
-      [primaryStatus, secondaryStatus] = await Promise.all([
+      [primaryStatus, secondaryStatus, primaryTransaction, secondaryTransaction] = await Promise.all([
         primaryError == null ? this._status(signature, this.connection) : null,
         secondaryError == null ? this._status(signature, this.secondaryConnection) : null,
+        this._finalizedTransaction(signature, this.connection),
+        this._finalizedTransaction(signature, this.secondaryConnection),
       ]);
     } catch (error) {
       return { confirmed: false, reason: `independent failure check failed: ${error.message}` };
@@ -963,27 +1244,84 @@ export class JupiterV2Executor {
       return { confirmed: false, reason: "both RPCs did not report a finalized error" };
     if (!sameRpcError(primary, secondary))
       return { confirmed: false, reason: "RPCs reported different finalized errors" };
-    return { confirmed: true, error: primary };
+    if (!primaryTransaction || !secondaryTransaction)
+      return { confirmed: false, reason: "both RPCs did not return finalized failed-transaction metadata" };
+    if (!sameRpcError(primaryTransaction.meta?.err, primary) ||
+        !sameRpcError(secondaryTransaction.meta?.err, secondary))
+      return { confirmed: false, reason: "finalized transaction metadata disagrees with RPC failure status" };
+    let primaryFee, secondaryFee;
+    try {
+      primaryFee = verifyFinalizedFailure(primaryTransaction, intent, signature, this.cfg);
+      secondaryFee = verifyFinalizedFailure(secondaryTransaction, intent, signature, this.cfg);
+    } catch (error) {
+      return { confirmed: false, reason: `failed-transaction evidence rejected: ${error.message}` };
+    }
+    if (String(primaryFee.networkFeeLamports) !== String(secondaryFee.networkFeeLamports))
+      return { confirmed: false, reason: "RPCs reported different finalized network fees" };
+    if (String(primaryFee.finalizedAtMs) !== String(secondaryFee.finalizedAtMs))
+      return { confirmed: false, reason: "RPCs reported different finalized block times" };
+    return { confirmed: true, error: primary, feeEvidence: primaryFee };
   }
 
-  _acceptFinalized(intent, attempt, executeResult, transaction) {
-    const durableJupiterSuccess = executeResult?.status === "Success" && Number(executeResult.code) === 0;
-    if (durableJupiterSuccess && executeResult.signature !== attempt.signature) {
-      const error = "Jupiter execute signature differs from the journaled signature";
+  async _acceptFinalized(intent, attempt, executeResult, _observedTransaction) {
+    /* A single RPC's `finalized` JSON is not custody evidence: a compromised
+     * provider can invent the status, payer balances and token deltas for a known
+     * signature. For an exit that would retire the only durable position record while
+     * the coins are still held. Re-read BOTH configured providers explicitly and
+     * require independently finalized success plus matching verified effects. A lag,
+     * outage or missing transaction is merely unresolved (state remains recoverable);
+     * contradictory finalized evidence is durable AMBIGUOUS. */
+    if (!this.secondaryConnection || this.secondaryConnection === this.connection)
+      throw new Error(`transaction ${attempt.signature} awaits an independent second-provider finalized confirmation`);
+    const providerReads = await Promise.allSettled([
+      Promise.all([
+        this._status(attempt.signature, this.connection),
+        this._finalizedTransaction(attempt.signature, this.connection),
+      ]),
+      Promise.all([
+        this._status(attempt.signature, this.secondaryConnection),
+        this._finalizedTransaction(attempt.signature, this.secondaryConnection),
+      ]),
+    ]);
+    if (providerReads.some((read) => read.status !== "fulfilled"))
+      throw new Error(`transaction ${attempt.signature} awaits two-provider finalized evidence; an RPC read failed`);
+    const observations = providerReads.map((read) => ({
+      status: read.value[0], transaction: read.value[1],
+    }));
+    const finalized = (status) => status?.confirmationStatus === "finalized" ||
+      (status && status.confirmations === null);
+    if (observations.some(({ status }) => !finalized(status)))
+      throw new Error(`transaction ${attempt.signature} awaits finalized confirmation from both RPC providers`);
+    if (observations.some(({ status }) => status.err != null)) {
+      const error = `RPC providers disagree on finalized success for ${attempt.signature}`;
       this.journal.markAmbiguous(intent.id, attempt.attempt, error, executeResult);
       throw new Error(error);
     }
-    let fill;
+    if (observations.some(({ transaction }) => !transaction))
+      throw new Error(`transaction ${attempt.signature} is finalized but its effects are not yet available from both RPC providers`);
+
+    let fills;
     try {
-      // Finalized chain deltas are sufficient after a crash/transport timeout;
-      // Jupiter totals, when durably available, remain an additional exact check.
-      fill = verifyFinalizedFill(transaction, intent, durableJupiterSuccess
-        ? executeResult : { signature: attempt.signature }, this.cfg);
+      fills = observations.map(({ transaction }) => verifyFinalizedFill(transaction, intent,
+        // Once both independent RPCs prove the journaled signature and custody
+        // effects, Jupiter's transport response is diagnostic only. Its claimed
+        // signature/totals may never veto stronger chain truth.
+        { signature: attempt.signature }, this.cfg));
     }
     catch (error) {
-      this.journal.markAmbiguous(intent.id, attempt.attempt, error.message, executeResult);
+      const conflict = `two-provider finalized-effect verification failed: ${error.message}`;
+      this.journal.markAmbiguous(intent.id, attempt.attempt, conflict, executeResult);
       throw error;
     }
+    for (const key of ["signature", "totalInputAmount", "totalOutputAmount", "networkFeeLamports",
+      "finalizedAtMs"]) {
+      if (String(fills[0][key]) !== String(fills[1][key])) {
+        const error = `RPC providers disagree on finalized ${key} for ${attempt.signature}`;
+        this.journal.markAmbiguous(intent.id, attempt.attempt, error, executeResult);
+        throw new Error(error);
+      }
+    }
+    const fill = fills[0];
     if (BigInt(fill.totalOutputAmount) < BigInt(attempt.minOutputRaw)) {
       const error = "actual output is below the signed order's minimum";
       this.journal.markAmbiguous(intent.id, attempt.attempt, error, executeResult);
@@ -1002,8 +1340,11 @@ export class JupiterV2Executor {
    * status, handed off, and the evidence evaporated because the next reader failed to
    * re-observe it. Evidence is threaded now, not re-derived; a signature seen ONCE by
    * anyone is never converted into markExpired's permission for a fresh signature. */
-  async _reconcile(intent, attempt, executeResult = attempt.execute, { observedOnce = false } = {}) {
+  async _reconcile(intent, attempt, executeResult = attempt.execute,
+    { observedOnce = false, finalityTimeoutMs = null } = {}) {
     const durableJupiterSuccess = executeResult?.status === "Success" && Number(executeResult.code) === 0;
+    const provablyUndisclosed = attempt.state === "signed" &&
+      attempt.protocol === CURRENT_TX_ATTEMPT_PROTOCOL;
     /* A "signed" attempt has never been disclosed — its signature CANNOT be on chain —
      * so waiting the full finality timeout for it is pure stall: measured, a wedged
      * signed attempt cost ~30 seconds of every tick, exactly when a latched exit needs
@@ -1017,7 +1358,10 @@ export class JupiterV2Executor {
      * where the transaction index lags the status index. A hand-rolled mirror of its
      * success shape dropped exactly that guard (`if (transaction)`) and turned a
      * sub-second index lag into a permanent AMBIGUOUS latch on a landed SUCCESS. */
-    let finality = attempt.state === "signed"
+    const waitFinalized = async () => finalityTimeoutMs == null
+      ? await this._waitFinalized(attempt.signature)
+      : await this._waitFinalized(attempt.signature, finalityTimeoutMs);
+    let finality = provablyUndisclosed
       ? await (async () => {
           /* The fast read is fenced primary-then-secondary — it runs during the exact
            * outages that wedge signed attempts, and an unfenced throw here re-froze
@@ -1035,25 +1379,29 @@ export class JupiterV2Executor {
            * observedStatus:false and the expiry branch reads that as permission for a
            * replacement signature. The one piece of evidence the belt collected would
            * be the one piece the guard never saw. OR it in. */
-          const waited = await this._waitFinalized(attempt.signature);
+          const waited = await waitFinalized();
           return { ...waited, observedStatus: true };
         })()
-      : await this._waitFinalized(attempt.signature);
+      : await waitFinalized();
     if (observedOnce) finality = { ...finality, observedStatus: true };
+    let signedObservationError = null;
+    if (provablyUndisclosed && finality.observedStatus) {
+      // Persist the loss of replacement authority BEFORE any further provider read.
+      // A crash, lagging second provider, or pruned next read may otherwise erase this
+      // observation while the durable row still says `signed`/never disclosed.
+      signedObservationError = `supposedly undisclosed signature ${attempt.signature} was observed on chain; ` +
+        "replacement authority is permanently withheld pending finalized reconciliation";
+      this.journal.markAmbiguous(intent.id, attempt.attempt, signedObservationError, executeResult);
+    }
     if (finality.outcome === "failed") {
       const error = `transaction finalized with error: ${JSON.stringify(finality.error)}`;
-      if (durableJupiterSuccess) {
-        const conflict = `${error}; conflicts with Jupiter's confirmed-success response — manual reconciliation required`;
-        this.journal.markAmbiguous(intent.id, attempt.attempt, conflict, executeResult);
-        throw new Error(conflict);
-      }
       /* The error's PROVENANCE decides which side the consensus check may reuse it
        * for. When the fence delivered this failure from the SECONDARY, labeling it
        * primaryError made _confirmFinalizedFailure skip the primary and compare the
        * secondary against itself — one RPC's word dressed as two-RPC consensus,
        * authorizing a phantom fee and a replacement swap. Tag it honestly and the
        * check reads the OTHER connection fresh. */
-      const consensus = await this._confirmFinalizedFailure(attempt.signature,
+      const consensus = await this._confirmFinalizedFailure(attempt.signature, intent,
         finality.errorSource === "secondary"
           ? { secondaryError: finality.error }
           : { primaryError: finality.error });
@@ -1062,24 +1410,14 @@ export class JupiterV2Executor {
         this.journal.markAmbiguous(intent.id, attempt.attempt, conflict, executeResult);
         throw new Error(conflict);
       }
-      if (!finality.transaction) {
-        const conflict = `${error}; finalized failure metadata/fee is unavailable — manual reconciliation required`;
-        this.journal.markAmbiguous(intent.id, attempt.attempt, conflict, executeResult);
-        throw new Error(conflict);
-      }
-      let feeEvidence;
-      try { feeEvidence = verifyFinalizedFailure(finality.transaction, intent, attempt.signature, this.cfg); }
-      catch (feeError) {
-        const conflict = `${error}; failed-transaction fee verification failed: ${feeError.message}`;
-        this.journal.markAmbiguous(intent.id, attempt.attempt, conflict, executeResult);
-        throw new Error(conflict);
-      }
-      this.journal.markFinalizedFailure(intent.id, attempt.attempt, error, feeEvidence, executeResult);
+      this.journal.markFinalizedFailure(intent.id, attempt.attempt, error,
+        consensus.feeEvidence, executeResult);
       throw new Error(error);
     }
     if (finality.outcome === "finalized") {
-      return this._acceptFinalized(intent, attempt, executeResult, finality.transaction);
+      return await this._acceptFinalized(intent, attempt, executeResult, finality.transaction);
     }
+    if (signedObservationError) throw new Error(signedObservationError);
     // Fenced like every other height read on the recovery path: the primary being
     // down is the normal weather here, and the secondary can answer this question.
     let height;
@@ -1109,34 +1447,27 @@ export class JupiterV2Executor {
       }
       const secondaryFinalized = secondaryStatus?.confirmationStatus === "finalized" ||
         (secondaryStatus && secondaryStatus.confirmations === null);
+      if (secondaryStatus && provablyUndisclosed) {
+        const observation = `supposedly undisclosed signature ${attempt.signature} was observed by the ` +
+          "secondary RPC; replacement authority is permanently withheld pending finalized reconciliation";
+        this.journal.markAmbiguous(intent.id, attempt.attempt, observation, executeResult);
+      }
       if (secondaryFinalized && secondaryStatus.err) {
         const error = `transaction finalized with error on secondary RPC: ${JSON.stringify(secondaryStatus.err)}`;
-        if (durableJupiterSuccess || finality.observedFinalized) {
+        if (finality.observedFinalized) {
           const conflict = `${error}; conflicts with prior success evidence — manual reconciliation required`;
           this.journal.markAmbiguous(intent.id, attempt.attempt, conflict, executeResult);
           throw new Error(conflict);
         }
-        const consensus = await this._confirmFinalizedFailure(attempt.signature,
+        const consensus = await this._confirmFinalizedFailure(attempt.signature, intent,
           { secondaryError: secondaryStatus.err });
         if (!consensus.confirmed) {
           const conflict = `${error}; independent RPC consensus unavailable (${consensus.reason}) — manual reconciliation required`;
           this.journal.markAmbiguous(intent.id, attempt.attempt, conflict, executeResult);
           throw new Error(conflict);
         }
-        const failedTransaction = await this._finalizedTransaction(attempt.signature, this.secondaryConnection);
-        if (!failedTransaction) {
-          const conflict = `${error}; finalized failure metadata/fee is unavailable — manual reconciliation required`;
-          this.journal.markAmbiguous(intent.id, attempt.attempt, conflict, executeResult);
-          throw new Error(conflict);
-        }
-        let feeEvidence;
-        try { feeEvidence = verifyFinalizedFailure(failedTransaction, intent, attempt.signature, this.cfg); }
-        catch (feeError) {
-          const conflict = `${error}; failed-transaction fee verification failed: ${feeError.message}`;
-          this.journal.markAmbiguous(intent.id, attempt.attempt, conflict, executeResult);
-          throw new Error(conflict);
-        }
-        this.journal.markFinalizedFailure(intent.id, attempt.attempt, error, feeEvidence, executeResult);
+        this.journal.markFinalizedFailure(intent.id, attempt.attempt, error,
+          consensus.feeEvidence, executeResult);
         throw new Error(error);
       }
       if (secondaryFinalized) {
@@ -1146,7 +1477,7 @@ export class JupiterV2Executor {
           this.journal.markAmbiguous(intent.id, attempt.attempt, error, executeResult);
           throw new Error(error);
         }
-        return this._acceptFinalized(intent, attempt, executeResult, transaction);
+        return await this._acceptFinalized(intent, attempt, executeResult, transaction);
       }
       if (secondaryStatus || secondaryHeight <= attempt.lastValidBlockHeight)
         throw new Error(`transaction ${attempt.signature} is still unresolved on the secondary RPC`);
@@ -1175,12 +1506,31 @@ export class JupiterV2Executor {
       }
       if (primaryBlockhash?.value !== false || secondaryBlockhash?.value !== false)
         throw new Error(`signed blockhash for ${attempt.signature} is still valid or unresolved; replacement refused`);
-      // History absence is not non-execution proof on a pruned/non-archival RPC. Once
-      // bytes reached /execute, never turn two null history reads into authority for a
-      // replacement signature. Only an attempt still durably `signed` (never marked
-      // submitted) may expire automatically.
-      if (attempt.state === "submitted") {
-        const error = "submitted signature is absent from two RPC histories after blockhash expiry; manual reconciliation required";
+      const historyReads = await Promise.allSettled([
+        this._status(attempt.signature, this.connection),
+        this._status(attempt.signature, this.secondaryConnection),
+      ]);
+      if (historyReads.some((read) => read.status !== "fulfilled"))
+        throw new Error(`signed blockhash for ${attempt.signature} is invalid, but both RPC histories ` +
+          "did not independently prove signature absence; replacement refused");
+      const freshObservation = historyReads.map((read) => read.value).find(Boolean);
+      if (freshObservation) {
+        const observation = `signature ${attempt.signature} was observed during the final two-RPC absence fence; ` +
+          "replacement authority is permanently withheld pending finalized reconciliation";
+        if (provablyUndisclosed)
+          this.journal.markAmbiguous(intent.id, attempt.attempt, observation, executeResult);
+        throw new Error(observation);
+      }
+      // History absence is not non-execution proof on a pruned/non-archival RPC. Only
+      // an attempt STILL durably `signed` is known never to have left this process.
+      // `ambiguous` deliberately does not remember whether its prior state was signed
+      // or submitted, so it may never be converted into replacement authority here.
+      if (!provablyUndisclosed) {
+        const provenance = attempt.state === "signed"
+          ? `unversioned signed-era protocol ${attempt.protocol ?? "missing"}`
+          : attempt.state;
+        const error = `${provenance} signature is absent from two RPC histories after blockhash expiry; ` +
+          "its bytes may have been exposed, so replacement is forbidden and manual reconciliation is required";
         this.journal.markAmbiguous(intent.id, attempt.attempt, error, executeResult);
         throw new Error(error);
       }
@@ -1197,6 +1547,20 @@ export class JupiterV2Executor {
     if (attempt.execute?.status === "Success" && Number(attempt.execute.code) === 0)
       return this._reconcile(intent, attempt, attempt.execute);
 
+    /* Builds before the unsigned-preflight protocol used `signed`/`submitted` for
+     * states whose bytes may already have reached an RPC simulation. In particular,
+     * a refused signed simulation could be conservatively persisted as `submitted`
+     * without ever reaching /execute. Null histories after expiry cannot prove those
+     * bytes never executed, while actively POSTing them would turn a refusal into a
+     * send trigger. Observe/finalize every non-current attempt, but never POST it or
+     * convert its absence into replacement authority. */
+    if (["signed", "submitted"].includes(attempt.state) &&
+        attempt.protocol !== CURRENT_TX_ATTEMPT_PROTOCOL) {
+      this.log(`recovery ${intent.id}: ${attempt.state} attempt protocol ${attempt.protocol ?? "missing"} is ` +
+        "observation-only; disclosure and replacement are forbidden");
+      return this._reconcile(intent, attempt, attempt.execute, { finalityTimeoutMs: 0 });
+    }
+
     /* NEVER DISCLOSE PROVABLY-DEAD BYTES. A "signed" attempt has, by the new
      * invariant, never left this process — so after downtime longer than its
      * blockhash lifetime (a laptop sleep is enough) the transaction is provably
@@ -1208,15 +1572,17 @@ export class JupiterV2Executor {
      * routes to _reconcile, whose "signed" branch takes the safe markExpired path and
      * clears the way for a fresh attempt. One getBlockHeight per resume, and only
      * bytes that can still land are ever disclosed. */
-    if (attempt.state === "signed") {
+    if (["signed", "submitted"].includes(attempt.state) &&
+        attempt.protocol === CURRENT_TX_ATTEMPT_PROTOCOL) {
       /* Three corrections across the fourth and fifth reviews. The bound is >= —
        * _buildSigned's own convention treats expiry <= chainHeight as dead, because a
        * transaction whose lastValidBlockHeight equals the tip can only be included in
        * the NEXT block, where it is invalid; the strict > left a one-block boundary
-       * that disclosed un-landable bytes. The read is fenced with a secondary
-       * fallback: it runs mid-dump on restart, exactly when RPCs 429-storm.
+       * that disclosed un-landable bytes. Both independent providers must establish
+       * the pre-disclosure bound; it runs mid-dump on restart, exactly when stale
+       * views and RPC 429 storms are most likely.
        *
-       * And when NEITHER RPC answers, the attempt is HELD, not disclosed. The first
+       * And when EITHER RPC cannot answer, the attempt is HELD, not disclosed. The first
        * fallback proceeded to the POST on the theory that a dead tx cannot land —
        * true, and beside the point: landing was never the risk, the STATE TRANSITION
        * was. markSubmitted before a doomed POST left a 'submitted' attempt whose
@@ -1224,30 +1590,98 @@ export class JupiterV2Executor {
        * exit — over bytes that were never in flight. Throwing keeps the attempt
        * 'signed'; the next tick, with any RPC back, takes the safe path. An exit
        * delayed one tick beats an exit disarmed forever. */
-      let height = null;
-      try { height = await this.connection.getBlockHeight("confirmed"); }
-      catch {
-        try { height = await this.secondaryConnection?.getBlockHeight?.("confirmed") ?? null; }
-        catch { height = null; }
+      /* First disclosure needs an independent answer from BOTH configured providers.
+       * Falling back to the secondary only when the primary threw let a merely stale
+       * primary authorize a POST after the secondary/current chain had already crossed
+       * lastValidBlockHeight. The dead bytes then became `submitted`, where absence can
+       * only resolve to AMBIGUOUS and permanently strand a risk exit. The providers do
+       * not have to report the identical tip, but both must independently say the
+       * transaction is still live. */
+      // Start height reads without awaiting them. Two independently dead exact hashes
+      // plus two explicit null histories are already sufficient to resolve an
+      // undisclosed attempt; a method-specific/hung height endpoint must not prevent
+      // that stronger proof from releasing a stop.
+      const heightReadsPromise = Promise.allSettled([
+        this.connection?.getBlockHeight?.("confirmed"),
+        this.secondaryConnection?.getBlockHeight?.("confirmed"),
+      ]);
+
+      /* `lastValidBlockHeight` is authored by the order service; a plausible number
+       * does not prove the transaction's exact recent blockhash is live on either
+       * chain view. Before the first disclosure, BOTH providers must affirm that exact
+       * blockhash. Two false answers route into observation/expiry without POSTing;
+       * disagreement or outage holds the signed bytes until consensus is available.
+       * This exact-hash proof deliberately precedes the height-disagreement hold: a
+       * stale primary height must not strand a stop whose blockhash BOTH providers
+       * independently reject and whose signature neither history has observed. */
+      const validityReads = await Promise.allSettled([
+        this.connection?.isBlockhashValid?.(attempt.blockhash, { commitment: "confirmed" }),
+        this.secondaryConnection?.isBlockhashValid?.(attempt.blockhash, { commitment: "confirmed" }),
+      ]);
+      const validity = validityReads.map((read) => read.status === "fulfilled"
+        ? read.value?.value : null);
+      if (validity.every((value) => value === false)) {
+        // The exact blockhash, not Jupiter's authored height, is the transaction's
+        // liveness authority. Before granting a replacement, nevertheless prove that
+        // neither history has EVER observed the supposedly undisclosed signature.
+        const statusReads = await Promise.allSettled([
+          this._status(attempt.signature, this.connection),
+          this._status(attempt.signature, this.secondaryConnection),
+        ]);
+        if (statusReads.some((read) => read.status !== "fulfilled"))
+          throw new Error(`both RPCs reject signed attempt ${intent.id}/${attempt.attempt}'s blockhash, ` +
+            "but signature-history absence could not be proved; holding bytes undisclosed");
+        const observed = statusReads.map((read) => read.value).find(Boolean);
+        if (observed)
+          return this._reconcile(intent, attempt, attempt.execute, { observedOnce: true });
+        if (attempt.state === "signed") {
+          this.journal.markExpired(intent.id, attempt.attempt,
+            "never-submitted signature absent and exact blockhash invalid on two independent RPCs");
+          throw new Error("never-submitted signed transaction has a two-RPC-invalid blockhash; the intent may be rebuilt next tick");
+        }
+        // `submitted` is a write-ahead state: a crash may have happened immediately
+        // before OR after the POST. Dead bytes must never be retransmitted, and two
+        // null histories cannot distinguish those crash sides. Reconciliation keeps
+        // the no-replacement invariant and will conservatively quarantine absence.
+        return this._reconcile(intent, attempt, attempt.execute);
       }
-      if (!Number.isSafeInteger(height) || height <= 0) {
-        /* Both height reads failed. Before holding, two escapes the sixth review
-         * demanded: the operator's HARD STOP routes to reconciliation rather than
-         * being unreachable behind this hold, and a fenced STATUS read — which needs
-         * no height — gets a chance to resolve the attempt outright. A
-         * method-specific outage (getBlockHeight gated, getSignatureStatuses fine)
-         * would otherwise freeze every exit behind one attempt that the working
-         * reads could have settled. */
+      if (!validity.every((value) => value === true)) {
         if (this.hardStop()) return this._reconcile(intent, attempt, attempt.execute);
         let observed = null;
         try { observed = await this._readEither((c) => this._status(attempt.signature, c)); }
         catch { observed = null; }
         if (observed) return this._reconcile(intent, attempt, attempt.execute, { observedOnce: true });
-        throw new Error(`cannot bound signed attempt ${intent.id}/${attempt.attempt}'s expiry — both RPC height ` +
-          "reads failed and no status is observable; holding the bytes undisclosed until a chain read succeeds");
+        throw new Error(`cannot prove signed attempt ${intent.id}/${attempt.attempt}'s exact blockhash is live ` +
+          "on both RPC providers; holding bytes undisclosed");
       }
-      if (height >= attempt.lastValidBlockHeight)
+
+      const heightReads = await heightReadsPromise;
+      const heights = heightReads.map((read) => read.status === "fulfilled" ? read.value : null);
+      const validHeights = heights.every((height) => Number.isSafeInteger(height) && height > 0);
+      if (!validHeights) {
+        /* Either height read failed. Before holding, two escapes the sixth review
+         * demanded: the operator's HARD STOP routes to reconciliation rather than
+         * being unreachable behind this hold, and a fenced STATUS read — which needs
+         * no height — gets a chance to resolve the attempt outright. */
+        if (this.hardStop()) return this._reconcile(intent, attempt, attempt.execute);
+        let observed = null;
+        try { observed = await this._readEither((c) => this._status(attempt.signature, c)); }
+        catch { observed = null; }
+        if (observed) return this._reconcile(intent, attempt, attempt.execute, { observedOnce: true });
+        throw new Error(`cannot bound signed attempt ${intent.id}/${attempt.attempt}'s expiry independently — ` +
+          "both RPC height reads are required and no status is observable; holding the bytes undisclosed until both chain reads succeed");
+      }
+      const expiry = Number(attempt.lastValidBlockHeight);
+      const blockHeightWindow = Number(this.cfg.blockHeightWindow ?? 600);
+      if (!Number.isSafeInteger(expiry) || expiry <= 0 ||
+          !Number.isFinite(blockHeightWindow) || blockHeightWindow <= 0)
+        throw new Error(`signed attempt ${intent.id}/${attempt.attempt} has an invalid expiry bound`);
+      const remainingByProvider = heights.map((height) => expiry - height);
+      if (remainingByProvider.some((remaining) => remaining <= 0))
         return this._reconcile(intent, attempt, attempt.execute);
+      if (remainingByProvider.some((remaining) => remaining > blockHeightWindow))
+        throw new Error(`cannot bound signed attempt ${intent.id}/${attempt.attempt}'s expiry independently — ` +
+          `both RPC providers must place it within ${blockHeightWindow} remaining blocks; holding bytes undisclosed`);
     }
 
     if (this.hardStop()) return this._reconcile(intent, attempt, attempt.execute);
@@ -1289,18 +1723,26 @@ export class JupiterV2Executor {
   }
 
   async executeIntent(spec) {
+    this._validateIntentSpec(spec);
     let intent = this.journal.ensureIntent({
       ...spec,
       context: { ...(spec.context || {}), wallet: this.wallet },
     });
-    if (intent.state === "accounted" || intent.state === "confirmed") return intent;
-    if (intent.state === "ambiguous") throw new Error(`intent ${intent.id} is AMBIGUOUS; WALL-ST-E is disarmed`);
-    const blocking = this.journal.hasBlockingIntent(intent.id);
-    if (blocking) throw new Error(`unresolved intent ${blocking} blocks new submissions`);
+    return this._withIntentScope(intent, async () => {
+      // Re-read after taking the in-process scope: a concurrent reconciliation may
+      // have changed the durable state before this caller acquired it.
+      intent = this.journal.getIntent(intent.id);
+      this._validateIntentSpec(intent);
+      if (intent.state === "accounted" || intent.state === "confirmed") return intent;
+      if (intent.state === "ambiguous")
+        throw new Error(`intent ${intent.id} is AMBIGUOUS; existing signature is recovery-only`);
+      const blocking = this.journal.hasConflictingIntent(intent);
+      if (blocking)
+        throw new Error(`unresolved intent ${blocking} conflicts with ${intent.kind} ${intent.id}`);
 
-    let attempt = this.journal.latestAttempt(intent.id);
-    if (attempt && ["signed", "submitted"].includes(attempt.state)) return this._resume(intent, attempt);
-    const count = this.journal.attempts(intent.id).length;
+      let attempt = this.journal.latestAttempt(intent.id);
+      if (attempt && ["signed", "submitted"].includes(attempt.state)) return this._resume(intent, attempt);
+      const count = this.journal.attempts(intent.id).length;
 
     /* EXITS ARE NOT EXHAUSTIBLE THE WAY ENTRIES ARE.
      * A flat cap of 3 was correct for entries — money not spent is money kept — and
@@ -1309,11 +1751,11 @@ export class JupiterV2Executor {
      * intent permanently dead, the position riding to zero, and new entries frozen
      * behind the latch. An exit may retry past maxAttempts ONLY while every prior
      * attempt is terminally resolved (anything live already returned via _resume
-     * above, and hasBlockingIntent holds cross-intent), with a cooldown so a fast
+     * above, and hasConflictingIntent holds same-position work), with a cooldown so a fast
      * dump cannot burn fees every tick, and never past maxExitAttempts — each
      * on-chain failure costs a real, accounted fee. */
-    const isExit = intent.kind !== "entry";
-    const exitCap = this.cfg.maxExitAttempts ?? 12;
+      const isExit = intent.kind !== "entry";
+      const exitCap = this.cfg.maxExitAttempts ?? 12;
     /* The exit cap binds from attempt ONE, not only past the entry cap. Nesting it
      * inside the count>=maxAttempts branch meant an operator who set
      * MAX_EXIT_TX_ATTEMPTS below MAX_TX_ATTEMPTS was silently ignored for the first
@@ -1327,33 +1769,33 @@ export class JupiterV2Executor {
      * operator's entire exit budget and permanently kill a stop. Only finalized
      * failures spend the budget; expiries retry for free, each one gated by a real
      * blockhash lifetime so this cannot hot-loop. */
-    const exitFeeAttempts = isExit
-      ? this.journal.attempts(intent.id).filter((a) => a.state === "failed").length
-      : 0;
-    if (isExit && exitFeeAttempts >= exitCap)
-      throw new Error(`exit intent ${intent.id} exhausted ${exitCap} fee-bearing attempts — manual intervention required`);
-    if (!isExit && count >= this.cfg.maxAttempts)
-      throw new Error(`intent ${intent.id} exhausted ${this.cfg.maxAttempts} attempts`);
+      const exitFeeAttempts = isExit
+        ? this.journal.attempts(intent.id).filter((a) => a.state === "failed").length
+        : 0;
+      if (isExit && exitFeeAttempts >= exitCap)
+        throw new Error(`exit intent ${intent.id} exhausted ${exitCap} fee-bearing attempts — manual intervention required`);
+      if (!isExit && count >= this.cfg.maxAttempts)
+        throw new Error(`intent ${intent.id} exhausted ${this.cfg.maxAttempts} attempts`);
     /* The cooldown keys on the SAME counter as the cap — fee-bearing attempts. Keying
      * it on total rows charged free expiries the throttle the cap had just exempted
      * them from: three sleep-expiries armed a 60s-per-retry brake on a stop that had
      * spent nothing, during exactly the fast dump the exit ladder exists for. Mixed
      * semantics between two branches of one policy is how that happened. */
-    if (isExit && exitFeeAttempts >= this.cfg.maxAttempts) {
+      if (isExit && exitFeeAttempts >= this.cfg.maxAttempts) {
       /* The cooldown's CLOCK reads the last FEE-BEARING attempt, matching its counter.
        * Reading latestAttempt stamped the brake from whatever row was touched last —
        * including a free expiry markExpired had just timestamped — so the exempt
        * attempts re-armed the throttle their exemption existed to avoid. Same defect
        * as the counter, one field over. */
-      const lastFee = this.journal.attempts(intent.id).filter((a) => a.state === "failed").at(-1);
-      const last = lastFee?.updatedAt ?? lastFee?.createdAt ?? 0;
-      const coolMs = this.cfg.exitRetryCooldownMs ?? 60_000;
-      if (this.now() - Number(last) < coolMs)
-        throw new Error(`exit intent ${intent.id} is cooling down after ${exitFeeAttempts} fee-bearing attempts (${coolMs}ms between retries)`);
-      this.log(`exit ${intent.id}: retrying past the entry cap — fee-bearing attempt ${exitFeeAttempts + 1} of ${exitCap}, all prior attempts terminally resolved`);
-    }
-    if (this.hardStop()) throw new Error("HARD STOP is present — no new submission");
-    if (intent.kind === "entry") this.submissionGate(intent);
+        const lastFee = this.journal.attempts(intent.id).filter((a) => a.state === "failed").at(-1);
+        const last = lastFee?.updatedAt ?? lastFee?.createdAt ?? 0;
+        const coolMs = this.cfg.exitRetryCooldownMs ?? 60_000;
+        if (this.now() - Number(last) < coolMs)
+          throw new Error(`exit intent ${intent.id} is cooling down after ${exitFeeAttempts} fee-bearing attempts (${coolMs}ms between retries)`);
+        this.log(`exit ${intent.id}: retrying past the entry cap — fee-bearing attempt ${exitFeeAttempts + 1} of ${exitCap}, all prior attempts terminally resolved`);
+      }
+      if (this.hardStop()) throw new Error("HARD STOP is present — no new submission");
+      if (intent.kind === "entry") this.submissionGate(intent);
 
     /* _buildSigned simulates the UNSIGNED transaction before it ever signs, so a
      * refusal here (quote-vs-chain shortfall, output floors, plain simulation error)
@@ -1361,19 +1803,82 @@ export class JupiterV2Executor {
      * next tick retries with a fresh quote. Only a transaction the chain has already
      * agreed with reaches recordSigned, and the first broadcastable disclosure
      * anywhere is the /execute POST inside _resume, which the journal fences. */
-    const signed = await this._buildSigned(intent);
-    attempt = this.journal.recordSigned(intent.id, { ...signed, attempt: count + 1 });
-    intent = this.journal.getIntent(intent.id);
-    return this._resume(intent, attempt);
+      const signed = await this._buildSigned(intent);
+      // A safety exit is allowed to start while an unrelated entry is still in its
+      // pre-sign build. Re-check immediately before the durable signing boundary so
+      // that newly unresolved work still freezes that entry; the unjournaled bytes
+      // have never left memory and are safe to discard.
+      const concurrent = this._inFlightConflict(intent, intent.id);
+      const newlyBlocking = this.journal.hasConflictingIntent(intent);
+      if (concurrent || newlyBlocking)
+        throw new Error(`submission scope changed during build; unresolved intent ${concurrent || newlyBlocking} now conflicts with ${intent.id}`);
+      attempt = this.journal.recordSigned(intent.id, { ...signed, attempt: count + 1 });
+      intent = this.journal.getIntent(intent.id);
+      return this._resume(intent, attempt);
+    });
   }
 
-  async recoverPending() {
+  async recoverPending({ observationOnly = false, maxIntents = Infinity } = {}) {
     const recovered = [];
-    for (const intent of this.journal.pendingIntents()) {
-      if (intent.state === "confirmed" || intent.state === "ambiguous") continue;
+    const limit = maxIntents === Infinity ? Infinity : Number(maxIntents);
+    if (limit !== Infinity && (!Number.isSafeInteger(limit) || limit < 1))
+      throw new Error("recovery maxIntents must be a positive integer");
+    // Confirmed intents have finished chain recovery and belong exclusively to the
+    // poller's accounting quarantine path. Slice only after removing them: one
+    // permanently malformed confirmed exit must not consume the single bounded slot
+    // forever and starve every genuinely signed/submitted stop behind it.
+    const ordered = this.journal.pendingIntents()
+      .filter((intent) => intent.state !== "confirmed")
+      .sort((left, right) =>
+      Number(!this._isSafetyExit(left)) - Number(!this._isSafetyExit(right)) ||
+      Number(left.createdAt) - Number(right.createdAt) || left.id.localeCompare(right.id));
+    // Preserve the original exit-first contract: round-robin inside the highest
+    // available priority class, rather than occasionally rotating an entry in front
+    // of a still-unresolved stop.
+    const safety = ordered.filter((intent) => this._isSafetyExit(intent));
+    const pool = limit !== Infinity && safety.length ? safety : ordered;
+    let rotated = pool;
+    if (limit !== Infinity && pool.length > 1 && this.lastBoundedRecoveryIntentId) {
+      const prior = pool.findIndex((intent) => intent.id === this.lastBoundedRecoveryIntentId);
+      if (prior >= 0) rotated = [...pool.slice(prior + 1), ...pool.slice(0, prior + 1)];
+    }
+    const pending = rotated.slice(0, limit);
+    if (limit !== Infinity && pending.length)
+      this.lastBoundedRecoveryIntentId = pending.at(-1).id;
+    for (const intent of pending) {
       const attempt = this.journal.latestAttempt(intent.id);
       if (!attempt) continue;
-      try { recovered.push(await this._resume(intent, attempt)); }
+      try {
+        const value = await this._withIntentScope(intent, async () => {
+          const current = this.journal.getIntent(intent.id);
+          const latest = this.journal.latestAttempt(intent.id);
+          if (!latest || current.state === "confirmed" || current.state === "accounted") return current;
+          // The poller's pre-risk pass is observation/finality only: no /execute POST,
+          // no first disclosure and no full finality wait may sit ahead of fresh stop
+          // evaluation. A later bounded background pass may retransmit identical bytes.
+          if (observationOnly)
+            return this._reconcile(current, latest, latest.execute, { finalityTimeoutMs: 0 });
+          // AMBIGUOUS recovery is observation-only. Its prior signed/submitted state
+          // was overwritten, so retransmission or expiry replacement would weaken
+          // idempotency. Fresh finalized evidence may still resolve it safely. Use
+          // a one-shot probe so a backlog of ambiguous entries cannot add 30s each
+          // ahead of the poller's stop-management phase.
+          if (current.state === "ambiguous")
+            return this._reconcile(current, latest, latest.execute, { finalityTimeoutMs: 0 });
+          try { this._validateIntentSpec(current); }
+          catch (error) {
+            this.log(`recovery ${current.id}: ${error.message}; reconciling malformed intent without submission`);
+            return this._reconcile(current, latest, latest.execute, { finalityTimeoutMs: 0 });
+          }
+          const blocking = this.journal.hasConflictingIntent(current);
+          if (blocking) {
+            this.log(`recovery ${current.id}: conflicting intent ${blocking}; reconciling without submission`);
+            return this._reconcile(current, latest, latest.execute);
+          }
+          return this._resume(current, latest);
+        });
+        recovered.push(value);
+      }
       catch (error) { this.log(`recovery ${intent.id}: ${error.message}`); }
     }
     return recovered;

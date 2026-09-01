@@ -8,12 +8,31 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
-import { ExecutionJournal, acquireProcessLock, positionEntryBlock, trackedBalanceDecision } from "./journal.mjs";
+import {
+  ExecutionJournal, LEGACY_CALL_IDENTITY_POLICY, acquireProcessLock,
+  deskExitDecisionForPosition, positionEntryBlock, requirePositiveCallId, validateRiskState,
+} from "./journal.mjs";
 import {
   JupiterV2Executor, TOKEN_PROGRAM, WSOL, associatedTokenAddress,
-  classicWalletTokenAmount, priceImpactPercent,
+  classicWalletTokenAmount, independentClassicMintDecimals,
 } from "./jupiter.mjs";
+import {
+  RpcBalanceUnavailableError, verifyTrackedBalanceWithFailover,
+} from "./balance-verification.mjs";
+import {
+  advanceFrozenBatchCursor, authenticatedFeedCursorState, waitForRecoveryBudget,
+} from "./feed-drain.mjs";
+import {
+  clearExitMarkFailureWitness, clearPriceExitWitness, confirmExitMarkFailureWitness,
+  confirmPriceExitWitness, executableExitMark, priceExitTrigger,
+} from "./exit-trigger.mjs";
+import { executorHeartbeatHealth, executorRuntimeFingerprint } from "./heartbeat-health.mjs";
+import { validateEntryPreflightContext } from "./entry-quote-guard.mjs";
+import {
+  independentSolUsdPrice, PYTH_SOL_USD_CACHE_SOURCE, usableSolUsdCache,
+} from "./sol-usd-oracle.mjs";
 import { DEFAULTS, planEntry, openPosition, stepPosition, freshState } from "./strategy.mjs";
 import { policyConfigForPosition, resolveTakeProfitRule, validateEntryReference } from "./trade-policy.mjs";
 
@@ -38,6 +57,9 @@ const STATE_DB = path.resolve(process.env.STATE_DB || "./.cc-executor.sqlite");
 const LOCK_FILE = path.resolve(process.env.LOCK_FILE || `${STATE_DB}.lock`);
 const PAUSE_ENTRIES_FILE = path.resolve(process.env.PAUSE_ENTRIES_FILE || `${STATE_DB}.pause-entries`);
 const HARD_STOP_FILE = path.resolve(process.env.HARD_STOP_FILE || `${STATE_DB}.hard-stop`);
+// Compute once, before the loop starts. A release changed on disk without restarting
+// cannot make an old in-memory process impersonate the newly published runtime.
+const RUNTIME_FINGERPRINT = executorRuntimeFingerprint(path.dirname(fileURLToPath(import.meta.url)));
 const LAMPORTS = 1_000_000_000;
 /* The FULL 44-character mainnet-beta genesis hash. It shipped truncated to 32
  * characters, so the equality check could never pass against a real RPC — a bug only
@@ -58,6 +80,10 @@ const LIVE_LIMITS = Object.freeze({
   maxNetworkFeePct: 10,
   maxRentLamports: 3_000_000,
   maxEntryRoundTripLossPct: 12,
+  maxEntryQuoteDriftPct: 5,
+  maxEntryPreflightAgeMs: 60_000,
+  maxExitTriggerAgeMs: 60_000,
+  solUsdCacheMaxAgeMs: 30 * 60_000,
   maxAttempts: 3,
   /* Adversarial-review hardening, 2026-09-01 — each closes a hole where the only
    * number consulted was one the counterparty authored:
@@ -76,6 +102,11 @@ const LIVE_LIMITS = Object.freeze({
 });
 const log = (...args) => console.log(new Date().toISOString(), "WALL-ST-E", ...args);
 const fatal = (message) => { console.error(new Date().toISOString(), "WALL-ST-E REFUSES:", message); process.exit(1); };
+
+// One durable journal has exactly one lock identity. Allowing LOCK_FILE to point
+// elsewhere lets two differently configured pollers mutate the same SQLite state.
+if (LOCK_FILE !== `${STATE_DB}.lock`)
+  fatal("LOCK_FILE must be the canonical STATE_DB lock (STATE_DB plus .lock)");
 
 const number = (name, value, { min = 0, max = Infinity } = {}) => {
   const n = Number(value);
@@ -152,70 +183,17 @@ if (EXECUTE) {
     fatal(`live journal is missing; initialize it once with LIVE_STATE_INIT_ACK=${WALLET} and INIT_ONLY=1`);
 }
 
-/* ── OPERATOR-RAISED LIVE CAPS ────────────────────────────────────────────────
- * The canary ceilings above stay the default, and every operator can still only
- * LOWER them by config. Raising is possible, and deliberately awkward: an operator
- * must set all three money caps explicitly AND type an acknowledgement naming this
- * wallet and these exact numbers. A changed number invalidates the sentence.
- *
- * Why that shape. The canary caps exist because a first release should be too small
- * to hurt while real fills prove the pipeline — but frozen forever they are their own
- * defect: a tenant who funds 1 SOL still trades in half-dollar clips and has no way
- * to say otherwise. So the property to preserve is not "small", it is "nothing raises
- * real-money exposure by accident". A typed sentence cannot be produced by a config
- * typo, by a copied .env, or by anything arriving through the feed — which is the
- * threat model that matters, since the feed is the one channel a compromised server
- * could speak through. OPERATOR_MAX remains a hard code-level ceiling above it all.
- * maxOpenPositions stays frozen: it multiplies every other cap. */
-const OPERATOR_MAX = Object.freeze({
-  maxSolPerTrade: 0.25,
-  dailySolCap: 2.5,
-  dailyLossLimitSol: 1,
-});
-const capsAckSentence = (wallet, trade, daily, loss) =>
-  `I raise the live caps for ${wallet} to ${trade} SOL per trade, ${daily} SOL per day, ${loss} SOL daily loss`;
-
-let LIVE_CEILINGS = LIVE_LIMITS;
-if (EXECUTE) {
-  const req = {
-    trade: process.env.MAX_SOL_PER_TRADE,
-    daily: process.env.DAILY_SOL_CAP,
-    loss: process.env.DAILY_LOSS_LIMIT_SOL,
-  };
-  const wantsRaise =
-    (req.trade != null && Number(req.trade) > LIVE_LIMITS.maxSolPerTrade) ||
-    (req.daily != null && Number(req.daily) > LIVE_LIMITS.dailySolCap) ||
-    (req.loss != null && Number(req.loss) > LIVE_LIMITS.dailyLossLimitSol);
-  if (wantsRaise) {
-    if (!req.trade || !req.daily || !req.loss)
-      fatal("raising any live cap requires ALL THREE set explicitly: MAX_SOL_PER_TRADE, " +
-        "DAILY_SOL_CAP, DAILY_LOSS_LIMIT_SOL — a partial raise hides the numbers the " +
-        "acknowledgement exists to make you look at");
-    const t = number("MAX_SOL_PER_TRADE", req.trade, { min: 0.000001, max: OPERATOR_MAX.maxSolPerTrade });
-    const d = number("DAILY_SOL_CAP", req.daily, { min: 0.000001, max: OPERATOR_MAX.dailySolCap });
-    const l = number("DAILY_LOSS_LIMIT_SOL", req.loss, { min: 0.000001, max: OPERATOR_MAX.dailyLossLimitSol });
-    if (d < t) fatal(`DAILY_SOL_CAP (${d}) is below MAX_SOL_PER_TRADE (${t}) — the day would refuse the first trade`);
-    const expected = capsAckSentence(WALLET, String(req.trade).trim(), String(req.daily).trim(), String(req.loss).trim());
-    if ((process.env.LIVE_CAPS_ACK || "").trim() !== expected)
-      fatal("raised live caps need a typed acknowledgement. Set LIVE_CAPS_ACK to exactly:\n\n    " +
-        expected + "\n");
-    LIVE_CEILINGS = Object.freeze({ ...LIVE_LIMITS, maxSolPerTrade: t, dailySolCap: d, dailyLossLimitSol: l });
-    log(`OPERATOR-RAISED CAPS acknowledged: ${t} SOL/trade, ${d} SOL/day deploy, ${l} SOL/day loss ` +
-      `(hard maxima ${OPERATOR_MAX.maxSolPerTrade}/${OPERATOR_MAX.dailySolCap}/${OPERATOR_MAX.dailyLossLimitSol} are a code change, by design)`);
-  }
-}
-
 const CFG = {
   ...DEFAULTS,
   maxSolPerTrade: number("MAX_SOL_PER_TRADE",
-    process.env.MAX_SOL_PER_TRADE || (EXECUTE ? LIVE_CEILINGS.maxSolPerTrade : DEFAULTS.maxSolPerTrade),
-    { min: 0.000001, max: EXECUTE ? LIVE_CEILINGS.maxSolPerTrade : 100 }),
+    process.env.MAX_SOL_PER_TRADE || (EXECUTE ? LIVE_LIMITS.maxSolPerTrade : DEFAULTS.maxSolPerTrade),
+    { min: 0.000001, max: EXECUTE ? LIVE_LIMITS.maxSolPerTrade : 100 }),
   dailySolCap: number("DAILY_SOL_CAP",
-    process.env.DAILY_SOL_CAP || (EXECUTE ? LIVE_CEILINGS.dailySolCap : DEFAULTS.dailySolCap),
-    { min: 0.000001, max: EXECUTE ? LIVE_CEILINGS.dailySolCap : 1000 }),
+    process.env.DAILY_SOL_CAP || (EXECUTE ? LIVE_LIMITS.dailySolCap : DEFAULTS.dailySolCap),
+    { min: 0.000001, max: EXECUTE ? LIVE_LIMITS.dailySolCap : 1000 }),
   dailyLossLimitSol: number("DAILY_LOSS_LIMIT_SOL",
-    process.env.DAILY_LOSS_LIMIT_SOL || (EXECUTE ? LIVE_CEILINGS.dailyLossLimitSol : DEFAULTS.dailyLossLimitSol),
-    { min: 0.000001, max: EXECUTE ? LIVE_CEILINGS.dailyLossLimitSol : 1000 }),
+    process.env.DAILY_LOSS_LIMIT_SOL || (EXECUTE ? LIVE_LIMITS.dailyLossLimitSol : DEFAULTS.dailyLossLimitSol),
+    { min: 0.000001, max: EXECUTE ? LIVE_LIMITS.dailyLossLimitSol : 1000 }),
   maxOpenPositions: number("MAX_OPEN_POSITIONS",
     process.env.MAX_OPEN_POSITIONS || DEFAULTS.maxOpenPositions,
     { min: 1, max: EXECUTE ? LIVE_LIMITS.maxOpenPositions : 100 }),
@@ -252,6 +230,15 @@ const JUPITER_CFG = {
   maxEntryRoundTripLossPct: number("MAX_ENTRY_ROUND_TRIP_LOSS_PCT",
     process.env.MAX_ENTRY_ROUND_TRIP_LOSS_PCT || LIVE_LIMITS.maxEntryRoundTripLossPct,
     { min: 0.1, max: EXECUTE ? LIVE_LIMITS.maxEntryRoundTripLossPct : 50 }),
+  maxEntryQuoteDriftPct: number("MAX_ENTRY_QUOTE_DRIFT_PCT",
+    process.env.MAX_ENTRY_QUOTE_DRIFT_PCT || LIVE_LIMITS.maxEntryQuoteDriftPct,
+    { min: 0.1, max: EXECUTE ? LIVE_LIMITS.maxEntryQuoteDriftPct : 50 }),
+  maxEntryPreflightAgeMs: number("MAX_ENTRY_PREFLIGHT_AGE_MS",
+    process.env.MAX_ENTRY_PREFLIGHT_AGE_MS || LIVE_LIMITS.maxEntryPreflightAgeMs,
+    { min: 5_000, max: EXECUTE ? LIVE_LIMITS.maxEntryPreflightAgeMs : 600_000 }),
+  maxExitTriggerAgeMs: number("MAX_EXIT_TRIGGER_AGE_MS",
+    process.env.MAX_EXIT_TRIGGER_AGE_MS || LIVE_LIMITS.maxExitTriggerAgeMs,
+    { min: 5_000, max: EXECUTE ? LIVE_LIMITS.maxExitTriggerAgeMs : 600_000 }),
   maxAttempts: number("MAX_TX_ATTEMPTS", process.env.MAX_TX_ATTEMPTS || LIVE_LIMITS.maxAttempts,
     { min: 1, max: EXECUTE ? LIVE_LIMITS.maxAttempts : 10 }),
   // Exit retries beyond maxAttempts: only when every prior attempt is terminally
@@ -268,6 +255,12 @@ const JUPITER_CFG = {
   finalityTimeoutMs: number("FINALITY_TIMEOUT_MS", process.env.FINALITY_TIMEOUT_MS || 30_000,
     { min: 1_000, max: 120_000 }),
 };
+
+// Parse this once at startup. Live operators may shorten the outage bridge, but
+// cannot extend the reviewed 30-minute canary ceiling through a mutable env value.
+const SOL_USD_CACHE_MAX_AGE_MS = number("SOL_USD_CACHE_MAX_AGE_MS",
+  process.env.SOL_USD_CACHE_MAX_AGE_MS || LIVE_LIMITS.solUsdCacheMaxAgeMs,
+  { min: 1_000, max: EXECUTE ? LIVE_LIMITS.solUsdCacheMaxAgeMs : 24 * 60 * 60_000 });
 
 number("POLL_MS", POLL_MS, { min: 1_000, max: 3_600_000 });
 number("FEE_RESERVE_SOL", FEE_RESERVE, { min: 0, max: 100 });
@@ -295,6 +288,27 @@ let S = journal.snapshot();
 S.state = { ...freshState(Date.now()), ...(S.state || {}) };
 Object.assign(S.state, journal.rollingRisk(Date.now()));
 S.positions ||= {};
+let feedRollback = (() => {
+  const value = journal.getMeta("feed_rollback");
+  if (value == null) return null;
+  if (value?.active === true && Number.isSafeInteger(Number(value.cursor)) &&
+      Number.isSafeInteger(Number(value.latestId))) return value;
+  // A corrupt durable alarm is itself reason to keep entries frozen until a valid
+  // authenticated feed proves it has caught back up to the durable cursor.
+  return { active: true, cursor: S.cursor, latestId: -1, observedAt: Date.now() };
+})();
+const feedRollbackActive = () => feedRollback?.active === true;
+const persistFeedRollback = (latestId) => {
+  feedRollback = {
+    active: true, cursor: S.cursor, latestId: Number(latestId), observedAt: Date.now(),
+  };
+  journal.setMeta("feed_rollback", feedRollback);
+};
+const clearFeedRollback = () => {
+  if (!feedRollbackActive()) return;
+  feedRollback = null;
+  journal.setMeta("feed_rollback", null);
+};
 const save = () => journal.saveRuntime(S);
 save();
 if (process.env.INIT_ONLY === "1") {
@@ -344,7 +358,9 @@ const jupiter = JUPITER_API_KEY ? new JupiterV2Executor({
 const openList = () => Object.values(S.positions);
 async function heldRaw(mint, connection = conn) {
   const ata = associatedTokenAddress(WALLET, mint, TOKEN_PROGRAM);
-  const account = await connection.getAccountInfo(new PublicKey(ata), "confirmed");
+  let account;
+  try { account = await connection.getAccountInfo(new PublicKey(ata), "confirmed"); }
+  catch (error) { throw new RpcBalanceUnavailableError(error); }
   return classicWalletTokenAmount(account, {
     mint, wallet: WALLET, allowMissing: true, label: `canonical ATA ${ata}`,
   });
@@ -352,24 +368,15 @@ async function heldRaw(mint, connection = conn) {
 async function solBalance() { return (await conn.getBalance(kp.publicKey, "confirmed")) / LAMPORTS; }
 
 async function inspectTrackedBalance(pos) {
-  const tracked = BigInt(String(pos.qtyRaw || "0"));
-  if (tracked <= 0n) return { verified: false, reason: "durable tracked balance is invalid",
-    trackedRaw: tracked.toString(), primaryRaw: null, secondaryRaw: null };
-  let primaryHeld;
-  try { primaryHeld = await heldRaw(pos.mint); }
-  catch (error) {
-    return { verified: false, reason: `primary canonical-ATA balance unavailable: ${error.message}`,
-      trackedRaw: tracked.toString(), primaryRaw: null, secondaryRaw: null };
-  }
-  let secondaryHeld = null;
-  if (primaryHeld < tracked && secondaryConn) {
-    try { secondaryHeld = await heldRaw(pos.mint, secondaryConn); }
-    catch (error) { log(`${pos.symbol}: secondary canonical-ATA balance check failed: ${error.message}`); }
-  }
-  return trackedBalanceDecision({
-    trackedRaw: tracked.toString(), primaryRaw: primaryHeld.toString(),
-    secondaryRaw: secondaryHeld?.toString() ?? null,
+  const balance = await verifyTrackedBalanceWithFailover({
+    trackedRaw: String(pos.qtyRaw || "0"),
+    readPrimary: () => heldRaw(pos.mint, conn),
+    readSecondary: secondaryConn ? () => heldRaw(pos.mint, secondaryConn) : null,
   });
+  if (balance.verified && balance.source === "secondary") {
+    log(`${pos.symbol}: primary canonical-ATA read failed; custody verified by the independent secondary RPC`);
+  }
+  return balance;
 }
 
 function persistBalanceBlock(pos, balance) {
@@ -389,22 +396,30 @@ function clearBalanceBlock(pos) {
   delete pos.balanceObservedSecondaryRaw;
 }
 
-function latchExit(pos, why, intentId) {
+function latchExit(pos, why, intentId, trigger = null) {
   if (!EXECUTE) return;
   pos.exitExecutionRequired = true;
   pos.exitExecutionReason ||= String(why || "risk exit");
   pos.exitExecutionIntentId ||= intentId;
   pos.exitExecutionObservedAt ||= Date.now();
+  if (trigger && !pos.exitExecutionTrigger) pos.exitExecutionTrigger = structuredClone(trigger);
   save();
+}
+
+function clearExitLatch(pos) {
+  for (const key of ["exitExecutionRequired", "exitExecutionReason", "exitExecutionIntentId",
+    "exitExecutionObservedAt", "exitExecutionTrigger", "exitExecutionLastError",
+    "exitExecutionLastAttemptAt"]) delete pos[key];
 }
 
 function validEntryEvent(ev) {
   try { new PublicKey(ev.mint); } catch { throw new Error("invalid Solana mint in feed event"); }
+  requirePositiveCallId(ev.call_id, "entry event call_id");
   if (!Number.isFinite(Number(ev.ts)) || Number(ev.ts) <= 0) throw new Error("entry event has no valid timestamp");
   if (Number(ev.ts) > Date.now() + MAX_FUTURE_SKEW_MS) throw new Error("entry event timestamp is too far in the future");
 }
 
-function entrySubmissionGate(intent) {
+function entryEventSubmissionGate(intent) {
   if (intent?.kind !== "entry") return;
   if (pauseEntries()) throw new Error("PAUSE ENTRIES file appeared before submission");
   const event = intent.context?.event;
@@ -414,6 +429,14 @@ function entrySubmissionGate(intent) {
   validateEntryReference(event, {
     nowMs: Date.now(), maxMarkAgeMs: MAX_ENTRY_MARK_AGE_MS,
     maxDeviationPct: MAX_ENTRY_DEVIATION_PCT,
+  });
+}
+
+function entrySubmissionGate(intent) {
+  entryEventSubmissionGate(intent);
+  validateEntryPreflightContext(intent, {
+    nowMs: Date.now(), maxEntryPreflightAgeMs: JUPITER_CFG.maxEntryPreflightAgeMs,
+    requireFresh: true,
   });
 }
 
@@ -434,8 +457,26 @@ function confirmedAmounts(intent, label) {
 
 function recoveryRuntime(context) {
   const next = structuredClone(S);
-  if (context?.riskStateBefore && typeof context.riskStateBefore === "object")
-    next.state = structuredClone(context.riskStateBefore);
+  const liveState = structuredClone(next.state);
+  if (context?.riskStateBefore && typeof context.riskStateBefore === "object") {
+    const recovered = structuredClone(context.riskStateBefore);
+    // A malformed pre-sign snapshot must not prevent custody accounting. Exact
+    // financial rails are rebuilt from risk_events inside markAccounted anyway.
+    try {
+      validateRiskState(recovered, { now: Date.now() });
+      next.state = recovered;
+    } catch {}
+  }
+  // Unrelated exits may reconcile independently and carry equally old pre-sign
+  // snapshots. Lifetime result counters are monotonic: restoring one snapshot may
+  // never erase a result already accounted by another intent.
+  for (const key of ["wins", "losses"]) {
+    const live = Number(liveState?.[key]);
+    const recovered = Number(next.state?.[key]);
+    if (Number.isSafeInteger(live) && live >= 0 &&
+        Number.isSafeInteger(recovered) && recovered >= 0)
+      next.state[key] = Math.max(live, recovered);
+  }
   return next;
 }
 
@@ -451,16 +492,50 @@ function applyConfirmedEntry(intent) {
   if (intent?.kind !== "entry") throw new Error(`intent ${intent?.id || "?"} is not an entry`);
   const { input, output, networkFee } = confirmedAmounts(intent, "entry");
   const context = intent.context || {};
-  const event = context.event;
+  const authoredEvent = context.event;
   const plan = context.plan;
   if (context.wallet && context.wallet !== WALLET)
     throw new Error(`entry intent ${intent.id} belongs to a different wallet context`);
   if (intent.inputMint !== WSOL || intent.outputMint !== intent.mint)
     throw new Error(`entry intent ${intent.id} has an invalid durable mint route`);
-  if (!event || String(event.mint || "") !== String(intent.mint))
-    throw new Error(`entry intent ${intent.id} has no matching durable event context`);
-  if (!plan || !Number.isFinite(Number(plan.sol)) || Number(plan.sol) <= 0)
-    throw new Error(`entry intent ${intent.id} has no durable sizing context`);
+
+  /* A finalized fill is custody reality, even if it was created by the older
+   * runtime. Never let missing pre-upgrade Pyth/call metadata make that holding
+   * disappear from the book or throw at the top of every future tick. New entries
+   * prove the complete durable context; older/malformed contexts are represented as
+   * an explicit exit-only quarantine with conservative placeholders. */
+  let verified = null;
+  const metadataIssues = [];
+  try {
+    verified = validateEntryPreflightContext(intent, {
+      nowMs: Number(context.entryPreflight?.observedAt) || Date.now(),
+      maxEntryPreflightAgeMs: JUPITER_CFG.maxEntryPreflightAgeMs,
+      requireFresh: false,
+    });
+  } catch (error) {
+    metadataIssues.push(`no provable independent SOL/USD entry basis: ${error.message}`);
+  }
+  const matchingEvent = authoredEvent &&
+    String(authoredEvent.mint || "") === String(intent.mint) ? authoredEvent : null;
+  const candidateCallId = Number(matchingEvent?.call_id);
+  const hasExactCallId = Number.isSafeInteger(candidateCallId) && candidateCallId > 0;
+  if (!hasExactCallId) metadataIssues.push("no exact durable call identity");
+  if (!plan || plan.action !== "buy" || !Number.isFinite(Number(plan.sol)) || Number(plan.sol) <= 0 ||
+      !Number.isFinite(Number(plan.f)) || Number(plan.f) < 0)
+    metadataIssues.push("no complete durable sizing context");
+
+  const rule = context.takeProfitRule || {};
+  const durableTakeProfitX = Number(rule.takeProfitX);
+  if (!Number.isFinite(durableTakeProfitX) || durableTakeProfitX <= 0 ||
+      typeof rule.honorDeskTarget !== "boolean")
+    metadataIssues.push("no durable take-profit rule");
+  const entryReference = context.entryReference;
+  if (!entryReference || !(Number(entryReference.stopRatio) > 0) ||
+      Number(entryReference.stopRatio) >= 1 ||
+      (entryReference.targetRatio != null && !(Number(entryReference.targetRatio) > 0)))
+    metadataIssues.push("no valid durable market reference");
+  const oracleVerified = Boolean(verified);
+  const independentlyVerified = oracleVerified && metadataIssues.length === 0;
 
   const costBasisLamports = BigInt(input) + BigInt(networkFee);
   const paidSol = Number(costBasisLamports) / LAMPORTS;
@@ -468,6 +543,9 @@ function applyConfirmedEntry(intent) {
   if (existing) {
     if (existing.entryIntentId !== intent.id || String(existing.qtyRaw) !== output ||
         String(existing.costBasisLamports) !== costBasisLamports.toString() ||
+        (hasExactCallId && Number(existing.callId) !== candidateCallId) ||
+        (independentlyVerified && existing.solUsdSource !== PYTH_SOL_USD_CACHE_SOURCE) ||
+        (!independentlyVerified && existing.accountingIncomplete !== true) ||
         Math.abs(Number(existing.paidSol) - paidSol) > 1e-12)
       throw new Error(`entry intent ${intent.id} conflicts with the recorded position`);
     const next = structuredClone(S);
@@ -476,20 +554,25 @@ function applyConfirmedEntry(intent) {
     return true;
   }
 
-  const rule = context.takeProfitRule || {};
-  const takeProfitX = Number(rule.takeProfitX);
-  if (!Number.isFinite(takeProfitX) || takeProfitX <= 0 || typeof rule.honorDeskTarget !== "boolean")
-    throw new Error(`entry intent ${intent.id} has no durable take-profit rule`);
+  const takeProfitX = Number.isFinite(durableTakeProfitX) && durableTakeProfitX > 0
+    ? durableTakeProfitX : Math.max(1, Number(CFG.takeProfitX) || 2);
+  const honorDeskTarget = typeof rule.honorDeskTarget === "boolean" ? rule.honorDeskTarget : false;
   const stopBufferPct = Number(context.positionConfig?.stopBufferPct);
-  const entryReference = context.entryReference;
-  if (!entryReference || !(Number(entryReference.stopRatio) > 0) || Number(entryReference.stopRatio) >= 1 ||
-      (entryReference.targetRatio != null && !(Number(entryReference.targetRatio) > 0)))
-    throw new Error(`entry intent ${intent.id} has no valid durable market reference`);
+  const stopRatio = Number(entryReference?.stopRatio) > 0 && Number(entryReference.stopRatio) < 1
+    ? Number(entryReference.stopRatio) : 0.01;
+  const targetRatio = Number(entryReference?.targetRatio) > 0
+    ? Number(entryReference.targetRatio) : null;
+  const event = matchingEvent || {
+    mint: intent.mint,
+    symbol: String(authoredEvent?.symbol || intent.mint.slice(0, 6)),
+    ts: Number(context.openedAtMs || intent.confirmedAt || intent.createdAt || Date.now()),
+  };
   const pos = openPosition({
     call: {
       ...event,
-      stop: Number(entryReference.stopRatio),
-      target: entryReference.targetRatio == null ? null : Number(entryReference.targetRatio),
+      mint: intent.mint,
+      stop: stopRatio,
+      target: targetRatio,
     },
     sol: paidSol,
     fillPrice: 1,
@@ -499,28 +582,63 @@ function applyConfirmedEntry(intent) {
   pos.paidSol = paidSol;
   pos.costBasisLamports = costBasisLamports.toString();
   pos.entryInputLamports = input;
-  pos.riskF = Number.isFinite(Number(plan.f)) ? Number(plan.f) : null;
+  pos.riskF = Number.isFinite(Number(plan?.f)) && Number(plan.f) >= 0 ? Number(plan.f) : 0;
   const durableOpenedAt = Number(context.openedAtMs ?? intent.createdAt);
   pos.openedAtMs = Number.isFinite(durableOpenedAt) && durableOpenedAt > 0
     ? durableOpenedAt : Date.now();
   pos.entryIntentId = intent.id;
+  if (hasExactCallId) pos.callId = candidateCallId;
+  else {
+    pos.callIdentityIncomplete = true;
+    pos.callIdentityIncompleteReason =
+      "landed legacy entry has no provable originating call_id; new entries remain blocked until it closes";
+    pos.callIdentityPolicy = LEGACY_CALL_IDENTITY_POLICY;
+  }
   pos.takeProfitX = takeProfitX;
-  pos.honorDeskTarget = rule.honorDeskTarget;
-  pos.marketMarkAtEntry = Number(entryReference.marketMark);
-  pos.marketMarkObservedAt = Number(entryReference.marketMarkAt);
+  pos.honorDeskTarget = honorDeskTarget;
+  if (Number(entryReference?.marketMark) > 0)
+    pos.marketMarkAtEntry = Number(entryReference.marketMark);
+  if (Number(entryReference?.marketMarkAt) > 0)
+    pos.marketMarkObservedAt = Number(entryReference.marketMarkAt);
   const solUsdAtEntry = Number(context.entryPreflight?.solUsd);
-  if (!Number.isFinite(solUsdAtEntry) || solUsdAtEntry <= 0)
-    throw new Error(`entry intent ${intent.id} has no durable SOL/USD reference`);
-  pos.solUsdAtEntry = solUsdAtEntry;
+  pos.solUsdAtEntry = Number.isFinite(solUsdAtEntry) && solUsdAtEntry > 0 ? solUsdAtEntry : 1;
+  // Preserve truthful oracle provenance even when some other strategy metadata is
+  // incomplete. accountingIncomplete, not a false source label, is what disarms all
+  // automatic price policy for the exit-only quarantine.
+  pos.solUsdSource = oracleVerified ? PYTH_SOL_USD_CACHE_SOURCE : "legacy-unverified";
+  if (!independentlyVerified) {
+    pos.accountingIncomplete = true;
+    pos.accountingIncompleteReason =
+      `landed entry has incomplete durable non-custody metadata: ` +
+      `${metadataIssues.join("; ") || "durable provenance unavailable"}; ` +
+      "automatic price exits are quarantined";
+  }
 
-  const next = recoveryRuntime(context);
+  // An exit can arrive while this exact buy is signed/submitted/ambiguous but not
+  // yet a position. The feed cursor is allowed to drain past that exit only because
+  // the journal kept it. Attach the latch in the SAME transaction that accounts the
+  // buy, so a crash cannot create a position that forgot the desk had already left.
+  const deferredExit = journal.deferredDeskExitForEntry(intent.id);
+  if (deferredExit) {
+    if (deferredExit.mint !== intent.mint ||
+        (hasExactCallId && Number(deferredExit.callId) !== candidateCallId))
+      throw new Error(`deferred desk exit for ${intent.id} does not match the confirmed entry`);
+    pos.exitExecutionRequired = true;
+    pos.exitExecutionReason = deferredExit.reason;
+    pos.exitExecutionIntentId = `desk-exit:${deferredExit.eventId}`;
+    pos.exitExecutionObservedAt = deferredExit.observedAt;
+  }
+
+  const next = recoveryRuntime(independentlyVerified ? context : null);
   next.positions[intent.mint] = pos;
   next.state.openCount = Object.keys(next.positions).length;
   next.state.bookHeat = Object.values(next.positions)
     .reduce((sum, position) => sum + (Number(position.riskF) || 0), 0);
-  journal.markAccounted(intent.id, next);
+  journal.markAccounted(intent.id, next, { consumeDeferredDeskExit: Boolean(deferredExit) });
   S = next;
-  log(`BOUGHT ${event.symbol || intent.mint.slice(0, 6)} — ${paidSol.toFixed(6)} SOL → ${output} raw — https://solscan.io/tx/${intent.signature}`);
+  log(`${independentlyVerified ? "BOUGHT" : "RECOVERED + QUARANTINED"} ` +
+    `${event.symbol || intent.mint.slice(0, 6)} — ${paidSol.toFixed(6)} SOL → ${output} raw — ` +
+    `https://solscan.io/tx/${intent.signature}`);
   return true;
 }
 
@@ -588,10 +706,18 @@ function accountConfirmedIntents() {
   let count = 0;
   for (const intent of journal.pendingIntents()) {
     if (intent.state !== "confirmed") continue;
-    if (intent.kind === "entry") applyConfirmedEntry(intent);
-    else if (["desk_exit", "risk_exit"].includes(intent.kind)) applyConfirmedExit(intent);
-    else throw new Error(`confirmed intent ${intent.id} has unsupported kind ${intent.kind}`);
-    count++;
+    try {
+      if (intent.kind === "entry") applyConfirmedEntry(intent);
+      else if (["desk_exit", "risk_exit"].includes(intent.kind)) applyConfirmedExit(intent);
+      else throw new Error(`confirmed intent ${intent.id} has unsupported kind ${intent.kind}`);
+      count++;
+    } catch (error) {
+      // One damaged accounting row must remain visible and block new exposure, but
+      // it may never starve stop/desk-exit handling for every unrelated holding.
+      // The confirmed state is deliberately retained for monitor/operator repair.
+      log(`ACCOUNTING QUARANTINE ${intent.id}: ${error.message} — ` +
+        "intent remains confirmed; unrelated position protection continues");
+    }
   }
   return count;
 }
@@ -612,6 +738,8 @@ async function onEntry(ev) {
   const age = Date.now() - Number(ev.ts);
   if (age > MAX_CALL_AGE_MS)
     return log(`SKIP ${ev.symbol}: call is ${Math.round(age / 60_000)}m old (max ${MAX_CALL_AGE_MS / 60_000}m)`);
+  if (feedRollbackActive())
+    return log(`SKIP ${ev.symbol}: authenticated feed latest_id rolled behind durable cursor — entries frozen`);
   if (pauseEntries()) return log(`SKIP ${ev.symbol}: PAUSE ENTRIES file is present`);
   if (hardStop()) return log(`SKIP ${ev.symbol}: HARD STOP file is present`);
   const history = journal.riskHistoryStatus(Date.now());
@@ -645,8 +773,12 @@ async function onEntry(ev) {
   if (!jupiter) throw new Error("Jupiter client is unavailable");
 
   const preliminaryAmountRaw = BigInt(Math.floor(plan.sol * LAMPORTS));
-  const preflight = await jupiter.preflightEntry(WSOL, ev.mint, preliminaryAmountRaw.toString());
-  entrySubmissionGate({ kind: "entry", context: { event: ev } });
+  const [preflight, tokenDecimals, solUsdOracle] = await Promise.all([
+    jupiter.preflightEntry(WSOL, ev.mint, preliminaryAmountRaw.toString()),
+    independentClassicMintDecimals(conn, secondaryConn, ev.mint),
+    independentSolUsdPrice(conn, secondaryConn),
+  ]);
+  entryEventSubmissionGate({ kind: "entry", context: { event: ev } });
   const executableReturnRatio = Number(BigInt(preflight.reverse.outAmount) * 1_000_000n /
     preliminaryAmountRaw) / 1_000_000;
   const worstFeeRatio = 2 * jupiter.cfg.maxNetworkFeeLamports / Number(preliminaryAmountRaw);
@@ -669,6 +801,31 @@ async function onEntry(ev) {
   const amountRaw = BigInt(Math.floor(plan.sol * LAMPORTS));
   log(`ENTRY ${ev.symbol} — ${plan.sol} SOL | stop ${ev.stop} target ${ev.target}`);
   const openedAtMs = Date.now();
+  const intentContext = {
+    event: ev, plan, takeProfitRule, openedAtMs, entryReference,
+    entryPreflight: {
+      inputAmountRaw: preliminaryAmountRaw.toString(),
+      forwardOutputRaw: String(preflight.forward.outAmount),
+      reverseOutputRaw: String(preflight.reverse.outAmount),
+      roundTripLossPct: preflight.lossPct,
+      // Never let the swap counterparty author its own USD fairness anchor.
+      // Pyth is read through both independent Solana RPC providers and its
+      // verification, feed id, confidence, freshness and consensus are checked.
+      solUsd: solUsdOracle.price,
+      solUsdSource: solUsdOracle.source,
+      solUsdPublishTime: solUsdOracle.publishTime,
+      solUsdConfidencePct: solUsdOracle.confidencePct,
+      solUsdProviderDivergencePct: solUsdOracle.divergencePct,
+      tokenDecimals,
+      observedAt: solUsdOracle.observedAt,
+    },
+    positionConfig: { stopBufferPct: perCall.stopBufferPct },
+    riskStateBefore: structuredClone(S.state),
+  };
+  // Apply the exact same complete gate used by restart recovery before an intent is
+  // even journaled. The executor checks it again after final simulation and before
+  // signing, and once more before any recovered signed bytes could be disclosed.
+  entrySubmissionGate({ kind: "entry", amountRaw: amountRaw.toString(), context: intentContext });
   const fill = await jupiter.executeIntent({
     id: intentId,
     kind: "entry",
@@ -678,31 +835,23 @@ async function onEntry(ev) {
     inputMint: WSOL,
     outputMint: ev.mint,
     amountRaw: amountRaw.toString(),
-    context: {
-      event: ev, plan, takeProfitRule, openedAtMs, entryReference,
-      entryPreflight: {
-        forwardOutputRaw: String(preflight.forward.outAmount),
-        reverseOutputRaw: String(preflight.reverse.outAmount),
-        roundTripLossPct: preflight.lossPct,
-        solUsd: preflight.solUsd,
-        observedAt: openedAtMs,
-      },
-      positionConfig: { stopBufferPct: perCall.stopBufferPct },
-      riskStateBefore: structuredClone(S.state),
-    },
+    context: intentContext,
   });
   applyConfirmedEntry(fill);
 }
 
-async function sellAll(pos, why, fraction = 1, suppliedIntentId = null) {
+async function sellAll(pos, why, fraction = 1, suppliedIntentId = null, trigger = null) {
   const intentId = suppliedIntentId || `risk-exit:${pos.entryIntentId || `${pos.mint}:${pos.openedAtMs || pos.openedAt}`}`;
-  latchExit(pos, why, intentId);
+  latchExit(pos, why, intentId, trigger);
   const existingIntent = journal.getIntent(intentId);
   if (existingIntent?.state === "confirmed") {
     applyConfirmedExit(existingIntent);
     return;
   }
   if (existingIntent?.state === "accounted") return log(`EXIT ${pos.symbol} already accounted`);
+  if (["signed", "submitted", "ambiguous"].includes(existingIntent?.state))
+    return log(`EXIT ${pos.symbol} remains durably latched — ${existingIntent.state} attempt is ` +
+      "handled by bounded recovery without blocking other position checks");
   if (!EXECUTE) return log(`PAPER EXIT ${pos.symbol} — ${why} — position retained; no transaction sent`);
   if (hardStop()) throw new Error("HARD STOP is present — automated exits are blocked; manage the wallet manually");
 
@@ -727,25 +876,60 @@ async function sellAll(pos, why, fraction = 1, suppliedIntentId = null) {
     amountRaw: amount.toString(),
     context: {
       position: structuredClone(pos), why, fraction,
+      trigger: trigger ? structuredClone(trigger) : null,
       riskStateBefore: structuredClone(S.state),
     },
   });
   applyConfirmedExit(fill);
 }
 
+/** Execute an exit for a held position, or durably defer it for the exact buy that
+ * is already beyond the no-return signing boundary but has not accounted yet. */
+async function handleDeskExitEvent(ev) {
+  try { new PublicKey(ev?.mint); }
+  catch { throw new Error("invalid Solana mint in desk exit event"); }
+  requirePositiveCallId(ev?.call_id, "desk exit call_id");
+  const eventId = ev.event_id || `${FLOOR}:${ev.id}`;
+  const reason = `desk exit (${ev.code || "exit"})`;
+  const pos = S.positions[ev.mint];
+  if (pos) {
+    const decision = deskExitDecisionForPosition(pos, ev);
+    if (decision.action === "ignore") {
+      log(`EXIT ${ev.symbol || ev.mint}: call ${decision.callId} does not match held call ${decision.positionCallId}`);
+      return "different-call";
+    }
+    if (decision.reason === "legacy-risk-reduction")
+      log(`EXIT ${ev.symbol || ev.mint}: legacy call identity is unprovable — taking the risk-reducing same-mint exit`);
+    await sellAll(pos, reason, 1, `desk-exit:${eventId}`);
+    return "position";
+  }
+  const entry = journal.blockingEntryForDeskExit({ mint: ev.mint, callId: ev.call_id });
+  if (!entry) return "not-held";
+  journal.deferDeskExitForEntry({
+    entryIntentId: entry.id, eventId, feedId: ev.id, callId: ev.call_id,
+    mint: ev.mint, reason, observedAt: Date.now(),
+  });
+  log(`EXIT ${ev.symbol || ev.mint}: durably deferred until unresolved entry ${entry.id} is accounted`);
+  return "deferred";
+}
+
 async function manageOpen() {
   let currentSolUsd = null;
+  let solUsdObservation = null;
   let solUsdError = null;
-  if (EXECUTE && openList().length && jupiter) {
-    try { currentSolUsd = await jupiter.solUsdPrice(); }
+  if (EXECUTE && openList().length) {
+    try {
+      solUsdObservation = await independentSolUsdPrice(conn, secondaryConn);
+      currentSolUsd = solUsdObservation.price;
+    }
     catch (error) { solUsdError = error; }
   }
 
   /* ONE DENOMINATOR OUTAGE MUST NOT DISARM EVERY STOP.
    * The SOL/USD leg is fetched once per tick; when it failed, the code discarded the
    * token→WSOL quote it ALREADY HELD for every position and left mark=null, which
-   * pricePolicy treats as "hold". So during a Jupiter USDC-route outage — precisely
-   * when rugs cluster — stops, trails and take-profits were all silently off for
+   * pricePolicy treats as "hold". So during a Pyth push or RPC-consensus outage —
+   * precisely when rugs cluster — stops, trails and take-profits were all silently off for
    * every open position at once, and the only backstop was the 12h age exit selling
    * the remnant. SOL/USD moves single-digit percent in hours while these stops care
    * about 20%+ token moves, so a cached rate is overwhelmingly better than no stop.
@@ -756,9 +940,14 @@ async function manageOpen() {
    * combined SOL crash + quote-route outage, a day-old rate misprices every mark by
    * SOL's full daily move — which can be 20%+, the size of the very moves the stops
    * exist to catch. Thirty minutes still covers the routine outage while bounding
-   * the mispricing to SOL's half-hour drift, normally low single digits. */
+  * the mispricing to SOL's half-hour drift, normally low single digits. */
   if (currentSolUsd > 0) {
-    S.solUsdCache = { v: currentSolUsd, ts: Date.now() };
+    S.solUsdCache = {
+      v: currentSolUsd,
+      ts: solUsdObservation.observedAt,
+      publishTime: solUsdObservation.publishTime,
+      source: PYTH_SOL_USD_CACHE_SOURCE,
+    };
     /* The cache must survive a restart, because restarts CORRELATE with the outages
      * it exists for — a deploy, crash or box reboot during quote-route chaos is the
      * normal case, not the unlucky one. It lived only on the in-memory S, which
@@ -771,17 +960,17 @@ async function manageOpen() {
       try { const m = journal.getMeta("sol_usd_cache"); if (m) S.solUsdCache = JSON.parse(m); } catch {}
     }
     const cache = S.solUsdCache;
-    const maxAge = Number(process.env.SOL_USD_CACHE_MAX_AGE_MS || 30 * 60e3);
-    /* age >= 0: a backward clock step (RTC-less reboot, NTP correction — the same
-     * restart class the persistence exists for) makes the age negative, which passed
-     * `<= maxAge` unconditionally and voided the staleness cap for hours. The journal
-     * already defends rolling windows against backward clocks; this line holds the
-     * same standard. */
-    const cacheAge = Date.now() - (cache?.ts ?? 0);
-    if (cache?.v > 0 && cacheAge >= 0 && cacheAge <= maxAge) {
-      currentSolUsd = cache.v;
+    // Never inherit a cache written by the old circular Jupiter SOL/USDC anchor, or
+    // a Pyth cache without its immutable publish time. Both the local observation
+    // and the oracle publication must remain inside the startup-validated window.
+    const usableCache = usableSolUsdCache(cache, {
+      nowMs: Date.now(), maxAgeMs: SOL_USD_CACHE_MAX_AGE_MS,
+    });
+    if (usableCache) {
+      currentSolUsd = usableCache.price;
       solUsdError = null;
-      log(`SOL/USD leg failed — using the cached rate $${cache.v} from ${Math.round((Date.now() - cache.ts) / 60000)}m ago so stops stay armed`);
+      log(`independent SOL/USD oracle failed — using the cached Pyth rate $${usableCache.price} ` +
+        `published ${Math.round(usableCache.publishAgeMs / 60_000)}m ago so stops stay armed`);
     }
   }
 
@@ -806,45 +995,69 @@ async function manageOpen() {
         save();
         if (wasBlocked) log(`${pos.symbol}: full canonical-ATA balance verified again — custody gate re-armed`);
       }
+      // A previously latched stop/rug/desk exit outranks fresh market-data work.
+      // Retrying it first prevents an order-service outage from delaying an exit
+      // whose decision has already crossed the durable execution boundary.
+      if (pos.exitExecutionRequired) {
+        await sellAll(pos, pos.exitExecutionReason || "required risk exit", 1,
+          pos.exitExecutionIntentId || null, pos.exitExecutionTrigger || null);
+        continue;
+      }
       if (pos.accountingIncomplete) {
-        log(`${pos.symbol}: legacy accounting/SOL-USD basis is incomplete — automatic price exits remain disarmed`);
+        // A quarantined legacy basis disarms price-derived policy, not an explicit
+        // desk/rug exit already durably latched for risk reduction.
+        log(`${pos.symbol}: legacy accounting/SOL-USD basis is incomplete — ` +
+          "automatic price exits remain disarmed; explicit same-mint desk exits remain enabled");
         continue;
       }
       let mark = null;
       if (jupiter && pos.qtyRaw && BigInt(pos.qtyRaw) > 0n) {
-        let quote = null;
-        try { quote = await jupiter.quote(pos.mint, WSOL, pos.qtyRaw); }
+        try {
+          if (solUsdError || !(currentSolUsd > 0))
+            throw new Error(`independent SOL/USD mark unavailable: ${solUsdError?.message || "no usable Pyth cache"}`);
+          const observation = await jupiter.preflightExitMark({
+            mint: pos.mint, amountRaw: pos.qtyRaw, position: pos,
+          });
+          mark = executableExitMark(pos, observation.actualOutputRaw, currentSolUsd);
+          clearExitMarkFailureWitness(pos);
+          delete pos.riskDataUnavailable;
+          delete pos.riskDataUnavailableReason;
+          delete pos.riskDataUnavailableAt;
+          save();
+        }
         catch (error) {
           pos.riskDataUnavailable = true;
-          pos.riskDataUnavailableReason = `mark/exit quote unavailable: ${error.message}`;
+          pos.riskDataUnavailableReason = `independent executable exit mark unavailable: ${error.message}`;
           pos.riskDataUnavailableAt = Date.now();
+          const witness = confirmExitMarkFailureWitness(pos, {
+            observedAt: pos.riskDataUnavailableAt, reason: pos.riskDataUnavailableReason,
+          }, { maxGapMs: Math.max(60_000, POLL_MS * 4) });
           save();
-          log(`mark ${pos.symbol}: ${error.message} — new entries blocked`);
-        }
-        if (quote) {
-          priceImpactPercent(quote);
-          if (solUsdError || !(currentSolUsd > 0)) {
-            pos.riskDataUnavailable = true;
-            pos.riskDataUnavailableReason = `SOL/USD mark unavailable: ${solUsdError?.message || "invalid quote"}`;
-            pos.riskDataUnavailableAt = Date.now();
-            save();
+          if (!witness.confirmed) {
+            log(`mark ${pos.symbol}: ${error.message} — new entries blocked; ` +
+              "waiting for one independent next-tick failure witness before risk reduction");
           } else {
-            const entryInputSol = Number(BigInt(pos.entryInputLamports)) / LAMPORTS;
-            mark = ((Number(BigInt(quote.outAmount)) / LAMPORTS) / entryInputSol) *
-              (currentSolUsd / Number(pos.solUsdAtEntry));
-            delete pos.riskDataUnavailable;
-            delete pos.riskDataUnavailableReason;
-            delete pos.riskDataUnavailableAt;
-            save();
+            log(`mark ${pos.symbol}: executable mark failed on two consecutive ticks — ` +
+              "latching a risk-reducing exit so the order service cannot suppress a stop");
+            await sellAll(pos, "independent executable exit mark unavailable on two consecutive ticks",
+              1, null, witness.trigger);
+            continue;
           }
         }
       }
       const decision = stepPosition({ pos, mark, deskExit: null, cfg: policyConfigForPosition(pos, CFG) });
-      if (pos.exitExecutionRequired) {
-        await sellAll(pos, pos.exitExecutionReason || decision.reason, 1, pos.exitExecutionIntentId || null);
-      } else if (decision.action === "sell") await sellAll(pos, decision.reason);
+      if (decision.action === "sell") {
+        const trigger = priceExitTrigger(pos, decision, mark, currentSolUsd, Date.now());
+        const witness = confirmPriceExitWitness(pos, trigger, { maxGapMs: Math.max(60_000, POLL_MS * 4) });
+        if (!witness.confirmed) {
+          save();
+          log(`${pos.symbol}: ${decision.reason} observed once — waiting for an independent next-tick witness`);
+          continue;
+        }
+        await sellAll(pos, decision.reason, 1, null, witness.trigger);
+      }
       else if (decision.action === "sell_part") await sellAll(pos, decision.reason, decision.fraction);
-      else save();
+      else { clearPriceExitWitness(pos); save(); }
     } catch (error) {
       // A sellAll above may have swapped S for a clone; write the failure onto the
       // LIVE object or the flags evaporate with the detached one.
@@ -852,6 +1065,13 @@ async function manageOpen() {
       const pos = live ?? { symbol: posKey };
       if (!live) { log(`manage ${pos.symbol}: ${error.message} — position left the book mid-pass`); continue; }
       if (pos.exitExecutionRequired) {
+        if (error?.code === "EXIT_TRIGGER_NOT_MET") {
+          clearExitLatch(pos);
+          clearPriceExitWitness(pos);
+          save();
+          log(`EXIT CANCELLED ${pos.symbol}: ${error.message} — price trigger must earn two fresh witnesses again`);
+          continue;
+        }
         pos.exitExecutionLastError = error.message;
         pos.exitExecutionLastAttemptAt = Date.now();
         if (/price impact .* exceeds cap/i.test(error.message)) {
@@ -879,9 +1099,73 @@ let ticking = false;
  * secret and opens no control channel — the server learns the bot's pulse, not its
  * reins. Throttled to once a minute. */
 let lastHeartbeatAt = 0;
+const runtimeHealth = {
+  lastTickStartedAt: 0, lastTickCompletedAt: 0, lastFeedSuccessAt: 0,
+  consecutiveFeedFailures: 0, consecutiveTickFailures: 0,
+  executionReadiness: EXECUTE ? {
+    ready: false, lastSuccessAt: 0, observedAt: 0, route: "wsol-usdc", providers: 0,
+  } : null,
+};
+let readinessProbeInFlight = false;
+let lastReadinessProbeAt = 0;
+function maybeProbeExecutionReadiness() {
+  if (!EXECUTE || !jupiter || readinessProbeInFlight ||
+      Date.now() - lastReadinessProbeAt < 2 * 60_000) return;
+  lastReadinessProbeAt = Date.now();
+  readinessProbeInFlight = true;
+  Promise.resolve(jupiter.probeExecutionReadiness()).then((result) => {
+    const succeededAt = Date.now();
+    runtimeHealth.executionReadiness = {
+      ready: result?.ready === true,
+      lastSuccessAt: result?.ready === true ? succeededAt : 0,
+      observedAt: Number(result?.observedAt) || succeededAt,
+      route: result?.route === "wsol-usdc" ? "wsol-usdc" : null,
+      providers: Number(result?.providers) === 2 ? 2 : 0,
+    };
+  }).catch(() => {
+    runtimeHealth.executionReadiness = {
+      ready: false,
+      lastSuccessAt: Number(runtimeHealth.executionReadiness?.lastSuccessAt) || 0,
+      observedAt: Date.now(), route: "wsol-usdc", providers: 0,
+    };
+  }).finally(() => { readinessProbeInFlight = false; });
+}
+const noteFeedFailure = () => { runtimeHealth.consecutiveFeedFailures++; };
+const noteFeedSuccess = () => {
+  runtimeHealth.lastFeedSuccessAt = Date.now();
+  runtimeHealth.consecutiveFeedFailures = 0;
+};
 function sendHeartbeat() {
   if (Date.now() - lastHeartbeatAt < 60_000) return;
   lastHeartbeatAt = Date.now();
+  let health;
+  try {
+    health = executorHeartbeatHealth({
+      entriesPaused: pauseEntries(), hardStop: hardStop(),
+      blockingIntent: Boolean(journal.hasBlockingIntent()), positions: openList(),
+      lastTickCompletedAt: runtimeHealth.lastTickCompletedAt,
+      lastFeedSuccessAt: runtimeHealth.lastFeedSuccessAt,
+      consecutiveFeedFailures: runtimeHealth.consecutiveFeedFailures,
+      consecutiveTickFailures: runtimeHealth.consecutiveTickFailures,
+      feedRollback: feedRollbackActive(),
+      executionReadiness: runtimeHealth.executionReadiness,
+      runtimeCommit: process.env.EXECUTOR_SOURCE_COMMIT || null,
+      runtimeFingerprint: RUNTIME_FINGERPRINT,
+    });
+  } catch {
+    // Telemetry can lose detail; it can never stop the trading/reconciliation loop.
+    health = executorHeartbeatHealth({
+      entriesPaused: pauseEntries(), hardStop: hardStop(), blockingIntent: true,
+      lastTickCompletedAt: runtimeHealth.lastTickCompletedAt,
+      lastFeedSuccessAt: runtimeHealth.lastFeedSuccessAt,
+      consecutiveFeedFailures: runtimeHealth.consecutiveFeedFailures,
+      consecutiveTickFailures: runtimeHealth.consecutiveTickFailures + 1,
+      feedRollback: feedRollbackActive(),
+      executionReadiness: runtimeHealth.executionReadiness,
+      runtimeCommit: process.env.EXECUTOR_SOURCE_COMMIT || null,
+      runtimeFingerprint: RUNTIME_FINGERPRINT,
+    });
+  }
   fetch(`${API}/api/floor/${FLOOR}/executor/heartbeat`, {
     method: "POST", redirect: "error", signal: AbortSignal.timeout(5_000),
     headers: { authorization: `Bearer ${SECRET}`, "content-type": "application/json" },
@@ -898,17 +1182,46 @@ function sendHeartbeat() {
         mint: p.mint,
         sol: Number((Number(p.entryInputLamports || 0) / LAMPORTS).toFixed(4)),
       })),
+      health,
       ts: Date.now(),
     }),
   }).catch(() => {});
 }
 
+/* Recovery is never allowed to sit unbounded in front of fresh position safety.
+ * At most one exit-first intent is probed before manageOpen, and the tick waits no
+ * more than one second for that observation-only pass. The promise keeps its
+ * in-process intent scope if the RPC is slower, so continuing cannot duplicate a
+ * submission. A full identical-byte retry is scheduled only after the tick's risk,
+ * feed and heartbeat work has completed, and never overlaps another recovery pass. */
+let recoveryPassInFlight = null;
+const startRecoveryPass = (options) => {
+  if (!EXECUTE || !jupiter || recoveryPassInFlight) return recoveryPassInFlight;
+  const pass = Promise.resolve(jupiter.recoverPending(options))
+    .catch((error) => log(`bounded recovery pass: ${error.message}`))
+    .finally(() => { if (recoveryPassInFlight === pass) recoveryPassInFlight = null; });
+  recoveryPassInFlight = pass;
+  return pass;
+};
+async function boundedRecoveryBeforeRisk() {
+  if (!EXECUTE) return;
+  const pass = recoveryPassInFlight || startRecoveryPass({ observationOnly: true, maxIntents: 1 });
+  if (!pass) return;
+  await waitForRecoveryBudget(pass,
+    Math.min(1_000, Math.max(100, Math.floor(POLL_MS / 4))));
+}
+const scheduleBackgroundRecovery = () => {
+  if (!EXECUTE || recoveryPassInFlight) return;
+  startRecoveryPass({ maxIntents: 1 });
+};
+
 async function tick() {
   if (ticking || shuttingDown) return;
   ticking = true;
-  sendHeartbeat();
+  runtimeHealth.lastTickStartedAt = Date.now();
+  let tickFailed = false;
   try {
-    if (EXECUTE) await jupiter.recoverPending();
+    await boundedRecoveryBeforeRisk();
     accountConfirmedIntents();
     // Existing risk outranks new opportunity. A stop, age exit, balance ambiguity, or
     // emergency-impact block must update the durable book before an entry from this
@@ -918,16 +1231,27 @@ async function tick() {
       const response = await fetch(`${API}/api/floor/${FLOOR}/executor/feed?after=${S.cursor}`, {
         headers: { authorization: `Bearer ${SECRET}` }, redirect: "error", signal: AbortSignal.timeout(10_000),
       });
-      if (response.status === 401) log("feed authentication rejected — check CC_SECRET / CC_FLOOR");
-      else if (!response.ok) log(`feed HTTP ${response.status}`);
+      if (response.status === 401) {
+        noteFeedFailure();
+        log("feed authentication rejected — check CC_SECRET / CC_FLOOR");
+      } else if (!response.ok) {
+        noteFeedFailure();
+        log(`feed HTTP ${response.status}`);
+      }
       else {
         const payload = await response.json();
         if (payload.cluster !== "mainnet-beta") throw new Error("feed cluster is not mainnet-beta");
         if (!Array.isArray(payload.events)) throw new Error("feed omitted its events array");
         const events = payload.events;
-        const latestId = Number(payload.latest_id);
-        if (!Number.isSafeInteger(latestId) || latestId < 0)
-          throw new Error("feed omitted a safe non-negative latest_id");
+        const feedCursor = authenticatedFeedCursorState(S.cursor, payload.latest_id);
+        const latestId = feedCursor.latestId;
+        if (feedCursor.rollback) {
+          persistFeedRollback(latestId);
+          noteFeedFailure();
+          log(`CRITICAL FEED ROLLBACK: authenticated latest_id ${latestId} is behind durable cursor ` +
+            `${S.cursor} — entries remain frozen; local position/risk exits continue`);
+          return;
+        }
         const returnedIds = events.map((event) => Number(event?.id));
         let previousId = S.cursor;
         for (const id of returnedIds) {
@@ -935,6 +1259,8 @@ async function tick() {
             throw new Error("feed event ids are not strictly increasing above the cursor or exceed latest_id");
           previousId = id;
         }
+        clearFeedRollback();
+        noteFeedSuccess();
         if (!S.primed) {
           S.primed = true;
           S.cursor = Math.max(S.cursor, latestId);
@@ -943,29 +1269,53 @@ async function tick() {
         } else {
           // Exit safety is not held hostage by an earlier bad entry. Pre-latch/process
           // every exit in the validated batch before the sequential cursor pass.
+          let unsafeExitPrepass = false;
           for (const ev of events.filter((event) => event.type === "exit")) {
-            const pos = S.positions[ev.mint];
-            if (!pos) continue;
             try {
-              await sellAll(pos, `desk exit (${ev.code || "exit"})`, 1,
-                `desk-exit:${ev.event_id || `${FLOOR}:${ev.id}`}`);
+              await handleDeskExitEvent(ev);
             } catch (error) {
-              log(`EXIT PREPASS ${ev.symbol || ev.id}: ${error.message} — exit remains latched`);
+              const positionLatched = S.positions[ev.mint]?.exitExecutionRequired === true;
+              let deferred = false;
+              try {
+                const entry = journal.blockingEntryForDeskExit({ mint: ev.mint, callId: ev.call_id });
+                deferred = Boolean(entry && journal.deferredDeskExitForEntry(entry.id));
+              } catch {}
+              if (!positionLatched && !deferred) unsafeExitPrepass = true;
+              log(`EXIT PREPASS ${ev.symbol || ev.id}: ${error.message} — ` +
+                `${positionLatched || deferred ? "durable exit remains latched" : "exit was not durably recorded"}`);
             }
           }
           const blockingIntent = journal.hasBlockingIntent();
           if (blockingIntent) {
-            log(`journal intent ${blockingIntent} is unresolved — exits stay latched and new exposure is frozen`);
+            /* The server returns at most 50 rows. Returning forever without moving
+             * the cursor pins us to that first window, so a newer desk exit can be
+             * invisible indefinitely. Every exit in THIS validated batch was already
+             * pre-latched above. Cross the batch now: entries are conservatively
+             * abandoned while exposure is frozen, and the next window (and its exits)
+             * becomes visible on the next poll. Never jump straight to latest_id —
+             * exits beyond this batch have not been seen yet. */
+            if (unsafeExitPrepass) {
+              log(`journal intent ${blockingIntent} is unresolved and an exit could not be recorded — ` +
+                "cursor stays pinned; manual action required");
+              return;
+            }
+            const nextCursor = advanceFrozenBatchCursor(S.cursor, events);
+            if (nextCursor > S.cursor) {
+              S.cursor = nextCursor;
+              save();
+              log(`journal intent ${blockingIntent} is unresolved — exits were preprocessed; ` +
+                `new exposure stayed frozen and cursor advanced to ${S.cursor} to expose the next batch`);
+            } else {
+              log(`journal intent ${blockingIntent} is unresolved — exits stay latched and new exposure is frozen`);
+            }
             return;
           }
           for (const ev of events) {
             try {
               if (ev.type === "entry") await onEntry(ev);
               else if (ev.type === "exit") {
-                const pos = S.positions[ev.mint];
-                if (pos) await sellAll(pos, `desk exit (${ev.code || "exit"})`, 1,
-                  `desk-exit:${ev.event_id || `${FLOOR}:${ev.id}`}`);
-                else log(`EXIT ${ev.symbol} — not held`);
+                const disposition = await handleDeskExitEvent(ev);
+                if (disposition === "not-held") log(`EXIT ${ev.symbol} — not held`);
               } else throw new Error(`unknown event type ${ev.type}`);
               S.cursor = Math.max(S.cursor, Number(ev.id));
               save();
@@ -986,11 +1336,18 @@ async function tick() {
           }
         }
       }
-    } catch (error) { log(`poll error: ${error.message}`); }
+    } catch (error) { noteFeedFailure(); log(`poll error: ${error.message}`); }
   } catch (error) {
+    tickFailed = true;
     log(`tick safety stop: ${error.message}`);
   } finally {
+    runtimeHealth.lastTickCompletedAt = Date.now();
+    runtimeHealth.consecutiveTickFailures = tickFailed
+      ? runtimeHealth.consecutiveTickFailures + 1 : 0;
+    maybeProbeExecutionReadiness();
+    sendHeartbeat();
     ticking = false;
+    scheduleBackgroundRecovery();
   }
 }
 

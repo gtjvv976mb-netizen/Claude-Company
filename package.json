@@ -5,7 +5,7 @@
   "type": "module",
   "description": "An automated, proposal-only Solana research desk with an optional user-operated local execution canary.",
   "engines": {
-    "node": ">=22.13.0 <23"
+    "node": ">=22.13.0 <25"
   },
   "scripts": {
     "test": "node scripts/test-all.mjs",

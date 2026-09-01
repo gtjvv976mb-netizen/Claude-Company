@@ -115,9 +115,11 @@ console.log("\nSIGNING-PATH CONTRACTS (asserted structurally — the live tests 
   const src = await import("node:fs").then((fs) =>
     fs.readFileSync(new URL("./jupiter.mjs", import.meta.url), "utf8"));
 
+  const prepareBody = src.slice(src.indexOf("async _prepareUnsigned"), src.indexOf("async preflightExitMark"));
   const buildBody = src.slice(src.indexOf("async _buildSigned"), src.indexOf("async _simulateUnsigned"));
   ok("F2: the order expiry is bounded against the chain before signing",
-    /getBlockHeight\("confirmed"\)/.test(buildBody) && /blockHeightWindow/.test(buildBody),
+    /getBlockHeight\("confirmed"\)/.test(prepareBody) && /blockHeightWindow/.test(prepareBody) &&
+    buildBody.indexOf("_prepareUnsigned") < buildBody.indexOf("tx.sign([this.keypair])"),
     "an unbounded lastValidBlockHeight wedged the journal and disarmed every exit");
 
   /* F3/F5, THIRD design — the re-review killed the second. Journal-then-simulate
@@ -132,8 +134,8 @@ console.log("\nSIGNING-PATH CONTRACTS (asserted structurally — the live tests 
    * disclosure anywhere is the /execute POST — behind recordSigned and markSubmitted,
    * the states the reconciliation machinery actually fences. */
   ok("F3: the simulation runs on the UNSIGNED transaction, before tx.sign",
-    buildBody.indexOf("_simulateUnsigned") !== -1 &&
-    buildBody.indexOf("_simulateUnsigned") < buildBody.indexOf("tx.sign([this.keypair])"),
+    prepareBody.indexOf("_simulateUnsigned") !== -1 &&
+    buildBody.indexOf("_prepareUnsigned") < buildBody.indexOf("tx.sign([this.keypair])"),
     "nothing disclosed during simulation can be broadcast");
   ok("F3: the simulation verifies no signature, because there is none yet",
     /sigVerify: false/.test(src.slice(src.indexOf("async _simulateUnsigned"))),
@@ -176,6 +178,14 @@ console.log("\nSTATE-HANDLING CONTRACTS IN THE POLLER");
   ok("F7: the fallback is bounded by age",
     /SOL_USD_CACHE_MAX_AGE_MS/.test(manage),
     "past 24h the old fail-closed hold applies — a cache is not a licence");
+  ok("exit policy consumes the chain-simulated executable mark, never Jupiter's display quote",
+    /preflightExitMark/.test(manage) && /observation\.actualOutputRaw/.test(manage) &&
+      !/jupiter\.quote\(pos\.mint/.test(manage),
+    "an inflated aggregator quote cannot keep a breached stop looking green");
+  ok("two consecutive unusable executable marks latch a risk-reducing exit",
+    /confirmExitMarkFailureWitness/.test(manage) &&
+      /independent executable exit mark unavailable on two consecutive ticks/.test(manage),
+    "refusing or poisoning the mark freezes exposure and escalates to risk reduction, never silent hold");
   const limits = src.slice(src.indexOf("const LIVE_LIMITS"), src.indexOf("const log ="));
   ok("the new bounds are FROZEN live ceilings like every other cap",
     /blockHeightWindow: 600/.test(limits) && /maxQuoteShortfallPct: 15/.test(limits) && /maxExitAttempts: 12/.test(limits),
@@ -237,6 +247,7 @@ console.log("\nFOURTH-PASS CONTRACTS");
   const fs = await import("node:fs");
   const jup = fs.readFileSync(new URL("./jupiter.mjs", import.meta.url), "utf8");
   const pol = fs.readFileSync(new URL("./poller.mjs", import.meta.url), "utf8");
+  const oracle = fs.readFileSync(new URL("./sol-usd-oracle.mjs", import.meta.url), "utf8");
   const pent = fs.readFileSync(new URL("../src/penthouse.js", import.meta.url), "utf8");
   const idx = fs.readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
 
@@ -251,11 +262,12 @@ console.log("\nFOURTH-PASS CONTRACTS");
 
   const resume = jup.slice(jup.indexOf("async _resume"), jup.indexOf("async executeIntent"));
   ok("P4-2: the resume expiry bound matches _buildSigned's convention (>=)",
-    /height >= attempt\.lastValidBlockHeight/.test(resume),
+    /remainingByProvider\.some\(\(remaining\) => remaining <= 0\)/.test(resume),
     "at height == lastValid the next block is lastValid+1: the bytes are already dead");
-  ok("P4-11: the chain-height read is fenced and falls back to the secondary RPC",
-    /secondaryConnection\?\.getBlockHeight/.test(resume),
-    "an unguarded read held exits hostage to the primary RPC mid-dump");
+  ok("P4-11: first disclosure requires independent heights from both RPCs",
+    /Promise\.allSettled/.test(resume) && /secondaryConnection\?\.getBlockHeight/.test(resume) &&
+      /remaining > blockHeightWindow/.test(resume),
+    "one unavailable, stale, or forged-height RPC can never authorize disclosure");
 
   const exec = jup.slice(jup.indexOf("async executeIntent"), jup.indexOf("async recoverPending"));
   ok("P4-4: only FEE-BEARING attempts spend the exit budget",
@@ -263,7 +275,8 @@ console.log("\nFOURTH-PASS CONTRACTS");
     "two free laptop-sleep expiries must not kill a stop forever");
 
   ok("P4-3: the persisted SOL/USD cache age is bounded below as well as above",
-    /cacheAge >= 0/.test(pol),
+    /usableSolUsdCache/.test(pol) &&
+      /observedAgeMs < 0 \|\| publishAgeMs < 0/.test(oracle),
     "a backward clock step made the age negative and voided the staleness cap for hours");
 
   ok("P4-5: sub-tick marks arm once per process with a busy guard and minimum spacing",

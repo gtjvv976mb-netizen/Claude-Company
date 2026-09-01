@@ -116,9 +116,13 @@ GitHub Pages automatically:
 Local equivalents:
 
 ```bash
-npm run build                                 # plain static build into dist/
-INLINE_ASSETS=1 npm run build                 # artifact build: images inlined as data URIs
+npm run build                                 # local preview; executor copy buttons are disabled
+INLINE_ASSETS=1 npm run build                 # local artifact preview with images inlined
+EXECUTOR_COMMIT="$(git rev-parse HEAD)" npm run build  # pinned release build from a reviewed clean commit
 ```
+
+CI supplies its exact GitHub commit automatically. A release build rejects malformed
+commit pins; an unpinned local preview shows no runnable executor install command.
 
 A custom domain later is Settings → Pages → Custom domain, plus a CNAME at your DNS.
 

@@ -5,15 +5,17 @@
   "version": "1.0.0",
   "description": "Self-hosted executor for Claude Company floor calls: your wallet, your caps, their research.",
   "engines": {
-    "node": ">=22.13"
+    "node": ">=22.13 <25"
   },
   "scripts": {
     "start": "node poller.mjs",
+    "monitor": "node monitor.mjs",
     "webhook": "node executor.mjs",
     "test": "node test-strategy.mjs",
     "simulate": "node simulate.mjs",
     "tune": "node tune.mjs",
     "test:install": "node test-install.mjs",
+    "test:launchd": "node test-launchd.mjs",
     "test:sizing": "node test-sizing.mjs",
     "test:journal": "node test-journal.mjs",
     "test:live": "node test-live-execution.mjs",

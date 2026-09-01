@@ -1,16 +1,19 @@
 # Claude Company (Claude Co) — Desk Charter
 
-A research and paper-trading desk, not a live trading bot. It forms trade *proposals* on
-Solana assets and stops at a human approval gate. Every rule below is injected verbatim
-into every agent's system prompt, so these are operating constraints, not documentation.
+A research desk, not a hosted live trading bot. It forms trade *proposals* on Solana
+assets and never receives signing authority. An optional self-hosted executor can act
+on authenticated calls from the user's own machine under separate local gates. Every
+rule below is injected verbatim into every agent's system prompt, so these are operating
+constraints, not documentation.
 
 ## Hard constraints
 
 1. **The hosted desk never executes.** It accepts no private keys or seed phrases and
    never signs a wallet transaction. The final artifact is an *unsigned ticket*: a human
    reads it and decides. Isolated reference executors may load a burner key on the user's
-   own machine, but this release rejects `EXECUTE=1` at startup; dry-run is the only
-   supported mode. Any agent that proposes the desk holding a key is in violation.
+   own machine. That local executor may support an explicitly armed, fail-closed live
+   canary; it is not a desk capability and gives the hosted service no control. Any
+   agent that proposes the desk holding a key is in violation.
 2. **Research RPC is read-only.** Evidence collection uses read methods. The retired
    browser-bot relay returns `410 Gone` and never forwards any request upstream. Wallet
    authentication and floor payments remain client-signed and purpose-scoped; the hosted
@@ -34,11 +37,12 @@ into every agent's system prompt, so these are operating constraints, not docume
 1. **Tests gate production.** Render must run `npm test` after `npm ci`; a failing root
    suite prevents that revision from starting.
 2. **Executor webhooks are disabled by default.** Production sets
-   `EXECUTOR_WEBHOOKS_ENABLED=0`. Polling may deliver research events to a dry-run client,
-   but the hosted service does not push them to an executor endpoint.
-3. **Live signing fails closed.** Both reference executor entry points terminate when
-   `EXECUTE=1`. Removing that refusal requires a durable transaction log, instruction-level
-   validation, and a separately approved canary rollout; it is not an environment toggle.
+   `EXECUTOR_WEBHOOKS_ENABLED=0`. Authenticated polling delivers research events, never
+   commands that can bypass the local executor's sizing, pause, or signing gates.
+3. **Live signing fails closed.** The only live-capable path is the user's local polling
+   executor. It requires a dedicated burner, wallet acknowledgement, two independent
+   RPCs, a durable transaction journal, instruction-level validation, simulation, and
+   immutable canary caps. `EXECUTE=1` alone is not an activation procedure.
 4. **The browser signer is closed too.** Signer and swap code do not ship in the page, and
    the old hosted RPC relay is retired. Legacy browser burners expose recovery only.
 5. **Model credit is a readiness dependency.** A reachable HTTP server is not a working

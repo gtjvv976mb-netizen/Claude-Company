@@ -7,8 +7,8 @@ import { spawnSync } from "node:child_process";
 const target = process.argv[2] || "https://claudedotcompany.com";
 const localRoot = fs.existsSync(target) ? path.resolve(target) : null;
 const site = target.replace(/\/$/, "");
-const need = ["poller.mjs", "journal.mjs", "jupiter.mjs", "strategy.mjs", "trade-policy.mjs",
-  "package.json", "package-lock.json", "install.sh"];
+const need = ["poller.mjs", "journal.mjs", "jupiter.mjs", "balance-verification.mjs", "entry-quote-guard.mjs", "exit-trigger.mjs", "feed-drain.mjs", "sol-usd-oracle.mjs", "heartbeat-health.mjs", "sleep-assertion.mjs", "monitor.mjs", "strategy.mjs", "trade-policy.mjs",
+  "package.json", "package-lock.json", "install.sh", "macos-launchagent.sh", "macos-release.sh", "launchd-runner.mjs"];
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-install-test-"));
 const sources = new Map();
 let fail = 0;
@@ -72,6 +72,9 @@ check("feed secret stays out of argv and the systemd unit",
 check("key, environment and journal are owner-only",
   installer.includes("umask 077") && installer.includes('chmod 600 "$INSTALL_DIR/burner.json"') &&
     installer.includes('chmod 600 "$ENV_NEXT"') && installer.includes('chmod 600 "$STATE_DB"'));
+check("one durable state database has exactly one canonical process lock",
+  installer.includes('LOCK_FILE="${STATE_DB}.lock"') &&
+  installer.includes('write_env_line LOCK_FILE "$LOCK_FILE"'));
 check("durable state is initialized before the service starts",
   /LIVE_STATE_INIT_ACK="\$PUBKEY"/.test(installer) && /INIT_ONLY=1/.test(installer) &&
     installer.indexOf('node "$RELEASE_DIR/poller.mjs"') <
@@ -136,13 +139,15 @@ if (writerStart >= 0 && writerEnd > writerStart) {
     check("systemd quoting round-trips %, whitespace, quotes, $, backticks, semicolons, ampersands and query strings", false);
   }
 }
-check("Node 22.13+ and pinned execution dependencies are required",
-  installer.includes("Node 22.13+") && installer.includes("package-lock.json") &&
+check("Node >=22.13 and <25 and pinned execution dependencies are required",
+  installer.includes("Node >=22.13 and <25") &&
+    /a<25&&\(a>22\|\|\(a===22&&b>=13\)\)/.test(installer) &&
+    installer.includes("package-lock.json") &&
     installer.includes("npm ci --ignore-scripts"));
 check("installer never pipes a mutable bootstrap script into a privileged shell",
   !/nodesource[\s\S]*\|[\s\S]*sudo\s+-E\s+bash/.test(installer));
-check("installer fetches both durable execution modules",
-  /RUNTIME_FILES=\(poller\.mjs journal\.mjs jupiter\.mjs strategy\.mjs trade-policy\.mjs\)/.test(installer));
+check("installer stages the complete durable execution and monitoring module graph",
+  /RUNTIME_FILES=\(poller\.mjs journal\.mjs jupiter\.mjs balance-verification\.mjs entry-quote-guard\.mjs exit-trigger\.mjs feed-drain\.mjs sol-usd-oracle\.mjs heartbeat-health\.mjs sleep-assertion\.mjs monitor\.mjs strategy\.mjs trade-policy\.mjs\)/.test(installer));
 const manifest = sources.get("package.json") ? JSON.parse(sources.get("package.json")) : {};
 const lock = sources.get("package-lock.json") ? JSON.parse(sources.get("package-lock.json")) : {};
 check("published manifest pins the signer dependencies",

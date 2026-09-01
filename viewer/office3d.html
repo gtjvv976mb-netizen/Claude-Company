@@ -7221,18 +7221,22 @@ function buildControls(settings) {
     box.appendChild(mk("div", "dp-note",
       "Clone and inspect the exact release below on a Linux host. The installer reads the executor feed secret privately, stores credentials and the burner key in mode-0600 files, and starts without trading."));
     const releaseCommit = "__CLAUDE_COMPANY_SOURCE_COMMIT__";
+    const hasPinnedExecutorRelease = /^[0-9a-f]{40}$/i.test(releaseCommit);
     /* ONE line, one paste. Still pinned to the reviewed release commit — the
        point of the pin is that you run code someone read, not whatever a URL
        serves today, and joining the steps with && keeps that while removing
        three separate pastes. The secret is NOT in here on purpose: the
        installer prompts for it, so it never reaches shell history or ps. */
-    const cmd = `git clone https://github.com/gtjvv976mb-netizen/claude-company-executor.git && cd claude-company-executor && git checkout --detach ${releaseCommit} && bash executor/install.sh --floor ${FLOOR_N}`;
+    const cmd = hasPinnedExecutorRelease
+      ? `git clone https://github.com/gtjvv976mb-netizen/Claude-Company.git && cd Claude-Company && git checkout --detach ${releaseCommit} && bash executor/install.sh --floor ${FLOOR_N}`
+      : "Executor installation is unavailable in this local preview. Build a release with an exact EXECUTOR_COMMIT.";
     const box2 = mk("div", "bud-addr");
     box2.style.cssText = "white-space:pre-wrap;word-break:break-all;font-size:10px;line-height:1.5";
     box2.textContent = cmd;
     box.appendChild(box2);
     const copyBtn = mk("button", "dp-btn ghost", "Copy the command");
     copyBtn.type = "button";
+    copyBtn.disabled = !hasPinnedExecutorRelease;
     copyBtn.onclick = async () => {
       try { await navigator.clipboard.writeText(cmd); copyBtn.textContent = "Copied ✓"; }
       catch { box2.style.userSelect = "all"; copyBtn.textContent = "Select it above"; }
@@ -7263,13 +7267,16 @@ function buildControls(settings) {
       "The installer shows the new burner address and arms only when you retype that public key in the terminal. " +
       "This first live release is hard-capped at 0.005 SOL per trade and 0.01 SOL in each rolling 24-hour window."));
     // Same single pinned line as the dry-run install, with the canary flags.
-    const liveCmd = `git clone https://github.com/gtjvv976mb-netizen/claude-company-executor.git && cd claude-company-executor && git checkout --detach ${releaseCommit} && bash executor/install.sh --floor ${FLOOR_N} --live --expected-commit ${releaseCommit} --max-sol 0.005 --daily-cap 0.01 --rpc-file /absolute/path/to/primary-rpc --secondary-rpc-file /absolute/path/to/secondary-rpc --jupiter-key-file /absolute/path/to/jupiter-api-key`;
+    const liveCmd = hasPinnedExecutorRelease
+      ? `git clone https://github.com/gtjvv976mb-netizen/Claude-Company.git && cd Claude-Company && git checkout --detach ${releaseCommit} && bash executor/install.sh --floor ${FLOOR_N} --live --expected-commit ${releaseCommit} --max-sol 0.005 --daily-cap 0.01 --rpc-file /absolute/path/to/primary-rpc --secondary-rpc-file /absolute/path/to/secondary-rpc --jupiter-key-file /absolute/path/to/jupiter-api-key`
+      : "Live-canary installation is unavailable in this local preview. Build a release with an exact EXECUTOR_COMMIT.";
     const liveBox = mk("div", "bud-addr");
     liveBox.style.cssText = "white-space:pre-wrap;word-break:break-all;font-size:10px;line-height:1.5";
     liveBox.textContent = liveCmd;
     box.appendChild(liveBox);
     const copyLive = mk("button", "dp-btn ghost", "Copy the live-canary command");
     copyLive.type = "button";
+    copyLive.disabled = !hasPinnedExecutorRelease;
     copyLive.onclick = async () => {
       try { await navigator.clipboard.writeText(liveCmd); copyLive.textContent = "Copied ✓"; }
       catch { liveBox.style.userSelect = "all"; copyLive.textContent = "Select it above"; }
