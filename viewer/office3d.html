@@ -4224,6 +4224,13 @@ window.__botStatus = () => {
   const fresh = hb && hb.seenAt && (Date.now() - hb.seenAt) < 3 * 60e3;
   return { exists: !!hb, running: !!fresh, live: !!(fresh && hb.mode === "live") };
 };
+/** Is the operator's own bot holding this mint? Only trusted while the pulse is
+ *  fresh — a stale heartbeat's position list is a memory, not a fact. */
+window.__botHeld = (mint) => {
+  const hb = window.__botHeartbeat;
+  if (!hb?.seenAt || Date.now() - hb.seenAt >= 3 * 60e3) return null;
+  return (hb.held || []).find((h) => h.mint === mint) || null;
+};
 
 setInterval(() => {
   const bs = window.__botStatus?.();
@@ -6673,6 +6680,30 @@ function paintFeedInto(wrap, feed, settings) {
       ? `Your floor: take ${c.size_sol} SOL — ${c.reason}`
       : `Your floor passed — ${c.reason}`;
     el.appendChild(why);
+
+    /* WHOSE POSITION IS THIS? The card said "Live" and meant the DESK's paper
+     * position — the research book everyone sees — while a reader naturally hears
+     * "my money is in this". They are independent: the desk publishes, your bot
+     * decides, and refusing is a normal outcome. Nothing on the card distinguished
+     * them, so a tenant with an idle bot could believe they were holding six coins.
+     * The bot's own heartbeat carries what it is actually in; say it plainly, and
+     * say when the bot is not running rather than implying it declined. */
+    const bs = window.__botStatus?.();
+    const line = document.createElement("div");
+    line.className = "dp-note";
+    line.style.fontSize = "10px";
+    if (!bs?.exists) {
+      line.textContent = "Desk position (paper) · WALL-ST-E not linked — no bot has reported to this floor";
+    } else if (!bs.running) {
+      line.textContent = "Desk position (paper) · WALL-ST-E is not running — it is not in this trade";
+    } else {
+      const held = window.__botHeld?.(c.mint);
+      line.textContent = held
+        ? `Desk position (paper) · YOUR BOT IS IN THIS: ${held.sol} SOL`
+        : `Desk position (paper) · your bot is ${bs.live ? "live" : "on paper"} and not in this one`;
+      if (held) line.style.color = "var(--good,#4f8f52)";
+    }
+    el.appendChild(line);
 
     if (c.verdict === "offered" && c.status === "live") {
       const act = document.createElement("div");

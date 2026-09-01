@@ -312,6 +312,11 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             wallet: String(body.wallet ?? "").slice(0, 64),
             cursor: Number(body.cursor) || 0,
             open: Number(body.open) || 0,
+            // Bounded and sanitised: a floor's own bot reporting which mints it holds.
+            held: Array.isArray(body.held) ? body.held.slice(0, 20).map((h) => ({
+              mint: String(h?.mint ?? "").slice(0, 64),
+              sol: Number(h?.sol) || 0,
+            })).filter((h) => h.mint) : [],
             ts: Number(body.ts) || Date.now(),
             seenAt: Date.now(),
           };

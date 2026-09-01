@@ -882,6 +882,14 @@ function sendHeartbeat() {
       wallet: WALLET,
       cursor: S.cursor,
       open: openList().length,
+      // WHICH coins, not just how many — the call cards need to say "your bot is in
+      // THIS one" rather than leaving a tenant to infer it from a count. Mint and
+      // size only: no prices, no PnL, nothing the server could use against the
+      // operator, and still nothing it can act on.
+      held: openList().slice(0, 20).map((p) => ({
+        mint: p.mint,
+        sol: Number((Number(p.entryInputLamports || 0) / LAMPORTS).toFixed(4)),
+      })),
       ts: Date.now(),
     }),
   }).catch(() => {});
