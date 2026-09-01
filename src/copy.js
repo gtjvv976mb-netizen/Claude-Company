@@ -328,7 +328,44 @@ export function decide(floorNo, call) {
     ? Math.max(0, Number(call.desk_size_usd) || 0) / Number(call.desk_equity_usd) : null;
   const teamCapSol = deskRatio != null ? s.bankroll_sol * deskRatio : Infinity;
   const uncapped = fixed ?? autoSize;
-  const sizeSol = Number(Math.min(uncapped, teamCapSol).toFixed(4));
+  /* A SIZE THAT CANNOT BE EXECUTED IS NOT AN OFFER.
+   *
+   * Solana's fixed network fees do not scale with trade size, so below a certain
+   * notional they eat the trade: two worst-case 500k-lamport fees are 66% of a
+   * 0.0015 SOL position and 20% of a 0.005 one. An executor applying any honest
+   * cost check must refuse those, and it did — measured on this desk, every call
+   * for a day was offered between 0.0015 and 0.0092 SOL and every one was correctly
+   * refused as "costs eat the target". The floor was publishing trades that were
+   * arithmetically impossible to take.
+   *
+   * teamCapSol caused it: a tenant's size is scaled to the same fraction-of-book the
+   * desk uses, and the desk's paper book trades ~0.03% per position. On a 5 SOL
+   * bankroll that is 0.0017 SOL. The cap's intent — never outrun the desk's
+   * conviction — is right, but a cap that produces unexecutable sizes is a refusal
+   * dressed as an offer.
+   *
+   * So: below MIN_EXECUTABLE_SOL the call is lifted to it when the bankroll can
+   * genuinely afford that (the risk stays inside the appetite's per-trade budget),
+   * and otherwise refused honestly — saying the bankroll is too small for the fees,
+   * which is a fact the tenant can act on, rather than offering a trade their bot
+   * will silently decline. */
+  const MIN_EXECUTABLE_SOL = Number(process.env.MIN_EXECUTABLE_SOL || 0.02);
+  const raw = Math.min(uncapped, teamCapSol);
+  let sizeSol = Number(raw.toFixed(4));
+  let liftedForFees = false;
+  if (sizeSol > 0 && sizeSol < MIN_EXECUTABLE_SOL) {
+    // The lift is bounded by what the appetite already permits per trade, so raising
+    // a size to make it executable can never exceed the risk the tenant chose.
+    const perTradeBudget = s.bankroll_sol * (s.preset.riskPctPerTrade / 100);
+    if (MIN_EXECUTABLE_SOL <= perTradeBudget) {
+      sizeSol = MIN_EXECUTABLE_SOL;
+      liftedForFees = true;
+    } else {
+      return { verdict: "skipped",
+        reason: `a tradeable position needs ~${MIN_EXECUTABLE_SOL} SOL (below that, network fees eat the trade) ` +
+          `but this floor's per-trade budget is ${perTradeBudget.toFixed(4)} SOL — raise the bankroll or set a fixed size` };
+    }
+  }
   if (sizeSol < 0.001) return { verdict: "skipped", reason: "the sized position rounds to nothing on this bankroll" };
 
   const baseHow = fixed
@@ -337,7 +374,10 @@ export function decide(floorNo, call) {
   const how = Number.isFinite(teamCapSol) && teamCapSol < uncapped
     ? `${baseHow} · capped to the team's ${(deskRatio * 100).toFixed(3)}% book allocation`
     : baseHow;
-  return { verdict: "offered", sizeSol, reason: how };
+  return { verdict: "offered", sizeSol,
+    reason: liftedForFees
+      ? `${how} · lifted to ${sizeSol} SOL so network fees do not eat the trade`
+      : how };
 }
 
 /** Broadcast one call to every leased floor. Deterministic, so this is free. */
