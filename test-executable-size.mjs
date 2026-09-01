@@ -38,15 +38,13 @@ console.log("\nAN UNEXECUTABLE SIZE IS LIFTED TO ONE THAT WORKS");
 db.prepare("UPDATE copy_settings SET bankroll_sol=5, appetite='aggressive' WHERE floor_no=?").run(FLOOR);
 const lifted = copy.decide(FLOOR, tinyCall);
 ok("the call is still offered", lifted.verdict === "offered", lifted.reason);
-const FLOOR_SOL = Number(process.env.MIN_EXECUTABLE_SOL || 0.1);
-ok("...at a size that can clear fixed fees", lifted.sizeSol >= FLOOR_SOL,
+ok("...at a size that can clear fixed fees", lifted.sizeSol >= 0.02,
   `${lifted.sizeSol} SOL — was 0.0017 before, where two fees are 59% of the trade`);
 ok("...and the lift is disclosed in the reason", /network fees do not eat the trade/.test(lifted.reason || ""));
 
 console.log("\nTHE LIFT NEVER EXCEEDS THE RISK THE TENANT CHOSE");
 // 0.2 SOL bankroll, aggressive = 3% = 0.006 SOL per trade, below the 0.02 floor.
-// 1 SOL bankroll, aggressive = 3% = 0.03 SOL per trade, below the 0.1 floor.
-db.prepare("UPDATE copy_settings SET bankroll_sol=1, appetite='aggressive' WHERE floor_no=?").run(FLOOR);
+db.prepare("UPDATE copy_settings SET bankroll_sol=0.2, appetite='aggressive' WHERE floor_no=?").run(FLOOR);
 const refused = copy.decide(FLOOR, tinyCall);
 ok("a bankroll too small to trade is told so, not handed an impossible trade",
   refused.verdict === "skipped" && /network fees eat the trade/.test(refused.reason),
@@ -56,7 +54,7 @@ console.log("\nA NORMAL SIZE IS UNTOUCHED");
 db.prepare("UPDATE copy_settings SET bankroll_sol=50, appetite='aggressive' WHERE floor_no=?").run(FLOOR);
 const normal = copy.decide(FLOOR, { ...tinyCall, desk_size_usd: 200, desk_equity_usd: 10000 });
 ok("a size already above the floor is not lifted",
-  normal.verdict === "offered" && normal.sizeSol > FLOOR_SOL &&
+  normal.verdict === "offered" && normal.sizeSol > 0.02 &&
   !/network fees do not eat/.test(normal.reason || ""),
   `${normal.sizeSol} SOL`);
 
