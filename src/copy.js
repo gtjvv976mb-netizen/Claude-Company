@@ -349,7 +349,16 @@ export function decide(floorNo, call) {
    * and otherwise refused honestly — saying the bankroll is too small for the fees,
    * which is a fact the tenant can act on, rather than offering a trade their bot
    * will silently decline. */
-  const MIN_EXECUTABLE_SOL = Number(process.env.MIN_EXECUTABLE_SOL || 0.02);
+  /* 0.02 was the arithmetic MINIMUM (fee burden 5%, just inside what a 20% stop can
+   * carry). 0.1 is the comfortable one — fee burden 1% — so a trade is decided by the
+   * thesis rather than by the toll booth. Raised at the owner's direction after the
+   * first day of live refusals.
+   *
+   * It stays a floor, not a size: a floor whose appetite affords more still trades
+   * more, and the refusal branch below protects tenants this would otherwise lock
+   * out — at 0.1 a cautious floor needs 13.3 SOL before anything can be offered, so
+   * they are TOLD that rather than silently receiving nothing. */
+  const MIN_EXECUTABLE_SOL = Number(process.env.MIN_EXECUTABLE_SOL || 0.1);
   const raw = Math.min(uncapped, teamCapSol);
   let sizeSol = Number(raw.toFixed(4));
   let liftedForFees = false;
