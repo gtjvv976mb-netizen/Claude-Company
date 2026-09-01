@@ -7049,8 +7049,12 @@ function buildControls(settings) {
     box.appendChild(mk("div", "dp-note",
       "Clone and inspect the exact release below on a Linux host. The installer reads the executor feed secret privately, stores credentials and the burner key in mode-0600 files, and starts without trading."));
     const releaseCommit = "__CLAUDE_COMPANY_SOURCE_COMMIT__";
-    const checkout = `git clone https://github.com/gtjvv976mb-netizen/Claude-Company.git\ncd Claude-Company\ngit checkout --detach ${releaseCommit}`;
-    const cmd = `${checkout}\nbash executor/install.sh --floor ${FLOOR_N}`;
+    /* ONE line, one paste. Still pinned to the reviewed release commit — the
+       point of the pin is that you run code someone read, not whatever a URL
+       serves today, and joining the steps with && keeps that while removing
+       three separate pastes. The secret is NOT in here on purpose: the
+       installer prompts for it, so it never reaches shell history or ps. */
+    const cmd = `git clone https://github.com/gtjvv976mb-netizen/Claude-Company.git && cd Claude-Company && git checkout --detach ${releaseCommit} && bash executor/install.sh --floor ${FLOOR_N}`;
     const box2 = mk("div", "bud-addr");
     box2.style.cssText = "white-space:pre-wrap;word-break:break-all;font-size:10px;line-height:1.5";
     box2.textContent = cmd;
@@ -7063,6 +7067,23 @@ function buildControls(settings) {
       setTimeout(() => (copyBtn.textContent = "Copy the command"), 1500);
     };
     box.appendChild(copyBtn);
+
+    // Step two is a click as well: the installer will ask for this.
+    if (settings.executor_secret) {
+      const copySec = mk("button", "dp-btn ghost", "Copy my secret (the installer asks for it)");
+      copySec.type = "button";
+      copySec.style.marginTop = "4px";
+      copySec.onclick = async () => {
+        try { await navigator.clipboard.writeText(settings.executor_secret); copySec.textContent = "Copied \u2713 — paste it at the prompt"; }
+        catch { copySec.textContent = "Clipboard blocked — copy it from the field above"; }
+        setTimeout(() => (copySec.textContent = "Copy my secret (the installer asks for it)"), 2200);
+      };
+      box.appendChild(copySec);
+    }
+    box.appendChild(mk("p", "dp-note",
+      "Two clicks and two pastes, and that is the floor: this site never receives a key and never signs, " +
+      "so the only thing that can trade for you is software on a machine you control. There is no button " +
+      "here that can do it instead \u2014 by design."));
 
     box.appendChild(mk("div", "dp-h", "Optional · supervised live canary"));
     box.appendChild(mk("div", "dp-note",
