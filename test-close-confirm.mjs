@@ -91,5 +91,70 @@ await subTickMarks();
 ok("an outlier print waits for its post-close witness", callRow(fresh.id).close_confirmed === null,
   "neither confirmed nor restated on one neighbour while the window is open");
 
+/* ── SIXTH-PASS SCENARIOS — the production shapes the fixtures had been hiding ── */
+console.log("\nTHE PRINT CANNOT WITNESS ITSELF (the 'closed' echo)");
+// closeCall writes the print as a marked kind='closed' row; a 1ms clock skew put it
+// after closed_at, where it posed as the first post-close witness and preempted every
+// genuine one. Adjudication reads witness kinds only.
+{
+  const c = mkCall({ entry: 1.0, closeMark: 6.0, closedAgoMs: 5 * 60e3,
+    marks: [[-60e3, 1.05], [45e3, 1.02]] });
+  db.prepare("INSERT INTO call_events (call_id, kind, mark, ts) VALUES (?, 'closed', 6.0, ?)")
+    .run(c.id, c.closedAt + 1);                     // the echo, 1ms after the close
+  await subTickMarks();
+  ok("the echo is ignored and the genuine witness restates the print",
+    callRow(c.id).close_mark === 1.05 && restated(c.id) === 1,
+    "kind='closed' rows are records of the print, never witnesses to it");
+}
+
+console.log("\nA NULL entry_ref DOES NOT INVERT THE CONSERVATISM RULE");
+// The old gate required entry != null and forced `flatters` false without it — so a
+// call published during a pair-read flake had its honest wick loss restated UP to
+// breakeven, the exact flattering the rule forbids. Entry cancels out of the algebra;
+// the fixed gate is preMark > print, no null case.
+{
+  const r = db.prepare(`INSERT INTO calls (mint, symbol, status, entry_ref, close_mark, closed_at, opened_at)
+    VALUES ('M','T','closed', NULL, 0.60, ?, ?)`).run(Date.now() - 5 * 60e3, Date.now() - 3600e3);
+  const id = Number(r.lastInsertRowid);
+  const closedAt = Date.now() - 5 * 60e3;
+  for (const [dt, m] of [[-50e3, 1.00], [50e3, 0.95]])
+    db.prepare("INSERT INTO call_events (call_id, kind, mark, ts) VALUES (?, 'mark', ?, ?)").run(id, m, closedAt + dt);
+  await subTickMarks();
+  ok("an entry-less wick loss STANDS", callRow(id).close_mark === 0.60 && restated(id) === 0,
+    "the algebra needs no entry: restate only when preMark < print");
+}
+
+console.log("\nA WITNESS HALF AN HOUR BACK STILL ADJUDICATES");
+// The outage that manufactures a bad print also starves a short pre-window: the last
+// honest mark sat just outside the old 10-minute cutoff while the fake print confirmed
+// unopposed. The lookback is an hour; the 30% drift test does the discriminating.
+{
+  const c = mkCall({ entry: 1.0, closeMark: 6.0, closedAgoMs: 5 * 60e3,
+    marks: [[-30 * 60e3, 1.05], [45e3, 1.02]] });   // pre-witness 30 minutes before the close
+  await subTickMarks();
+  ok("a 30-minute-old pre-close witness convicts the fake print",
+    callRow(c.id).close_mark === 1.05 && restated(c.id) === 1,
+    "the window only has to CONTAIN a witness; drift does the judging");
+}
+
+console.log("\nPRODUCTION KEEPS WITNESSING A CLOSE UNTIL IT IS ADJUDICATED");
+// Both mark writers gated on status='live', closeCall flips status first — so no
+// production path ever wrote a post-close mark and the whole restatement mechanism was
+// dead code its hand-fed fixtures never exposed. The mark loop now includes
+// closed-unconfirmed calls; asserted structurally here (the write itself needs a live
+// price feed), alongside the required detail that the echo-proof kind filter guards
+// BOTH witness queries.
+{
+  const fs = await import("node:fs");
+  const src = fs.readFileSync(new URL("./src/penthouse.js", import.meta.url), "utf8");
+  const sub = src.slice(src.indexOf("export async function subTickMarks"), src.indexOf("export async function monitorCalls"));
+  ok("the mark loop includes closed-but-unconfirmed calls",
+    /status='closed' AND close_confirmed IS NULL/.test(sub.split("const recent")[0]),
+    "a close awaiting adjudication still deserves witnesses");
+  ok("both witness queries admit witness kinds only",
+    (sub.match(/kind IN \('mark','ok'\)/g) || []).length >= 2,
+    "provenance and 'closed' echoes can never adjudicate");
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

@@ -1225,7 +1225,19 @@ export async function subTickMarks() {
   try {
     let marked = 0, confirmed = 0;
     const minSpacingMs = (_subTickSecs / 2) * 1000;
-    const live = db.prepare("SELECT id, mint FROM calls WHERE status='live'").all();
+    /* Witness marks flow for LIVE calls AND for closes still awaiting adjudication.
+     * Both writers used to gate on status='live', and closeCall flips status first —
+     * so no production path ever recorded a post-close mark, the confirm loop's
+     * post-close witness was structurally NULL, and the entire restatement mechanism
+     * was dead code that only its own test fixtures (which inserted marks by hand)
+     * ever saw work. The sixth review proved it with the production path: a
+     * manufactured 6x print confirmed unrestated. The lesson is the green-suite one
+     * again: a fixture that hand-builds a world production cannot produce tests the
+     * logic and not the system. */
+    const live = db.prepare(`SELECT id, mint FROM calls WHERE status='live'
+      UNION SELECT id, mint FROM calls
+      WHERE status='closed' AND close_confirmed IS NULL AND closed_at > ?`)
+      .all(Date.now() - 15 * 60e3);
     for (const call of live) {
       try {
         const last = db.prepare(`SELECT MAX(ts) t FROM call_events
@@ -1260,11 +1272,21 @@ export async function subTickMarks() {
       WHERE status='closed' AND close_confirmed IS NULL AND closed_at > ?`).all(Date.now() - 24 * 3600e3);
     for (const call of recent) {
       try {
+        /* Witness KINDS only ('mark'/'ok'): closeCall's own 'closed' row carries the
+         * print as a mark, and a 1ms clock skew put it AFTER closed_at — the print
+         * became its own "first post-close witness" and, being earliest, preempted
+         * every genuine one. A print must never adjudicate itself.
+         *
+         * And the pre-close lookback is an hour, not ten minutes: the realistic
+         * producer of a bad print is a data outage, which is exactly what starves a
+         * short window — the last honest mark sat 30 seconds outside the old cutoff
+         * while the fake print confirmed unopposed. The 30% drift test does the real
+         * discriminating; the window only has to contain a witness. */
         const preMark = db.prepare(`SELECT mark FROM call_events
-          WHERE call_id=? AND mark IS NOT NULL AND ts < ? AND ts > ?
-          ORDER BY ts DESC LIMIT 1`).get(call.id, call.closed_at, call.closed_at - 10 * 60e3)?.mark ?? null;
+          WHERE call_id=? AND mark IS NOT NULL AND kind IN ('mark','ok') AND ts < ? AND ts > ?
+          ORDER BY ts DESC LIMIT 1`).get(call.id, call.closed_at, call.closed_at - 60 * 60e3)?.mark ?? null;
         const postMark = db.prepare(`SELECT mark FROM call_events
-          WHERE call_id=? AND mark IS NOT NULL AND ts > ? AND ts < ?
+          WHERE call_id=? AND mark IS NOT NULL AND kind IN ('mark','ok') AND ts > ? AND ts < ?
           ORDER BY ts ASC LIMIT 1`).get(call.id, call.closed_at, call.closed_at + 10 * 60e3)?.mark ?? null;
         const windowOver = Date.now() > call.closed_at + 10 * 60e3;
         const settle = (restateTo = null, why = null) => {
@@ -1286,10 +1308,15 @@ export async function subTickMarks() {
         }
         const postAgreesWithPre = Math.abs(postMark - preMark) / preMark <= 0.30;
         if (!postAgreesWithPre) { settle(); continue; }                        // the market truly moved through the close
-        // Both neighbours agree the print is the outlier. Restate ONLY if doing so
-        // makes the recorded outcome worse — pnl(preMark) below pnl(print).
-        const entry = call.entry_ref > 0 ? call.entry_ref : null;
-        const flatters = entry != null && (preMark - entry) > (call.close_mark - entry);
+        /* Both neighbours agree the print is the outlier. Restate ONLY if doing so
+         * makes the recorded outcome worse. The first version wrote that as
+         * pnl(preMark) > pnl(print) with entry_ref in both terms — and entry CANCELS:
+         * (preMark - e) > (print - e) is just preMark > print. Worse than redundant,
+         * the null-entry guard forced `flatters` false for any call published during
+         * a pair-read flake, INVERTING the rule: the one case it existed to prevent —
+         * a wick loss restated up to breakeven — happened precisely there. The
+         * algebra was the review's finding; the simpler form has no null case. */
+        const flatters = preMark > call.close_mark;
         if (flatters) {
           settle(null);                                                        // an honest wick the desk really sold into
         } else {

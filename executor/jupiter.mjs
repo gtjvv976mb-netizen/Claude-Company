@@ -886,21 +886,40 @@ export class JupiterV2Executor {
     return connection.getTransaction(signature, { commitment: "finalized", maxSupportedTransactionVersion: 0 });
   }
 
+  /* PRESENCE-seeking read, fenced primary→secondary. Confirming that a signature IS
+   * on chain is sound from either RPC — observation is evidence for existence on any
+   * honest node — so a primary outage must not turn this wait into a throw. (The
+   * ABSENCE proof is different: it names its connections explicitly elsewhere and is
+   * untouched here — falling back silently there would collapse "two independent
+   * histories" into one.) A read that fails on both counts as a miss for this
+   * iteration, not an error: the sixth review found the unfenced first read threw
+   * before the fast path's observedStatus OR could run, evaporating the exact
+   * observation the replacement guard needed. */
+  async _readEither(fn) {
+    try { return await fn(this.connection); }
+    catch (error) {
+      if (!this.secondaryConnection) throw error;
+      return fn(this.secondaryConnection);
+    }
+  }
+
   async _waitFinalized(signature) {
     const deadline = this.now() + this.cfg.finalityTimeoutMs;
     let observedStatus = false;
     let observedFinalized = false;
     do {
-      const status = await this._status(signature);
+      let status = null;
+      try { status = await this._readEither((c) => this._status(signature, c)); }
+      catch { status = null; }                       // both RPCs down: a miss, not a verdict
       if (status) observedStatus = true;
       const isFinalized = status?.confirmationStatus === "finalized" || (status && status.confirmations === null);
       if (isFinalized) {
         observedFinalized = true;
-        if (status.err) {
-          const transaction = await this._finalizedTransaction(signature);
+        let transaction = null;
+        try { transaction = await this._readEither((c) => this._finalizedTransaction(signature, c)); }
+        catch { transaction = null; }
+        if (status.err)
           return { outcome: "failed", error: status.err, transaction, observedStatus, observedFinalized };
-        }
-        const transaction = await this._finalizedTransaction(signature);
         if (transaction) return { outcome: "finalized", transaction, observedStatus, observedFinalized };
       }
       if (this.now() >= deadline) break;
@@ -1181,9 +1200,22 @@ export class JupiterV2Executor {
         try { height = await this.secondaryConnection?.getBlockHeight?.("confirmed") ?? null; }
         catch { height = null; }
       }
-      if (!Number.isSafeInteger(height) || height <= 0)
-        throw new Error("cannot bound the signed attempt's expiry — both RPC height reads failed; " +
-          "holding the bytes undisclosed until a chain read succeeds");
+      if (!Number.isSafeInteger(height) || height <= 0) {
+        /* Both height reads failed. Before holding, two escapes the sixth review
+         * demanded: the operator's HARD STOP routes to reconciliation rather than
+         * being unreachable behind this hold, and a fenced STATUS read — which needs
+         * no height — gets a chance to resolve the attempt outright. A
+         * method-specific outage (getBlockHeight gated, getSignatureStatuses fine)
+         * would otherwise freeze every exit behind one attempt that the working
+         * reads could have settled. */
+        if (this.hardStop()) return this._reconcile(intent, attempt, attempt.execute);
+        let observed = null;
+        try { observed = await this._readEither((c) => this._status(attempt.signature, c)); }
+        catch { observed = null; }
+        if (observed) return this._reconcile(intent, attempt, attempt.execute);
+        throw new Error(`cannot bound signed attempt ${intent.id}/${attempt.attempt}'s expiry — both RPC height ` +
+          "reads failed and no status is observable; holding the bytes undisclosed until a chain read succeeds");
+      }
       if (height >= attempt.lastValidBlockHeight)
         return this._reconcile(intent, attempt, attempt.execute);
     }
@@ -1278,7 +1310,13 @@ export class JupiterV2Executor {
      * spent nothing, during exactly the fast dump the exit ladder exists for. Mixed
      * semantics between two branches of one policy is how that happened. */
     if (isExit && exitFeeAttempts >= this.cfg.maxAttempts) {
-      const last = attempt?.updatedAt ?? attempt?.createdAt ?? 0;
+      /* The cooldown's CLOCK reads the last FEE-BEARING attempt, matching its counter.
+       * Reading latestAttempt stamped the brake from whatever row was touched last —
+       * including a free expiry markExpired had just timestamped — so the exempt
+       * attempts re-armed the throttle their exemption existed to avoid. Same defect
+       * as the counter, one field over. */
+      const lastFee = this.journal.attempts(intent.id).filter((a) => a.state === "failed").at(-1);
+      const last = lastFee?.updatedAt ?? lastFee?.createdAt ?? 0;
       const coolMs = this.cfg.exitRetryCooldownMs ?? 60_000;
       if (this.now() - Number(last) < coolMs)
         throw new Error(`exit intent ${intent.id} is cooling down after ${exitFeeAttempts} fee-bearing attempts (${coolMs}ms between retries)`);
