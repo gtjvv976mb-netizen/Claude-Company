@@ -979,9 +979,24 @@ export class JupiterV2Executor {
      * sub-second index lag into a permanent AMBIGUOUS latch on a landed SUCCESS. */
     const finality = attempt.state === "signed"
       ? await (async () => {
-          const status = await this._status(attempt.signature);
+          /* The fast read is fenced primary-then-secondary — it runs during the exact
+           * outages that wedge signed attempts, and an unfenced throw here re-froze
+           * every exit behind one dead attempt for the whole primary outage. */
+          let status = null;
+          try { status = await this._status(attempt.signature); }
+          catch {
+            if (!this.secondaryConnection) throw new Error("primary RPC unavailable for the signed-attempt status read");
+            status = await this._status(attempt.signature, this.secondaryConnection);
+          }
           if (!status) return { outcome: "pending", observedStatus: false, observedFinalized: false };
-          return this._waitFinalized(attempt.signature);
+          /* The fast read's own observation must survive the handoff. _waitFinalized
+           * starts observedStatus at false from its OWN reads — if the fork that
+           * produced our observation drops before it looks, it times out with
+           * observedStatus:false and the expiry branch reads that as permission for a
+           * replacement signature. The one piece of evidence the belt collected would
+           * be the one piece the guard never saw. OR it in. */
+          const waited = await this._waitFinalized(attempt.signature);
+          return { ...waited, observedStatus: true };
         })()
       : await this._waitFinalized(attempt.signature);
     if (finality.outcome === "failed") {
@@ -1016,7 +1031,14 @@ export class JupiterV2Executor {
     if (finality.outcome === "finalized") {
       return this._acceptFinalized(intent, attempt, executeResult, finality.transaction);
     }
-    const height = await this.connection.getBlockHeight("confirmed");
+    // Fenced like every other height read on the recovery path: the primary being
+    // down is the normal weather here, and the secondary can answer this question.
+    let height;
+    try { height = await this.connection.getBlockHeight("confirmed"); }
+    catch {
+      if (!this.secondaryConnection) throw new Error("primary RPC unavailable for the expiry height read");
+      height = await this.secondaryConnection.getBlockHeight("confirmed");
+    }
     if (height > attempt.lastValidBlockHeight) {
       // One RPC returning null is not proof that a transaction never landed. Cross-
       // check an independent history before permitting a replacement signature.
@@ -1138,22 +1160,31 @@ export class JupiterV2Executor {
      * clears the way for a fresh attempt. One getBlockHeight per resume, and only
      * bytes that can still land are ever disclosed. */
     if (attempt.state === "signed") {
-      /* Two corrections from the fourth review. The bound is >= — _buildSigned's own
-       * convention treats expiry <= chainHeight as dead, because a transaction whose
-       * lastValidBlockHeight equals the tip can only be included in the NEXT block,
-       * where it is invalid; the strict > left a one-block boundary that disclosed
-       * un-landable bytes and recreated the AMBIGUOUS latch this guard closes. And the
-       * read is fenced: it runs mid-dump on restart, exactly when RPCs 429-storm, and
-       * an unguarded throw here held the exit hostage to the primary RPC. On failure
-       * try the secondary; if neither answers, proceed as the pre-guard code always
-       * did — the POST itself carries lastValidBlockHeight and cannot land a dead tx. */
+      /* Three corrections across the fourth and fifth reviews. The bound is >= —
+       * _buildSigned's own convention treats expiry <= chainHeight as dead, because a
+       * transaction whose lastValidBlockHeight equals the tip can only be included in
+       * the NEXT block, where it is invalid; the strict > left a one-block boundary
+       * that disclosed un-landable bytes. The read is fenced with a secondary
+       * fallback: it runs mid-dump on restart, exactly when RPCs 429-storm.
+       *
+       * And when NEITHER RPC answers, the attempt is HELD, not disclosed. The first
+       * fallback proceeded to the POST on the theory that a dead tx cannot land —
+       * true, and beside the point: landing was never the risk, the STATE TRANSITION
+       * was. markSubmitted before a doomed POST left a 'submitted' attempt whose
+       * absence proof can only ever conclude AMBIGUOUS, permanently freezing every
+       * exit — over bytes that were never in flight. Throwing keeps the attempt
+       * 'signed'; the next tick, with any RPC back, takes the safe path. An exit
+       * delayed one tick beats an exit disarmed forever. */
       let height = null;
       try { height = await this.connection.getBlockHeight("confirmed"); }
       catch {
         try { height = await this.secondaryConnection?.getBlockHeight?.("confirmed") ?? null; }
         catch { height = null; }
       }
-      if (Number.isSafeInteger(height) && height >= attempt.lastValidBlockHeight)
+      if (!Number.isSafeInteger(height) || height <= 0)
+        throw new Error("cannot bound the signed attempt's expiry — both RPC height reads failed; " +
+          "holding the bytes undisclosed until a chain read succeeds");
+      if (height >= attempt.lastValidBlockHeight)
         return this._reconcile(intent, attempt, attempt.execute);
     }
 
@@ -1241,12 +1272,17 @@ export class JupiterV2Executor {
       throw new Error(`exit intent ${intent.id} exhausted ${exitCap} fee-bearing attempts — manual intervention required`);
     if (!isExit && count >= this.cfg.maxAttempts)
       throw new Error(`intent ${intent.id} exhausted ${this.cfg.maxAttempts} attempts`);
-    if (isExit && count >= this.cfg.maxAttempts) {
+    /* The cooldown keys on the SAME counter as the cap — fee-bearing attempts. Keying
+     * it on total rows charged free expiries the throttle the cap had just exempted
+     * them from: three sleep-expiries armed a 60s-per-retry brake on a stop that had
+     * spent nothing, during exactly the fast dump the exit ladder exists for. Mixed
+     * semantics between two branches of one policy is how that happened. */
+    if (isExit && exitFeeAttempts >= this.cfg.maxAttempts) {
       const last = attempt?.updatedAt ?? attempt?.createdAt ?? 0;
       const coolMs = this.cfg.exitRetryCooldownMs ?? 60_000;
       if (this.now() - Number(last) < coolMs)
-        throw new Error(`exit intent ${intent.id} is cooling down after attempt ${count} (${coolMs}ms between retries)`);
-      this.log(`exit ${intent.id}: retrying past the entry cap — attempt ${count + 1} of ${exitCap}, all prior attempts terminally resolved`);
+        throw new Error(`exit intent ${intent.id} is cooling down after ${exitFeeAttempts} fee-bearing attempts (${coolMs}ms between retries)`);
+      this.log(`exit ${intent.id}: retrying past the entry cap — fee-bearing attempt ${exitFeeAttempts + 1} of ${exitCap}, all prior attempts terminally resolved`);
     }
     if (this.hardStop()) throw new Error("HARD STOP is present — no new submission");
     if (intent.kind === "entry") this.submissionGate(intent);

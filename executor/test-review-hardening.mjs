@@ -241,8 +241,11 @@ console.log("\nFOURTH-PASS CONTRACTS");
   const idx = fs.readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
 
   const reconcile = jup.slice(jup.indexOf("async _reconcile"), jup.indexOf("async _resume"));
+  /* Fifth pass changed the handoff syntax (the result is captured so the fast read's
+   * observation can be OR'd in) — the contract is unchanged: an observed status goes
+   * to the FULL _waitFinalized, and no hand-rolled mirror of its shape exists. */
   ok("P4-1: an observed status hands off to the FULL _waitFinalized, no hand-rolled mirror",
-    /return this\._waitFinalized\(attempt\.signature\)/.test(reconcile) &&
+    /await this\._waitFinalized\(attempt\.signature\)/.test(reconcile) &&
     !/outcome: "finalized", transaction, observedStatus/.test(reconcile),
     "a null-transaction index lag must retry, never latch a landed SUCCESS as AMBIGUOUS");
 
@@ -273,10 +276,51 @@ console.log("\nFOURTH-PASS CONTRACTS");
     /preMark/.test(sub) && /postAgreesWithPre/.test(sub),
     "direction-blind post-close comparison restated honest stop closes to post-crash prices");
   ok("P4-8: both confirm/restate UPDATEs refuse to touch an already-confirmed close",
-    (sub.match(/close_confirmed IS NULL/g) || []).length >= 4,
-    "a settled print can never be re-opened by a later pass");
+    (sub.match(/close_confirmed IS NULL/g) || []).length >= 3,
+    "a settled print can never be re-opened by a later pass — the fifth-pass rebuild consolidated the UPDATEs into settle()");
   ok("P4-6b: with no pre-close witness the print stands — one witness cannot convict another",
     /one witness cannot convict another/.test(sub));
+}
+
+/* ── FIFTH-PASS FIXES (2026-09-01, seven findings, verified by hand after the
+ *    panel's verifiers died on a session limit — behavioral coverage lives in
+ *    test-close-confirm.mjs, which runs the REAL confirm loop against a real DB) ── */
+console.log("\nFIFTH-PASS CONTRACTS");
+{
+  const fs = await import("node:fs");
+  const jup = fs.readFileSync(new URL("./jupiter.mjs", import.meta.url), "utf8");
+  const pent = fs.readFileSync(new URL("../src/penthouse.js", import.meta.url), "utf8");
+
+  const resume = jup.slice(jup.indexOf("async _resume"), jup.indexOf("async executeIntent"));
+  ok("P5-1: unreadable chain height HOLDS the signed bytes, never discloses them",
+    /holding the bytes undisclosed/.test(resume),
+    "the old fallback POSTed dead bytes and latched AMBIGUOUS — landing was never the risk, the state transition was");
+
+  const reconcile = jup.slice(jup.indexOf("async _reconcile"), jup.indexOf("async _resume"));
+  ok("P5-2: the fast read's observation survives the handoff to _waitFinalized",
+    /observedStatus: true \}/.test(reconcile),
+    "an observed signature must never time out into permission for a replacement");
+  ok("P5-3: the reconcile height read is fenced to the secondary too",
+    /primary RPC unavailable for the expiry height read/.test(jup),
+    "the resume fence bought nothing if the very next read threw on the same outage");
+
+  const exec = jup.slice(jup.indexOf("async executeIntent"), jup.indexOf("async recoverPending"));
+  ok("P5-4: the cooldown keys on FEE-BEARING attempts, same counter as the cap",
+    /exitFeeAttempts >= this\.cfg\.maxAttempts/.test(exec),
+    "free expiries must not arm a 60s throttle on a stop that has spent nothing");
+
+  ok("P5-5: every witness mark enters by one spacing-guarded door",
+    /export function writeWitnessMark/.test(pent) &&
+    /if \(!writeWitnessMark\(call\.id, now\.mark\)\)/.test(pent),
+    "the monitor's unconditional mark let one cache interval witness itself via overlap");
+
+  const sub = pent.slice(pent.indexOf("export async function subTickMarks"), pent.indexOf("export async function monitorCalls"));
+  ok("P5-6: a restatement may never flatter the outcome",
+    /flatters/.test(sub) && /never in the book's favour/.test(sub),
+    "an honest dump-wick stop the followers really sold into must stand");
+  ok("P5-7: closes stay eligible until confirmed; the post-close witness is history",
+    /24 \* 3600e3/.test(sub) && /postMark/.test(sub),
+    "the 10-minute window stranded exactly the closes most likely to be corrupt");
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

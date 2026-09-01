@@ -1192,6 +1192,25 @@ let monitorBusy = false;
 let _subTickArmed = false;
 let _subTickBusy = false;
 let _subTickSecs = 45;
+
+/**
+ * THE ONE DOOR A WITNESS MARK ENTERS BY. The spacing rule ("witnesses must be
+ * separated observations") was enforced only inside subTickMarks, while monitorCalls
+ * wrote its own mark unconditionally — so a monitor pass overlapping a sub-tick pass
+ * could write the same anomalous DexScreener cache interval twice, seconds apart, and
+ * the pair rule confirmed the anomaly off its own echo. Every mark writer goes
+ * through here now; a mark younger than half the sub-tick cadence is the same
+ * observation, whoever fetched it.
+ */
+export function writeWitnessMark(callId, mark) {
+  if (!(mark > 0)) return false;
+  const minSpacingMs = (_subTickSecs / 2) * 1000;
+  const last = db.prepare(`SELECT MAX(ts) t FROM call_events
+    WHERE call_id=? AND mark IS NOT NULL`).get(callId)?.t ?? 0;
+  if (Date.now() - last < minSpacingMs) return false;
+  noteEvent(callId, "mark", null, mark);
+  return true;
+}
 export function startSubTickMarks(secs = 45) {
   if (_subTickArmed) return false;
   _subTickArmed = true;
@@ -1215,43 +1234,69 @@ export async function subTickMarks() {
         const px = await ds.pairsFor(call.mint);
         if (!px?.ok) continue;
         const cons = ds.consensus(px.pairs);
-        if (cons.ok && cons.priceUsd > 0) { noteEvent(call.id, "mark", null, cons.priceUsd); marked++; }
+        if (cons.ok && writeWitnessMark(call.id, cons.priceUsd)) marked++;
       } catch { /* a failed read is a missing witness, never an error */ }
     }
-    const recent = db.prepare(`SELECT id, mint, close_mark, closed_at FROM calls
-      WHERE status='closed' AND close_confirmed IS NULL AND closed_at > ?`).all(Date.now() - 10 * 60e3);
+    /* CLOSE-PRINT CONFIRMATION, adjudicated from HISTORY, bounded by CONSERVATISM.
+     *
+     * Fifth-review rebuild, two defects closed:
+     *
+     * NO STRANDING. The 10-minute eligibility window assumed a next pass would still
+     * see the row — a DexScreener outage or a deploy restart (the very events that
+     * produce bad prints) aged the row out unexamined, permanently provisional. Rows
+     * stay eligible until confirmed (24h scan bound), and the post-close witness is
+     * the first recorded MARK after the close — history, not a live read — so a late
+     * pass adjudicates exactly what an on-time pass would have.
+     *
+     * A RESTATEMENT MAY NEVER FLATTER THE OUTCOME. The both-neighbours rule was
+     * direction-blind: a real dump-wick stop close — where the exit alert went out at
+     * the wick and follower bots actually sold there — V-bounced, agreed with both
+     * neighbours as "anomalous", and was restated to breakeven while followers
+     * realized -40%. The book must never diverge from follower reality in its own
+     * favour: a restatement is applied only when it makes the recorded outcome WORSE
+     * (shrinks a win), never better (never shrinks a loss, never grows a win). The
+     * manufactured-6x-win case restates; the honest wick stands. */
+    const recent = db.prepare(`SELECT id, mint, close_mark, closed_at, entry_ref FROM calls
+      WHERE status='closed' AND close_confirmed IS NULL AND closed_at > ?`).all(Date.now() - 24 * 3600e3);
     for (const call of recent) {
       try {
         const preMark = db.prepare(`SELECT mark FROM call_events
           WHERE call_id=? AND mark IS NOT NULL AND ts < ? AND ts > ?
           ORDER BY ts DESC LIMIT 1`).get(call.id, call.closed_at, call.closed_at - 10 * 60e3)?.mark ?? null;
-        if (!(preMark > 0) || !(call.close_mark > 0)) {
-          db.prepare("UPDATE calls SET close_confirmed=1 WHERE id=? AND close_confirmed IS NULL").run(call.id);
-          confirmed++; continue;                             // one witness cannot convict another
-        }
+        const postMark = db.prepare(`SELECT mark FROM call_events
+          WHERE call_id=? AND mark IS NOT NULL AND ts > ? AND ts < ?
+          ORDER BY ts ASC LIMIT 1`).get(call.id, call.closed_at, call.closed_at + 10 * 60e3)?.mark ?? null;
+        const windowOver = Date.now() > call.closed_at + 10 * 60e3;
+        const settle = (restateTo = null, why = null) => {
+          if (restateTo != null) {
+            const r = db.prepare("UPDATE calls SET close_mark=?, close_confirmed=1 WHERE id=? AND close_confirmed IS NULL")
+              .run(restateTo, call.id);
+            if (r.changes) noteEvent(call.id, "close_restated", why);
+          } else {
+            db.prepare("UPDATE calls SET close_confirmed=1 WHERE id=? AND close_confirmed IS NULL").run(call.id);
+          }
+          confirmed++;
+        };
+        if (!(preMark > 0) || !(call.close_mark > 0)) { settle(); continue; }   // one witness cannot convict another
         const printDrift = Math.abs(call.close_mark - preMark) / preMark;
-        if (printDrift <= 0.30) {
-          db.prepare("UPDATE calls SET close_confirmed=1 WHERE id=? AND close_confirmed IS NULL").run(call.id);
-          confirmed++; continue;                             // the print agrees with its pre-close neighbour
+        if (printDrift <= 0.30) { settle(); continue; }                        // the print agrees with its neighbour
+        if (!(postMark > 0)) {
+          if (windowOver) settle();                                            // no second witness will ever come
+          continue;                                                            // else wait for the next mark
         }
-        const px = await ds.pairsFor(call.mint);
-        if (!px?.ok) continue;                               // stay provisional; try again next pass
-        const cons = ds.consensus(px.pairs);
-        if (!(cons.ok && cons.priceUsd > 0)) continue;
-        const postAgreesWithPre = Math.abs(cons.priceUsd - preMark) / preMark <= 0.30;
-        if (postAgreesWithPre) {
-          // Pre and post agree with each other; the print is the odd one out. Restate
-          // to the pre-close mark — the last honest observation AT close time.
-          const r = db.prepare("UPDATE calls SET close_mark=?, close_confirmed=1 WHERE id=? AND close_confirmed IS NULL")
-            .run(preMark, call.id);
-          if (r.changes) noteEvent(call.id, "close_restated",
-            `close print ${call.close_mark} was ${Math.round(printDrift * 100)}% from the pre-close mark ${preMark}, ` +
-            `which the post-close read ${cons.priceUsd} corroborates — restated to ${preMark}`);
+        const postAgreesWithPre = Math.abs(postMark - preMark) / preMark <= 0.30;
+        if (!postAgreesWithPre) { settle(); continue; }                        // the market truly moved through the close
+        // Both neighbours agree the print is the outlier. Restate ONLY if doing so
+        // makes the recorded outcome worse — pnl(preMark) below pnl(print).
+        const entry = call.entry_ref > 0 ? call.entry_ref : null;
+        const flatters = entry != null && (preMark - entry) > (call.close_mark - entry);
+        if (flatters) {
+          settle(null);                                                        // an honest wick the desk really sold into
         } else {
-          // The market genuinely moved through the close; the raw print stands.
-          db.prepare("UPDATE calls SET close_confirmed=1 WHERE id=? AND close_confirmed IS NULL").run(call.id);
+          settle(preMark,
+            `close print ${call.close_mark} was ${Math.round(printDrift * 100)}% from the pre-close mark ${preMark}, ` +
+            `corroborated by the post-close mark ${postMark} — restated to ${preMark} (never in the book's favour)`);
         }
-        confirmed++;
       } catch { /* unconfirmed stays unconfirmed; the next loop tries again */ }
     }
     return { marked, confirmed };
@@ -1364,7 +1409,11 @@ export async function monitorCalls() {
           announceExit(call, exit).catch((e) => noteEvent(call.id, "announce_failed", String(e.message || e)));
           closed++;
         } else {
-          noteEvent(call.id, "ok", null, now.mark);
+          /* The 'ok' mark rides the shared spacing door: an overlapping sub-tick pass
+           * must not let one DexScreener cache interval witness itself twice. When the
+           * door refuses (a mark landed seconds ago), the heartbeat row is still
+           * written — kind 'ok' with no mark — so pass accounting stays intact. */
+          if (!writeWitnessMark(call.id, now.mark)) noteEvent(call.id, "ok", null, null);
         }
       } catch (e) {
         try { noteEvent(call.id, "check_failed", String(e.message || e)); } catch {}
