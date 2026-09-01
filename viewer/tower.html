@@ -859,20 +859,55 @@ const FOUND_WALLETS = new Map();
       FOUND_WALLETS.set(w.name, { kind: "standard", w });
   } } };
   window.addEventListener("wallet-standard:register-wallet", (e) => { try { e.detail(api); } catch {} });
-  try { window.dispatchEvent(new CustomEvent("wallet-standard:app-ready", { detail: api })); } catch {}
-  // legacy fallbacks for injectors that never adopted the standard
-  setTimeout(() => {
+  /* SCAN AGAIN, ON DEMAND. Discovery used to run once, 300ms after load — and a
+     wallet that injects a moment later (a slow page, an in-app browser, an
+     extension waking up) was simply never found. The button then "did nothing",
+     because the no-wallets path called window.open, which browsers block. */
+  window.__scanWallets = () => {
+    try { window.dispatchEvent(new CustomEvent("wallet-standard:app-ready", { detail: api })); } catch {}
     if (window.solana?.isPhantom && ![...FOUND_WALLETS.keys()].some((n) => /phantom/i.test(n)))
       FOUND_WALLETS.set("Phantom", { kind: "legacy", w: window.solana });
     if (window.solflare?.isSolflare && ![...FOUND_WALLETS.keys()].some((n) => /solflare/i.test(n)))
       FOUND_WALLETS.set("Solflare", { kind: "legacy", w: window.solflare });
-  }, 300);
+    if (window.backpack && ![...FOUND_WALLETS.keys()].some((n) => /backpack/i.test(n)))
+      FOUND_WALLETS.set("Backpack", { kind: "legacy", w: window.backpack });
+    return FOUND_WALLETS.size;
+  };
+  window.__scanWallets();
+  setTimeout(window.__scanWallets, 300);
+  setTimeout(window.__scanWallets, 1200);          // late injectors
 })();
 
 function chooseWallet() {
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
+    // one more look at click time — the wallet may have arrived since load
+    if (!FOUND_WALLETS.size) {
+      window.__scanWallets?.();
+      await new Promise((r) => setTimeout(r, 350));
+      window.__scanWallets?.();
+    }
     const list = [...FOUND_WALLETS.entries()];
-    if (!list.length) { window.open("https://phantom.app/download", "_blank", "noopener"); return resolve(null); }
+    if (!list.length) {
+      /* A blocked popup is indistinguishable from a broken button. Say what is
+         wrong, in the page, with a real link the browser will honour. */
+      const ov = document.createElement("div");
+      ov.style.cssText = "position:fixed;inset:0;z-index:80;background:rgba(10,14,16,.6);display:grid;place-items:center";
+      const bx = document.createElement("div");
+      bx.style.cssText = "background:var(--panel,#1b2b2f);color:inherit;border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:20px 22px;max-width:340px;display:flex;flex-direction:column;gap:10px;font-size:13px;line-height:1.5";
+      bx.innerHTML = "<div style='font-size:12px;letter-spacing:.14em;text-transform:uppercase;opacity:.7'>No wallet found</div>" +
+        "<div>This browser has no Solana wallet extension available to the page.</div>" +
+        "<div style='opacity:.8;font-size:12px'>If Phantom IS installed: unlock it, then press Connect again \u2014 a locked wallet does not announce itself. On a phone, open this page inside your wallet's own browser.</div>" +
+        "<a href='https://phantom.app/download' target='_blank' rel='noopener' style='color:var(--amber,#e0ad3d)'>Get Phantom \u2197</a>";
+      const cl = document.createElement("button");
+      cl.textContent = "Close";
+      cl.style.cssText = "font:inherit;font-size:11px;opacity:.7;background:none;border:1px solid rgba(255,255,255,.16);border-radius:6px;padding:6px 10px;color:inherit;cursor:pointer;align-self:flex-start";
+      cl.onclick = () => { ov.remove(); resolve(null); };
+      bx.appendChild(cl);
+      ov.appendChild(bx);
+      ov.onclick = (e) => { if (e.target === ov) { ov.remove(); resolve(null); } };
+      document.body.appendChild(ov);
+      return;
+    }
     if (list.length === 1) return resolve(list[0][1]);
     const overlay = document.createElement("div");
     overlay.style.cssText = "position:fixed;inset:0;z-index:80;background:rgba(10,14,16,.6);display:grid;place-items:center";
