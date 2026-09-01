@@ -48,10 +48,23 @@ const RING_MAX = 400;
 // A restart used to blank every room: the ring was memory, so the backlog a new
 // viewer received was empty until something happened. The chronicle is the ring's
 // durable twin — rehydrate the tail so the office wakes up remembering its morning.
+//
+// SUBSTANCE FIRST. The plain last-400 tail was ~90% world:* scenery (it fires ~10
+// times a minute), so after every deploy the rooms "remembered" weather and forgot
+// work — each restart visibly reset the tabs to a noise-dominated slice while the
+// real history sat safe in the chronicle. Rehydrate the pipeline's events to near
+// the full ring, with only a garnish of ambience so a fresh room still breathes.
 try {
-  const tail = db.prepare("SELECT data FROM chronicle ORDER BY id DESC LIMIT ?").all(RING_MAX);
-  for (let i = tail.length - 1; i >= 0; i--) {
-    try { RING.push(JSON.parse(tail[i].data)); } catch {}
+  const WORLD_SLOTS = 40;
+  const substance = db.prepare(
+    "SELECT id, data FROM chronicle WHERE type NOT LIKE 'world:%' ORDER BY id DESC LIMIT ?")
+    .all(RING_MAX - WORLD_SLOTS);
+  const ambience = db.prepare(
+    "SELECT id, data FROM chronicle WHERE type LIKE 'world:%' ORDER BY id DESC LIMIT ?")
+    .all(WORLD_SLOTS);
+  const tail = [...substance, ...ambience].sort((x, y) => x.id - y.id);
+  for (const row of tail) {
+    try { RING.push(JSON.parse(row.data)); } catch {}
   }
 } catch {}
 
