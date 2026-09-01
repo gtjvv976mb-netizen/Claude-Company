@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { isProviderCreditError, providerCreditHealth } from "./src/provider-health.js";
+import {
+  isProviderCreditError,
+  providerCreditHealth,
+  providerErrorForViewer,
+} from "./src/provider-health.js";
 
 const now = 1_800_000_000_000;
 const event = (type, ageMs, data = {}) => ({ type, ts: now - ageMs, data: JSON.stringify(data) });
@@ -24,6 +28,13 @@ const rawProviderError = providerCreditHealth([
   event("seat:failed", 2_000, { seat: "narrative", error: "400: Your credit balance is too low to access the Anthropic API" }),
 ], { nowMs: now });
 assert.equal(rawProviderError.blocked, true, "the provider's raw billing error is recognized");
+assert.equal(providerErrorForViewer("billing failed: sk-private-material"), null,
+  "the public heartbeat never receives raw upstream wording");
+assert.equal(providerErrorForViewer("provider says raise the account ceiling", { isOwner: true }),
+  "provider says raise the account ceiling",
+  "the authenticated house owner can inspect the bounded diagnostic");
+assert.equal(providerErrorForViewer("x".repeat(300), { isOwner: true }).length, 240,
+  "the owner diagnostic remains bounded");
 
 const unrelated = providerCreditHealth([
   event("seat:failed", 2_000, { seat: "flow", error: "request timed out" }),

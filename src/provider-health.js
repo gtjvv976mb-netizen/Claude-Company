@@ -20,6 +20,13 @@ export function isProviderCreditError(error) {
   return CREDIT_ERROR_PATTERNS.some((pattern) => pattern.test(message));
 }
 
+/** Raw provider wording is useful to the authenticated house operator, but the
+ * global heartbeat is intentionally public. Keep that diagnostic out of anonymous
+ * responses instead of assuming every upstream error string is secret-free. */
+export function providerErrorForViewer(error, { isOwner = false } = {}) {
+  return isOwner ? String(error ?? "").slice(0, 240) : null;
+}
+
 function eventData(event) {
   if (event?.data && typeof event.data === "object") return event.data;
   try { return JSON.parse(event?.data ?? "{}"); }

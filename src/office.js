@@ -43,7 +43,7 @@ import { callouts, WHALE_USD } from "./whales.js";
 import { evidenceBackedPumpfunCallouts } from "./callouts.js";
 import { isAddress } from "./lib/base58.js";
 import { retiredBrowserRpcResponse } from "./execution-gates.js";
-import { providerCreditHealth } from "./provider-health.js";
+import { providerCreditHealth, providerErrorForViewer } from "./provider-health.js";
 import { currentImprovementBundle, improvementServiceStatus } from "./improvement-bundle.js";
 import {
   eventVisibleOnFloor,
@@ -991,7 +991,11 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           });
           const settled = q("SELECT COUNT(*) n, COALESCE(SUM(pnl_usd),0) pnl, SUM(pnl_usd>0) w FROM results");
           return json(200, {
-            state, reason, providerError, lastEventTs: lastEv, grokEnabled: !!process.env.XAI_API_KEY,
+            state, reason,
+            providerError: providerErrorForViewer(providerError, {
+              isOwner: Boolean(me && holdsFloor(50)),
+            }),
+            lastEventTs: lastEv, grokEnabled: !!process.env.XAI_API_KEY,
             providerCredit: {
               blocked: provider.blocked,
               failures: provider.failures,
