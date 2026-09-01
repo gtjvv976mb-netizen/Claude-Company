@@ -6396,6 +6396,54 @@ window.__renderKilledInto = (el) => loadKilled(el);
    controls, bot, drawers) and a LIVE region (score + call cards) that is the
    only thing a poll repaints. */
 /** The single source of truth for how the bot's pulse is worded, wherever it appears. */
+/* The burner's address and what is actually in it. The balance is read through
+   the site's own RPC relay — the same read-only lane the floor uses — so this
+   works without a wallet extension and without the poller telling us a number
+   we could not check. */
+function showBotWallet(after, wallet) {
+  document.getElementById("bot-wallet")?.remove();
+  if (!wallet) return;
+  const box = document.createElement("div");
+  box.id = "bot-wallet";
+  box.style.cssText = "margin-top:5px;display:flex;flex-direction:column;gap:3px";
+  const row = document.createElement("div");
+  row.style.cssText = "display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:11px";
+  const lbl = document.createElement("span");
+  lbl.className = "dp-note";
+  lbl.textContent = "Fund this wallet:";
+  const addr = document.createElement("button");
+  addr.type = "button";
+  addr.className = "cachip";
+  addr.textContent = `${wallet.slice(0, 6)}…${wallet.slice(-6)} ⧉`;
+  addr.title = "Copy the burner's address";
+  addr.onclick = async () => {
+    try { await navigator.clipboard.writeText(wallet); addr.textContent = "copied ✓"; }
+    catch { addr.textContent = wallet; addr.style.userSelect = "all"; }
+    setTimeout(() => { addr.textContent = `${wallet.slice(0, 6)}…${wallet.slice(-6)} ⧉`; }, 1600);
+  };
+  const bal = document.createElement("span");
+  bal.className = "dp-note";
+  bal.textContent = "balance…";
+  row.append(lbl, addr, bal);
+  box.appendChild(row);
+  const note = document.createElement("p");
+  note.className = "dp-note";
+  note.style.fontSize = "10.5px";
+  note.textContent = "Send SOL only, and only what you would shrug off losing — this key lives on your machine.";
+  box.appendChild(note);
+  after.after(box);
+  // live balance, through the relay
+  fetch((window.__API_BASE__ || "") + "/api/bot/rpc", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getBalance", params: [wallet] }),
+  }).then((r) => r.json()).then((d) => {
+    const sol = (d?.result?.value ?? 0) / 1e9;
+    bal.textContent = `${sol.toFixed(4)} SOL`;
+    bal.style.color = sol > 0 ? "var(--good,#4f8f52)" : "var(--amber,#e0ad3d)";
+    if (sol === 0) bal.textContent += " — empty, it cannot trade";
+  }).catch(() => { bal.textContent = "balance unavailable"; });
+}
+
 function updateBotHb(settings) {
   const el = document.getElementById("bot-hb");
   if (!el) return;
@@ -6408,6 +6456,11 @@ function updateBotHb(settings) {
     el.textContent = `● WALL-ST-E self-reports: ${(hb.mode || "?").toUpperCase()}` +
       ` · ${hb.open ?? 0} open · heartbeat ${Math.max(1, Math.round(age / 1000))}s ago` +
       ` (reported by your machine, not verified by this site)`;
+    /* THE WALLET YOU HAVE TO FUND. The poller reports it in every heartbeat and
+       the panel simply never showed it, so the one address an operator needs
+       existed only in the installer's output, scrolled off a terminal hours
+       ago. Address, live balance, one-tap copy. */
+    showBotWallet(el, hb.wallet);
   } else if (hb && age != null) {
     el.style.color = "var(--bad,#b0503f)";
     el.textContent = `○ WALL-ST-E's last heartbeat was ${Math.round(age / 60e3)}m ago` +
