@@ -4056,7 +4056,10 @@ const botFig = (() => {
   //    makes — with his trinket shelf and charging dock inside. Opening south.
   const den = new THREE.Group();
   den.position.set(BOT_DEN.x - 0.35, 0, BOT_DEN.z);
-  den.rotation.y = -Math.PI / 2;                 // opens EAST, toward Codex's door
+  /* +PI/2, not -PI/2. Rotating by -90 maps the den's local back wall (-z) onto
+     world +x — the EAST side — so the adobe opened away from Codex Banks with
+     its back turned to him. This puts the rampart west and the opening east. */
+  den.rotation.y = Math.PI / 2;
   bx(den, 2.0, 1.9, 0.14, 0, 0.95, -0.62, m(0x6e5a3a, 0.9));         // corrugated back
   for (let i = 0; i < 5; i++)                                         // ribs on the panel
     bx(den, 0.06, 1.8, 0.05, -0.8 + i * 0.4, 0.95, -0.55, m(0x57462c, 0.9));
@@ -6049,11 +6052,31 @@ async function renderTeamInto(el) {
   let R;
   try {
     const { status, body } = await api(`/api/floor/${FLOOR}`);
-    if (status !== 200) throw new Error(body?.error || `the desk answered ${status}`);
+    if (status !== 200) throw Object.assign(new Error(body?.error || `the desk answered ${status}`), { status });
     R = body;
   } catch (e) {
-    el.appendChild(mk("p", "locked", `Could not reach the desk. ${String(e.message || e)}`));
-    const retry = mk("button", "dp-btn", "Try again"); retry.onclick = refresh; el.appendChild(retry);
+    /* 'Could not reach the desk' told a tenant nothing they could act on. Name
+       the actual cause: a dead session (the commonest, and it is also why the
+       secret buttons refuse), a restarting API, or a wallet without standing. */
+    const st = e.status;
+    el.appendChild(mk("p", "locked",
+      st === 401 ? "Your session has expired on this device."
+      : st === 403 ? "This wallet does not hold this floor."
+      : !st ? "The desk did not answer — it may be restarting."
+      : `The desk answered ${st}.`));
+    el.appendChild(mk("p", "dp-note",
+      st === 401 ? "Reconnect the wallet that holds this floor, then come back."
+      : st === 403 ? "Connect the wallet that leases it — or the treasury/dev wallet for floor 50."
+      : "Give it a moment and try again."));
+    const row = mk("div", "dp-row");
+    const retry = mk("button", "dp-btn", "Try again"); retry.onclick = refresh;
+    row.appendChild(retry);
+    if (st === 401 || st === 403) {
+      const go = mk("a", "dp-btn ghost", "Reconnect in the tower");
+      go.href = "/tower"; go.style.textDecoration = "none";
+      row.appendChild(go);
+    }
+    el.appendChild(row);
     return;
   }
   if (!R.lease) {
