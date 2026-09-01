@@ -14,6 +14,10 @@
  * possible precisely because the adjudication no longer needs a live read.
  */
 process.env.CLAUDE_CO_DB = process.env.CLAUDE_CO_DB || "/tmp/close-confirm-test.db";
+// The mark loop legitimately fetches prices for closed-unconfirmed calls now — which
+// includes these fixtures. Offline mode makes that fetch decline deterministically;
+// the suite must never depend on an external API failing to resolve a fixture mint.
+process.env.DS_OFFLINE = "1";
 import fs from "node:fs";
 try { fs.rmSync(process.env.CLAUDE_CO_DB); } catch {}
 
@@ -70,7 +74,7 @@ ok("a continuing dump is never rewritten", callRow(dump.id).close_mark === 0.55 
   callRow(dump.id).close_confirmed === 1 && restated(dump.id) === 0);
 
 console.log("\nNO SECOND WITNESS, NO CONVICTION");
-const lone = mkCall({ entry: 1.0, closeMark: 4.0, closedAgoMs: 15 * 60e3, marks: [] });
+const lone = mkCall({ entry: 1.0, closeMark: 4.0, closedAgoMs: 20 * 60e3, marks: [] });
 await subTickMarks();
 ok("a close with no recorded neighbours confirms as printed", callRow(lone.id).close_mark === 4.0 &&
   callRow(lone.id).close_confirmed === 1, "one witness cannot convict another");
@@ -135,6 +139,18 @@ console.log("\nA WITNESS HALF AN HOUR BACK STILL ADJUDICATES");
   ok("a 30-minute-old pre-close witness convicts the fake print",
     callRow(c.id).close_mark === 1.05 && restated(c.id) === 1,
     "the window only has to CONTAIN a witness; drift does the judging");
+}
+
+console.log("\nA WITNESS AT MINUTE ELEVEN IS HEARD (the windows are one number now)");
+// The seventh review: witnesses were WRITTEN for 15 minutes but only READ for 10 — a
+// mark recorded at minute 11 by the same pass was permanently ignored and windowOver
+// confirmed the fake print it would have convicted.
+{
+  const c = mkCall({ entry: 1.0, closeMark: 6.0, closedAgoMs: 12 * 60e3,
+    marks: [[-60e3, 1.05], [11 * 60e3, 1.02]] });   // the late witness, minute 11
+  await subTickMarks();
+  ok("the minute-eleven witness convicts the print", callRow(c.id).close_mark === 1.05 && restated(c.id) === 1,
+    "witnessing and adjudication share WITNESS_WINDOW_MS — two numbers for one contract will drift");
 }
 
 console.log("\nPRODUCTION KEEPS WITNESSING A CLOSE UNTIL IT IS ADJUDICATED");

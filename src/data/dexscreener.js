@@ -35,6 +35,12 @@ export async function profiles() {
 
 /** All pairs for a mint, richest first. pairs[0] from the API is NOT the deepest. */
 export async function pairsFor(mint) {
+  /* Offline test seam. The behavioral close-confirm suite runs the REAL subTickMarks,
+   * whose mark loop fetches prices for its fixture calls — and the suite was green
+   * only because the fixture mint happened not to resolve. A safety net whose green
+   * depends on an external API erroring is the wrong-axis suite again; tests set this
+   * flag and the fetch declines deterministically. Never set in production. */
+  if (process.env.DS_OFFLINE === "1") return { ok: false, error: "DS_OFFLINE test mode" };
   const r = await getJson(`${BASE}/latest/dex/tokens/${mint}`, { label: "dexscreener/tokens" });
   if (!r.ok || !r.data?.pairs?.length) return { ok: false, error: r.error || "no pairs", pairs: [] };
   const pairs = r.data.pairs

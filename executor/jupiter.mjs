@@ -903,14 +903,28 @@ export class JupiterV2Executor {
     }
   }
 
+  /** Like _readEither, but says WHICH connection answered — evidence needs provenance.
+   * The seventh review found a finalized failure observed via the secondary being
+   * passed downstream labeled as the PRIMARY's error, whereupon the two-RPC
+   * consensus check read only the secondary again and confirmed it against itself. */
+  async _readEitherTagged(fn) {
+    try { return { value: await fn(this.connection), source: "primary" }; }
+    catch (error) {
+      if (!this.secondaryConnection) throw error;
+      return { value: await fn(this.secondaryConnection), source: "secondary" };
+    }
+  }
+
   async _waitFinalized(signature) {
     const deadline = this.now() + this.cfg.finalityTimeoutMs;
     let observedStatus = false;
     let observedFinalized = false;
     do {
-      let status = null;
-      try { status = await this._readEither((c) => this._status(signature, c)); }
-      catch { status = null; }                       // both RPCs down: a miss, not a verdict
+      let status = null, statusSource = "primary";
+      try {
+        const read = await this._readEitherTagged((c) => this._status(signature, c));
+        status = read.value; statusSource = read.source;
+      } catch { status = null; }                     // both RPCs down: a miss, not a verdict
       if (status) observedStatus = true;
       const isFinalized = status?.confirmationStatus === "finalized" || (status && status.confirmations === null);
       if (isFinalized) {
@@ -919,7 +933,8 @@ export class JupiterV2Executor {
         try { transaction = await this._readEither((c) => this._finalizedTransaction(signature, c)); }
         catch { transaction = null; }
         if (status.err)
-          return { outcome: "failed", error: status.err, transaction, observedStatus, observedFinalized };
+          return { outcome: "failed", error: status.err, errorSource: statusSource,
+                   transaction, observedStatus, observedFinalized };
         if (transaction) return { outcome: "finalized", transaction, observedStatus, observedFinalized };
       }
       if (this.now() >= deadline) break;
@@ -981,7 +996,13 @@ export class JupiterV2Executor {
     return this.journal.getIntent(intent.id);
   }
 
-  async _reconcile(intent, attempt, executeResult = attempt.execute) {
+  /* `observedOnce` carries a caller's PRIOR observation of this signature into every
+   * branch that treats "never seen" as replacement authority. Two reviews running
+   * found the same defect at two different call sites — an escape path observed a
+   * status, handed off, and the evidence evaporated because the next reader failed to
+   * re-observe it. Evidence is threaded now, not re-derived; a signature seen ONCE by
+   * anyone is never converted into markExpired's permission for a fresh signature. */
+  async _reconcile(intent, attempt, executeResult = attempt.execute, { observedOnce = false } = {}) {
     const durableJupiterSuccess = executeResult?.status === "Success" && Number(executeResult.code) === 0;
     /* A "signed" attempt has never been disclosed — its signature CANNOT be on chain —
      * so waiting the full finality timeout for it is pure stall: measured, a wedged
@@ -996,7 +1017,7 @@ export class JupiterV2Executor {
      * where the transaction index lags the status index. A hand-rolled mirror of its
      * success shape dropped exactly that guard (`if (transaction)`) and turned a
      * sub-second index lag into a permanent AMBIGUOUS latch on a landed SUCCESS. */
-    const finality = attempt.state === "signed"
+    let finality = attempt.state === "signed"
       ? await (async () => {
           /* The fast read is fenced primary-then-secondary — it runs during the exact
            * outages that wedge signed attempts, and an unfenced throw here re-froze
@@ -1018,6 +1039,7 @@ export class JupiterV2Executor {
           return { ...waited, observedStatus: true };
         })()
       : await this._waitFinalized(attempt.signature);
+    if (observedOnce) finality = { ...finality, observedStatus: true };
     if (finality.outcome === "failed") {
       const error = `transaction finalized with error: ${JSON.stringify(finality.error)}`;
       if (durableJupiterSuccess) {
@@ -1025,8 +1047,16 @@ export class JupiterV2Executor {
         this.journal.markAmbiguous(intent.id, attempt.attempt, conflict, executeResult);
         throw new Error(conflict);
       }
+      /* The error's PROVENANCE decides which side the consensus check may reuse it
+       * for. When the fence delivered this failure from the SECONDARY, labeling it
+       * primaryError made _confirmFinalizedFailure skip the primary and compare the
+       * secondary against itself — one RPC's word dressed as two-RPC consensus,
+       * authorizing a phantom fee and a replacement swap. Tag it honestly and the
+       * check reads the OTHER connection fresh. */
       const consensus = await this._confirmFinalizedFailure(attempt.signature,
-        { primaryError: finality.error });
+        finality.errorSource === "secondary"
+          ? { secondaryError: finality.error }
+          : { primaryError: finality.error });
       if (!consensus.confirmed) {
         const conflict = `${error}; independent RPC consensus unavailable (${consensus.reason}) — manual reconciliation required`;
         this.journal.markAmbiguous(intent.id, attempt.attempt, conflict, executeResult);
@@ -1212,7 +1242,7 @@ export class JupiterV2Executor {
         let observed = null;
         try { observed = await this._readEither((c) => this._status(attempt.signature, c)); }
         catch { observed = null; }
-        if (observed) return this._reconcile(intent, attempt, attempt.execute);
+        if (observed) return this._reconcile(intent, attempt, attempt.execute, { observedOnce: true });
         throw new Error(`cannot bound signed attempt ${intent.id}/${attempt.attempt}'s expiry — both RPC height ` +
           "reads failed and no status is observable; holding the bytes undisclosed until a chain read succeeds");
       }

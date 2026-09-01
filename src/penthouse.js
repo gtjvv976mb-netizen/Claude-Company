@@ -1193,6 +1193,14 @@ let _subTickArmed = false;
 let _subTickBusy = false;
 let _subTickSecs = 45;
 
+/* ONE WINDOW for post-close witnessing AND adjudication. The seventh review found
+ * them split — witnesses were WRITTEN for 15 minutes after a close while the confirm
+ * loop only READ 10 minutes and declared "no second witness will ever come" at the
+ * same 10 — so a witness recorded at minute 11, seconds earlier in the very same
+ * pass, was permanently ignored and the fake print it would have convicted was
+ * confirmed. Two numbers describing one contract will drift; one number cannot. */
+const WITNESS_WINDOW_MS = 15 * 60e3;
+
 /**
  * THE ONE DOOR A WITNESS MARK ENTERS BY. The spacing rule ("witnesses must be
  * separated observations") was enforced only inside subTickMarks, while monitorCalls
@@ -1237,7 +1245,7 @@ export async function subTickMarks() {
     const live = db.prepare(`SELECT id, mint FROM calls WHERE status='live'
       UNION SELECT id, mint FROM calls
       WHERE status='closed' AND close_confirmed IS NULL AND closed_at > ?`)
-      .all(Date.now() - 15 * 60e3);
+      .all(Date.now() - WITNESS_WINDOW_MS);
     for (const call of live) {
       try {
         const last = db.prepare(`SELECT MAX(ts) t FROM call_events
@@ -1287,8 +1295,8 @@ export async function subTickMarks() {
           ORDER BY ts DESC LIMIT 1`).get(call.id, call.closed_at, call.closed_at - 60 * 60e3)?.mark ?? null;
         const postMark = db.prepare(`SELECT mark FROM call_events
           WHERE call_id=? AND mark IS NOT NULL AND kind IN ('mark','ok') AND ts > ? AND ts < ?
-          ORDER BY ts ASC LIMIT 1`).get(call.id, call.closed_at, call.closed_at + 10 * 60e3)?.mark ?? null;
-        const windowOver = Date.now() > call.closed_at + 10 * 60e3;
+          ORDER BY ts ASC LIMIT 1`).get(call.id, call.closed_at, call.closed_at + WITNESS_WINDOW_MS)?.mark ?? null;
+        const windowOver = Date.now() > call.closed_at + WITNESS_WINDOW_MS;
         const settle = (restateTo = null, why = null) => {
           if (restateTo != null) {
             const r = db.prepare("UPDATE calls SET close_mark=?, close_confirmed=1 WHERE id=? AND close_confirmed IS NULL")
