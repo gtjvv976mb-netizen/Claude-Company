@@ -6142,9 +6142,25 @@ async function renderTeamInto(el) {
   // 1. the bot
   const cBot = mk("div", "tchip");
   cBot.append(mk("span", "tk", "WALL-ST-E \u00b7 autotrader"));
-  const bv = mk("span", "tv", "○ local status not linked");
-  cBot.appendChild(bv);
-  cBot.appendChild(mk("span", "dp-note", "Check the machine running the poller"));
+  // Relayed from the bot's own heartbeat \u2014 the site never claims liveness itself.
+  let hb = null;
+  try { hb = JSON.parse(R.executorHeartbeat || "null"); } catch {}
+  const hbAge = hb?.seenAt ? Date.now() - hb.seenAt : null;
+  if (hb && hbAge != null && hbAge < 3 * 60e3) {
+    const bv = mk("span", "tv", `● ${(hb.mode || "?").toUpperCase()} \u00b7 ${hb.open ?? 0} open`);
+    bv.style.color = "var(--good,#4f8f52)";
+    cBot.appendChild(bv);
+    cBot.appendChild(mk("span", "dp-note",
+      `self-reported ${Math.max(1, Math.round(hbAge / 1000))}s ago by your machine`));
+  } else if (hb && hbAge != null) {
+    const bv = mk("span", "tv", `○ last pulse ${Math.round(hbAge / 60e3)}m ago`);
+    bv.style.color = "var(--bad,#b0503f)";
+    cBot.appendChild(bv);
+    cBot.appendChild(mk("span", "dp-note", "the poller may be stopped \u2014 check the machine running it"));
+  } else {
+    cBot.appendChild(mk("span", "tv", "○ local status not linked"));
+    cBot.appendChild(mk("span", "dp-note", "Check the machine running the poller"));
+  }
   strip.appendChild(cBot);
 
   // 2. the shift — with the toggle and cadence inline

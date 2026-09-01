@@ -289,11 +289,23 @@ export function roomState(floorNo, wallet, { houseSeat = false } = {}) {
   // their own room, under the house's name.
   const lease = leaseFor(floorNo)
     ?? (houseSeat ? { floor_no: floorNo, wallet, name: "The House Desk", base_units: "0", created_at: 0 } : null);
+  const mine = Boolean(houseSeat || (wallet && lease && lease.wallet === wallet));
+  /* The Team tab's WALL-ST-E tile said "local status not linked" forever, because this
+   * payload reads room_settings while the executor's self-reported heartbeat lands in
+   * copy_settings — two tables, one bot. Bridge it here, owner-only like the feed's
+   * settings: the pulse is the tenant's own telemetry, not a public claim. */
+  let executorHeartbeat = null;
+  if (mine) {
+    try { executorHeartbeat = db.prepare(
+      "SELECT executor_heartbeat FROM copy_settings WHERE floor_no=?").get(floorNo)?.executor_heartbeat ?? null; }
+    catch { executorHeartbeat = null; }
+  }
   return {
     identity, floorLabel,
     floorNo,
     lease,
-    isMine: Boolean(houseSeat || (wallet && lease && lease.wallet === wallet)),
+    isMine: mine,
+    executorHeartbeat,
     settings: settings(floorNo),
     runs: runsFor(floorNo),
     busy: isBusy(floorNo),
