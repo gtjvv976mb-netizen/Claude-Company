@@ -2792,7 +2792,7 @@ class Worker {
     if (!this.path) {
       const dx = this.deskAt.x - this.home.x, dz = this.deskAt.z - this.home.z;
       const d = Math.hypot(dx, dz) || 1;
-      const pull = 0.62 * this.seated;
+      const pull = SIT_IN * this.seated;
       const tx = this.home.x + (dx / d) * pull, tz = this.home.z + (dz / d) * pull;
       if (Math.hypot(this.x - this.home.x, this.z - this.home.z) < 1.2) {
         this.x += (tx - this.x) * Math.min(1, dt * 6);
@@ -3040,11 +3040,24 @@ const DESK_KIT = {
 
 /* ── desks and chairs ─────────────────────────────────────────────────────── */
 const deskYaw = (spec) => Math.atan2(-(spec.desk[1] - spec.stand[1]), spec.desk[0] - spec.stand[0]);
+/* THE SEAT: 0.62 in from the standing spot toward the desk. The chair goes
+   here and the sitter slides here — one number, so a figure can never end up
+   sitting in front of its own chair (which is exactly what happened when the
+   sitter moved and the chair did not). */
+const SIT_IN = 0.78;      // seat centre lands 0.72 from the desk centre: the
+                          // chair tucks under the 0.52 desk edge, the sitter's
+                          // knees are beneath it, hands reach the keyboard
+const seatPoint = (spec) => {
+  const dx = spec.desk[0] - spec.stand[0], dz = spec.desk[1] - spec.stand[1];
+  const d = Math.hypot(dx, dz) || 1;
+  return [spec.stand[0] + (dx / d) * SIT_IN, spec.stand[1] + (dz / d) * SIT_IN];
+};
+window.__seatPoint = seatPoint;
 for (const spec of STAFF) {
   if (spec.grok) continue;          // built into his own (toggleable, unbaked) office
   const yaw = deskYaw(spec);
   buildDesk(spec.desk, yaw + Math.PI, spec.y ?? 0, spec.claude ? P.claude : P.teal, spec.id);
-  buildChair(spec.stand, yaw, spec.y ?? 0);
+  buildChair(seatPoint(spec), yaw, spec.y ?? 0);
 }
 
 /* ── bake the room ────────────────────────────────────────────────────────────
@@ -3191,7 +3204,7 @@ scene.add(codexOffice);
 
   // his desk and chair, up on the dais, out of the baked room
   const desk = buildDesk([O.cx, -10.8], -Math.PI / 2, 0, 0x1b1e1c, null);
-  const chair = buildChair([O.cx, -9.7], Math.PI / 2, 0);
+  const chair = buildChair([O.cx, -9.7 - SIT_IN], Math.PI / 2, 0);   // where he actually sits
   for (const g of [desk, chair]) { room.remove(g); codexOffice.add(g); g.position.y += CODEX_DAIS; }
 
   // ── THE BOARD: what he is for — tests, proposals, and the standing promise
@@ -3309,7 +3322,7 @@ const grokBoard = (() => {
   // ── his desk and chair, black to match the room, up on the dais
   const deskYawG = -Math.PI / 2;                   // facing the floor, like the boss
   const desk = buildDesk([O.cx, -10.8], deskYawG, 0, 0x1b1c1e, null);
-  const chair = buildChair([O.cx, -9.7], deskYawG + Math.PI, 0);
+  const chair = buildChair([O.cx, -9.7 - SIT_IN], deskYawG + Math.PI, 0);
   for (const g of [desk, chair]) {
     room.remove(g); grokOffice.add(g);             // out of the baked room
     g.position.y += GROX_DAIS;                     // up on his dais
