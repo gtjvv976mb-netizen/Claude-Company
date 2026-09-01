@@ -73,7 +73,15 @@ ok("live deployment and transaction ceilings cannot be raised by environment", (
   ]) {
     const result = run({ [name]: value, LIVE_STATE_INIT_ACK: wallet });
     assert.notEqual(result.status, 0, `${name} unexpectedly bypassed its live ceiling`);
-    assert.match(result.stderr, new RegExp(`${name} must be between`));
+    /* The three MONEY caps are now raisable by an operator who types the
+     * acknowledgement (see test-operator-caps.mjs), so raising one by env alone is
+     * refused EARLIER and more usefully — naming the ceremony rather than the range.
+     * The invariant this test guards is unchanged and is what is asserted: env alone
+     * can never bypass a live ceiling. Everything else still refuses on range. */
+    const MONEY = ["MAX_SOL_PER_TRADE", "DAILY_SOL_CAP", "DAILY_LOSS_LIMIT_SOL"];
+    assert.match(result.stderr, MONEY.includes(name)
+      ? /ALL THREE set explicitly|typed acknowledgement/
+      : new RegExp(`${name} must be between`));
   }
 });
 
