@@ -152,7 +152,13 @@ function startPenthouse() {
    * that finds the book full returns immediately having spent nothing, and the hourly
    * pace in llm.js stops the desk eating the day's budget by lunchtime. So this sets
    * how OFTEN the desk may look, while the money decides how often it may work. */
-  const cycleMins = Number(process.env.PENTHOUSE_CYCLE_MINS || 20);
+  /* 20-minute cycles studied ~8 coins an hour and proposed about one in forty. The
+   * pipeline's judgement is sound — a re-run of two live calls returned honest WATCHes
+   * with named, machine-checkable promote rules — so the lever for more published
+   * calls is throughput, not a lower bar: more distinct candidates studied per hour.
+   * 12 minutes is ~1.7x the studies; the daily pacer in llm.js still caps the spend.
+   * Render can override with PENTHOUSE_CYCLE_MINS. */
+  const cycleMins = Number(process.env.PENTHOUSE_CYCLE_MINS || 12);
   const monitorMins = Number(process.env.PENTHOUSE_MONITOR_MINS || 10);
   // Sub-tick price witnesses between full passes: the two-witness high needs
   // neighbours closer than the 10-minute monitor gap, and fresh close prints
