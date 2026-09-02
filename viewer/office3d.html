@@ -4783,7 +4783,9 @@ let oldestChron = null, chronBusy = false, chronDone = false;
 let newestChron = 0;                       // the high-water mark the tape has rendered
 async function loadChronicle(before) {
   if (chronBusy || chronDone) return 0;
-  if (!before && newestChron) return fillChronicleGap();
+  // A cursor-less call while rows are ALREADY on the tape is the re-prepend case; before
+  // the first page lands (SSE may have advanced the cursor) it must still load history.
+  if (!before && newestChron && tapeEl?.childElementCount) return fillChronicleGap();
   chronBusy = true;
   try {
     const base = window.__API_BASE__ || "";
