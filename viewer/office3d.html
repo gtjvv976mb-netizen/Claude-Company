@@ -7306,6 +7306,7 @@ function buildControls(settings) {
     catGrid.appendChild(lab);
   }
   box.appendChild(catGrid);
+  deskCoverageNote([...catChosen]).then((note) => { if (note.textContent) catGrid.insertAdjacentElement("afterend", note); });
   box.appendChild(mk("div", "dp-note", "The narratives your team is allowed to call. A coin outside these is passed, however good it looks. Your appetite sets a sensible default; this overrides it."));
 
   // ── liquidity floor: the thinnest book this floor will touch (real: decide()
@@ -8130,6 +8131,32 @@ const dashWhen = (ts) => {
   try { return new Date(ms).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }); }
   catch { return new Date(ms).toISOString().slice(0, 16).replace("T", " "); }
 };
+/** What this desk actually publishes, against what a floor chases. A floor whose
+ *  categories miss the desk's asset class receives nothing and never learns why —
+ *  measured end to end on untouched defaults. Public data, cached for two minutes. */
+let __deskMix = null;
+async function deskCoverageNote(chosen, cls = "dp-note") {
+  const el = document.createElement("div"); el.className = cls; el.style.marginTop = "4px";
+  try {
+    if (!__deskMix || Date.now() - __deskMix.at > 120e3) {
+      const { status, body } = await call_api("/api/ledger?limit=100");
+      const rows = status === 200 && Array.isArray(body?.house) ? body.house : [];
+      const counts = {}; for (const c of rows) { const k = c.category || "unclear"; counts[k] = (counts[k] || 0) + 1; }
+      __deskMix = { at: Date.now(), total: rows.length, counts };
+    }
+    const { total, counts } = __deskMix;
+    if (!total) { el.textContent = "The desk has not published yet, so coverage cannot be measured."; return el; }
+    const pick = new Set(chosen || []);
+    const covered = Object.entries(counts).filter(([k]) => pick.has(k)).reduce((a, [, v]) => a + v, 0);
+    const pct = Math.round(covered / total * 100);
+    const mix = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 4)
+      .map(([k, v]) => k + " " + Math.round(v / total * 100) + "%").join(" \u00b7 ");
+    el.textContent = "This desk's last " + total + " calls: " + mix + ". Your floor chases " + pct + "% of them" +
+      (pct === 0 ? " \u2014 it will receive no calls until a category the desk publishes is allowed." : pct < 50 ? " \u2014 most calls will pass this floor by." : ".");
+    if (pct < 50) el.style.color = "var(--warn,#d9a441)";
+  } catch { el.textContent = ""; }
+  return el;
+}
 const dashMetric = (key, value, note) => {
   const card = dashNode("div", "dashmetric");
   card.append(dashNode("span", "k", key), dashNode("b", "", value));
@@ -8937,6 +8964,7 @@ async function loadWallsteDashboard({ background = false } = {}) {
     categoryGroup.appendChild(dashNode("label", "", "Allowed categories"));
     const categories = dashNode("div", "padgrid");
     const categorySet = new Set(Array.isArray(filters.categories) ? filters.categories : []);
+    deskCoverageNote([...categorySet], "dp-note").then((note) => { if (note.textContent) categoryGroup.appendChild(note); });
     for (const [value, label] of wallsteFilterCategories) {
       const choice = dashNode("label", "pad" + (categorySet.has(value) ? " on" : ""));
       const check = dashNode("input"); check.type = "checkbox"; check.value = value; check.checked = categorySet.has(value);
