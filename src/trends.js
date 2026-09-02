@@ -51,9 +51,51 @@ const REACH_SCORE = { niche: 6, notable: 14, mainstream: 8 };   // mainstream is
  * request. Solana only, and old coins are dropped: a token that predates the event
  * cannot be a coin launched FOR it, however well its name happens to match.
  */
+/**
+ * The coins pump.fun is listing for this theme, by name and symbol.
+ *
+ * DexScreener indexes a coin once it has a pool worth indexing, which is minutes to
+ * hours after birth — and this lane's entire purpose is to be there before the crowd.
+ * A theme Grok reports as "just broke" is answered on pump.fun by launches that are
+ * three minutes old and invisible to a search engine. Free, and additive: a failure
+ * here leaves the DexScreener search below exactly as it was.
+ */
+async function padCoinsForTheme(terms, { maxAgeHours }) {
+  const { newLaunches, recentlyTraded, asCandidate } = await import("./data/pumpfun-live.js");
+  const [fresh, traded] = await Promise.all([
+    newLaunches({ pages: 2 }).catch(() => []), recentlyTraded({ pages: 3 }).catch(() => []),
+  ]);
+  const needles = terms.map((t) => t.trim().toLowerCase()).filter((t) => t.length >= 3);
+  const out = [];
+  for (const row of [...fresh, ...traded]) {
+    const hay = `${row.name ?? ""} ${row.symbol ?? ""}`.toLowerCase();
+    const matchedTerm = needles.find((n) => hay.includes(n));
+    if (!matchedTerm) continue;
+    const c = asCandidate(row, {});
+    if (!c || c.live.banned) continue;
+    /* Only coins the desk could actually trade. Without this the race is won by
+       whatever is biggest — a $24m coin took a "dogs" race in testing, which is the
+       coin the money already found, and off the desk's board besides. */
+    if (!c.live.band) continue;
+    if (c.pair.ageHours != null && c.pair.ageHours > maxAgeHours) continue;
+    out.push({
+      mint: c.mint, symbol: c.pair.baseSymbol, name: c.pair.baseName,
+      // A curve's reserve is unpriced here (no SOL rate in this lane), so rank the
+      // race on the market cap, which is the number this feed states directly.
+      liquidityUsd: c.pair.marketCap ?? 0,
+      marketCap: c.pair.marketCap, ageHours: c.pair.ageHours,
+      buysH1: c.live.replyCount ?? 0, matchedTerm, launchpad: "pump.fun",
+    });
+  }
+  return out;
+}
+
 export async function coinsForTheme(theme, { maxAgeHours = 72 } = {}) {
   const terms = (theme.search_terms ?? []).filter((t) => typeof t === "string" && t.trim().length >= 2).slice(0, 5);
   const seen = new Map();
+  // pump.fun first: its rows are the youngest, and the first entry for a mint wins.
+  for (const c of await padCoinsForTheme(terms, { maxAgeHours }).catch(() => []))
+    if (!seen.has(c.mint)) seen.set(c.mint, c);
   for (const term of terms) {
     const r = await getJson(`${DEX}/latest/dex/search?q=${encodeURIComponent(term.trim())}`,
       { label: "dexscreener/search" }).catch(() => null);

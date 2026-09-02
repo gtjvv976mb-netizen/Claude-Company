@@ -326,7 +326,34 @@ function startPenthouse() {
   };
   setTimeout(promote, 120000);
   setInterval(promote, promoteMins * 60000);
-  console.log(`[penthouse] fresh scan every ${freshMins}m, watch checks every ${promoteMins}m`);
+
+  /* THE LORE LANE. Grok reads what X is accelerating on, and the desk hunts the coins
+   * wearing that story before the story is priced — pump.fun first, where a coin for a
+   * theme that broke ten minutes ago actually is. This lane was written in full and
+   * never called by anything: a repo-wide search for scanTrends found its definition
+   * and nothing else, so the desk has never once front-run a narrative it could see.
+   *
+   * It costs one Grok call per pass, so it runs on its own slow clock rather than
+   * inside the research loop, and each theme carries its own 90-minute cooldown. With
+   * no XAI key it returns "no grok key" and nothing happens. */
+  const trendMins = Number(process.env.PENTHOUSE_TREND_MINS || 12);
+  const trendHunt = async () => {
+    try {
+      const { scanTrends } = await import("./trends.js");
+      const r = await scanTrends({ maxThemes: 4 });
+      if (!r.ok) { console.log(`[trend] ${r.error}`); return; }
+      if (r.candidates.length)
+        console.log(`[trend] ${r.candidates.length} candidate(s) from ${r.themes.length} live theme(s): ` +
+          r.candidates.slice(0, 3).map((c) => `${c.symbol} (${c.theme})`).join(", "));
+      else if (r.empty?.length)
+        console.log(`[trend] ${r.empty.length} story/stories live with no coin launched yet: ${r.empty.join(", ")}`);
+    } catch (e) { console.log(`[trend] ${e.message}`); }
+  };
+  setTimeout(trendHunt, 150000);
+  setInterval(trendHunt, trendMins * 60000);
+
+  console.log(`[penthouse] fresh scan every ${freshMins}m, watch checks every ${promoteMins}m, ` +
+    `trend hunt every ${trendMins}m`);
 }
 
 async function main() {

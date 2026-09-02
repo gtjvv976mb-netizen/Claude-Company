@@ -22,7 +22,11 @@
 import { cfg } from "./config.js";
 
 /* What share of each cycle's paid attention goes to pump.fun. A floor, not a cap. */
-export const PAD_QUOTA = Math.min(1, Math.max(0, Number(process.env.PENTHOUSE_PAD_QUOTA || 0.6)));
+/* PUMP.FUN ONLY (owner, 2026-09-03). This was a 0.6 FLOOR — fill 60% of the paid seats
+   with pump.fun coins, then fill the rest from anywhere — and the desk was spending 40%
+   of its research on launchpads the owner does not want traded. At 1 it is the whole
+   board. Set PENTHOUSE_PAD_QUOTA below 1 to let other launchpads back in. */
+export const PAD_QUOTA = Math.min(1, Math.max(0, Number(process.env.PENTHOUSE_PAD_QUOTA ?? 1)));
 
 /** Market-cap bands, as the owner specified them. */
 /* The bands live in their own leaf module so the screen can read the same numbers
@@ -164,7 +168,13 @@ export function selectAcrossBoard(board, budget, { padQuota = PAD_QUOTA, pad = "
   const quota = Math.min(budget, Math.ceil(budget * padQuota));
   sweepBoard(quota, (c) => c.launchpad === pad);
   const fromPad = picked.length;
-  sweepBoard(budget, () => true);
+  /* AT A FULL QUOTA THE FLOOR BECOMES A WALL. The owner's instruction is to search and
+     trade pump.fun coins only, so when the quota is the whole budget the general pass
+     is filtered too — otherwise a quiet hour on pump.fun silently spends the desk's
+     research on the launchpads it was told to leave alone. Below 1 it behaves exactly
+     as before: a floor, never a cap. */
+  if (padQuota >= 1) sweepBoard(budget, (c) => c.launchpad === pad);
+  else sweepBoard(budget, () => true);
 
   if (picked.length) picked.padMix = { [pad]: fromPad, other: picked.length - fromPad };
   return picked;

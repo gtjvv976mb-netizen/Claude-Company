@@ -13,12 +13,15 @@ let pass = 0, fail = 0;
 const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  — " + d : ""}`))
                                  : (fail++, console.log(`  FAIL ${n}${d ? "  — " + d : ""}`)); };
 
+/* Attributed to pump.fun on purpose. Since 2026-09-03 a full launchpad quota is
+   exclusive, so an unattributed coin is not selected at all — the desk was told to
+   trade pump.fun, and "we could not tell which pad this is" is not that. */
 const coin = (mcap, name = "Dog", sym = "DOG", score = 50) => ({
-  mint: `${sym}${mcap}`, score,
+  mint: `${sym}${mcap}`, score, launchpad: "pump.fun",
   pair: { marketCap: mcap, baseName: name, baseSymbol: sym, websites: [] },
 });
 
-console.log("\nCAP BANDS — the owner's five, exactly");
+console.log("\nCAP BANDS — the owner's six, exactly");
 for (const [mcap, want] of [[10_000, "nano"], [50_000, "micro"], [75_000, "low"],
                             [250_000, "medium"], [750_000, "high"], [5_000_000, "very_high"]])
   ok(`$${mcap.toLocaleString()} -> ${want}`, capBandOf(coin(mcap)) === want, capBandOf(coin(mcap)));
@@ -94,8 +97,24 @@ const padPick = selectAcrossBoard(padBoard, 6);
 const pf = padPick.filter((p) => p.launchpad === "pump.fun").length;
 ok("pump.fun is the MAJORITY of a cycle's workups", pf / padPick.length > 0.5,
   `${pf} of ${padPick.length} — where pump.fun carries the volume, it gets the attention`);
-ok("...and it meets the quota it was given", pf >= Math.ceil(6 * PAD_QUOTA),
-  `${pf} >= ${Math.ceil(6 * PAD_QUOTA)}`);
+const padAvailable = padMarket.filter((c) => c.launchpad === "pump.fun").length;
+ok("...and it meets the quota, up to what the board actually holds",
+  pf >= Math.min(padAvailable, Math.ceil(6 * PAD_QUOTA)),
+  `${pf} of ${padAvailable} available, quota ${Math.ceil(6 * PAD_QUOTA)}`);
+/* AT A FULL QUOTA IT IS EXCLUSIVE. The owner's instruction is pump.fun only, so a seat
+   the pad cannot fill is left empty rather than handed to a launchpad the desk was told
+   not to trade. Below 1 the quota stays a floor and the rest of the board fills in. */
+if (PAD_QUOTA >= 1) {
+  ok("nothing but pump.fun is studied at a full quota",
+    padPick.every((p) => p.launchpad === "pump.fun"),
+    padPick.map((p) => p.launchpad).join(", "));
+  ok("...and a seat it cannot fill is simply not taken", padPick.length === padAvailable,
+    `${padPick.length} picked from ${padAvailable} available, against a budget of 6`);
+  const mixed = selectAcrossBoard(buildBoard(padMarket, { perCell: 5 }), 6, { padQuota: 0.5 });
+  ok("a lowered quota lets the other pads back in",
+    mixed.some((p) => p.launchpad !== "pump.fun"),
+    mixed.map((p) => p.launchpad).join(", "));
+}
 ok("a pump.fun coin beats a HIGHER-SCORING coin from another pad",
   padPick.some((p) => p.launchpad === "pump.fun" && p.score < 99) &&
   padPick.findIndex((p) => p.launchpad === "pump.fun") === 0,
@@ -107,11 +126,23 @@ ok("the filtered pass walks PAST rows it rejects to reach a buried coin",
   padPick.some((p) => p.pair.baseSymbol === "PF1"),
   "PF1 sits at depth 4 of its cell behind four coins from other pads");
 
-console.log("\nBUT THE QUOTA IS A FLOOR, NOT A CAP");
+console.log("\nAT A FULL QUOTA, AN EMPTY SEAT BEATS THE WRONG LAUNCHPAD");
+/* This assertion is the exact reverse of what it said until 2026-09-03, and
+ * deliberately so. The quota was a FLOOR then — "refusing a good coin for being born on
+ * the wrong pad would be the worse mistake" — which was right while the desk traded
+ * every launchpad. The owner has since said pump.fun only. A rule that quietly spends
+ * the desk's research elsewhere whenever pump.fun is quiet is not that rule, so at a
+ * full quota an unfillable seat is left unfilled. Lower PENTHOUSE_PAD_QUOTA and the old
+ * behaviour comes back verbatim, which is what the second case here checks. */
 const noPump = buildBoard(padMarket.filter((c) => c.launchpad !== "pump.fun"), { perCell: 5 });
 const noPumpPick = selectAcrossBoard(noPump, 4);
-ok("a market with NO pump.fun still fills the whole budget", noPumpPick.length === 4,
-  "refusing a good coin for being born on the wrong pad would be the worse mistake");
+ok("a market with NO pump.fun is not studied at all at a full quota",
+  PAD_QUOTA >= 1 ? noPumpPick.length === 0 : noPumpPick.length === 4,
+  `${noPumpPick.length} picked at quota ${PAD_QUOTA}`);
+ok("...and the same market fills the budget once the quota is lowered",
+  selectAcrossBoard(buildBoard(padMarket.filter((c) => c.launchpad !== "pump.fun"),
+    { perCell: 5 }), 4, { padQuota: 0.5 }).length === 4,
+  "the floor behaviour is one environment variable away");
 ok("no coin is ever picked twice", new Set(padPick.map((p) => p.mint)).size === padPick.length,
   "the quota pass and the general pass share one seen-set");
 

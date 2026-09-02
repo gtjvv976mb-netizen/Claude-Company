@@ -55,7 +55,20 @@ import { liveCalls } from "./calls.js";
  * wallet is already most of the risk that wallet should carry, and strategy.mjs caps
  * the executor at four regardless.
  */
-export const MAX_LIVE_CALLS = Math.max(1, Number(process.env.PENTHOUSE_MAX_LIVE_CALLS || 6));
+/* SIX WAS A CEILING ON THE WHOLE DESK, not just on the book.
+ *
+ * While six calls were live, four separate lanes returned immediately and the desk did
+ * no paid research at all — measured on the live server, 158 of 697 loop iterations
+ * over seven days, and it was in exactly that state when the count was taken. Six slots
+ * against a flat twelve-hour hold is an arithmetic ceiling of about twelve published
+ * calls a day, which is not a desk that trades minutes.
+ *
+ * The bands now carry their own clock (categories.js): a nano call closes in half an
+ * hour, a micro one in an hour. Slots turn over on that scale, so the number that made
+ * sense for day-long holds is the wrong shape. Twenty-four is still a real limit — the
+ * executor's own maxOpenPositions and every per-trade cap are untouched, and those, not
+ * this, are what bound the money at risk. */
+export const MAX_LIVE_CALLS = Math.max(1, Number(process.env.PENTHOUSE_MAX_LIVE_CALLS || 24));
 /** Set PENTHOUSE_SEQUENTIAL=0 to let cycles run while a position is open. */
 export const SEQUENTIAL = process.env.PENTHOUSE_SEQUENTIAL !== "0";
 
