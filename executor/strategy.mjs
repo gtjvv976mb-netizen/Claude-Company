@@ -177,6 +177,11 @@ export function openPosition({ call, sol, fillPrice, cfg = DEFAULTS }) {
     target: call.target != null ? Number(call.target) : null,
     high: fillPrice, scaled: false, openedAt: call.ts ?? 0,
     openedAtMs: call.openedAtMs ?? Date.now(),
+    /* THE BAND'S CLOCK, carried from the call. Null on a legacy call or an unreadable
+       market cap, in which case the bot's own configured age exit governs, as before. */
+    holdBand: call.hold_band ?? call.holdBand ?? null,
+    holdMaxMs: Number(call.hold_max_ms ?? call.holdMaxMs) > 0
+      ? Number(call.hold_max_ms ?? call.holdMaxMs) : null,
     riskF: null,
   };
 }

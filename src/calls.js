@@ -1,4 +1,5 @@
 import db, { ensureColumn } from "./lib/store.js";
+import { holdWindowFor } from "./categories.js";
 import { emit } from "./lib/bus.js";
 import { POLICY_DEFAULTS, POLICY_VERSION, pricePolicy } from "../executor/trade-policy.mjs";
 
@@ -75,6 +76,15 @@ ensureColumn("calls", "desk_size_usd", "REAL");
 ensureColumn("calls", "desk_risk_usd", "REAL");
 ensureColumn("calls", "desk_equity_usd", "REAL");
 ensureColumn("calls", "policy_version", "TEXT");
+/* THE HOLD WINDOW THE BAND DESERVES. A call is an instruction to buy AND to sell, and
+   until now only the buy carried a number: every position sat under one 12-hour age
+   exit whatever it was. A $9k coin resolves inside half an hour and a $5m coin needs
+   most of a day, so the window travels with the call (categories.js) and the bot sells
+   on it. NULL on a legacy row and on any call whose market cap was unreadable — the
+   bot then falls back to its own configured age exit, exactly as before. */
+ensureColumn("calls", "hold_min_ms", "INTEGER");
+ensureColumn("calls", "hold_max_ms", "INTEGER");
+ensureColumn("calls", "hold_band", "TEXT");
 // Historical calls were not stamped at publication, so NULL cannot safely be called
 // house evidence. Only new, explicitly attributed rows enter improvement scorecards.
 ensureColumn("calls", "source_floor", "INTEGER");
@@ -86,6 +96,7 @@ db.exec(`CREATE INDEX IF NOT EXISTS idx_calls_closed_provenance
          ON calls(source_attributed,source_scope,closed_at)`);
 
 export function openCall(c) {
+  const hold = holdWindowFor(c.mcapUsd ?? null);
   // Every pump.fun-origin call carries the one invalidation the research pass
   // found casually decisive: the observed profitable snipers' exit rule was
   // "the creator sold". Tenants deserve the same tripwire in writing.
@@ -96,8 +107,9 @@ export function openCall(c) {
     const info = db.prepare(`
       INSERT INTO calls (mint,symbol,category,launchpad,source_floor,source_scope,source_attributed,image_url,conviction,entry_ref,entry_lo,entry_hi,stop,target,
                          thesis,invalidation,flags_at_call,liq_at_call,rt_loss_at_call,mcap_at_call,
-                         desk_size_usd,desk_risk_usd,desk_equity_usd,policy_version,opened_at,report_file,last_verified_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+                         desk_size_usd,desk_risk_usd,desk_equity_usd,policy_version,opened_at,report_file,last_verified_at,
+                         hold_band,hold_min_ms,hold_max_ms)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       c.mint, c.symbol ?? null, c.category ?? null, c.launchpad ?? null,
       c.sourceFloor ?? null, c.sourceScope ?? "unattributed", c.sourceAttributed === true ? 1 : 0,
       c.imageUrl ?? null, c.conviction ?? null,
@@ -106,7 +118,8 @@ export function openCall(c) {
       c.flags == null ? null : JSON.stringify(c.flags), c.liqUsd ?? null, c.rtLossPct ?? null, c.mcapUsd ?? null,
       c.deskSizeUsd ?? null, c.deskRiskUsd ?? null, c.deskEquityUsd ?? null, c.policyVersion ?? POLICY_VERSION,
       Date.now(), c.reportFile ?? null,
-      Date.now());          // last_verified_at — clearing the gauntlet IS the first verification
+      Date.now(),           // last_verified_at — clearing the gauntlet IS the first verification
+      hold?.band ?? null, hold?.holdMinMs ?? null, hold?.holdMaxMs ?? null);
     const call = getCall(info.lastInsertRowid);
     emit("call:open", { callId: call.id, mint: call.mint, symbol: call.symbol, category: call.category, launchpad: call.launchpad });
     return call;
@@ -195,8 +208,12 @@ export function evaluateExit(call, now) {
    * it; history confirms it on the next monitor pass via highWaterMark's pair rule. */
   const policyHwm = Math.max(highWaterMark(call.id) ?? 0, call.entry_ref ?? 0);
   const policy = pricePolicy({
+    // The band's clock rides on the position, so the paper record closes a call at the
+    // same moment a tenant's bot closes the trade. Without it the two paths disagreed
+    // by hours on exactly the coins the desk holds for minutes.
     position: { entry: call.entry_ref, stop: call.stop, target: call.target,
-      high: policyHwm, openedAtMs: call.opened_at },
+      high: policyHwm, openedAtMs: call.opened_at,
+      holdBand: call.hold_band ?? null, holdMaxMs: call.hold_max_ms ?? null },
     mark,
     // Tests and replay jobs may supply the observation timestamp. Live monitoring
     // omits it and uses the wall clock.
@@ -208,7 +225,7 @@ export function evaluateExit(call, now) {
   });
   if (policy.action === "sell") return { fire: true, code:
       policy.reason.startsWith("take profit") ? "take_profit" :
-      policy.reason.startsWith("age exit") ? "thesis_expired" :
+      policy.reason.startsWith("age exit") || / window closed /.test(policy.reason) ? "thesis_expired" :
       policy.reason === "desk target hit" ? "target_hit" : "stop_hit",
     urgency: "level", detail: `${policy.reason} · policy ${POLICY_VERSION}`, pct: 100 };
   return { fire: false, policyVersion: POLICY_VERSION };

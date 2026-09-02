@@ -62,15 +62,33 @@ ok("2x sells in both paths", takeServer.code === "take_profit" &&
   takeExecutor.action === "sell" && takeExecutor.fraction === 1,
   `${takeServer.code} / ${takeExecutor.reason}`);
 
-console.log("\nTIME EXPIRY USES THE SAME TWELVE-HOUR POLICY");
-const thirteenHoursAgo = Date.now() - 13 * 3600e3;
-db.prepare("UPDATE calls SET opened_at=? WHERE id=?").run(thirteenHoursAgo, call.id);
+console.log("\nTIME EXPIRY USES ONE POLICY ON BOTH SIDES");
+const pastBackstop = Date.now() - 25 * 3600e3;
+db.prepare("UPDATE calls SET opened_at=? WHERE id=?").run(pastBackstop, call.id);
 const agedCall = getCall(call.id);
 const ageServer = evaluateExit(agedCall, market(1.1));
-const ageExecutor = executorAt(1.1, { openedAtMs: thirteenHoursAgo, nowMs: Date.now() });
-ok("age expiry sells in both paths", ageServer.code === "thesis_expired" &&
+const ageExecutor = executorAt(1.1, { openedAtMs: pastBackstop, nowMs: Date.now() });
+ok("the age backstop sells in both paths", ageServer.code === "thesis_expired" &&
   ageExecutor.action === "sell" && /age exit/.test(ageExecutor.reason),
   `${ageServer.code} / ${ageExecutor.reason}`);
+
+/* THE BAND'S CLOCK MUST ALSO AGREE. A nano call is held for half an hour, and the paper
+ * record has to close at the same moment the tenant's bot does — otherwise the desk's
+ * published performance describes a trade nobody could have had. */
+const nanoOpened = Date.now() - 31 * 60_000;
+db.prepare("UPDATE calls SET opened_at=?, hold_band='nano', hold_max_ms=? WHERE id=?")
+  .run(nanoOpened, 30 * 60_000, call.id);
+const nanoCall = getCall(call.id);
+const nanoServer = evaluateExit(nanoCall, market(1.1));
+const nanoExecutor = stepPosition({
+  pos: openPosition({ call: { mint: call.mint, symbol: call.symbol, stop: call.stop, target: call.target,
+    openedAtMs: nanoOpened, hold_band: "nano", hold_max_ms: 30 * 60_000 },
+    sol: 0.02, fillPrice: 1, cfg: DEFAULTS }),
+  mark: 1.1, cfg: DEFAULTS, nowMs: Date.now(),
+});
+ok("a closed band window sells in both paths", nanoServer.code === "thesis_expired" &&
+  nanoExecutor.action === "sell" && /nano window closed/.test(nanoExecutor.reason),
+  `${nanoServer.code} / ${nanoExecutor.reason}`);
 
 console.log("\nTHE POLICY IS VERSIONED ON EVERY SURFACE");
 ok("strategy re-exports the shared version", EXECUTOR_POLICY_VERSION === POLICY_VERSION,

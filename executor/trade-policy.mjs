@@ -3,7 +3,12 @@ export const POLICY_VERSION = "snipe-v3";
 
 export const POLICY_DEFAULTS = Object.freeze({
   takeProfitX: 2,
-  maxAgeHours: 12,
+  /* THE BACKSTOP, not the policy. Each call now carries its own band window (nano half
+     an hour, very high a day) and that is what closes a position; this is only the
+     ceiling for a call that carried none, and it matches the longest band so it can
+     never cut a very-high hold short. An operator setting MAX_AGE_HOURS lower still
+     wins everywhere: the shorter of the two governs. */
+  maxAgeHours: 24,
   trailPct: 0.25,
   breakevenArmX: 1.35,
   trailArmX: 1.5,
@@ -81,10 +86,27 @@ export function pricePolicy({ position, mark, deskExit = null, nowMs = Date.now(
   if (deskExit) return { action: "sell", fraction: 1,
     reason: `desk exit: ${deskExit.code || "exit"}`, position: p, policyVersion: POLICY_VERSION };
 
-  if (p.openedAtMs != null && c.maxAgeHours > 0) {
-    const ageH = (nowMs - p.openedAtMs) / 3600e3;
-    if (ageH >= c.maxAgeHours) return { action: "sell", fraction: 1,
-      reason: `age exit — ${Math.round(ageH)}h with no resolution`, position: p, policyVersion: POLICY_VERSION };
+  /* THE CLOCK RUNS BEFORE THE PRICE. This desk buys low to sell high inside a session,
+   * so the sell is decided when the call is: each market-cap band carries the window it
+   * deserves — half an hour at $9k, a day at $5m — and the position closes on it whether
+   * or not the target printed. The window travels with the call; the bot's own
+   * maxAgeHours remains the backstop and the shorter of the two always wins, so a
+   * conservative operator can shorten every hold but a call can never extend one. */
+  const bandHoldMs = Number(p.holdMaxMs) > 0 ? Number(p.holdMaxMs) : null;
+  const configuredHoldMs = c.maxAgeHours > 0 ? c.maxAgeHours * 3600e3 : null;
+  const holdMs = bandHoldMs != null && configuredHoldMs != null
+    ? Math.min(bandHoldMs, configuredHoldMs) : (bandHoldMs ?? configuredHoldMs);
+  if (p.openedAtMs != null && holdMs > 0) {
+    const heldMs = nowMs - p.openedAtMs;
+    if (heldMs >= holdMs) {
+      const mins = Math.round(heldMs / 60_000);
+      const onBand = bandHoldMs != null && holdMs === bandHoldMs;
+      return { action: "sell", fraction: 1,
+        reason: onBand
+          ? `the ${p.holdBand || "band"} window closed after ${mins}m — this desk sells on the clock`
+          : `age exit — ${Math.round(heldMs / 3600e3)}h with no resolution`,
+        position: p, policyVersion: POLICY_VERSION };
+    }
   }
   if (!(mark > 0)) return { action: "hold", reason: "no readable mark", position: p, policyVersion: POLICY_VERSION };
 

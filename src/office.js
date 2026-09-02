@@ -73,6 +73,7 @@ export function executorFeedPayload(floorNo, rawAfter = 0) {
            c.symbol, c.category, c.launchpad, c.conviction,
            c.entry_ref, c.entry_lo, c.entry_hi, c.stop, c.target, c.close_reason, c.status, c.opened_at,
            c.liq_at_call, c.rt_loss_at_call, c.mcap_at_call, c.policy_version,
+           c.hold_band, c.hold_min_ms, c.hold_max_ms,
            COALESCE((SELECT e.mark FROM call_events e
                      WHERE e.call_id=c.id AND e.mark IS NOT NULL
                      ORDER BY e.id DESC LIMIT 1), c.entry_ref) AS current_mark,
@@ -124,6 +125,10 @@ export function executorFeedPayload(floorNo, rawAfter = 0) {
       conviction: r.conviction, category: r.category, launchpad: r.launchpad,
       liq_at_call: r.liq_at_call, rt_loss_at_call: r.rt_loss_at_call,
       mcap_at_call: r.mcap_at_call,
+      // The band's clock. The bot sells on it whether or not the target printed.
+      hold_band: r.hold_band ?? null,
+      hold_min_ms: r.hold_min_ms ?? null,
+      hold_max_ms: r.hold_max_ms ?? null,
       policy_version: r.policy_version,
       take_profit_x: floorSettings.take_profit_x ?? 0,
       fixed_sol: floorSettings.fixed_sol ?? 0,
