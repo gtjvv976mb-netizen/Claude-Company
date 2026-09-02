@@ -89,8 +89,20 @@ export function executorFeedPayload(floorNo, rawAfter = 0) {
    * poll rather than on the next redeploy of somebody's VPS. 0 means auto —
    * the bot then honours the desk's own authored target. */
   const floorSettings = copy.settingsFor(floorNo);
+  /* WHY A CALL WAS NOT OFFERED RIDES WITH THE FEED. Two house calls were published
+   * while an armed bot polled an empty feed, and nothing outside the server database
+   * could say why: the feed carries only ENTRY alerts, which exist only for offered
+   * deliveries, and the verdict for a skipped one lived in a row no executor route
+   * exposed. The bot's own log now gets the floor's recent verdicts — symbol,
+   * verdict, reason, size — floor-scoped and secret-free, so "not offered because
+   * conviction 38 is under this floor's bar of 40" is one log line, not a day. */
+  const decisions = db.prepare(`
+    SELECT d.call_id, c.symbol, d.verdict, d.reason, d.size_sol, d.delivered_at
+    FROM deliveries d LEFT JOIN calls c ON c.id=d.call_id
+    WHERE d.floor_no=? ORDER BY d.id DESC LIMIT 12`).all(floorNo);
   return { cluster: "mainnet-beta", latest_id: latestId,
     next_cursor: rows.length ? rows[rows.length - 1].id : after,
+    decisions,
     rules: { take_profit_x: floorSettings.take_profit_x ?? 0,
              fixed_sol: floorSettings.fixed_sol ?? 0,
              mcap_tier: floorSettings.mcap_tier ?? "any" },

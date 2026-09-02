@@ -66,6 +66,8 @@ const SLEEP_ASSERTION_FAULT_FILE = sleepAssertionFaultPath(LOCK_FILE);
 // cannot make an old in-memory process impersonate the newly published runtime.
 const RUNTIME_FINGERPRINT = executorRuntimeFingerprint(path.dirname(fileURLToPath(import.meta.url)));
 const LAMPORTS = 1_000_000_000;
+// newest floor verdict already logged; verdicts older than this are not repeated
+let lastDecisionSeen = Date.now() - 6 * 3600e3;
 /* The FULL 44-character mainnet-beta genesis hash. It shipped truncated to 32
  * characters, so the equality check could never pass against a real RPC — a bug only
  * a genuine live boot could surface, and exactly the kind fail-closed design is for:
@@ -1382,6 +1384,19 @@ async function tick() {
         if (payload.cluster !== "mainnet-beta") throw new Error("feed cluster is not mainnet-beta");
         if (!Array.isArray(payload.events)) throw new Error("feed omitted its events array");
         const events = payload.events;
+        /* Say why a call was NOT offered. An empty feed is indistinguishable from a
+         * desk that published nothing, and today it hid two published calls the floor
+         * had declined. The feed now carries the floor's recent verdicts; log each
+         * new refusal once. Pure observability — nothing here changes a decision. */
+        if (Array.isArray(payload.decisions)) {
+          for (const d of [...payload.decisions].reverse()) {
+            const at = Number(d?.delivered_at) || 0;
+            if (at <= lastDecisionSeen || d?.verdict === "offered") continue;
+            log(`NOT OFFERED ${d?.symbol || d?.call_id}: ${d?.reason || d?.verdict}`);
+          }
+          lastDecisionSeen = Math.max(lastDecisionSeen,
+            ...payload.decisions.map((d) => Number(d?.delivered_at) || 0));
+        }
         const feedCursor = authenticatedFeedCursorState(S.cursor, payload.latest_id);
         const latestId = feedCursor.latestId;
         if (feedCursor.rollback) {
