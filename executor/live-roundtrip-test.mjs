@@ -13,7 +13,8 @@
  */
 import { Connection, Keypair } from "@solana/web3.js";
 import fs from "node:fs";
-import { JupiterV2Executor, WSOL, independentClassicMintDecimals } from "./jupiter.mjs";
+import { JupiterV2Executor, WSOL, independentClassicMintDecimals,
+  MAX_GROSS_RENT_LAMPORTS } from "./jupiter.mjs";
 import { independentSolUsdPrice } from "./sol-usd-oracle.mjs";
 import { ExecutionJournal } from "./journal.mjs";
 import { validateEntryReference } from "./trade-policy.mjs";
@@ -43,11 +44,11 @@ const jupiter = new JupiterV2Executor({
   config: {
     slippageBps: 300, maxPriceImpactPct: 5, maxExitPriceImpactPct: 50,
     maxFeeBps: 100, maxNetworkFeeLamports: 500_000, maxNetworkFeePct: 10,
-    // 4,078,560 = exactly two account creations (2 x 2,039,280): the wrapped-SOL
-    // account and the token ATA. The live cap of 3,000,000 cannot cover a first-time
-    // buy of any new token, which is every buy this desk makes. Rent is RECLAIMABLE
-    // when those accounts close, so it is a deposit, not a cost.
-    maxRentLamports: 5_000_000, maxAttempts: 3, maxExitAttempts: 12,
+    /* The PRODUCTION rent ceiling, imported rather than chosen. A probe that invents
+     * its own limits proves only that the probe can trade; this one has to prove the
+     * live configuration can. (The earlier 3,000,000 refused a first-time buy at its
+     * true cost of 4,078,560 — two account creations — and has since been raised.) */
+    maxRentLamports: MAX_GROSS_RENT_LAMPORTS, maxAttempts: 3, maxExitAttempts: 12,
     blockHeightWindow: 600, maxQuoteShortfallPct: 15, finalityTimeoutMs: 60_000,
   },
 });
@@ -110,10 +111,10 @@ const entry = await jupiter.executeIntent({
 });
 
 log(`BUY CONFIRMED  signature ${entry.signature}`);
-log(`  received ${entry.outputAmountRaw} raw token units`);
+log(`  received ${entry.actualOutputRaw} raw token units`);
 
 // Sell every unit back, so the test leaves no position behind.
-const held = BigInt(entry.outputAmountRaw);
+const held = BigInt(entry.actualOutputRaw);
 log(`selling all ${held} units back to SOL`);
 const exit = await jupiter.executeIntent({
   id: `roundtrip-exit:${MINT}:${openedAtMs}`,

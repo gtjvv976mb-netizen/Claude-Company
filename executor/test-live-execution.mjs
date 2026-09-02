@@ -479,10 +479,20 @@ await ok("atomic snapshot probes reject duplicate keys, signed sources and overs
   await assert.rejects(() => coherentAccountSnapshot(validationConnection, [key], {
     transaction: signed,
   }), /not unsigned/);
-  const tooMany = Array.from({ length: 40 }, () => Keypair.generate().publicKey);
-  await assert.rejects(() => coherentAccountSnapshot(validationConnection, tooMany, {
-    transaction: makeTx(),
-  }), /atomic account-snapshot probe .*Solana max 1232|cannot be serialized safely/);
+  /* 40 keys no longer fits one probe (1232-byte packet) — and no longer needs to.
+   * The set is split across probes that must all land on ONE exact slot. */
+  const many = Array.from({ length: 40 }, () => Keypair.generate().publicKey);
+  const chunked = await coherentAccountSnapshot(validationConnection, many, { transaction: makeTx() });
+  assert.equal(chunked.accounts.length, 40, "every requested row comes back");
+  assert.equal(chunked.slot, 700, "one slot for the whole set");
+  // A chunk that lands on a newer bank proves the set is not coherent: refused, never stitched.
+  let calls = 0;
+  const movingBank = { ...validationConnection,
+    simulateTransaction: async (tx, options) => atomicCapabilitySnapshot(tx, options, {
+      slot: 700 + (calls++ % 2), accountFor: () => null }) };
+  await assert.rejects(() => coherentAccountSnapshot(movingBank, many, {
+    transaction: makeTx(), attempts: 2,
+  }), /could not produce one coherent exact-slot account snapshot/);
 });
 
 await ok("atomic snapshots require internally consistent same-response balance evidence", async () => {
@@ -1087,7 +1097,7 @@ await ok("gross rent is independently bound and capped without raising exposure 
     rentFeeLamports: MAX_GROSS_RENT_LAMPORTS + 1 }, expected, cfg), /rent .* exceeds cap/);
   const unearned = makeExitMarkHarness({ orderOverrides: { rentFeeLamports: 4_078_560 } });
   await assert.rejects(() => unearned.executor.preflightExitMark(unearned.spec),
-    /canonical ATA rent facts do not match Jupiter's gross rent estimate/);
+    /canonical ATA rent facts do not match Jupiter's rent estimate/);
   assert.equal(unearned.calls.simulate, 0);
 });
 

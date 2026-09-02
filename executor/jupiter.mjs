@@ -602,7 +602,47 @@ export async function processedSlotFreshnessAnchor(connection, {
  * Simulation account rows are post-state. A successful Memo changes only the fee
  * payer's lamports, so the same response's pre/post balance vectors and fee are
  * required and checked before the payer row is restored to its atomic pre-state. */
-export async function coherentAccountSnapshot(connection, publicKeys, {
+/* One Memo probe can carry at most ~34 static keys before it exceeds Solana's
+ * 1232-byte packet, yet the writable-account cap above it is 64 — so any route in
+ * between could not be snapshotted at all, and every exit on such a route was
+ * refused. Hit live: a wrapped-SOL unwrap whose probe came to 1260 bytes at 35 keys.
+ *
+ * Split the address set into probes of SNAPSHOT_CHUNK_KEYS and keep the property the
+ * single probe gave us — ONE exact slot for every row. The chunks are dispatched
+ * CONCURRENTLY at the same floor so they reach the RPC inside one bank; sequential
+ * dispatch never agreed on a slot live, because banks advance every ~400ms. Every
+ * chunk must land on the identical slot; if any lands on a newer bank the set is not
+ * coherent and the whole set is retried from that newer floor. No partial rows ever
+ * survive. Callers see the same { accounts, slot } shape, rows in the order asked.
+ * 30 addresses + payer + Memo = 32 static keys ≈ 1164 bytes, safely under 1232. */
+export const SNAPSHOT_CHUNK_KEYS = 30;
+export async function coherentAccountSnapshot(connection, publicKeys, options = {}) {
+  if (!Array.isArray(publicKeys) || !publicKeys.length)
+    throw new Error("coherent account snapshot requires at least one address");
+  if (publicKeys.length <= SNAPSHOT_CHUNK_KEYS)
+    return coherentAccountSnapshotChunk(connection, publicKeys, options);
+  const addresses = publicKeys.map((key) => key instanceof PublicKey ? key.toBase58() : String(key));
+  if (new Set(addresses).size !== addresses.length)
+    throw new Error("coherent account snapshot addresses must be unique");
+  const chunks = [];
+  for (let i = 0; i < publicKeys.length; i += SNAPSHOT_CHUNK_KEYS)
+    chunks.push(publicKeys.slice(i, i + SNAPSHOT_CHUNK_KEYS));
+  const attempts = options.attempts ?? WRITABLE_SNAPSHOT_ATTEMPTS;
+  let floor = options.minContextSlot ?? 0;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const settled = await Promise.allSettled(chunks.map((chunk) =>
+      coherentAccountSnapshotChunk(connection, chunk, { ...options, attempts: 1, minContextSlot: floor })));
+    const parts = settled.filter((r) => r.status === "fulfilled").map((r) => r.value);
+    // Any bank observed, on success or failure, only ever raises the next floor.
+    for (const part of parts) floor = Math.max(floor, part.slot);
+    if (parts.length === chunks.length && parts.every((part) => part.slot === parts[0].slot))
+      return Object.freeze({ accounts: Object.freeze(parts.flatMap((part) => [...part.accounts])), slot: parts[0].slot });
+    // Either a chunk failed or the chunks straddled a bank boundary: retry the set.
+  }
+  throw new Error(`RPC could not produce one coherent exact-slot account snapshot after ${attempts} attempts`);
+}
+
+async function coherentAccountSnapshotChunk(connection, publicKeys, {
   transaction, commitment = "confirmed", minContextSlot = 0,
   attempts = WRITABLE_SNAPSHOT_ATTEMPTS,
   requestTimeoutMs = WRITABLE_SNAPSHOT_REQUEST_TIMEOUT_MS,
@@ -663,7 +703,12 @@ export async function coherentAccountSnapshot(connection, publicKeys, {
   }));
   let probeLength;
   try { probeLength = probe.serialize().length; }
-  catch { throw new Error("atomic account-snapshot probe cannot be serialized safely"); }
+  catch (error) {
+    // Keep the underlying reason: a swallowed cause turned a live exit failure into
+    // a guess between packet overflow and a malformed key. Say which.
+    throw new Error(`atomic account-snapshot probe cannot be serialized safely ` +
+      `(${staticAccountKeys.length} keys): ${error?.message || error}`);
+  }
   if (probeLength > 1232)
     throw new Error(`atomic account-snapshot probe is ${probeLength} bytes (Solana max 1232)`);
   if (probe.signatures.length !== 1 || Buffer.from(probe.signatures[0] || []).length !== 64 ||
@@ -907,6 +952,10 @@ export async function validateTransaction(transaction, expected, cfg, connection
   let computeLimit = 1_400_000;
   let computePrice = 0n;
   const createdAtas = new Set();
+  // ATAs this same transaction closes again (the wrapped-SOL unwrap on every exit).
+  // Rent paid to open them comes straight back inside the transaction, and Jupiter's
+  // rentFeeLamports is quoted on that NET basis — see the rent guard below.
+  const closedAtas = new Set();
 
   // First collect only wallet-owned ATAs for the two expected mints.
   for (const ix of message.instructions) {
@@ -962,6 +1011,7 @@ export async function validateTransaction(transaction, expected, cfg, connection
       } else if (opcode === 9) { // CloseAccount
         if (ata.get(account) !== WSOL || !sameKey(ix.keys[1]?.pubkey, wallet) || !sameKey(ix.keys[2]?.pubkey, wallet))
           throw new Error("token cleanup does not return wrapped SOL to the local wallet");
+        closedAtas.add(account);
       } else {
         // In particular: no Approve, SetAuthority, MintTo or Burn capability.
         throw new Error(`top-level token opcode ${opcode} is not allowed`);
@@ -999,7 +1049,7 @@ export async function validateTransaction(transaction, expected, cfg, connection
     message, tables, computeLimit, computePrice, jupiterRoutes,
     inputProgram, outputProgram, inputAta, outputAta,
     writableAddresses, writableSnapshotSlot: writableSnapshot.slot,
-    writableCapabilityFingerprint, createdAtas: [...createdAtas],
+    writableCapabilityFingerprint, createdAtas: [...createdAtas], closedAtas: [...closedAtas],
     observedAddresses, preAccounts,
   };
 }
@@ -1284,17 +1334,30 @@ export class JupiterV2Executor {
     const rentExemptionLamports = Number(rentExemptionValue);
     if (!Number.isSafeInteger(rentExemptionLamports) || rentExemptionLamports <= 0)
       throw new Error(`${label} RPC returned an invalid classic-token account rent exemption`);
+    /* Jupiter's rentFeeLamports is quoted NET: rent for accounts that remain open after
+     * the transaction. Proved on mainnet — the buy (both ATAs stay open) reported
+     * 4,078,560 and matched; the sell (wrapped-SOL ATA created AND closed in the same
+     * transaction) reported 0, while this guard demanded the gross 2,039,280 and refused.
+     * Every unwrap exit, i.e. every stop, was impossible. Net out same-transaction
+     * closes; keep strict equality, so an exit that claims rent with nothing actually
+     * missing is still refused. */
     const createdAtas = new Set(validation.createdAtas);
-    const missingCreatedAtas = [
+    const closedAtas = new Set(validation.closedAtas ?? []);
+    const missingCreated = [
       [validation.inputAta, preAccounts[1]],
       [validation.outputAta, preAccounts[2]],
     ].filter(([address, account]) => createdAtas.has(address) &&
-      (!account || isClosedAccountTombstone(account))).length;
-    const expectedGrossRentLamports = missingCreatedAtas * rentExemptionLamports;
-    const reportedGrossRentLamports = Number(order.rentFeeLamports ?? 0);
-    if (!Number.isSafeInteger(reportedGrossRentLamports) ||
-        reportedGrossRentLamports !== expectedGrossRentLamports)
-      throw new Error(`${label} RPC canonical ATA rent facts do not match Jupiter's gross rent estimate`);
+      (!account || isClosedAccountTombstone(account)));
+    // GROSS: every account this order must fund up front — what the rent CAP bounds.
+    // NET: gross minus accounts the same transaction closes again — what Jupiter quotes.
+    const expectedGrossRentLamports = missingCreated.length * rentExemptionLamports;
+    const expectedNetRentLamports = missingCreated
+      .filter(([address]) => !closedAtas.has(address)).length * rentExemptionLamports;
+    const reportedRentLamports = Number(order.rentFeeLamports ?? 0);
+    if (!Number.isSafeInteger(reportedRentLamports) ||
+        reportedRentLamports !== expectedNetRentLamports)
+      throw new Error(`${label} RPC canonical ATA rent facts do not match Jupiter's rent estimate ` +
+        `(chain expects ${expectedNetRentLamports} net of same-transaction closes; Jupiter reports ${reportedRentLamports})`);
     if (expectedGrossRentLamports > Number(this.cfg.maxRentLamports ?? MAX_GROSS_RENT_LAMPORTS))
       throw new Error(`${label} RPC canonical ATA rent exceeds the reviewed gross rent cap`);
     const claimedExpiry = Number(order.lastValidBlockHeight);
@@ -2129,7 +2192,14 @@ export class JupiterV2Executor {
         body: JSON.stringify({
           signedTransaction: attempt.signedTx.toString("base64"),
           requestId: attempt.requestId,
-          lastValidBlockHeight: attempt.lastValidBlockHeight,
+          /* Jupiter's /execute validates this field as a STRING and rejects a number
+           * with a ZodError. Sending the journal's numeric value 400'd EVERY live
+           * submission — the single reason this executor had never completed a trade.
+           * It stayed invisible while the error handler rendered structured bodies as
+           * "[object Object]"; the first run after that was fixed named this exactly.
+           * The journal keeps the number (it is compared against chain heights); only
+           * the wire form is a string. */
+          lastValidBlockHeight: String(attempt.lastValidBlockHeight),
         }),
       });
       result = await jsonResponse(response, "Jupiter /execute");
