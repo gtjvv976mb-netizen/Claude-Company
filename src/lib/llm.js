@@ -16,6 +16,48 @@ CREATE TABLE IF NOT EXISTS llm_spend (
 );
 CREATE INDEX IF NOT EXISTS idx_spend_ts ON llm_spend(ts);
 `);
+
+/**
+ * WHERE THE MONEY ACTUALLY GOES, per seat.
+ *
+ * The desk records every model call's seat, model, effort and cost, and nothing has ever
+ * read it back. "Make it cheaper" without this is guesswork — and guesswork here means
+ * cutting the seat that is cheap and load-bearing while leaving the one that is 44% of
+ * the bill untouched. Aggregate only: no prompt text, no evidence, no wallet.
+ */
+export function spendBySeat({ hours = 24 } = {}) {
+  const since = Date.now() - Math.max(1, Number(hours) || 24) * 3600e3;
+  const rows = db.prepare(`
+    SELECT seat, model, effort,
+           COUNT(*) AS calls,
+           SUM(usd) AS usd,
+           SUM(in_tok) AS inTok,
+           SUM(out_tok) AS outTok,
+           SUM(cached_tok) AS cachedTok
+    FROM llm_spend WHERE ts >= ?
+    GROUP BY seat, model, effort
+    ORDER BY usd DESC`).all(since);
+  const total = rows.reduce((a, r) => a + (Number(r.usd) || 0), 0);
+  const workups = db.prepare(
+    "SELECT COUNT(DISTINCT ts / 600000) n FROM llm_spend WHERE ts >= ?").get(since)?.n ?? 0;
+  return {
+    hours, sinceMs: since,
+    totalUsd: Number(total.toFixed(4)),
+    seats: rows.map((r) => ({
+      seat: r.seat, model: r.model, effort: r.effort,
+      calls: r.calls,
+      usd: Number((Number(r.usd) || 0).toFixed(4)),
+      pctOfTotal: total > 0 ? Number(((Number(r.usd) || 0) / total * 100).toFixed(1)) : 0,
+      usdPerCall: r.calls > 0 ? Number(((Number(r.usd) || 0) / r.calls).toFixed(4)) : 0,
+      inTok: r.inTok, outTok: r.outTok, cachedTok: r.cachedTok,
+      // A seat whose input dwarfs its output is paying to READ; one whose output
+      // dominates is paying to THINK. They are cut in completely different ways.
+      shape: (r.outTok || 0) > (r.inTok || 0) / 4 ? "thinking" : "reading",
+    })),
+    tenMinuteBuckets: workups,
+  };
+}
+
 ensureColumn("llm_spend", "floor", "INTEGER");
 // Existing nulls predate floor attribution and may contain tenant spend. Keep them out
 // of house-only improvement evidence rather than laundering unknown provenance as HQ.

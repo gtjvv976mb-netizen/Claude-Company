@@ -14,7 +14,7 @@ import path from "node:path";
 import { ROOT } from "./config.js";
 import { bus, backlog, emit, runFor, chronicleRead } from "./lib/bus.js";
 import { census as funnelCensus } from "./funnel.js";
-import { spend, spendSince } from "./lib/llm.js";
+import { spend, spendSince, spendBySeat } from "./lib/llm.js";
 import { cfg } from "./config.js";
 import * as store from "./lib/store.js";
 import db from "./lib/store.js";
@@ -661,6 +661,15 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
 
         // The house record, computed from chain data rather than self-reported.
         if (url.pathname === "/api/record") return json(200, perf.houseRecord());
+
+        /* WHERE THE MODEL BILL GOES, by seat. Aggregate and read-only — seat, model,
+           effort, call count, dollars and tokens. No prompt text and no evidence. The
+           desk has recorded this since llm_spend existed and nothing ever read it back,
+           so every conversation about cost has been an argument rather than a look. */
+        if (url.pathname === "/api/spend/seats") {
+          const hours = Math.max(1, Math.min(720, Number(url.searchParams.get("hours")) || 24));
+          return json(200, spendBySeat({ hours }));
+        }
 
         if (url.pathname === "/api/leaderboard") return json(200, { floors: identity.leaderboard() });
 
