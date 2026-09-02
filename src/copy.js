@@ -153,6 +153,28 @@ export const MCAP_TIERS = {
   any: { lo: 0, hi: Infinity, note: "every band the desk calls" },
 };
 
+/* ONE-TIME CORRECTION FOR THE HOUSE FLOOR (2026-09-02). Floor 50's declared
+   bankroll sat at 0.05 SOL, so aggressive 3% sized every position at 0.0015 —
+   under the fee floor — and every call the desk published was skipped at
+   delivery. Twelve hours, six calls, a silent bot. The owner asked for a fixed
+   0.2 SOL per trade on a 0.6 SOL wallet; this seeds exactly that, only while
+   the floor is in the starved state, and only for the house floor. Anything
+   set afterwards in the Team tab wins. */
+const HOUSE_SEED = { floor: 50, bankrollSol: 0.6, fixedSol: 0.2 };
+function seedStarvedHouseFloor() {
+  try {
+    const cur = db.prepare("SELECT bankroll_sol, fixed_sol FROM copy_settings WHERE floor_no=?").get(HOUSE_SEED.floor);
+    if (!cur) return;
+    const starved = Number(cur.bankroll_sol) < 0.2 && !(Number(cur.fixed_sol) > 0);
+    if (!starved) return;
+    db.prepare("UPDATE copy_settings SET bankroll_sol=?, fixed_sol=?, updated_at=? WHERE floor_no=?")
+      .run(HOUSE_SEED.bankrollSol, HOUSE_SEED.fixedSol, Date.now(), HOUSE_SEED.floor);
+    console.log(`[copy] house floor ${HOUSE_SEED.floor} was starved (bankroll ${cur.bankroll_sol} SOL, fixed ${cur.fixed_sol}); ` +
+      `seeded bankroll ${HOUSE_SEED.bankrollSol} SOL, fixed ${HOUSE_SEED.fixedSol} SOL per trade`);
+  } catch (e) { console.error("[copy] house seed skipped:", e.message); }
+}
+seedStarvedHouseFloor();
+
 export function settingsFor(floorNo) {
   let s = db.prepare("SELECT * FROM copy_settings WHERE floor_no=?").get(floorNo);
   if (!s) {
