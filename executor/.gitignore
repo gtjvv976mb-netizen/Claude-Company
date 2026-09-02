@@ -5,3 +5,8 @@ burner.json
 .cc-executor.lock
 PAUSE_ENTRIES
 HARD_STOP
+
+# Rollback copies written by macos-release.sh carry the feed secret and RPC keys;
+# the manual round-trip probe keeps its own journal. Neither may ever be staged.
+.cc-executor.env.previous-*
+.roundtrip-test.sqlite*
