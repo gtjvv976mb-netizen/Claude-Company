@@ -6947,6 +6947,12 @@ function paintFeedInto(wrap, feed, settings) {
       if (held) line.style.color = "var(--good,#4f8f52)";
     }
     el.appendChild(line);
+    // When it opened, and when it closed. A card with no time is a card with no history.
+    const when = document.createElement("div");
+    when.className = "dp-note"; when.style.fontSize = "10px";
+    when.textContent = "opened " + (dashWhen(c.opened_at) || "\u2014") +
+      (c.status !== "live" && c.closed_at ? " \u00b7 closed " + dashWhen(c.closed_at) : "");
+    el.appendChild(when);
 
     if (c.verdict === "offered" && c.status === "live") {
       const act = document.createElement("div");
@@ -7711,7 +7717,7 @@ async function loadWatchboard(host) {
 /* ── the killed lane: judgment, receipted. Dodged bullets in green. ──────── */
 async function loadKilled(host) {
   try {
-    const { status, body } = await call_api("/api/killed");
+    const { status, body } = await call_api("/api/killed?limit=40");
     if (status === 403) return false;                     // gated, not empty
     // An unreachable desk is not a clean record. null = "could not ask", undefined =
     // "asked, nothing there" — the label distinguishes them, so the return must too.
@@ -7720,13 +7726,13 @@ async function loadKilled(host) {
     const head = document.createElement("div");
     head.className = "dp-h"; head.textContent = "Killed — the trades that did not happen";
     host.appendChild(head);
-    for (const k of body.kills.slice(0, 8)) {
+    for (const k of body.kills.slice(0, 40)) {
       const row = document.createElement("div"); row.className = "killrow";
       const top = document.createElement("div"); top.className = "kr-top";
       const sym = document.createElement("span"); sym.className = "kr-sym";
       sym.style.display = "inline-flex"; sym.style.alignItems = "center"; sym.style.gap = "7px";
       sym.append(coinFace(k.mint, k.symbol),
-        document.createTextNode(`${k.symbol || k.mint.slice(0, 6)} · killed by ${k.seat}`), caChip(k.mint));
+        document.createTextNode(`${k.symbol || k.mint.slice(0, 6)} · killed by ${k.seat}` + (dashWhen(k.ts) ? ` · ${dashWhen(k.ts)}` : "")), caChip(k.mint));
       const since = document.createElement("span");
       if (k.sinceKillPct != null) {
         since.className = "kr-since " + (k.sinceKillPct <= 0 ? "good" : "bad");
@@ -8044,7 +8050,7 @@ window.load_ledger = async () => {
         ["b grow", (c.symbol || c.mint.slice(0, 6)) + (c.launchpad ? " · " + c.launchpad : "")],
         ["span", c.status === "live" ? "live" : (c.close_reason || "closed").replace(/_/g, " ")],
         ["b " + ((c.move_pct ?? 0) >= 0 ? "up" : "down"), c.move_pct != null ? c.move_pct + "%" : "—"],
-        ["faint", ago(c.opened_at)],
+        ["faint", dashWhen(c.opened_at) || ago(c.opened_at)],
       ]));
     }
 
@@ -8057,7 +8063,7 @@ window.load_ledger = async () => {
         ["b grow", (r.floor_name ? r.floor_name : ordC(r.floor_no)) + (r.symbol ? " · " + r.symbol : "")],
         ["span", money(r.bought_usd) + " in"],
         ["b " + (r.pnl_usd >= 0 ? "up" : "down"), money(r.pnl_usd)],
-        ["faint", ago(r.settled_at)],
+        ["faint", dashWhen(r.settled_at) || ago(r.settled_at)],
       ]));
     }
   } catch { el.innerHTML = ""; empty(el, "Could not reach the desk."); }
@@ -8208,7 +8214,7 @@ async function loadOverviewDashboard() {
   dashLoading(el, "Opening the floor dashboard…");
   const [floorR, feedR, pulseR, statsR, budgetR] = await Promise.all([
     call_api("/api/floor/" + FLOOR_N),
-    call_api("/api/floor/" + FLOOR_N + "/feed"),
+    call_api("/api/floor/" + FLOOR_N + "/feed?limit=120"),
     call_api("/api/heartbeat"),
     call_api("/api/stats/overview"),
     call_api("/api/budget"),

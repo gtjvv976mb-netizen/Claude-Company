@@ -55,6 +55,14 @@ import {
 const BOOTED_AT = Date.now();
 
 /** Build the authenticated poller's response after the route has checked its secret. */
+/** ?limit= on a list route: a default when absent, a hard cap when present. History
+ *  that exists but is never requested reads as "empty" — the Closed view was whatever
+ *  survived a 25-row floor feed after the live calls were removed. */
+function queryLimit(url, def, max) {
+  const n = Number(url?.searchParams?.get("limit"));
+  return Number.isFinite(n) && n > 0 ? Math.min(max, Math.floor(n)) : def;
+}
+
 export function executorFeedPayload(floorNo, rawAfter = 0) {
   // A malformed cursor must not bind as NaN — SQLite compares everything to NULL as
   // false, so the bot would poll a permanently empty feed at HTTP 200 and never trade.
@@ -618,7 +626,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
         if (url.pathname === "/api/chronicle" && !insider())
           return json(403, { private: true });
         if (url.pathname === "/api/calls") {
-          return json(200, { live: calls.liveCalls(), recent: calls.recentCalls(20), stats: calls.stats() });
+          return json(200, { live: calls.liveCalls(), recent: calls.recentCalls(queryLimit(url, 20, 200)), stats: calls.stats() });
         }
         if (url.pathname === "/api/calls/stats") return json(200, calls.stats());
 
@@ -659,7 +667,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
         const ledgerMatch = url.pathname.match(/^\/api\/(ledger|floor\/(\d+)\/ledger)$/);
         if (ledgerMatch) {
           const floorNo = ledgerMatch[2] != null ? Number(ledgerMatch[2]) : null;
-          return json(200, identity.ledger({ floorNo }));
+          return json(200, identity.ledger({ floorNo, limit: queryLimit(url, 100, 300) }));
         }
 
         // ── a guest pass: pay the tenant, see the floor ──
@@ -1073,7 +1081,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           return json(403, { error: "the kill record is for tenants — lease a floor" });
         if (url.pathname === "/api/killed") {
           const kills = db.prepare(`SELECT mint, symbol, seat, reason, MAX(ts) ts FROM verdicts
-            WHERE killed=1 GROUP BY mint ORDER BY ts DESC LIMIT 14`).all();
+            WHERE killed=1 GROUP BY mint ORDER BY ts DESC LIMIT ?`).all(queryLimit(url, 14, 100));
           const out = kills.map((k) => {
             const at = db.prepare("SELECT price FROM snapshots WHERE mint=? AND ts<=? ORDER BY ts DESC LIMIT 1").get(k.mint, k.ts)?.price ?? null;
             const now = db.prepare("SELECT price FROM snapshots WHERE mint=? ORDER BY ts DESC LIMIT 1").get(k.mint)?.price ?? null;
@@ -1328,7 +1336,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               : leasing.leaseFor(floorNo)?.wallet === me);
             const st = copy.settingsFor(floorNo);
             const settings = floorFeedSettingsForViewer(st, { isOwner });
-            return json(200, { feed: copy.feedFor(floorNo), settings,
+            return json(200, { feed: copy.feedFor(floorNo, queryLimit(url, 25, 200)), settings,
                                appetites: copy.APPETITES, rent: leasing.rentStatus(floorNo),
                                record: perf.recordFor(floorNo) });
           }
