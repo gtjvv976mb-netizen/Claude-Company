@@ -178,11 +178,15 @@ seedStarvedHouseFloor();
 export function settingsFor(floorNo) {
   let s = db.prepare("SELECT * FROM copy_settings WHERE floor_no=?").get(floorNo);
   if (!s) {
-    /* The HQ is the memecoin desk. Seeding it 'balanced' — whose own note reads
-     * "Everything but pure memecoins" — would have the house skip 100% of the calls
-     * it had just written: not a cautious risk setting, a floor that cannot work.
-     * Tenants keep the cautious default and choose for themselves. */
-    const appetite = floorNo === 50 ? "aggressive" : "balanced";
+    /* This is a memecoin desk. 'balanced' — whose own note reads "Everything but
+     * pure memecoins" — receives NONE of what it publishes. Seeding tenants with it
+     * meant a floor that leased, installed the bot and touched nothing got zero calls,
+     * forever, with no message saying why: the end-to-end tenant test measured
+     * offered=0 skipped=1 on untouched defaults. A default that delivers nothing is
+     * not a cautious setting; it is a product that does not work. New floors are
+     * seeded with the appetite that matches what this desk actually publishes;
+     * existing rows are never rewritten, and every tenant can still choose. */
+    const appetite = "aggressive";
     db.prepare("INSERT INTO copy_settings (floor_no, appetite, updated_at) VALUES (?,?,?)")
       .run(floorNo, appetite, Date.now());
     s = db.prepare("SELECT * FROM copy_settings WHERE floor_no=?").get(floorNo);
