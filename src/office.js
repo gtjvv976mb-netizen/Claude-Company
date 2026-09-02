@@ -405,20 +405,24 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
         const l = leasing.leaseFor(floorNo);
         return !!l && l.wallet === me;
       };
-      // Live data is for people with standing: the HQ's owner anywhere, a tenant
-      // on their own floor. Everyone else — every floor, the HQ included — gets
-      // the demo shift. The 3D office is the showroom; the data is the product.
-      // Live standing, floor by floor: the HQ opens to its owner and to every
-      // tenant (they are copying its calls); a leased floor opens to its tenant
-      // and to anyone holding a paid guest pass; everything else is the demo.
+      /* THE HQ IS PUBLIC (2026-09-02, the owner's call). Every visitor sees
+         the house desk live — its tape, its book, its kills, the boss's record —
+         because the data IS the demo now, and nothing on the site invents
+         numbers any more. A leased floor stays private to its tenant and to
+         paid pass-holders. Writes are unaffected: holdsFloor() still guards
+         every mutation. */
       const floorPrivate = (floorNo) => {
+        if (floorNo === HQ_FLOOR) return false;
         if (!me) return true;
-        if (floorNo === HQ_FLOOR) return !(hqOwner(me) || leasing.leaseOf(me));
         const l = leasing.leaseFor(floorNo);
         if (!l) return true;
         return l.wallet !== me && !passes.passFor(floorNo, me);
       };
-      const insider = () => !!me && (hqOwner(me) || !!leasing.leaseOf(me));
+      /* The house's READ surfaces — calls, stats, whales, chronicle, the
+         board, kills, dossiers, activity, the watch board, callouts — open to
+         everyone for the same reason. Kept as a function so the ten gates read
+         the same and can be re-closed in one line. */
+      const insider = () => true;
 
       const readBody = () => new Promise((resolve) => {
         let raw = ""; let over = false;
@@ -683,8 +687,8 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             });
           }
           if (!me) return json(401, { error: "sign in with your wallet first" });
-          if (!leasing.leaseOf(me) && !hqOwner(me))
-            return json(403, { error: "guest passes are for tenants — lease a floor first" });
+          // Anyone with a wallet may pay a tenant to look inside — that is the
+          // point of the pass. The on-chain proof in grantPass is the gate.
           const body = await readBody();
           const r = await passes.grantPass({ floorNo, viewer: me, signature: body?.signature });
           return json(r.ok ? 200 : 400, r);
@@ -1399,8 +1403,29 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
     }
 
     if (url.pathname === "/api/tower/floors") {
+      /* REAL DATA ON THE TOWER. Occupancy was already true; the numbers were
+         not there at all, so the building could not answer "who is actually
+         making money". Per floor: settled trades, realised P&L, capital
+         deployed, positions open right now — and the three prices a visitor
+         needs: the lease, the rent, and what a look inside costs. */
+      const summary = tower.summary();
+      let perf = {};
+      try {
+        for (const r of identity.leaderboard(60)) {
+          perf[r.floor_no] = { settled: r.settled, pnlUsd: r.pnl_usd, boughtUsd: r.bought_usd,
+                               lastSettled: r.last_settled, open: 0 };
+        }
+        for (const r of db.prepare(`SELECT d.floor_no, COUNT(*) n FROM deliveries d
+                                     JOIN calls c ON c.id = d.call_id
+                                     WHERE d.verdict='offered' AND c.status='live'
+                                     GROUP BY d.floor_no`).all()) {
+          perf[r.floor_no] = { ...(perf[r.floor_no] || { settled: 0, pnlUsd: 0, boughtUsd: 0, lastSettled: null }), open: r.n };
+        }
+      } catch (e) { perf = { error: String(e.message) }; }
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(tower.summary()));
+      res.end(JSON.stringify({ ...summary, perf,
+        prices: { leaseTokens: leasing.PRICE_TOKENS, rentTokens: leasing.RENT_TOKENS,
+                  passTokens: passes.PASS_TOKENS, passDays: passes.PASS_DAYS } }));
       return;
     }
 

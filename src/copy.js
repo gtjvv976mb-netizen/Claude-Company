@@ -376,7 +376,15 @@ export function decide(floorNo, call) {
    * which is a fact the tenant can act on, rather than offering a trade their bot
    * will silently decline. */
   const MIN_EXECUTABLE_SOL = Number(process.env.MIN_EXECUTABLE_SOL || 0.02);
-  const raw = Math.min(uncapped, teamCapSol);
+  /* A FIXED SIZE IS THE OPERATOR'S NUMBER. The team's book-allocation cap
+     exists to keep AUTO sizing in proportion to the desk's own conviction; it
+     was also shrinking an explicit fixed order (0.2 SOL) to 0.0006 and then
+     "lifting" it to the 0.02 fee floor — so the operator asked for 0.2 and got
+     0.02 on every trade, with the reason string cheerfully saying both. Fixed
+     means fixed; the refusals above still apply. */
+  const raw = fixed != null
+    ? (deskRatio === 0 ? 0 : fixed)   // an explicit ZERO authorization is never revived by a fixed size
+    : Math.min(uncapped, teamCapSol);
   let sizeSol = Number(raw.toFixed(4));
   let liftedForFees = false;
   if (sizeSol > 0 && sizeSol < MIN_EXECUTABLE_SOL) {
@@ -401,7 +409,7 @@ export function decide(floorNo, call) {
   const baseHow = fixed
     ? `fixed ${fixed} SOL a trade`
     : `${s.appetite} · ${risk.sizeMultiplier}x for ${call.category} · conviction ${Math.round(call.conviction ?? 0)}`;
-  const how = Number.isFinite(teamCapSol) && teamCapSol < uncapped
+  const how = fixed == null && Number.isFinite(teamCapSol) && teamCapSol < uncapped
     ? `${baseHow} · capped to the team's ${(deskRatio * 100).toFixed(3)}% book allocation`
     : baseHow;
   return { verdict: "offered", sizeSol,

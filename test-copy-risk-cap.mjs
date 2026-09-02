@@ -65,12 +65,22 @@ ok("authorized max loss is stored", stored.desk_risk_usd === 21, `$${stored.desk
 ok("the source equity is stored", stored.desk_equity_usd === 10_000, `$${stored.desk_equity_usd}`);
 
 const offered = decide(50, stored);
-// $50 / $10,000 = 0.5% of the declared 10 SOL bankroll = 0.05 SOL. The floor's
-// 2 SOL fixed preference may cut below this cap but may not enlarge it.
-ok("tenant size is capped to the team's portable allocation",
-  offered.verdict === "offered" && offered.sizeSol === 0.05,
+// $50 / $10,000 = 0.5% of the declared 10 SOL bankroll = 0.05 SOL \u2014 the cap that
+// AUTO sizing lives under. A FIXED size is the operator's own number (2026-09-02,
+// the owner's call): on the house floor the proportional cap turned an explicit
+// 0.2 SOL into 0.0006 and then "lifted" it to the 0.02 fee floor on every trade.
+// Fixed means fixed; a zero authorization (below) is still never revived.
+ok("a fixed size is honoured above the team's portable allocation",
+  offered.verdict === "offered" && offered.sizeSol === 2,
   `${offered.verdict} ${offered.sizeSol} SOL \u2014 ${offered.reason}`);
-ok("the delivery explains that the team cap bound", /capped to the team's/.test(offered.reason), offered.reason);
+ok("the delivery does not claim a cap it did not apply", !/capped to the team's/.test(offered.reason), offered.reason);
+saveSettings(50, { fixedSol: "auto" });
+const autoSized = decide(50, stored);
+saveSettings(50, { fixedSol: 2 });
+ok("AUTO sizing is still capped to the team's portable allocation",
+  autoSized.verdict === "offered" && autoSized.sizeSol === 0.05,
+  `${autoSized.verdict} ${autoSized.sizeSol} SOL \u2014 ${autoSized.reason}`);
+ok("and the delivery says so", /capped to the team's/.test(autoSized.reason), autoSized.reason);
 
 console.log("\nZERO IS AN EXPLICIT CAP; NULL ALONE MEANS LEGACY");
 const zero = decide(50, { ...stored, desk_size_usd: 0 });

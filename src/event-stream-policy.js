@@ -8,9 +8,14 @@ export function requestedEventFloor(url) {
     ? requested : null;
 }
 
+/* THE HQ IS THE SHOP WINDOW. Floor 50 — the house's own desk — streams live to
+   everyone, signed in or not: the visitor sees the real sixteen at real work,
+   not a demo shift. A leased floor still opens only to its tenant or to a
+   holder of a paid guest pass; the tenant's edge stays theirs. */
 export function mayReadEventStream({ floor, wallet, hqOwner, leaseWallet, hasPass = false }) {
-  if (!wallet || floor == null) return false;
-  if (floor === 50) return wallet === hqOwner;
+  if (floor == null) return false;
+  if (floor === 50) return true;
+  if (!wallet) return false;
   return Boolean(leaseWallet && (leaseWallet === wallet || hasPass));
 }
 

@@ -5790,6 +5790,11 @@ setInterval(() => {
    Live when served by the desk; a scripted demo shift when opened standalone. */
 const liveEl = document.getElementById("s-live"), liveText = document.getElementById("s-livetext");
 function goSim(reason) { liveEl.classList.add("sim"); liveText.textContent = "Demo shift"; liveEl.title = reason; runDemo(); }
+/* A private floor shows a LOCK, not a fiction. It used to run the demo shift —
+   invented coins, invented verdicts — which is exactly what a visitor weighing
+   a 250,000 $CLAUDECO pass must never be shown. The floor stands still and the
+   note says what it costs to open it, and where the live desk is. */
+function goPrivate(reason) { liveEl.classList.add("sim"); liveText.textContent = "Private"; liveEl.title = reason; }
 
 if (location.search.includes("demo")) {
   goSim("demo mode requested");
@@ -5811,18 +5816,20 @@ if (location.search.includes("demo")) {
       // A leased floor's live desk belongs to its tenant. Visitors get the demo
       // shift — and are told so, rather than left wondering why nothing is real.
       es.close();
-      goSim("This floor's live desk is private to its tenant.");
-      tape("Floor", "You're watching a demo shift. This floor's live desk is private to its tenant — lease your own in the tower.", "warn");
+      goPrivate(hello.vacant ? "This floor is not leased." : "This floor's live desk is private to its tenant.");
+      tape("Floor", hello.vacant
+        ? "This floor isn't leased yet. Lease it in the tower — or watch the HQ live on floor 50."
+        : "This floor is private to its tenant. A guest pass opens it for 30 days — or watch the HQ live on floor 50.", "warn");
       window.__privateFloor = true;          // stops the alert poller 403ing forever
       const stage = document.getElementById("stage");
       if (stage && !document.getElementById("privnote")) {
         const n = document.createElement("div");
         n.id = "privnote";
         n.innerHTML = hello.hq
-          ? `🕵️ Demo shift — The Aye-Team's live desk runs in private. <a href="tower.html">Lease a floor</a> to copy its real calls and watch the house live.`
+          ? `🏢 The HQ is open to everyone — <a href="/floor/50">reload the floor</a> to watch it live.`
           : hello.vacant
-          ? `🏢 Demo shift — this floor isn't leased yet. <a href="tower.html">Lease it</a> and this desk goes live for you.`
-          : `🔒 Demo shift — this floor's live desk is private to its tenant. <a href="tower.html">Lease your own floor</a> to run one for real.`;
+          ? `🏢 This floor isn't leased yet. <a href="tower.html">Lease it</a> and this desk goes live for you — or <a href="/floor/50">watch the HQ live</a>.`
+          : `🔒 This floor is private to its tenant. <b>Looking inside costs 250,000 $CLAUDECO</b> for 30 days, paid straight to the tenant — or <a href="/floor/50">watch the HQ live</a> for free.`;
         stage.appendChild(n);
         // Self-diagnosis: a signed-in viewer without standing sees WHO the server
         // thinks they are — the difference between "broken" and "wrong wallet"
@@ -5834,12 +5841,18 @@ if (location.search.includes("demo")) {
               if (!meB.wallet) return;
               const who = document.createElement("div");
               who.style.cssText = "margin-top:8px;font-size:11px;opacity:.75";
-              who.textContent = `Signed in as ${meB.wallet.slice(0, 4)}…${meB.wallet.slice(-4)} — this wallet has no live standing here. The HQ opens to the wallet in HQ_OWNER / TREASURY_OWNER; a floor opens to its tenant.`;
+              who.textContent = `Signed in as ${meB.wallet.slice(0, 4)}…${meB.wallet.slice(-4)} — this wallet has no standing on this floor. A floor opens to its tenant and to pass-holders; the HQ on floor 50 is open to everyone.`;
               document.getElementById("privnote")?.appendChild(who);
             }).catch(() => {});
         }
-        // A tenant elsewhere in the building can buy their way in: pay the floor's
-        // owner directly, paste the transaction, and the stream opens.
+        // Anyone can buy their way in: pay the floor's tenant directly, paste
+        // the transaction, and the stream opens. Not signed in? Say where to.
+        if (!hello.hq && !hello.vacant && !localStorage.getItem("cc_token")) {
+          const nudge = document.createElement("div");
+          nudge.className = "passbox";
+          nudge.innerHTML = `<span><a href="tower.html">Connect your wallet in the tower</a> to buy a guest pass for this floor.</span>`;
+          n.appendChild(nudge);
+        }
         if (!hello.hq && !hello.vacant && localStorage.getItem("cc_token")) {
           fetch((window.__API_BASE__ || "") + `/api/floor/${hello.floor}/pass`, {
             headers: { authorization: "Bearer " + localStorage.getItem("cc_token") },
@@ -5847,7 +5860,7 @@ if (location.search.includes("demo")) {
             if (!info.payTo) return;
             const box = document.createElement("div");
             box.className = "passbox";
-            box.innerHTML = `<span>Or buy a <b>${info.priceTokens.toLocaleString()} $CLAUDECO</b> guest pass (${info.days} days), paid straight to this floor's owner:</span>
+            box.innerHTML = `<span>Buy a <b>${info.priceTokens.toLocaleString()} $CLAUDECO</b> guest pass (${info.days} days): send exactly that amount to the tenant's wallet below from your own wallet, then paste the transaction signature.</span>
               <input readonly value="${info.payTo}" aria-label="Owner wallet address">
               <input id="pass-sig" placeholder="Paste your payment's transaction signature" aria-label="Transaction signature">
               <button class="dp-btn" id="pass-go" type="button">Redeem pass</button>
@@ -5888,6 +5901,9 @@ if (location.search.includes("demo")) {
     } catch {}
   };
   es.onerror = () => {
+    // A private floor closes its own stream on purpose; that close is not an
+    // outage, and must not start the demo shift the lock exists to prevent.
+    if (window.__privateFloor) return;
     if (!ok) { es.close(); goSim("no desk process on this origin"); return; }
     // Connected once, then dropped: EventSource retries on its own, but the
     // tape used to sit there silently while the desk kept working (and kept
@@ -5898,6 +5914,7 @@ if (location.search.includes("demo")) {
   // On any (re)open the desk re-greets us — take that as the all-clear and
   // pull whatever was missed.
   es.addEventListener("hello", () => {
+    if (window.__privateFloor) return;             // the lock's label stands
     lastBeat = Date.now();
     liveEl.classList.remove("sim");
     liveText.textContent = "Live";
@@ -5930,7 +5947,9 @@ if (location.search.includes("demo")) {
       es = next;
     } catch {}
   }, 30000);
-  setTimeout(() => { if (!ok) { es.close(); goSim("desk did not answer"); } }, 2500);
+  // The 2.5s fallback is for a desk that never answered — not for a floor that
+  // answered "private" and was closed on purpose. That was the label leak.
+  setTimeout(() => { if (!ok && !window.__privateFloor) { es.close(); goSim("desk did not answer"); } }, 2500);
 } else {
   goSim("opened as a file");
 }

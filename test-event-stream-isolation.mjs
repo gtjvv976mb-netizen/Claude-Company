@@ -19,10 +19,14 @@ ok("a missing floor resolves to HQ rather than the internal global stream", noFl
 ok("an explicit tenant floor remains exact", floorSeven === 7);
 ok("an invalid floor fails closed", invalid == null);
 
-ok("a leased tenant cannot read HQ by omitting the floor",
-  !mayReadEventStream({ floor: noFloor, wallet: "tenant", hqOwner: "owner", leaseWallet: "tenant" }));
-ok("only the deed owner can read HQ",
+ok("the HQ is the shop window: a tenant omitting the floor lands on it and may watch",
+  mayReadEventStream({ floor: noFloor, wallet: "tenant", hqOwner: "owner", leaseWallet: "tenant" }));
+ok("the HQ streams to a visitor with no wallet at all",
+  mayReadEventStream({ floor: 50, wallet: null, hqOwner: "owner" }));
+ok("the deed owner can still read HQ",
   mayReadEventStream({ floor: 50, wallet: "owner", hqOwner: "owner" }));
+ok("a tenant floor still refuses a wallet-less visitor",
+  !mayReadEventStream({ floor: 7, wallet: null, hqOwner: "owner", leaseWallet: "tenant" }));
 ok("the tenant can read its own explicit floor",
   mayReadEventStream({ floor: 7, wallet: "tenant", hqOwner: "owner", leaseWallet: "tenant" }));
 ok("another tenant cannot read that floor",
