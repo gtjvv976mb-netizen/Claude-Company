@@ -933,8 +933,10 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
                 `the account has credit, but a configured limit is refusing new calls. Analyst seats fail individually, so calls get withheld ` +
                 `as "fewer than three analysts returned" when the real cause is billing. Raise the limit in the Anthropic Console ` +
                 `(Billing → Usage limits); free screening continues meanwhile.`
-              : `the Anthropic account balance is empty (${provider.failures} provider-credit failure${provider.failures === 1 ? "" : "s"} in the last six hours) — ` +
+              : `the Anthropic account balance is empty (${provider.failures} provider-credit failure${provider.failures === 1 ? "" : "s"} in the last six hours` +
+                `${provider.lastFailureTs ? `, the latest ${Math.max(0, Math.round((now - provider.lastFailureTs) / 60000))} min ago` : ""}) — ` +
                 `this is the API account, NOT the desk's $${cap}/day cap, which still has $${Math.max(0, cap - sp.usd).toFixed(2)} of headroom. ` +
+                `Grok seats keep paying and moving today's total, so a rising spend figure does NOT mean Anthropic is fine — see spendAnthropicUsd. ` +
                 `Top up the Anthropic account behind ANTHROPIC_API_KEY; free screening continues meanwhile.`;
           }
           /* IS THE PAID HALF ACTUALLY WORKING?
@@ -1025,6 +1027,12 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               watches: cnt(`SELECT COUNT(*) n FROM watchlist WHERE created_at > ${dayAgo}`),
               xReads: cnt(`SELECT COUNT(*) n FROM llm_spend WHERE seat='XRead' AND ts > ${dayAgo}`),
               spendUsd: Number(sp.usd.toFixed(2)), capUsd: cap,
+              /* SPLIT BY PROVIDER. Today's total kept moving while every Anthropic
+                 seat was being refused, because the Grok seats were still paying —
+                 and "spend is moving" was read as "the account is fine". A single
+                 number cannot show that. Two can. */
+              spendAnthropicUsd: Number((q(`SELECT COALESCE(SUM(usd),0) usd FROM llm_spend WHERE model LIKE 'claude-%' AND ts > ${dayAgo}`)?.usd || 0).toFixed(2)),
+              spendXaiUsd: Number((q(`SELECT COALESCE(SUM(usd),0) usd FROM llm_spend WHERE model LIKE 'grok-%' AND ts > ${dayAgo}`)?.usd || 0).toFixed(2)),
             },
             pnl: {
               realizedUsd: Number((settled?.pnl ?? 0).toFixed(2)),
