@@ -618,6 +618,15 @@ function renderSel() {
     p.className = "price";
     p.innerHTML = `<b>${fmt(P.leaseTokens)} $CLAUDECO</b> to lease · ${fmt(P.rentTokens)} rent / 30 days · one floor per wallet`;
     selEl.appendChild(p);
+  } else if (f.state === "owned" && window.__mine?.(f)) {
+    /* YOURS. The card used to be drawn from the floor's STATE alone, so an owner was
+       quoted the price of a pass to their own floor and then told, on the next line,
+       that the floor was theirs. A page that contradicts itself in two lines teaches a
+       visitor not to trust either one. */
+    const c = document.createElement("div");
+    c.className = "cost";
+    c.innerHTML = "\u2713 <b>This floor is yours.</b> No pass, no charge \u2014 walk straight in.";
+    selEl.appendChild(c);
   } else if (f.state === "owned") {
     const c = document.createElement("div");
     c.className = "cost";
@@ -626,17 +635,24 @@ function renderSel() {
   } else {
     const c = document.createElement("div");
     c.className = "cost";
-    c.textContent = "Open to everyone — the house desk, live, no pass needed.";
+    c.textContent = window.__mine?.(f)
+      ? "Your HQ — the house desk. Open to everyone, and it is yours."
+      : "Open to everyone — the house desk, live, no pass needed.";
     selEl.appendChild(c);
   }
   const enter = document.createElement("a");
   enter.className = f.state === "vacant" ? "btn ghost" : "btn primary";
   enter.href = `/floor/${f.n}`;
-  enter.textContent = f.state === "vacant" ? "See the lease" : f.state === "hq" ? "Watch HQ live" : `Look inside · ${fmt(P.passTokens)} $CLAUDECO`;
+  enter.textContent =
+    f.state === "vacant" ? "See the lease"
+      : window.__mine?.(f) ? (f.state === "hq" ? "Enter your HQ" : "Enter your floor")
+        : f.state === "hq" ? "Watch HQ live"
+          : `Look inside · ${fmt(P.passTokens)} $CLAUDECO`;
   act.appendChild(enter);
   if (f.state !== "hq") {
     const hq = document.createElement("a");
-    hq.className = "btn ghost"; hq.href = "/floor/50"; hq.textContent = "Watch HQ live";
+    hq.className = "btn ghost"; hq.href = "/floor/50";
+    hq.textContent = window.__hqIsMine?.() ? "Enter your HQ" : "Watch HQ live";
     act.appendChild(hq);
   }
   selEl.appendChild(act);
@@ -1141,13 +1157,24 @@ function b58(bytes) {
 wbtn.addEventListener("click", connect);
 
 /* ── lease action, injected into the selection panel ─────────────────────── */
+/* WHO IS LOOKING. The renderer runs in a different module from the wallet, so it had
+   no way to ask. These two answer for it, and both are false until sign-in — an
+   unknown visitor is never told a floor is theirs. */
+window.__mine = (f) => {
+  if (!ME || !f) return false;
+  if (f.state === "hq") return ME.isHqOwner === true;
+  return ME.lease?.floor_no === f.n;
+};
+window.__hqIsMine = () => ME?.isHqOwner === true;
+
 window.__leaseUI = function (f, selEl) {
   if (!CFG) return;
   const wrap = document.createElement("div");
   wrap.className = "msg";
 
   if (f.state !== "vacant") {
-    if (ME?.lease?.floor_no === f.n) { wrap.className = "msg ok"; wrap.textContent = "This floor is yours."; selEl.appendChild(wrap); }
+    // The card itself now says so, from __mine() below — saying it twice was the
+    // symptom that made the contradiction visible in the first place.
     return;
   }
   if (!CFG.ready) { wrap.textContent = "Leasing opens once the treasury is configured."; selEl.appendChild(wrap); return; }

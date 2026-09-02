@@ -1,0 +1,15 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "claude-co",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "src/index.js",
+        "office",
+        "8788"
+      ],
+      "port": 8788
+    }
+  ]
+}

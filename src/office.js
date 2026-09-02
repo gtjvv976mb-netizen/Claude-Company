@@ -627,6 +627,12 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           const lease = leasing.leaseOf(me);
           // On-chain is best-effort: an RPC hiccup must not fail sign-in.
           const onchain = await leasing.walletBalanceOf(me).catch(() => null);
+          /* WHAT THIS WALLET OWNS, said plainly. The tower page knew which floor a
+             visitor leased and still offered to sell them a pass to it, because the
+             card was drawn from the floor's state alone and the ownership line was
+             appended afterwards — so an owner read "Looking inside costs 250,000
+             $CLAUDECO" and "This floor is yours" one under the other. The page cannot
+             tell the truth about a thing it was never told, so it is told here. */
           return json(200, {
             wallet: me,
             onchainBaseUnits: onchain == null ? null : onchain.toString(),
@@ -634,6 +640,8 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             priceBaseUnits: leasing.PRICE_BASE_UNITS.toString(),
             decimals: leasing.DECIMALS,
             lease, credits: leasing.creditsFor(me),
+            isHqOwner: me === tower.hqOwnerWallet(),
+            hqFloor: tower.HQ_FLOOR,
           });
         }
         // ── the house call sheet ──

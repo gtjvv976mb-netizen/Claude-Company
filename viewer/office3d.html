@@ -2306,9 +2306,9 @@ const SEATQ = {
 const DOSSIER = {
   Scout: {  // AUSTIN POWERZ
     brief: "Finds what the desk should be looking at today, and states why it matters now.",
-    detail: "Runs a sweep across 14 search angles and returns roughly 357 unique tokens per pass, drawn from pump.fun, letsbonk.fun, bags.fm, moonshot, boop and Meteora. Six venues, one pass. The standing question is what deserves attention today, and why now - the timing half of it is not optional.",
+    detail: "Reads pump.fun's own launch feed and the 1-minute candles behind it, alongside twenty-five search angles — roughly 380 coins a pass, the youngest of them two minutes old and invisible to a search engine. One venue, deliberately: the desk trades pump.fun and nothing else.",
     method: "Model call - costs money on every sweep.",
-    known: "Arriving loud, early, and with 357 names.",
+    known: "Arriving loud, early, and with a few hundred names.",
     note: "Attention is not a recommendation. Roughly four in five of its names die at the Screener.",
   },
   Screener: {  // MAXWELL SMORT
@@ -8328,7 +8328,7 @@ const CANDIDATE_BANDS = [
   ["low", "low", "$100k–$500k — room to re-rate, thin book"],
   ["medium", "medium", "$500k–$1m — a tape worth reading"],
   ["high", "high", "$1m–$10m — needs real money to move"],
-  ["very_high", "very high", "$10m–$20m — slow, but survivable"],
+  ["very_high", "very high", "$1m–$10m — needs real money to move"],
 ];
 let candidateBoardLoading = false;
 async function loadCandidateBoard() {
