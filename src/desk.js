@@ -90,15 +90,28 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
    * against a holder, and can the position be left. Reputation research is expensive
    * and only matters once that answer is yes, so the paid X read happens HERE rather
    * than inside gather(), where it was costing 107 reads against 235 screen kills. */
-  await enrichWithXRead(ev, hook);
+  /* STARTED, NOT AWAITED. The X read is one xAI call with fifty searches behind it and a
+   * two-minute timeout, and it sat squarely in front of the analyst batch — so every
+   * workup on the desk waited on it before a single seat began, including the three
+   * seats that never read the result. Only forensics (the deployer's public record) and
+   * narrative (the story) consult ev.xRead, so only those two wait for it now. The read
+   * itself is unchanged, and so is its place in the sequence: it still happens after the
+   * safety screen, so the desk still never pays to research a coin it is about to
+   * reject as a honeypot. */
+  const xRead = enrichWithXRead(ev, hook);
 
   // --- Stages 2-6: five independent analysts, in parallel. ---
   emit("stage", { stage: "analysis", mint, symbol: ev.symbol });
   const keys = ["forensics", "liquidity", "flow", "technical"];
+  const needsXRead = new Set(["forensics"]);
   const settled = await Promise.allSettled([
-    ...keys.map((k) => runAnalyst(k, ev)),
-    runNarrative(ev),
+    ...keys.map((k) => needsXRead.has(k)
+      ? xRead.then(() => runAnalyst(k, ev)) : runAnalyst(k, ev)),
+    xRead.then(() => runNarrative(ev)),
   ]);
+  // A failed X read must not take the workup down with it; enrichWithXRead already
+  // degrades to "no read", and the seats say so themselves when ev.xRead is missing.
+  await xRead.catch(() => {});
   const allKeys = [...keys, "narrative"];
 
   const analysts = {};

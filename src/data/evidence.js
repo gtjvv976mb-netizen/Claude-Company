@@ -27,22 +27,38 @@ export async function gather(mint, hook = "") {
   if (best) best.priceUsd = cons.priceUsd;              // the consensus mark, not one pool's quote
   const totalLiquidityUsd = cons.liquidityUsd;
 
-  const mintAcct = await sol.mintInfo(mint);
+  /* THESE READS DO NOT DEPEND ON ONE ANOTHER, SO THEY DO NOT WAIT FOR ONE ANOTHER.
+   *
+   * They ran strictly in order and only one pair has a real dependency — holders needs
+   * the supply from mintInfo. The rest was queueing behind it for no reason, on the
+   * critical path of every coin the desk touches INCLUDING the ones the free screen
+   * then kills. The exit probe alone is two sequential quote legs with retries and can
+   * take forty seconds by itself. Nothing here costs a model call, so this is pure
+   * latency: same requests, same order of magnitude of bytes, one round trip instead
+   * of six. Every failure mode is unchanged because each promise keeps its own catch. */
+  const usdcRaw = Math.round(cfg.targetSizeUsd * 1e6);
+  const wantsDeployer = hook !== "monitor" && mint.endsWith("pump");
+  const [mintAcct, rt, jp, promo, marketRegime, deployerRaw] = await Promise.all([
+    sol.mintInfo(mint),
+    // Exitability probe at the desk's real target size, quoted in USDC.
+    jup.roundTrip({ quoteMint: MINTS.USDC, tokenMint: mint, quoteAmountRaw: String(usdcRaw) }),
+    jup.price([mint]),
+    ds.paidOrders(mint),
+    regime().catch(() => ({ regime: "unknown" })),
+    // Who created it — answered where it is answerable, and skipped on monitor ticks,
+    // which need prices rather than biographies.
+    wantsDeployer ? pf.deployerProfile(mint).catch(() => null) : Promise.resolve(null),
+  ]);
+  // The one genuine dependency: holder concentration is a share OF the supply.
   const holders = mintAcct.ok && mintAcct.supply
     ? await sol.topHolders(mint, mintAcct.supply)
     : { ok: false, error: "mint info unavailable" };
 
-  // Exitability probe at the desk's real target size, quoted in USDC.
-  const usdcRaw = Math.round(cfg.targetSizeUsd * 1e6);
-  const rt = await jup.roundTrip({ quoteMint: MINTS.USDC, tokenMint: mint, quoteAmountRaw: String(usdcRaw) });
-
-  const jp = await jup.price([mint]);
   const jupPrice = jp?.[mint] ?? null;
 
   // The two questions every memecoin call must answer about its attention:
   // is it PAID FOR (DexScreener boosts/ads — bought reach, not organic demand),
   // and was it CALLED OUT (our own recorded whale callouts for this mint).
-  const promo = await ds.paidOrders(mint);
   const approved = promo.orders.filter((o) => o.status === "approved");
   const promotion = {
     boosted: approved.length > 0,
@@ -50,16 +66,10 @@ export async function gather(mint, hook = "") {
     lastPaidAt: approved.reduce((m, o) => Math.max(m, o.paidAt ?? 0), 0) || null,
   };
   const callouts = whaleFeed({ limit: 200 }).filter((w) => w.mint === mint).slice(0, 5);
-  const marketRegime = await regime().catch(() => ({ regime: "unknown" }));
 
-  // Who created it — the doctrine's deferred question, answered where it is
-  // answerable (pump.fun coins) and skipped on monitor ticks, which need prices,
-  // not biographies. Best-effort: an API failure reads as unknown, never a block.
-  let deployer = null;
-  if (hook !== "monitor" && mint.endsWith("pump")) {
-    deployer = await pf.deployerProfile(mint).catch(() => null);
-    if (deployer && !deployer.ok) deployer = { note: deployer.note ?? "deployer unknown" };
-  }
+  // Best-effort: an API failure reads as unknown, never a block.
+  let deployer = deployerRaw;
+  if (deployer && !deployer.ok) deployer = { note: deployer.note ?? "deployer unknown" };
 
   /* THE X READ USED TO HAPPEN HERE, AND IT COSTS MONEY.
    *

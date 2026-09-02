@@ -663,17 +663,34 @@ export async function runPenthouseCycle({
   const queue = [...shortlist];
   let replaced = 0;
 
-  // 4. Only now does anything cost money.
+  /* 4. Only now does anything cost money — and now more than one coin at a time.
+   *
+   * COINS ARE INDEPENDENT OF EACH OTHER. A workup is eleven to thirteen model calls
+   * with a genuinely sequential tail (red team, then risk, then the PM), so a single
+   * coin cannot be made much faster — but nothing links one coin's workup to the next,
+   * and the desk had never run two. Measured on the live server: a median of 8.6
+   * minutes between full verdicts, which is a scheduling ceiling rather than a
+   * thinking one.
+   *
+   * THE BUDGET STILL BINDS, and the work already running is RESERVED against it.
+   * Re-reading the accumulator alone is not enough: a workup's cost lands only when it
+   * finishes, so three workers checking a cap that nothing in flight has yet charged
+   * would each start one more. Measured on a stub, three workers against a $3 cap at
+   * $0.42 a workup overshot by $1.20 — half again the bound I had claimed. With every
+   * running workup reserving its typical cost, the overshoot comes back to one workup,
+   * which is the same bound the strictly-serial loop always had and the best any
+   * check-then-spend scheme can offer. The daily budget and hourly pace brakes in
+   * llm.js are untouched and absolute. Set PENTHOUSE_WORKUP_CONCURRENCY to 1 to
+   * restore the old behaviour exactly. */
+  /** Measured on the live desk: $135.71 of model spend across 323 workups in 24 hours. */
+  const TYPICAL_WORKUP_USD = Number(process.env.PENTHOUSE_TYPICAL_WORKUP_USD || 0.42);
   const picks = [];
   let workedUp = 0;
   let stopped = null;
-  for (const c of queue) {
-    const usedSoFar = spend.usd - startSpend;
-    if (usedSoFar >= CYCLE_BUDGET_USD) {
-      stopped = `budget: $${usedSoFar.toFixed(2)} of $${CYCLE_BUDGET_USD}`;
-      emit("cycle:budget", { usedUsd: Number(usedSoFar.toFixed(4)), capUsd: CYCLE_BUDGET_USD });
-      break;
-    }
+  const CONCURRENCY = Math.max(1, Math.min(6,
+    Number(process.env.PENTHOUSE_WORKUP_CONCURRENCY || 3)));
+  let cursor = 0;
+  const studyOne = async (c) => {
     const hook = `house scan · ${c.category}${c.launchpad ? ` · ${c.launchpad}` : ""}`;
     let rec;
     try {
@@ -684,10 +701,10 @@ export async function runPenthouseCycle({
       if (e instanceof OutOfCredit) {
         stopped = e.constructor.name === "BudgetExhausted" ? "daily budget reached" : "out of credit";
         emit("cycle:halted", { reason: e.constructor.name === "BudgetExhausted" ? "daily_budget" : "out_of_credit" });
-        break;
+        return "halt";
       }
       emit("cycle:error", { mint: c.mint, error: String(e.message) });
-      continue;
+      return "error";
     }
     if (!rec || rec.outcome === "no_data") {
       // Free failure: nothing was asked of a model, so the slot is still unspent.
@@ -700,7 +717,7 @@ export async function runPenthouseCycle({
           reason: "no_data", replacedWith: next.pair?.baseSymbol ?? next.mint?.slice(0, 6),
           note: "an unreadable coin costs nothing, so it must not cost a slot either" });
       }
-      continue;
+      return "no_data";
     }
     workedUp++;                       // paid for, whatever the verdict turned out to be
     // THE COHORT. Every workup that got a verdict is a candidate, not only the ones
@@ -709,7 +726,34 @@ export async function runPenthouseCycle({
     // every safety failure before conviction is even consulted.
     picks.push({ rec, category: c.category, launchpad: c.launchpad,
       conviction: rec.pm?.conviction ?? rec.conviction ?? null });
-  }
+    return "studied";
+  };
+
+  let inFlight = 0;
+  const worker = async () => {
+    while (!stopped) {
+      // Spend already charged, PLUS a reservation for every workup still running. The
+      // reservation is what stops N workers from each starting one more against a cap
+      // that nothing in flight has charged yet.
+      const usedSoFar = spend.usd - startSpend;
+      if (usedSoFar + inFlight * TYPICAL_WORKUP_USD >= CYCLE_BUDGET_USD) {
+        stopped = `budget: $${usedSoFar.toFixed(2)} of $${CYCLE_BUDGET_USD}`;
+        emit("cycle:budget", { usedUsd: Number(usedSoFar.toFixed(4)), capUsd: CYCLE_BUDGET_USD,
+          inFlight, reservedUsd: Number((inFlight * TYPICAL_WORKUP_USD).toFixed(4)) });
+        return;
+      }
+      // The queue grows while it is being walked: a free failure pushes a replacement
+      // from the bench, and the cursor must see it.
+      if (cursor >= queue.length) return;
+      const coin = queue[cursor++];
+      inFlight++;
+      try { await studyOne(coin); } finally { inFlight--; }
+    }
+  };
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+  if (CONCURRENCY > 1)
+    emit("cycle:concurrency", { workers: CONCURRENCY, studied: workedUp,
+      note: "coins are independent of one another; the budget cap is re-read per coin" });
 
   /* 5. THE COHORT PICK — of everything studied, publish the single best one.
    *
