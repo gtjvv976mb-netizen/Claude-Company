@@ -476,6 +476,7 @@ select.dp-in{cursor:pointer}
 .memo{background:var(--card); border:1px solid var(--card-line); border-radius:8px; padding:12px}
 .memo header{display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin-bottom:6px}
 .memo .sym{font-family:"Instrument Serif",Georgia,serif; font-size:20px; color:var(--ink)}
+.memo .when{font-size:10.5px;color:var(--ink-faint);margin-left:auto}
 .memo .verdict{font-size:10px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; padding:3px 7px; border-radius:4px}
 .v-PROPOSE,.v-APPROVED{background:var(--good); color:#fff}
 .v-WATCH,.v-HELD{background:var(--warn); color:#26201a}
@@ -4782,6 +4783,7 @@ let oldestChron = null, chronBusy = false, chronDone = false;
 let newestChron = 0;                       // the high-water mark the tape has rendered
 async function loadChronicle(before) {
   if (chronBusy || chronDone) return 0;
+  if (!before && newestChron) return fillChronicleGap();
   chronBusy = true;
   try {
     const base = window.__API_BASE__ || "";
@@ -4896,7 +4898,7 @@ async function loadInboxHistory() {
     const tk = (() => { try { return localStorage.getItem("cc_token"); } catch { return null; } })();
     const r = await fetch(`${base}/api/chronicle?${q}`,
       tk ? { headers: { authorization: "Bearer " + tk } } : undefined);
-    if (r.status === 403) { inboxDone = true; return; }
+    if (r.status === 403) { inboxDone = true; const em = inboxEl.querySelector(".empty"); if (em) em.textContent = "The decision record is private to tenants \u2014 connect the wallet that holds your lease."; return; }
     const { events = [] } = await r.json();
     if (!events.length || events[0].id == null) {
       inboxDone = true;
@@ -4909,11 +4911,12 @@ async function loadInboxHistory() {
     inboxOldest = events[0].id;
     if (events.length < 250) inboxDone = true;
     for (const e of events.slice().reverse()) {          // newest first, appended below
+      if (/^(no_data|error|insufficient_coverage)$/.test(String(e.outcome))) continue;
       try {
         inboxEl.appendChild(memoNode({
           symbol: e.symbol || (e.mint ? e.mint.slice(0, 6) : "?"), decision: e.outcome,
           thesis: e.thesis || e.detail || "Filed to the journal.",
-          conviction: e.conviction ?? null, size: e.size ?? null, stop: e.stop ?? null, gmgn: e.gmgn ?? null }));
+          conviction: e.conviction ?? null, size: e.size ?? null, stop: e.stop ?? null, gmgn: e.gmgn ?? null, ts: e.ts }));
         // Count history into the pinned bar, the same way live memos count.
         __inboxSeen++;
         if (e.outcome === "APPROVED" || e.outcome === "PROPOSE") approvedCount++;
@@ -4934,10 +4937,10 @@ inboxEl.addEventListener("scroll", () => {
   if (inboxEl.scrollHeight - inboxEl.scrollTop - inboxEl.clientHeight < 80) loadInboxHistory();
 });
 
-function memoNode({ symbol, decision, thesis, conviction, size, stop, gmgn }) {
+function memoNode({ symbol, decision, thesis, conviction, size, stop, gmgn, ts }) {
   const m = document.createElement("div");
   m.className = "memo";
-  m.innerHTML = `<header><span class="sym"></span><span class="verdict v-${decision}"></span></header><p class="th"></p><div class="kv"></div>`;
+  m.innerHTML = `<header><span class="sym"></span><span class="verdict v-${decision}"></span><time class="when">${ts ? new Date(ts).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : ""}</time></header><p class="th"></p><div class="kv"></div>`;
   m.querySelector(".sym").textContent = symbol;
   m.querySelector(".verdict").textContent = decision;
   m.querySelector(".th").textContent = thesis || "—";
@@ -6837,7 +6840,7 @@ function paintFeedInto(wrap, feed, settings) {
   if (!feed.length) {
     const p = document.createElement("p");
     p.className = "locked";
-    p.textContent = "No calls published yet \u2014 the Desk tab's watch board shows what the team is stalking.";
+    p.textContent = "No calls published yet.";
     wrap.appendChild(p);
     return;
   }
@@ -6950,7 +6953,7 @@ function paintFeedInto(wrap, feed, settings) {
      * them, so a tenant with an idle bot could believe they were holding six coins.
      * The bot's own heartbeat carries what it is actually in; say it plainly, and
      * say when the bot is not running rather than implying it declined. */
-    const bs = window.__botStatus?.();
+    const bs = c.status === "live" ? window.__botStatus?.() : null;
     const line = document.createElement("div");
     line.className = "dp-note";
     line.style.fontSize = "10px";
@@ -7805,7 +7808,7 @@ async function openCallDossier(callId) {
     b.appendChild(mk("div", "dp-h", "Life of the call"));
     for (const e of body.events.slice(-14)) {
       b.appendChild(mk("div", "wr-rule",
-        `${new Date(e.ts).toLocaleTimeString()} · ${e.kind}${e.mark != null ? " · $" + e.mark : ""}${e.detail ? " · " + String(e.detail).slice(0, 90) : ""}`));
+        `${dashWhen(e.ts)} · ${e.kind}${e.mark != null ? " · $" + e.mark : ""}${e.detail ? " · " + String(e.detail).slice(0, 90) : ""}`));
     }
   }
   if (body.fills.length) {
@@ -7991,10 +7994,11 @@ window.load_stats = async () => {
   }
   el.appendChild(chips);
   const note = document.createElement("p"); note.className = "dp-note";
-  note.textContent = "The building's books are public — settled results and the house's record, so anyone can judge whether the company works. The live edge is what a lease buys.";
+  note.textContent = "Settled results and the house's record.";
   el.appendChild(note);
   try {
-    const { body } = await call_api("/api/stats/overview");
+    const { status, body } = await call_api("/api/stats/overview");
+    if (status !== 200 || !body.building) return empty(el, "Could not reach the desk.");
     const B = body.building || {};
     if (statsView === "building") {
       for (const [k, v, cls] of [
@@ -8032,17 +8036,18 @@ window.load_ranks = async () => {
   const el = document.getElementById("rankspanel");
   el.innerHTML = "";
   const h = document.createElement("p"); h.className = "dp-note";
-  h.textContent = "Floors ranked by realised, settled results only — open positions are not achievement. Rewards will hang off this board.";
+  h.textContent = "Ranked by realised, settled P&L. Open positions do not count.";
   el.appendChild(h);
   try {
-    const { body } = await call_api("/api/leaderboard");
+    const { status, body } = await call_api("/api/leaderboard");
+    if (status !== 200) return empty(el, "Could not reach the desk.");
     const rows = body.floors || [];
     if (!rows.length) return empty(el, "No settled results anywhere in the building yet. The first floor to close a copied call ranks first.");
     rows.forEach((f, i) => {
       el.appendChild(drow([
         ["b", "#" + (i + 1)],
         ["b grow", (f.floor_name || ordC(f.floor_no)) + (f.md_name ? " · MD " + f.md_name : "")],
-        ["span", f.settled + " settled"],
+        ["span", f.settled + " settled \u00b7 " + money(f.bought_usd) + " in"], ["faint", dashWhen(f.last_settled) ? "last settled " + dashWhen(f.last_settled) : "\u2014"],
         ["b " + (f.pnl_usd >= 0 ? "up" : "down"), money(f.pnl_usd)],
       ]));
     });
@@ -8053,24 +8058,25 @@ window.load_ledger = async () => {
   const el = document.getElementById("ledgerpanel");
   el.innerHTML = "";
   try {
-    const { body } = await call_api(FLOOR_N != null ? `/api/floor/${FLOOR_N}/ledger` : "/api/ledger");
+    const { body } = await call_api(FLOOR_N != null ? `/api/floor/${FLOOR_N}/ledger?limit=300` : "/api/ledger?limit=300");
     const t = body.totals || {};
     const h = document.createElement("p"); h.className = "dp-note";
     h.textContent = `The record book. House: ${t.house?.calls ?? 0} calls, ${t.house?.live ?? 0} live, ` +
       `${t.house?.closed_up ?? 0} closed up, ${t.house?.closed_down ?? 0} closed down. ` +
       `${FLOOR_N != null ? "This floor:" : "Floors:"} ${t.floors?.settled ?? 0} settled, ${money(t.floors?.pnl_usd)} realised. ` +
-      "This page exists so the desk can be judged on what it said, and the floors on what they did.";
+      "";
     el.appendChild(h);
 
     const hh = document.createElement("div"); hh.className = "data-h"; hh.textContent = "The house's calls";
     el.appendChild(hh);
     if (!(body.house || []).length) empty(el, "No calls published yet.");
+    else if ((body.house || []).length < (t.house?.calls ?? 0)) empty(el, `Showing the latest ${body.house.length} of ${t.house.calls} calls.`);
     for (const c of body.house || []) {
       el.appendChild(drow([
         ["b grow", (c.symbol || c.mint.slice(0, 6)) + (c.launchpad ? " · " + c.launchpad : "")],
-        ["span", c.status === "live" ? "live" : (c.close_reason || "closed").replace(/_/g, " ")],
+        ["span", (c.status === "live" ? "live" : (c.close_reason || "closed").replace(/_/g, " ")) + (c.stop != null ? " \u00b7 stop $" + c.stop : "") + (c.target != null ? " \u00b7 tgt $" + c.target : "")],
         ["b " + ((c.move_pct ?? 0) >= 0 ? "up" : "down"), c.move_pct != null ? c.move_pct + "%" : "—"],
-        ["faint", dashWhen(c.opened_at) || ago(c.opened_at)],
+        ["faint", c.status === "live" ? "opened " + (dashWhen(c.opened_at) || ago(c.opened_at)) : "closed " + (dashWhen(c.closed_at || c.opened_at) || ago(c.closed_at || c.opened_at))],
       ]));
     }
 
@@ -8296,7 +8302,7 @@ async function loadOverviewDashboard() {
     dashMetric("WALL-ST-E", heartbeatAge != null && heartbeatAge < 150000
       ? String(heartbeat.mode || "connected").toUpperCase() : heartbeat ? "STALE" : "NOT LINKED",
       heartbeatAge == null ? "no self-reported heartbeat" : "self-reported " + dashAge(heartbeatAge)),
-    dashMetric("Settled P&L", feedPrivate ? "PRIVATE" : money(feedR?.body?.record?.pnl_usd ?? 0),
+    dashMetric("Settled P&L", feedPrivate ? "PRIVATE" : money(feedR?.body?.record?.netPnlUsd ?? 0),
       feedPrivate ? "the tenant performance record is unavailable in this session"
         : String(feedR?.body?.record?.settled ?? 0) + " settled trades"),
     dashMetric("Building", String(building.floorsLeased ?? "—") + " floors leased",
@@ -8321,7 +8327,7 @@ async function loadOverviewDashboard() {
     row.append(
       dashMetric("Building credit", credit, "research and rent only"),
       dashMetric("Rent", rent?.overdue ? "OVERDUE" : rent?.dueAt ? dashFuture(rent.dueAt) : "—",
-        "never trading capital"),
+        rent?.dueAt ? "due " + dashWhen(rent.dueAt) + (rent.unpaidPeriods ? " \u00b7 " + rent.unpaidPeriods + " unpaid" : "") : "no lease"),
       dashMetric("Managing Director", room.settings?.md_brain === "grok" ? "Grok" : "Claude",
         room.settings?.mode === "grind" ? "team is grinding" : "team is on a break")
     );
@@ -8332,12 +8338,12 @@ async function loadOverviewDashboard() {
   const recent = dashNode("div", "dashsection");
   recent.appendChild(dashNode("h4", "", "Recent published calls"));
   if (!feed.length) recent.appendChild(dashNode("p", "dp-note",
-    feedR?.status === 403 ? "The tenant's call sheet is private." : "No calls have been published yet."));
+    feedR?.status === 403 ? "The tenant's call sheet is private." : feedR?.status === 200 ? "No calls have been published yet." : "The call sheet did not load (" + (feedR?.status ?? "no response") + ") \u2014 retrying in 30s."));
   for (const call of feed.slice(0, 3)) {
     recent.appendChild(drow([
       ["b grow", call.symbol || String(call.mint || "").slice(0, 6)],
       ["span", call.status === "live" ? "live" : String(call.close_reason || "closed").replace(/_/g, " ")],
-      ["faint", call.delivered_at ? ago(call.delivered_at) : ""],
+      ["faint", (dashWhen(call.delivered_at) || (call.delivered_at ? ago(call.delivered_at) : "")) + (call.status !== "live" && call.closed_at ? " \u00b7 closed " + dashWhen(call.closed_at) : "")],
     ]));
   }
   el.appendChild(recent);
@@ -8460,7 +8466,7 @@ let dashboardFeedCache = null;
 async function dashboardFloorFeed({ force = false } = {}) {
   if (!force && dashboardFeedCache && Date.now() - dashboardFeedCache.at < 12000)
     return dashboardFeedCache.response;
-  const response = await call_api("/api/floor/" + FLOOR_N + "/feed");
+  const response = await call_api("/api/floor/" + FLOOR_N + "/feed?limit=200");
   if (response.status === 200) dashboardFeedCache = { at: Date.now(), response };
   return response;
 }
@@ -8502,7 +8508,8 @@ async function loadDashboardCalls(view, { force = false } = {}) {
       const wrap = dashNode("div");
       wrap.style.cssText = "display:flex;flex-direction:column;gap:7px";
       el.appendChild(wrap);
-      paintFeedInto(wrap, published, body.settings);
+      if (published.length) paintFeedInto(wrap, published, body.settings);
+      else wrap.appendChild(dashNode("p", "locked", feed.length ? "No open calls right now \u2014 " + feed.length + " closed under Closed / Killed." : "No calls have been published to this floor yet."));
     } else {
       const closed = feed.filter((call) => call.status !== "live");
       el.append(dashLead("Closed / killed",
@@ -8526,6 +8533,8 @@ async function loadDashboardCalls(view, { force = false } = {}) {
       const ok = await loadKilled(killed);
       killed.querySelector(".dp-h")?.remove();
       if (ok === false) killed.appendChild(dashNode("p", "dp-note", "Killed candidates are tenants only."));
+      else if (ok === null) killed.appendChild(dashNode("p", "dp-note", "Could not read the kill record \u2014 the desk did not answer."));
+      else if (!killed.querySelector(".killrow")) killed.appendChild(dashNode("p", "locked", "Nothing has been killed before publication yet."));
     }
   } catch (error) {
     el.innerHTML = "";
