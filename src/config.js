@@ -77,7 +77,10 @@ minLiquidityUsd: num("DESK_MIN_LIQUIDITY_USD", 12000),
      * execution. */
 /* The board runs $10k to $20m. Below $10k there is not enough coin to trade and
      * the pool is one wallet; above $20m is somebody else's business. */
-    minMarketCapUsd: num("DESK_MIN_MCAP_USD", 10_000),
+    /* $5k, the floor of the nano sleeve. It sat at $10k while the nano band starts at
+     * $5k, so the smallest half of the band the owner asked for was refused as
+     * "too_small" by a number nobody had moved. */
+    minMarketCapUsd: num("DESK_MIN_MCAP_USD", 5_000),
     /* $10m, matching the top of the very-high sleeve (categories.js). The two numbers
      * are one taxonomy: a ceiling above the last sleeve creates calls no floor can
      * receive, which is the exact failure the sleeve test was written to catch. */
@@ -221,12 +224,28 @@ minLiquidityUsd: num("DESK_MIN_LIQUIDITY_USD", 12000),
  * live mint and freeze authority, and the unverified-is-not-safe rule. This lowers a
  * PROXY so that more small coins reach the real test; it does not lower the real test.
  */
+/* One row per sleeve, and `ageH` is the youngest the desk will look at in that band.
+ *
+ * The age floor used to be one flat 1.5 hours for everything, which is a coherent rule
+ * for a desk hunting day-old coins and an incoherent one for a desk asked to trade a
+ * $9k coin inside thirty minutes: it refused, twice over, the exact population the
+ * nano and micro sleeves exist for. It is now the band's own number. The larger bands
+ * keep a real floor — a $5m coin an hour old is a different kind of claim.
+ *
+ * `vol` and `txns` are 24-HOUR floors. A coin four minutes old has no 24-hour history
+ * and never will in time to matter, so a coin inside its band's hunt window is judged
+ * on its minute tape instead (see wouldSurviveScreen). Neither path touches the real
+ * test: the measured Jupiter round-trip, live mint and freeze authority, holder
+ * concentration and honeypot mechanics are unchanged and absolute. */
+import { bandForMarketCap } from "./bands.js";
+
 export const BAND_FLOORS = {
-  micro:     { liq: 5_000,  vol: 4_000,  txns: 25 },   // $10k-$100k
-  low:       { liq: 8_000,  vol: 8_000,  txns: 40 },   // $100k-$500k
-  medium:    { liq: 12_000, vol: 12_000, txns: 60 },   // $500k-$1m
-  high:      { liq: 15_000, vol: 15_000, txns: 60 },   // $1m-$10m
-  very_high: { liq: 25_000, vol: 20_000, txns: 80 },   // $10m-$20m
+  nano:      { liq: 2_000,  vol: 1_500,  txns: 10, ageH: 0.02 },  // $5k-$20k, from a minute old
+  micro:     { liq: 4_000,  vol: 3_000,  txns: 20, ageH: 0.05 },  // $20k-$60k
+  low:       { liq: 5_000,  vol: 4_000,  txns: 25, ageH: 0.25 },  // $60k-$100k
+  medium:    { liq: 8_000,  vol: 8_000,  txns: 40, ageH: 0.5 },   // $100k-$500k
+  high:      { liq: 12_000, vol: 12_000, txns: 60, ageH: 1 },     // $500k-$1m
+  very_high: { liq: 15_000, vol: 15_000, txns: 60, ageH: 1.5 },   // $1m-$10m
 };
 
 /**
@@ -237,14 +256,14 @@ export const BAND_FLOORS = {
  * That is the same rule the rest of the desk follows everywhere else.
  */
 export function floorsFor(mcap) {
-  const flat = { liq: cfg.screen.minLiquidityUsd, vol: cfg.screen.minVolume24hUsd, txns: cfg.screen.minTxns24h };
+  const flat = { liq: cfg.screen.minLiquidityUsd, vol: cfg.screen.minVolume24hUsd,
+    txns: cfg.screen.minTxns24h, ageH: cfg.screen.minPairAgeHours };
   if (mcap == null || !(mcap > 0)) return flat;
-  const band =
-    mcap < 100_000 ? "micro" :
-    mcap < 500_000 ? "low" :
-    mcap < 1_000_000 ? "medium" :
-    mcap < 10_000_000 ? "high" :
-    mcap <= 20_000_000 ? "very_high" : null;
+  /* ONE TAXONOMY. These boundaries were hardcoded here and drifted a full rung out of
+     step with CAP_BANDS on 2026-09-03: the screen called a $250k coin "low" while the
+     desk called it "medium" and the sleeves disagreed with both. The bands are defined
+     in exactly one place now, and this reads them. */
+  const band = bandForMarketCap(mcap);
   return band ? BAND_FLOORS[band] : flat;
 }
 

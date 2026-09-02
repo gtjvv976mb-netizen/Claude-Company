@@ -169,7 +169,12 @@ export function rank(c) {
     } else {
       s -= 15; why.push("young without ignition");
     }
-  } else if (age < 1.5) { s -= 20; why.push("too new even for the sniper path"); }
+  } else if (age < 1.5 && !c.momentum) {
+    /* Only for a coin the desk cannot see the tape of. The ignition lane exists to make
+       this judgement from minute candles instead, and penalising its finds for being
+       young would discard the entire population it was built to find. */
+    s -= 20; why.push("too new even for the sniper path");
+  }
 
   /* THE REVIVAL PATH — the desk's second job. Of the coins that matter, some are
    * new and igniting; the rest are OLD coins coming back: dumped, flatlined, and
@@ -243,6 +248,16 @@ export function wouldSurviveScreen(c) {
   const liq = p.liquidityUsd ?? 0;
   const vol = p.volume?.h24 ?? 0;
   const tx = (p.txns?.h24?.buys ?? 0) + (p.txns?.h24?.sells ?? 0);
+  /* A COIN FOUR MINUTES OLD HAS NO 24-HOUR HISTORY, AND WILL NOT HAVE ONE IN TIME.
+   *
+   * Judging it on daily aggregates refuses it for a fact about the calendar rather than
+   * about the coin. When the ignition lane has attached a minute tape, that tape is the
+   * evidence of a real market instead — and it is a HARDER test per unit time, not a
+   * softer one: five minutes must carry a fifth of what the band asks of a whole day.
+   * Only a coin still inside its band's hunt window may be judged this way; an old coin
+   * with no daily volume is an old coin nobody is trading. */
+  const tape = c.momentum || null;
+  const tapeVol = tape?.vol5mUsd ?? 0;
   const mcap = p.marketCap ?? p.fdv ?? null;
   const age = p.ageHours ?? 0;
   /* Floors scaled to the coin's own size — see BAND_FLOORS. A flat floor was passing 2
@@ -275,12 +290,20 @@ export function wouldSurviveScreen(c) {
    * is a strengthening of the safety argument, not a loosening of it. */
   const liqUnknown = p.liquidityUsd == null && p.liquidity?.usd == null;
   if (!liqUnknown && liq < fl.liq) return "thin_liquidity";
-  if (vol < fl.vol) return "no_volume";
-  if (tx < fl.txns) return "no_participants";
-  // An unreadable pool has to clear a HIGHER bar of real trading before the desk will
-  // spend anything measuring it — the tape is the only evidence of a market it has.
-  if (liqUnknown && (vol < fl.vol * 2 || tx < fl.txns * 2)) return "thin_liquidity";
-  if (age < s.minPairAgeHours) return "too_new";
+  const tapeCarries = tape != null && tapeVol >= Math.max(300, fl.vol / 5);
+  if (vol < fl.vol && !tapeCarries) return "no_volume";
+  // The tape is a volume record, not a trade count, so a tape-judged coin has already
+  // answered the participation question with the only evidence it owns.
+  if (tx < fl.txns && !tapeCarries) return "no_participants";
+  /* An unreadable pool has to clear a HIGHER bar of real trading before the desk will
+     spend anything measuring it — the tape is the only evidence of a market it has.
+     A graduated pump.fun coin arrives here every time: its bonding curve is drained
+     into an AMM pool that this feed cannot see, so the minute tape answers, at double
+     the bar a readable pool would have had to clear. */
+  const tapeCarriesDouble = tape != null && tapeVol >= Math.max(600, (fl.vol * 2) / 5);
+  if (liqUnknown && (vol < fl.vol * 2 || tx < fl.txns * 2) && !tapeCarriesDouble)
+    return "thin_liquidity";
+  if (age < (fl.ageH ?? s.minPairAgeHours)) return "too_new";
   if (s.maxMarketCapUsd > 0 && mcap != null && mcap > s.maxMarketCapUsd) return "too_big";
   if (s.minMarketCapUsd > 0 && mcap != null && mcap < s.minMarketCapUsd) return "too_small";
   if (liq > 0 && vol / liq > s.maxVolToLiqRatio) return "wash_suspect";
@@ -326,8 +349,37 @@ export function selectShortlist(scored, workups) {
  * "the market offered nothing" from "the desk is strangling itself" — two failures that
  * look identical from outside and cost a full day to separate by hand once already.
  */
+/**
+ * THE IGNITION LANE'S CONTRIBUTION TO THE UNIVERSE.
+ *
+ * The keyword sweep returns coins a search engine thinks are relevant, whose median age
+ * measured twenty-five days. This adds the coins pump.fun is trading RIGHT NOW, with a
+ * minute tape attached so the screen can judge a four-minute-old coin on evidence
+ * rather than on the absence of a 24-hour history. It is free and it calls no model.
+ *
+ * It degrades to nothing: if pump.fun is unreachable the desk runs on the sweep alone,
+ * exactly as it did before.
+ */
+export async function ignitionUniverse({ solUsd = null, tapes = 40 } = {}) {
+  try {
+    const { ignitionSweep } = await import("./ignition.js");
+    const r = await ignitionSweep({ solUsd, tapes });
+    // Only coins whose tape says something is happening. A negative score is a coin
+    // going the wrong way on real volume, and the desk has no reason to look at it.
+    return r.ranked.filter((c) => c.ignition.score > 0);
+  } catch (e) {
+    emit("ignition:unavailable", { note: String(e?.message || e) });
+    return [];
+  }
+}
+
 export async function warmFunnel() {
-  const universe = await sweep();
+  const [swept, igniting] = await Promise.all([sweep(), ignitionUniverse()]);
+  /* Ignition first so its richer row — the one carrying the minute tape — wins the
+     dedupe against the same coin arriving from the keyword sweep. */
+  const merged = new Map();
+  for (const c of [...igniting, ...swept]) if (c?.mint && !merged.has(c.mint)) merged.set(c.mint, c);
+  const universe = [...merged.values()];
   const scored = [];
   for (const c of universe) {
     if (liveCallFor(c.mint)) continue;
@@ -348,7 +400,8 @@ export async function warmFunnel() {
 
   const shape = funnel.census();
   emit("funnel:warmed", {
-    swept: universe.length, ranked: scored.length, screenPassed: passed, screenHeld: held,
+    swept: universe.length, igniting: igniting.length, ranked: scored.length,
+    screenPassed: passed, screenHeld: held,
     watch: shape.watch, screened: shape.screened, studied: shape.studied, ready: shape.ready,
     expired,
     note: "free — the screen narrows the market whether or not the desk can trade right now",

@@ -26,10 +26,19 @@ const coin = ({ mcap = 50_000, liq, vol = 50_000, tx = 500, age = 5 } = {}) => {
 };
 
 console.log("\nFLOORS SCALE WITH THE COIN, BECAUSE THE BANDS SPAN 2000x");
-ok("a micro-cap is asked for $5k of depth", floorsFor(30_000).liq === 5_000);
-ok("a very-high-cap is asked for $25k", floorsFor(15_000_000).liq === 25_000);
-ok("the floor RISES with size", BAND_FLOORS.micro.liq < BAND_FLOORS.very_high.liq,
-  "a $30k coin with $5k of depth is ordinary; a $15m coin with $5k of depth is a fiction");
+/* The six sleeves, since 2026-09-03: nano $5k-$20k, micro $20k-$60k, low $60k-$100k,
+   medium $100k-$500k, high $500k-$1m, very high $1m-$10m. */
+ok("a nano-cap is asked for $2k of depth", floorsFor(9_000).liq === 2_000);
+ok("a micro-cap is asked for $4k", floorsFor(30_000).liq === 4_000);
+ok("a very-high-cap is asked for $15k", floorsFor(5_000_000).liq === 15_000);
+ok("the floor RISES with size", BAND_FLOORS.nano.liq < BAND_FLOORS.micro.liq
+  && BAND_FLOORS.micro.liq < BAND_FLOORS.very_high.liq,
+  "a $30k coin with $4k of depth is ordinary; a $5m coin with $4k of depth is a fiction");
+/* THE AGE FLOOR IS THE BAND'S OWN NUMBER. One flat 1.5 hours refused the entire
+   population the nano and micro sleeves exist for — a coin the desk is asked to hold
+   for thirty minutes cannot be required to be ninety minutes old first. */
+ok("the nano sleeve looks at a coin about a minute old", floorsFor(9_000).ageH <= 0.02);
+ok("...while a $5m coin still has to be an hour and a half old", floorsFor(5_000_000).ageH === 1.5);
 ok("an UNREADABLE market cap gets the STRICT flat floor, not the loosest band",
   floorsFor(null).liq === cfg.screen.minLiquidityUsd,
   "an unknown number must never be handed the most permissive treatment");
@@ -37,9 +46,9 @@ ok("an UNREADABLE market cap gets the STRICT flat floor, not the loosest band",
 console.log("\nA POOL THAT CAN BE READ AND IS TOO THIN STILL DIES");
 ok("micro-cap with $1k of depth is refused",
   wouldSurviveScreen(coin({ mcap: 30_000, liq: 1_000 })) === "thin_liquidity", "$1k < $5k floor");
-ok("...and a $15m coin with $12k of depth is refused too",
-  wouldSurviveScreen(coin({ mcap: 15_000_000, liq: 12_000, vol: 50_000 })) === "thin_liquidity",
-  "$12k would have PASSED the old flat floor — the band bar is stricter up here, not looser");
+ok("...and a $5m coin with $12k of depth is refused too",
+  wouldSurviveScreen(coin({ mcap: 5_000_000, liq: 12_000, vol: 50_000 })) === "thin_liquidity",
+  "$12k clears the nano bar four times over and still fails up here — the band bar rises with size");
 
 console.log("\nUNKNOWN LIQUIDITY IS NOT THIN LIQUIDITY");
 ok("an unreadable pool with a real tape is not killed on depth",
@@ -87,10 +96,17 @@ ok("2x the volume floor is the bar for an unreadable pool",
 console.log("\nEVERY OTHER FLOOR IS UNCHANGED");
 ok("too_big still fires at the ceiling",
   wouldSurviveScreen(coin({ mcap: 50_000_000, liq: 900_000, vol: 900_000 })) === "too_big");
-ok("too_small still fires under $10k",
-  wouldSurviveScreen(coin({ mcap: 5_000, liq: 9_000, vol: 50_000 })) === "too_small");
-ok("too_new still fires inside the migration hour",
-  wouldSurviveScreen(coin({ mcap: 50_000, liq: 9_000, vol: 50_000, age: 0.5 })) === "too_new");
+/* A cap off the board gets the STRICT flat floors, so this coin is given depth that
+   clears them — otherwise it dies on liquidity and never reaches the cap check. */
+ok("too_small still fires below the nano floor",
+  wouldSurviveScreen(coin({ mcap: 4_000, liq: 20_000, vol: 50_000 })) === "too_small",
+  "$4k is under the $5k bottom of the board");
+/* Still fires — but on the BAND'S clock. A $5m coin half an hour old is refused; a
+   $50k one is exactly what the micro sleeve is hunting. */
+ok("too_new still fires on a $5m coin half an hour old",
+  wouldSurviveScreen(coin({ mcap: 5_000_000, liq: 20_000, vol: 50_000, age: 0.5 })) === "too_new");
+ok("...and does NOT fire on a micro-cap the same age",
+  wouldSurviveScreen(coin({ mcap: 50_000, liq: 9_000, vol: 50_000, age: 0.5 })) !== "too_new");
 ok("wash_suspect still fires on an absurd volume/depth ratio",
   wouldSurviveScreen(coin({ mcap: 50_000, liq: 6_000, vol: 6_000 * 41 })) === "wash_suspect");
 
