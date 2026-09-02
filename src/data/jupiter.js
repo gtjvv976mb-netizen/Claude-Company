@@ -1,11 +1,37 @@
 import { getJson } from "../lib/http.js";
 
-const HOSTS = ["https://lite-api.jup.ag", "https://api.jup.ag"];
+/* The exit probe is the desk's most important free screen — a coin that cannot be
+ * SOLD is a roach motel no analyst should ever see — and it runs on Jupiter's public
+ * lite host with no key and no back-off. Under load that host answers HTTP 429, the
+ * probe reports "did not complete", and the coin is screened out as unverified_exit
+ * before a dollar of research is spent. Three live house calls re-run locally all
+ * died exactly that way, for $0.00. Two changes, both strictly additive:
+ *  - JUPITER_API_KEY, when present, is sent as x-api-key and the keyed host goes first.
+ *  - 429 and 5xx answers are retried with jittered back-off before the next host. */
+const LITE_HOST = "https://lite-api.jup.ag";
+const KEYED_HOST = "https://api.jup.ag";
+const apiKey = () => String(process.env.JUPITER_API_KEY || "").trim();
+const hosts = () => apiKey() ? [KEYED_HOST, LITE_HOST] : [LITE_HOST, KEYED_HOST];
+const RETRY_DELAYS_MS = [600, 1500, 3000];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const transient = (r) => !r.ok && /HTTP (429|5\d\d)/.test(String(r.error || ""));
+
+/** Call `attempt` until it succeeds or the transient budget is spent. Exported for tests. */
+export async function withRetry(attempt, { delays = RETRY_DELAYS_MS, wait = sleep } = {}) {
+  let r = await attempt();
+  for (const base of delays) {
+    if (!transient(r)) return r;
+    await wait(base + Math.floor(Math.random() * base * 0.5));
+    r = await attempt();
+  }
+  return r;
+}
 
 async function tryHosts(pathAndQuery, label) {
   let last;
-  for (const h of HOSTS) {
-    const r = await getJson(h + pathAndQuery, { label: label || pathAndQuery });
+  for (const h of hosts()) {
+    const headers = h === KEYED_HOST && apiKey() ? { "x-api-key": apiKey() } : {};
+    const r = await withRetry(() => getJson(h + pathAndQuery, { label: label || pathAndQuery, headers }));
     if (r.ok) return r;
     last = r;
   }
