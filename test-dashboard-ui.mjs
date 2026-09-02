@@ -75,8 +75,23 @@ assert.match(html, /callsOpen && dashboardSubview\.calls === "candidates"[\s\S]*
   "the open pre-decision candidate board refreshes across new desk cycles");
 assert.match(html, /dashMetric\("Settled P&L", feedPrivate \? "PRIVATE"/,
   "private floor performance is not converted into a false zero");
-assert.match(html, /width:min\(700px, calc\(100% - 28px\)\)/,
-  "the desktop dashboard is a real working surface, not the former narrow rail");
+/* OWNER DECISION (2026-09-02): the rail must not cover half the screen. The 700px,
+ * 85%-tall fixed frame measured 55% x 81% of a 1280x720 viewport and force-opened at
+ * boot, mostly to show a headline and one sentence. The invariant is now bounded and
+ * content-sized: no wider than 480px, height follows content under a viewport cap,
+ * and nothing opens it by itself. A pixel value is not the property worth pinning;
+ * these three are. */
+{
+  const railWidth = html.match(/\.rail\{[\s\S]*?width:min\((\d+)px, calc\(100% - 28px\)\)/);
+  assert.ok(railWidth && Number(railWidth[1]) <= 480,
+    `the desktop rail stays a compact side panel (<=480px), got ${railWidth?.[1] ?? "none"}`);
+  assert.match(html, /\.rail\{[\s\S]*?height:auto;[\s\S]*?max-height:min\((\d+)vh, calc\(100% - 82px\)\)/,
+    "the rail sizes to its content and caps below the viewport, scrolling inside");
+  const railCap = Number(html.match(/\.rail\{[\s\S]*?max-height:min\((\d+)vh/)?.[1]);
+  assert.ok(railCap <= 75, `the rail's height cap stays under 75vh, got ${railCap}`);
+  assert.doesNotMatch(html, /queueMicrotask\(\(\) => window\.showDashboard\?\.\("overview", \{ force: true \}\)\)/,
+    "nothing force-opens the rail at boot; the dock is the resting state");
+}
 assert.match(html, /@media \(max-width:760px\)[\s\S]*?\.dock\{left:8px; right:8px; top:auto; bottom:8px/,
   "mobile navigation becomes a reachable bottom dock");
 assert.ok(
