@@ -581,9 +581,9 @@ const makeExitMarkHarness = ({ payer = wallet.publicKey, presigned = false,
   chainHeight = 600, postOutputRaw = "4900000", secondaryPostOutputRaw = postOutputRaw,
   secondarySimulationError = null, orderOverrides = {}, finalChainHeight = chainHeight,
   secondaryWritableOverride = null, primaryPostWritableOverride = null,
-  simulationContextSlot = 702 } = {}) => {
+  simulationContextSlot = 702, instructions = [exitRoute] } = {}) => {
   const transaction = new VersionedTransaction(new TransactionMessage({
-    payerKey: payer, recentBlockhash, instructions: [exitRoute],
+    payerKey: payer, recentBlockhash, instructions,
   }).compileToV0Message());
   if (presigned) transaction.signatures[0] = new Uint8Array(64).fill(7);
   const order = {
@@ -1099,6 +1099,50 @@ await ok("gross rent is independently bound and capped without raising exposure 
   await assert.rejects(() => unearned.executor.preflightExitMark(unearned.spec),
     /canonical ATA rent facts do not match Jupiter's rent estimate/);
   assert.equal(unearned.calls.simulate, 0);
+});
+
+/* THE UNWRAP EXIT — every stop this desk will ever fire. A sell to SOL creates the
+ * wrapped-SOL ATA and CLOSES it in the same transaction, so Jupiter quotes rent NET
+ * (0) while the chain's pre-state shows the ATA missing (gross 2,039,280). The guard
+ * compared gross to net and refused every exit on mainnet. It must net out the
+ * same-transaction close — and still refuse an exit that claims rent it never pays. */
+await ok("an unwrap exit that creates and closes the wrapped-SOL ATA nets its rent to zero", async () => {
+  const ATA_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+  const createWsolAta = new TransactionInstruction({
+    programId: ATA_PROGRAM_ID,
+    keys: [
+      { pubkey: wallet.publicKey, isSigner: true, isWritable: true },      // payer
+      { pubkey: sourceAta, isSigner: false, isWritable: true },            // the WSOL ATA
+      { pubkey: wallet.publicKey, isSigner: false, isWritable: false },    // owner
+      { pubkey: new PublicKey(WSOL), isSigner: false, isWritable: false }, // mint
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: new PublicKey(TOKEN_PROGRAM), isSigner: false, isWritable: false },
+    ],
+    data: Buffer.from([1]),                                                // idempotent create
+  });
+  const closeWsolAta = new TransactionInstruction({
+    programId: new PublicKey(TOKEN_PROGRAM),
+    keys: [
+      { pubkey: sourceAta, isSigner: false, isWritable: true },
+      { pubkey: wallet.publicKey, isSigner: false, isWritable: true },     // lamports back to wallet
+      { pubkey: wallet.publicKey, isSigner: true, isWritable: false },     // authority
+    ],
+    data: Buffer.from([9]),                                                // CloseAccount
+  });
+  const unwrap = [createWsolAta, exitRoute, closeWsolAta];
+  // Jupiter quotes NET rent 0 for create-and-close: the guard must let it through.
+  const honest = makeExitMarkHarness({ instructions: unwrap, orderOverrides: { rentFeeLamports: 0 } });
+  await assert.doesNotReject(async () => {
+    try { await honest.executor.preflightExitMark(honest.spec); }
+    catch (error) {
+      if (/canonical ATA rent facts do not match/.test(error.message)) throw error;
+      // any OTHER refusal is outside this test's claim
+    }
+  }, "net-zero rent on a same-transaction unwrap must not be refused as a rent mismatch");
+  // The same transaction claiming the gross figure is an over-claim: still refused.
+  const overclaim = makeExitMarkHarness({ instructions: unwrap, orderOverrides: { rentFeeLamports: 2_039_280 } });
+  await assert.rejects(() => overclaim.executor.preflightExitMark(overclaim.spec),
+    /canonical ATA rent facts do not match Jupiter's rent estimate/);
 });
 
 await ok("execution-readiness probe exercises both providers without signing, journaling or executing", async () => {
