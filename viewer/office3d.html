@@ -675,7 +675,7 @@ select.dp-in{cursor:pointer}
         <div id="teamcontrolpanel"></div>
         <div class="crewpanel on" id="crewpanel">
           <div class="legend" id="legend"></div>
-          <p class="note">Every figure is one agent. Movement reflects a real pipeline stage, not a timer. Research only: no agent here can sign or execute a trade. Select a portrait to open its file.</p>
+          <p class="note">One tile per agent \u2014 select a portrait to open its file. WALL-ST-E is your own bot, not house staff.</p>
         </div>
       </div>
     </section>
@@ -2421,7 +2421,7 @@ const DOSSIER = {
     detail: "WALL-ST-E is the local poller, not a wallet hidden in this website. Dry run is the default; live mode must be armed explicitly on your own machine, where the burner key stays. The central desk only publishes calls and never receives a private key. Browser and webhook signing remain disabled. On first start he begins at the newest feed item and never replays old calls.",
     method: "Code only — no model call, no monthly cost. He is the hands, not the brain.",
     known: "Compacting the day's trades into neat little cubes.",
-    note: "This page has no local-executor telemetry, so it never claims WALL-ST-E is live. Confirm his mode and fills on the machine running the poller.",
+    note: "Liveness shown here is relayed from the bot's own heartbeat \u2014 the site never asserts it on its own.",
   },
   GrokAD: {  // GROX MULDER
     brief: "The Assistant Director from the other agency. When a floor hires the Grok brain, he moves into the suite beside the boss and works the trades himself.",
@@ -6456,6 +6456,23 @@ async function renderTeamInto(el, { includeBot = true } = {}) {
 
   strip.appendChild(cBrain);
   el.appendChild(strip);
+  /* The payload has carried the floor's research journal (last 25 runs) since grind
+   * mode shipped; the only renderer wrote into a hidden legacy pane. A grinding
+   * floor's past work was visible nowhere. */
+  {
+    const runs = Array.isArray(R.runs) ? R.runs : [];
+    const box = mk("div", "dp-h", "Research runs \u00b7 last " + Math.min(25, runs.length || 25));
+    box.style.marginTop = "10px"; el.appendChild(box);
+    if (!runs.length) el.appendChild(mk("p", "dp-note", "No runs yet \u2014 grind mode researches on its own clock."));
+    for (const r of runs.slice(0, 25)) {
+      const row = mk("div", "dp-note");
+      const when = window.dashWhen?.(r.started_at) || "";
+      row.textContent = (r.symbol || String(r.mint || "").slice(0, 6)) + " \u00b7 " +
+        (r.outcome || (r.finished_at ? "done" : "running")) + (when ? " \u00b7 " + when : "") +
+        (r.finished_at && window.dashWhen?.(r.finished_at) ? " \u2192 " + window.dashWhen(r.finished_at) : "");
+      el.appendChild(row);
+    }
+  }
 
   /* Hunt targets (run-a-token-now + pinned mints) removed from the panel at the
    * owner's direction, 2026-09-01 — "remove the hunt target mechanisms for now."
@@ -8182,6 +8199,7 @@ async function deskCoverageNote(chosen, cls = "dp-note") {
   } catch { el.textContent = ""; }
   return el;
 }
+window.dashWhen = dashWhen;
 const dashMetric = (key, value, note) => {
   const card = dashNode("div", "dashmetric");
   card.append(dashNode("span", "k", key), dashNode("b", "", value));
@@ -8694,10 +8712,10 @@ async function loadWallsteDashboard({ background = false } = {}) {
     const statusGrid = dashNode("div", "dashgrid");
     statusGrid.append(
       dashMetric("Telemetry", connected ? "Connected" : heartbeat ? "Stale" : "No heartbeat",
-        "self-reported " + (telemetry.ageMs == null ? "never" : dashAge(telemetry.ageMs))),
+        "self-reported " + (telemetry.ageMs == null ? "never" : dashAge(telemetry.ageMs) + (dashWhen(heartbeat?.seenAt) ? " \u00b7 " + dashWhen(heartbeat.seenAt) : ""))),
       dashMetric("Health", String(health?.state || "not reported").replace(/-/g, " "),
         health?.runtimeCommit ? "runtime " + String(health.runtimeCommit).slice(0, 10) : "reported by the local poller"),
-      dashMetric("Open positions", String(heartbeat?.open ?? 0),
+      dashMetric("Open positions", heartbeat ? String(heartbeat.open ?? 0) : "Not reported",
         String(Array.isArray(heartbeat?.held) ? heartbeat.held.length : 0) + " holdings named in heartbeat"),
       dashMetric("Active trade cap", activeCaps ? dashSol(activeCaps.maxSolPerTrade) : "Not reported",
         capPolicy.activeFresh ? "fresh self-report" : activeCaps ? "last-reported · stale" : "awaiting current executor")
@@ -8728,7 +8746,7 @@ async function loadWallsteDashboard({ background = false } = {}) {
         (connected ? "Fresh heartbeat address" : "LAST-REPORTED ADDRESS · STALE — DO NOT FUND") +
         " · state: " + String(wallet.state || "unknown").replace(/-/g, " ") +
         " · source: " + String(wallet.source || "read-only") +
-        (wallet.observedAt ? " · observed " + dashAge(Date.now() - wallet.observedAt) : "")));
+        (wallet.observedAt ? " · observed " + (dashWhen(wallet.observedAt) || dashAge(Date.now() - wallet.observedAt)) : "")));
       if (wallet.requiredForReadinessSol != null) funding.appendChild(dashNode("p", "dp-note",
         "Conservative no-sign readiness reserve for the reported active trade cap: " +
         dashSol(wallet.requiredForReadinessSol) + ". This is not a recommendation to fund more."));
@@ -8749,9 +8767,9 @@ async function loadWallsteDashboard({ background = false } = {}) {
     const readiness = health?.executionReadiness || null;
     heartbeatGrid.append(
       dashMetric("Last completed tick", lastTickAt ? dashAge(Date.now() - lastTickAt) : "Not reported",
-        lastTickAt ? new Date(lastTickAt).toLocaleString() : "from outbound heartbeat"),
+        lastTickAt ? dashWhen(lastTickAt) : "from outbound heartbeat"),
       dashMetric("Last feed success", lastFeedAt ? dashAge(Date.now() - lastFeedAt) : "Not reported",
-        lastFeedAt ? new Date(lastFeedAt).toLocaleString() : "from outbound heartbeat"),
+        lastFeedAt ? dashWhen(lastFeedAt) : "from outbound heartbeat"),
       dashMetric("Entry pause", health?.entriesPaused === true ? "Paused" : health ? "Not paused" : "Unknown",
         "self-reported control state"),
       dashMetric("Hard stop", health?.hardStop === true ? "ACTIVE" : health ? "Clear" : "Unknown",
@@ -8766,7 +8784,7 @@ async function loadWallsteDashboard({ background = false } = {}) {
     healthCard.appendChild(heartbeatGrid);
     const held = Array.isArray(heartbeat?.held) ? heartbeat.held : [];
     healthCard.appendChild(dashNode("p", "dp-note",
-      held.length ? "Held mints named by the local heartbeat:" : "No held mints were named by the current heartbeat."));
+      held.length ? "Held mints named by the local heartbeat:" : (heartbeat ? "No held mints were named by the current heartbeat." : "No heartbeat has been received yet.")));
     if (held.length) {
       const heldList = dashNode("div", "held-list");
       for (const position of held) {
@@ -9074,7 +9092,7 @@ async function loadWallsteDashboard({ background = false } = {}) {
       dashMetric("Active per trade", caps.maxSolPerTrade == null ? "—" : String(caps.maxSolPerTrade) + " SOL", "entry input ceiling"),
       dashMetric("Active 24h deploy", caps.rolling24hDeploySol == null ? "—" : String(caps.rolling24hDeploySol) + " SOL", "rolling entry ceiling"),
       dashMetric("Active loss brake", caps.rolling24hRealizedLossBrakeSol == null ? "—" : String(caps.rolling24hRealizedLossBrakeSol) + " SOL", "blocks later entries after realized loss"),
-      dashMetric("Open positions", String(caps.maxOpenPositions ?? "—"), "concurrent recorded maximum")
+      dashMetric("Max open positions", String(caps.maxOpenPositions ?? "—"), "concurrent recorded maximum")
     );
     capsCard.appendChild(capsGrid);
     capsCard.appendChild(dashNode("p", "boundary-note",
@@ -9104,7 +9122,8 @@ async function loadWallsteDashboard({ background = false } = {}) {
 async function loadCalloutsDashboard() {
   const el = document.getElementById("calloutsbody");
   if (!el || document.getElementById("calloutspanel")?.hidden) return;
-  dashLoading(el, "Matching callout authors to confirmed wallet activity…");
+  if (el.childElementCount === 0) dashLoading(el, "Matching callout authors to confirmed wallet activity…");
+  else el.setAttribute("aria-busy", "true");
   try {
     const { status, body } = await call_api("/api/callouts");
     el.innerHTML = "";
@@ -9146,6 +9165,7 @@ async function loadCalloutsDashboard() {
         " · unmatched chatter included: " + String(policy.unmatchedChatterIncluded === true) +
         " · coverage: " + String(coverage.succeeded ?? 0) + "/" + String(coverage.attempted ?? 0) +
         " checked" + (coverage.complete === true ? " (complete)" : " (incomplete)") +
+        (dashWhen(body.generatedAt) ? " \u00b7 as of " + dashWhen(body.generatedAt) : "") +
         " · Pump.fun verification required: " + String(policy.pumpfunVerifiedRequired === true) +
         (whaleBar ? " · whale bar " + dashMoney(whaleBar) + " matched inflow" : "") +
         ((hidden.unverified || hidden.belowWhale)
@@ -9164,6 +9184,8 @@ async function loadCalloutsDashboard() {
       const succeeded = Number(coverage.succeeded || 0);
       const failed = Number(coverage.failed || 0);
       const partial = Number(coverage.partialScans || 0);
+      const failWhy = Array.isArray(coverage.failures) && coverage.failures.length
+        ? " (" + coverage.failures.map((f) => f.count + "\u00d7 " + String(f.reason).replace(/-/g, " ")).join(", ") + ")" : "";
       const honestEmpty = attempted === 0
         ? "No Pump.fun flow candidates were available for a caller check in this pass."
         : succeeded === 0 && failed > 0
@@ -9171,13 +9193,13 @@ async function loadCalloutsDashboard() {
           : "No exact author-wallet match cleared the current-value inflow threshold in the " + succeeded +
             " successfully checked coin" + (succeeded === 1 ? "" : "s") +
             (failed || partial ? "; " + failed + " check" + (failed === 1 ? "" : "s") +
-              " failed and " + partial + " scan" + (partial === 1 ? " was" : "s were") + " partial" : "") + ".";
+              " failed and " + partial + " scan" + (partial === 1 ? " was" : "s were") + " partial" : "") + failWhy + ".";
       const hiddenNote = (hidden.unverified || hidden.belowWhale)
         ? " " + String(hidden.unverified || 0) + " unverified author" + ((hidden.unverified || 0) === 1 ? "" : "s") +
           " and " + String(hidden.belowWhale || 0) + " verified author" + ((hidden.belowWhale || 0) === 1 ? "" : "s") +
           " under the " + dashMoney(whaleBar) + " whale bar were not posted."
         : "";
-      el.appendChild(dashNode("p", "locked", honestEmpty + hiddenNote));
+      el.appendChild(dashNode("p", "locked", honestEmpty));
       return;
     }
     for (const row of matched) {
@@ -9192,17 +9214,18 @@ async function loadCalloutsDashboard() {
       head.appendChild(dashNode("span", "who", who));
       if (callout.verified === true) head.appendChild(dashNode("span", "dashbadge good", "PUMP.FUN VERIFIED"));
       head.appendChild(dashNode("span", "coin", "$" + String(coin.symbol || coin.mint?.slice(0, 6) || "?").replace(/^\$/, "")));
+      if (coin.netUsd != null) head.appendChild(dashNode("span", "coin", (coin.netUsd >= 0 ? "+" : "") + dashMoney(coin.netUsd) + " net"));
       card.appendChild(head);
       if (callout.text) card.appendChild(dashNode("p", "callout-evidence", "“" + String(callout.text).slice(0, 280) + "”"));
       const proof = dashNode("div", "callout-proof");
-      const posted = dashWhen(callout.ts) || dashWhen(row.inflows[0]?.timestamp);
+      const posted = dashWhen(callout.ts);
+      const inflowWhen = dashWhen(row.inflows[0]?.timestamp);
       proof.append(
         dashNode("span", "", dashMoney(evidence.matchedCurrentValueUsd) + " matched inflow"),
         ...(posted ? [dashNode("span", "", "posted " + posted)] : []),
         dashNode("span", "", String(evidence.qualifyingInflowCount || row.inflows.length) + " matching transaction" +
           ((evidence.qualifyingInflowCount || row.inflows.length) === 1 ? "" : "s")),
-        dashNode("span", "", "current-value threshold " + dashMoney(evidence.thresholdUsd)),
-        dashNode("span", "", String(callout.verificationLevel || "wallet-inflow-matched").replace(/-/g, " "))
+        ...(inflowWhen ? [dashNode("span", "", "inflow " + inflowWhen)] : [])
       );
       card.appendChild(proof);
       const links = dashNode("div", "dashactions");
@@ -9212,11 +9235,13 @@ async function loadCalloutsDashboard() {
         source.href = sourceUrl; source.target = "_blank"; source.rel = "noopener";
         links.appendChild(source);
       }
-      const receipt = row.inflows.find((inflow) => /^https:\/\//.test(String(inflow?.link || "")));
-      if (receipt) {
-        const chain = dashNode("a", "candidate-link", "Verify matching transaction ↗");
-        chain.href = receipt.link; chain.target = "_blank"; chain.rel = "noopener";
-        links.appendChild(chain);
+      for (const inflow of row.inflows.slice(0, 4)) {
+        const text = dashMoney(inflow.currentValueUsd) + " \u00b7 " + (dashWhen(inflow.timestamp) || "time unknown");
+        if (/^https:\/\//.test(String(inflow?.link || ""))) {
+          const chain = dashNode("a", "candidate-link", text + " \u2197");
+          chain.href = inflow.link; chain.target = "_blank"; chain.rel = "noopener";
+          links.appendChild(chain);
+        } else links.appendChild(dashNode("span", "dp-note", text));
       }
       links.appendChild(caChip(coin.mint));
       card.appendChild(links);
@@ -9255,7 +9280,7 @@ async function loadSettingsDashboard() {
     }
     const identity = room.identity || {};
     const copySettings = feedR.status === 200 ? (feedR.body?.settings || {}) : {};
-    el.append(dashLead("Settings",
+    el.append(dashLead((identity.floorName || room.floorLabel || "This floor"),
       "Identity, desk name, notifications, and this device's display. Team operations live under Team; execution filters and feed setup live under WALL-ST-E.",
       "OWNER CONTROLS", "good"));
 
@@ -9319,7 +9344,7 @@ async function loadSettingsDashboard() {
     const webhook = dashNode("input", "dp-in");
     webhook.type = "url"; webhook.value = copySettings.webhook_url || "";
     webhook.placeholder = "Discord, Telegram, or Slack webhook";
-    deskForm.append(field("Desk name", deskName), field("Exit-alert webhook · optional", webhook));
+    deskForm.append(field("Desk name", deskName), field("Alert webhook \u00b7 entry and exit \u00b7 optional", webhook));
     const deskActions = dashNode("div", "form-actions");
     const deskSave = dashNode("button", "dp-btn", "Save desk settings");
     deskSave.type = "button";
@@ -9361,7 +9386,7 @@ async function loadSettingsDashboard() {
 
     const build = document.querySelector('meta[name="cc-build"]')?.content;
     if (build) {
-      const note = dashNode("p", "dp-note", "build " + build);
+      const note = dashNode("p", "dp-note", "build " + build); note.title = "Build you are looking at \u2014 hard-refresh (\u2318\u21e7R) if it looks older than a change you expect";
       note.style.cssText = "text-align:center;opacity:.58;font-size:10px";
       el.appendChild(note);
     }
@@ -9376,7 +9401,7 @@ window.__loadDashboardDestination = (which) => {
   if (which === "overview") loadOverviewDashboard();
   else if (which === "calls") activateDashboardSubview("calls", dashboardSubview.calls);
   else if (which === "wallste") loadWallsteDashboard();
-  else if (which === "team") window.__renderTeamInto?.(document.getElementById("teamcontrolpanel"), { includeBot: false });
+  else if (which === "team") window.__renderTeamInto?.(document.getElementById("teamcontrolpanel"), { includeBot: true });
   else if (which === "callouts") loadCalloutsDashboard();
   else if (which === "activity") activateDashboardSubview("activity", dashboardSubview.activity);
   else if (which === "performance") activateDashboardSubview("performance", dashboardSubview.performance);
