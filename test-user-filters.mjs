@@ -1,15 +1,19 @@
 /**
- * THE THREE DIALS A TENANT OWNS.
+ * WHAT A TENANT OWNS, AND WHAT THE TEAM OWNS.
  *
- * Everything else in copy.js decides WHICH calls reach a floor. These decide what the
- * floor does with one, and each has an explicit AUTO mode where the desk decides
- * instead — because the honest default for someone who has never watched this run is
- * not a number they had to invent, it is "let the team choose and show me what it
- * chose". A tenant who sets nothing must get exactly the desk's own behaviour.
+ * The tenant owns two numbers: the money in their bot, and the SOL that goes into each
+ * trade. The trading team owns everything else, including which coins are worth trading
+ * at all (owner, 2026-09-03).
  *
- *   take_profit_x   0 = auto (the desk's authored target), else a hard multiple
+ * There used to be a wall of per-floor filters — launchpad, category, liquidity floor,
+ * market-cap sleeve, conviction bar — and every one of them was a way to receive
+ * nothing. The house floor's own bot sat armed for twelve hours on 2026-09-02 while
+ * each call it was sent died on one. A customer assembling a filter policy before their
+ * bot works has been handed the desk's job.
+ *
+ *   bankroll_sol    the money the bot is allowed to trade
  *   fixed_sol       0 = auto (bankroll x category x conviction), else the same size
- *   mcap_tier       micro / low / mid / any
+ *   take_profit_x   0 = auto (the desk's authored target), else a hard multiple
  */
 import db from "./src/lib/store.js";
 import { settingsFor, saveSettings, decide, MCAP_TIERS } from "./src/copy.js";
@@ -34,7 +38,7 @@ settingsFor(F);
 let s = settingsFor(F);
 ok("take profit is auto", Number(s.take_profit_x) === 0, `take_profit_x=${s.take_profit_x}`);
 ok("size is auto", Number(s.fixed_sol) === 0, `fixed_sol=${s.fixed_sol}`);
-ok("every sleeve", s.mcap_tier === "any", s.mcap_tier);
+ok("no sleeve filter stands between the team and the bot", decide(F, call({ mcap_at_call: 9_000 })).verdict === "offered");
 const autoOffer = decide(F, call());
 ok("auto sizing scales with conviction", autoOffer.verdict === "offered" && !/fixed/.test(autoOffer.reason),
   autoOffer.reason);
@@ -75,29 +79,27 @@ ok("auto is expressible", Number(settingsFor(F).fixed_sol) === 0);
 const pf = planEntry({ call: c2, cfg: { ...DEFAULTS, fixedSol: 0.02 }, state: { ...st, wins: 3, losses: 29 } });
 ok("a fixed fund does NOT override a refusal", pf.action === "skip", pf.reason);
 
-console.log("\nDIAL 3 — THE MARKET-CAP SLEEVE");
-// The sleeves are the desk's OWN five bands now (categories.js), so a tenant's "low"
-// and the desk's "low" are the same thing. They briefly disagreed, which is worse than
-// having no filter: the desk would call a coin low while the low sleeve refused it.
-saveSettings(F, { mcapTier: "micro" });
-ok("a $900k call is outside micro ($10k-$100k)",
-  decide(F, call({ mcap_at_call: 900_000 })).verdict === "skipped",
-  decide(F, call({ mcap_at_call: 900_000 })).reason);
-ok("a $50k call is inside micro", decide(F, call({ mcap_at_call: 50_000 })).verdict === "offered");
-saveSettings(F, { mcapTier: "medium" });
-ok("the medium sleeve ($500k-$1m) takes the $900k call",
-  decide(F, call({ mcap_at_call: 900_000 })).verdict === "offered");
-ok("...and refuses a $20m one", decide(F, call({ mcap_at_call: 20_000_000 })).verdict === "skipped");
+console.log("\nTHE TEAM DECIDES WHAT IS TRADED — no tenant filter can block a call");
+/* Each of these was, until 2026-09-03, a per-floor gate that could silently refuse a
+ * call the trading team had already researched, sized and published. They are stored
+ * settings still (tenants may have set them, and the columns are read elsewhere), but
+ * they no longer decide delivery. The assertion is deliberately blunt: with every one
+ * of them set to its most exclusive value, the call still arrives. */
+saveSettings(F, { mcapTier: "micro", categories: ["established"], launchpads: ["bags.fm"], minLiqUsd: 5_000_000 });
+for (const [what, over] of [
+  ["a cap far outside the stored sleeve", { mcap_at_call: 900_000 }],
+  ["a nano-cap coin",                     { mcap_at_call: 9_000 }],
+  ["a category the floor did not list",   { category: "memecoin" }],
+  ["a launchpad the floor did not list",  { launchpad: "pump.fun" }],
+  ["liquidity under the stored floor",    { liq_at_call: 12_000 }],
+  ["conviction under the old bar",        { conviction: 12 }],
+  ["an unreadable market cap",            { mcap_at_call: null }],
+]) ok(what + " is still delivered", decide(F, call(over)).verdict === "offered", decide(F, call(over)).reason);
+saveSettings(F, { mcapTier: "any", categories: null, launchpads: null, minLiqUsd: 0 });
+// The brakes that remain are the ones that are not preferences: money, and fees.
+ok("a bogus tier name still falls back to a real one",
+  (saveSettings(F, { mcapTier: "moon" }), !!MCAP_TIERS[settingsFor(F).mcap_tier]), settingsFor(F).mcap_tier);
 saveSettings(F, { mcapTier: "any" });
-ok("any takes both", decide(F, call({ mcap_at_call: 200_000 })).verdict === "offered"
-  && decide(F, call({ mcap_at_call: 20_000_000 })).verdict === "offered");
-// The same rule the screen follows: an unreadable number must not become an execution,
-// and must not silently qualify either.
-saveSettings(F, { mcapTier: "micro" });
-ok("an UNKNOWN market cap is not filtered out on a guess",
-  decide(F, call({ mcap_at_call: null })).verdict === "offered", "null cap passes the sleeve");
-ok("a bogus tier name falls back to a real one", (saveSettings(F, { mcapTier: "moon" }), !!MCAP_TIERS[settingsFor(F).mcap_tier]),
-  settingsFor(F).mcap_tier);
 
 
 /* ── THE SLEEVES MUST TILE WHAT THE DESK ACTUALLY PRODUCES ───────────────────
@@ -113,19 +115,44 @@ ok("a bogus tier name falls back to a real one", (saveSettings(F, { mcapTier: "m
   const dead = Object.entries(MCAP_TIERS).filter(([k, v]) => k !== "any" && v.lo >= ceiling);
   ok("no sleeve sits entirely above the ceiling", dead.length === 0,
     dead.length ? dead.map(([k]) => k).join(", ") + " can never receive a call" : "every sleeve is reachable");
-  const bands = ["micro", "low", "medium", "high", "very_high"];
+  const bands = ["nano", "micro", "low", "medium", "high", "very_high"];
   ok("the sleeves tile the board with no gap",
     bands.slice(0, -1).every((b, i) => MCAP_TIERS[b].hi === MCAP_TIERS[bands[i + 1]].lo),
     bands.join(" -> "));
   ok("the top sleeve ends exactly at the desk's ceiling", MCAP_TIERS.very_high.hi === ceiling,
     `very_high tops out at $${Math.round(MCAP_TIERS.very_high.hi).toLocaleString()}`);
   // A call anywhere on the board must fall in exactly one sleeve.
-  for (const mcap of [50_000, 250_000, 750_000, 5_000_000, 15_000_000]) {
+  for (const mcap of [10_000, 50_000, 250_000, 750_000, 5_000_000]) {
     const hits = Object.entries(MCAP_TIERS)
       .filter(([k, v]) => k !== "any" && mcap >= v.lo && mcap < v.hi).map(([k]) => k);
     ok(`a $${mcap.toLocaleString()} call lands in exactly one sleeve`, hits.length === 1, hits.join(",") || "NONE");
   }
 }
 
+
+/* THE HOLD WINDOWS. These are the owner's numbers, band by band, and a call carries its
+ * band's window to the executor — so a silent edit here would quietly turn a
+ * thirty-minute nano trade into an overnight hold. */
+{
+  const { CAP_BANDS, holdWindowFor } = await import("./src/categories.js");
+  const MIN = 60_000, HOUR = 60 * MIN;
+  const want = {
+    nano:      [1 * MIN,   30 * MIN],
+    micro:     [20 * MIN,  1 * HOUR],
+    low:       [1 * HOUR,  5 * HOUR],
+    medium:    [1 * HOUR,  5 * HOUR],
+    high:      [1 * HOUR,  5 * HOUR],
+    very_high: [5 * HOUR, 24 * HOUR],
+  };
+  console.log("\nHOLD WINDOWS");
+  for (const [band, [lo, hi]] of Object.entries(want))
+    ok(`${band} is held ${lo / MIN}-${hi / MIN} minutes`,
+      CAP_BANDS[band].holdMinMs === lo && CAP_BANDS[band].holdMaxMs === hi,
+      `${CAP_BANDS[band].holdMinMs / MIN}-${CAP_BANDS[band].holdMaxMs / MIN} min`);
+  ok("a $9k cap resolves to the nano window", holdWindowFor(9_000)?.holdMaxMs === 30 * MIN);
+  ok("a $5m cap resolves to the very-high window", holdWindowFor(5_000_000)?.holdMaxMs === 24 * HOUR);
+  ok("an unreadable cap has no window", holdWindowFor(null) === null && holdWindowFor(0) === null);
+  ok("a cap off the board has no window", holdWindowFor(50_000_000) === null);
+}
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

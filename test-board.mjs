@@ -19,11 +19,11 @@ const coin = (mcap, name = "Dog", sym = "DOG", score = 50) => ({
 });
 
 console.log("\nCAP BANDS — the owner's five, exactly");
-for (const [mcap, want] of [[50_000, "micro"], [250_000, "low"], [750_000, "medium"],
-                            [5_000_000, "high"], [15_000_000, "very_high"]])
+for (const [mcap, want] of [[10_000, "nano"], [50_000, "micro"], [75_000, "low"],
+                            [250_000, "medium"], [750_000, "high"], [5_000_000, "very_high"]])
   ok(`$${mcap.toLocaleString()} -> ${want}`, capBandOf(coin(mcap)) === want, capBandOf(coin(mcap)));
-ok("under $10k is off the board", capBandOf(coin(5_000)) === null, "too little coin to trade");
-ok("over $20m is off the board", capBandOf(coin(50_000_000)) === null, "somebody else's business");
+ok("under $5k is off the board", capBandOf(coin(4_000)) === null, "too little coin to trade");
+ok("over $10m is off the board", capBandOf(coin(50_000_000)) === null, "somebody else's business");
 ok("an UNREADABLE cap is never assigned a band",
   capBandOf({ pair: { marketCap: null, fdv: null } }) === null,
   "an unknown number must not be given a drawer it may not belong in");
@@ -40,18 +40,18 @@ console.log("\nTHE BOARD SPREADS PAID ATTENTION ACROSS CELLS");
 // A market where one drawer is stuffed and the others hold one coin each. The old
 // top-N would have spent every slot inside the stuffed drawer.
 const market = [
-  ...Array.from({ length: 10 }, (_, i) => coin(200_000, "Meme" + i, "M" + i, 90 - i)),  // low/memecoin
+  ...Array.from({ length: 10 }, (_, i) => coin(200_000, "Meme" + i, "M" + i, 90 - i)),  // medium/memecoin
   coin(50_000, "Micro Dog", "MD", 40),                                                  // micro/memecoin
-  coin(750_000, "Mid Quest Game", "MQ", 35),                                            // medium/web3_gaming
-  coin(5_000_000, "Big Protocol", "BP", 30),                                            // high/utility
+  coin(750_000, "Mid Quest Game", "MQ", 35),                                            // high/web3_gaming
+  coin(5_000_000, "Big Protocol", "BP", 30),                                            // very_high/utility
 ];
 const board = buildBoard(market, { perCell: 5 });
 ok("four cells are filled", board.filled === 4, `${board.filled} of ${board.possible} possible`);
 ok("the stuffed cell is capped at perCell",
-  board.cells.find((c) => c.key === "low/memecoin").coins.length === 5,
+  board.cells.find((c) => c.key === "medium/memecoin").coins.length === 5,
   "10 seen, 5 shortlisted");
 ok("...and still records how many it SAW",
-  board.cells.find((c) => c.key === "low/memecoin").total === 10);
+  board.cells.find((c) => c.key === "medium/memecoin").total === 10);
 
 const picked = selectAcrossBoard(board, 4);
 const cells = new Set(picked.map((p) => p.cellKey));

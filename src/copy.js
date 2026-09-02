@@ -151,6 +151,12 @@ migrateData("2026-08-31-hq-memecoin-appetite", () => {
  * would call a coin "low" while a tenant's "low" sleeve refused it. One vocabulary,
  * defined once, or the filter a tenant picks does not mean what the desk means by it.
  */
+/* THE AUTO SIZE, for a tenant who states funds but no per-trade number: a percentage of
+ * their own bankroll, scaled by the category's risk and the call's conviction. One desk
+ * number, because sizing policy is the team's job too — the tenant's lever is the
+ * explicit per-trade SOL amount, which overrides this entirely. */
+export const AUTO_RISK_PCT_PER_TRADE = Number(process.env.DESK_AUTO_RISK_PCT || 3);
+
 export const MCAP_TIERS = {
   ...Object.fromEntries(Object.entries(CAP_BANDS).map(([k, b]) => [k, { lo: b.lo, hi: b.hi, note: b.note }])),
   any: { lo: 0, hi: Infinity, note: "every band the desk calls" },
@@ -164,6 +170,23 @@ export const MCAP_TIERS = {
    the floor is in the starved state, and only for the house floor. Anything
    set afterwards in the Team tab wins. */
 const HOUSE_SEED = { floor: 50, bankrollSol: 0.6, fixedSol: 0.2 };
+
+/* ONE-TIME CORRECTION FOR THE HOUSE FLOOR (2026-09-03). Floor 50 sat on the `micro`
+   sleeve, so it refused every call above $100k — and after the sleeves were rebuilt
+   around the owner's six bands, `micro` means $20k-$60k, which would have refused
+   almost everything. The owner wants all six bands traded, so the house floor is put
+   on `any` once. It moves only a floor still holding the pre-rebuild default; a
+   sleeve chosen in the Team tab afterwards wins. */
+function widenHouseFloorSleeve() {
+  try {
+    const cur = db.prepare("SELECT mcap_tier FROM copy_settings WHERE floor_no=?").get(HOUSE_SEED.floor);
+    if (!cur || cur.mcap_tier !== "micro") return;
+    db.prepare("UPDATE copy_settings SET mcap_tier='any', updated_at=? WHERE floor_no=? AND mcap_tier='micro'")
+      .run(Date.now(), HOUSE_SEED.floor);
+    console.log(`[copy] house floor ${HOUSE_SEED.floor} was on the micro sleeve and refused every larger call; widened to every sleeve`);
+  } catch (e) { console.error("[copy] house sleeve widen skipped:", e.message); }
+}
+
 function seedStarvedHouseFloor() {
   try {
     const cur = db.prepare("SELECT bankroll_sol, fixed_sol FROM copy_settings WHERE floor_no=?").get(HOUSE_SEED.floor);
@@ -177,6 +200,7 @@ function seedStarvedHouseFloor() {
   } catch (e) { console.error("[copy] house seed skipped:", e.message); }
 }
 seedStarvedHouseFloor();
+widenHouseFloorSleeve();
 
 export function settingsFor(floorNo) {
   let s = db.prepare("SELECT * FROM copy_settings WHERE floor_no=?").get(floorNo);
@@ -290,9 +314,27 @@ const openCount = (floorNo) => db.prepare(`
   SELECT COUNT(*) n FROM deliveries d JOIN calls c ON c.id=d.call_id
   WHERE d.floor_no=? AND d.taken=1 AND c.status='live'`).get(floorNo).n;
 
+/* HOW MANY POSITIONS A BOT MAY HOLD AT ONCE. Set by the desk, not the tenant: it is a
+ * property of how this desk trades — several small clips running at once, each on its
+ * own band's clock — and not a taste the customer should have to have. */
+export const MAX_OPEN_POSITIONS = Number(process.env.DESK_MAX_OPEN_POSITIONS || 8);
+
 /**
- * What should THIS floor do about THIS call? Pure function of the floor's own settings —
- * which is what makes fifty floors genuinely differ rather than echo one another.
+ * What should THIS floor do about THIS call?
+ *
+ * THE TENANT CHOOSES TWO NUMBERS: how much money their bot has, and how much SOL goes
+ * into each trade. Nothing else (owner, 2026-09-03). Every other question — which
+ * launchpad, which category, which market-cap sleeve, what liquidity is enough, what
+ * conviction clears the bar — is the trading team's job, and the team answers it once,
+ * upstream, by deciding what to publish at all. A customer who has to assemble a
+ * filter policy before their bot works has been handed the desk's job; and every one
+ * of those filters was, in practice, a way to receive nothing. On 2026-09-02 the house
+ * floor's own bot sat armed for twelve hours while every call it was sent died on one
+ * of them.
+ *
+ * So what remains here is only what is genuinely per-floor: whether the rent is paid,
+ * how much of the tenant's own money to put in, and whether that money is enough to
+ * clear Solana's fees.
  */
 export function decide(floorNo, call) {
   const s = settingsFor(floorNo);
@@ -304,50 +346,16 @@ export function decide(floorNo, call) {
     return { verdict: "skipped", reason: "rent is overdue — top up $CLAUDECO to resume new calls" };
   const risk = CATEGORY_RISK[call.category] ?? CATEGORY_RISK.unclear;
 
-  // Platform first: a floor that only trades pump.fun should say so, rather than
-  // reporting a category miss on a coin it was never going to look at.
-  const pad = call.launchpad || "other";
-  if (!s.launchpads.includes(pad))
-    return { verdict: "skipped", reason: `this floor does not trade ${pad}` };
-
-  if (!s.categories.includes(call.category))
-    return { verdict: "skipped", reason: `${call.category} is outside this floor's categories` };
-
-  // The floor's liquidity floor. Only bites when we KNOW the call-time book and it
-  // is genuinely below the set floor — an unreadable liquidity (null) is never
-  // treated as zero, so a data gap can't silently gate out every call.
-  if (s.min_liq_usd && call.liq_at_call != null && call.liq_at_call < s.min_liq_usd)
-    return { verdict: "skipped",
-      reason: `liquidity $${Math.round(call.liq_at_call).toLocaleString()} is under this floor's floor of $${Math.round(s.min_liq_usd).toLocaleString()}` };
-
-  /* THE SLEEVE THIS FLOOR ASKED FOR. An unknown market cap is never filtered out —
-   * the same rule the screen follows for unreadable numbers, because "we could not
-   * measure it" must not quietly become "it qualified". */
-  const tier = MCAP_TIERS[s.mcap_tier] ?? MCAP_TIERS.any;
-  const mcap = call.mcap_at_call;
-  if (s.mcap_tier !== "any" && mcap != null && (mcap < tier.lo || mcap >= tier.hi))
-    return { verdict: "skipped",
-      reason: `$${Math.round(mcap).toLocaleString()} cap is outside this floor's ${s.mcap_tier} sleeve (${tier.note})` };
-
-  /* A published house call has already cleared the desk's mandate and safety gates.
-   * Applying the HQ copy preset here was a second, contradictory conviction vote:
-   * the house could publish a 30-conviction mandate pick and then refuse to deliver
-   * it to its own executor because the aggressive copy bar is 40. Floor 50 bypasses
-   * only this tenant preference; platform, category, liquidity, sleeve, sizing and
-   * open-book brakes above and below remain identical. Tenant floors keep their bar. */
-  if (floorNo !== 50 && call.conviction != null && call.conviction < s.preset.minConviction)
-    return { verdict: "skipped", reason: `conviction ${Math.round(call.conviction)} is under this floor's bar of ${s.preset.minConviction}` };
-
   const open = openCount(floorNo);
-  if (open >= s.preset.maxOpen)
-    return { verdict: "skipped", reason: `already holding ${open} of a maximum ${s.preset.maxOpen}` };
+  if (open >= MAX_OPEN_POSITIONS)
+    return { verdict: "skipped", reason: `already holding ${open} of a maximum ${MAX_OPEN_POSITIONS}` };
 
   /* SIZE. Two ways, and the tenant picks: a FIXED fund — the same SOL on every trade,
    * which makes a young record legible because every outcome is comparable — or auto,
    * where the desk sizes from the floor's bankroll, the category's risk and the call's
    * own conviction. Fixed overrides how MUCH; it never overrides the refusals above. */
   const convScale = call.conviction != null ? Math.min(1, Math.max(0.4, call.conviction / 100)) : 0.6;
-  const autoSize = s.bankroll_sol * (s.preset.riskPctPerTrade / 100) * risk.sizeMultiplier * convScale;
+  const autoSize = s.bankroll_sol * (AUTO_RISK_PCT_PER_TRADE / 100) * risk.sizeMultiplier * convScale;
   const fixed = Number(s.fixed_sol) > 0 ? Number(s.fixed_sol) : null;
   // NULL is a legacy call with no portable desk cap. Zero is an explicit refusal
   // and must stay zero all the way downstream; treating both as falsy would revive
@@ -397,7 +405,7 @@ export function decide(floorNo, call) {
      * percentage, so a floor with fixed_sol = 0.2 was refused with the advice
      * "...or set a fixed size" — the house floor sat on that contradiction for a day
      * while an armed bot polled an empty feed. */
-    const perTradeBudget = fixed != null ? fixed : s.bankroll_sol * (s.preset.riskPctPerTrade / 100);
+    const perTradeBudget = fixed != null ? fixed : s.bankroll_sol * (AUTO_RISK_PCT_PER_TRADE / 100);
     if (MIN_EXECUTABLE_SOL <= perTradeBudget) {
       sizeSol = MIN_EXECUTABLE_SOL;
       liftedForFees = true;
@@ -410,8 +418,8 @@ export function decide(floorNo, call) {
   if (sizeSol < 0.001) return { verdict: "skipped", reason: "the sized position rounds to nothing on this bankroll" };
 
   const baseHow = fixed
-    ? `fixed ${fixed} SOL a trade`
-    : `${s.appetite} · ${risk.sizeMultiplier}x for ${call.category} · conviction ${Math.round(call.conviction ?? 0)}`;
+    ? `${fixed} SOL a trade, the size you set`
+    : `auto · ${risk.sizeMultiplier}x for ${call.category} · conviction ${Math.round(call.conviction ?? 0)}`;
   const how = fixed == null && Number.isFinite(teamCapSol) && teamCapSol < uncapped
     ? `${baseHow} · capped to the team's ${(deskRatio * 100).toFixed(3)}% book allocation`
     : baseHow;

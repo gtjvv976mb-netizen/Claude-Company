@@ -187,7 +187,7 @@ observe([
 ]);
 const rows = raw.prepare("SELECT mint, band, coin_type, cell_key FROM funnel ORDER BY mint").all();
 ok("a coin observed with NO cell attached still lands in the right band",
-  rows[0].band === "low" && rows[1].band === "micro",
+  rows[0].band === "medium" && rows[1].band === "micro",
   `$250k -> ${rows[0].band}, $40k -> ${rows[1].band}`);
 ok("...and is typed from what it says it is",
   rows[0].coin_type === "memecoin" && rows[1].coin_type === "web3_gaming",

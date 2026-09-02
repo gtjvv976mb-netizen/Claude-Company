@@ -78,7 +78,10 @@ minLiquidityUsd: num("DESK_MIN_LIQUIDITY_USD", 12000),
 /* The board runs $10k to $20m. Below $10k there is not enough coin to trade and
      * the pool is one wallet; above $20m is somebody else's business. */
     minMarketCapUsd: num("DESK_MIN_MCAP_USD", 10_000),
-    maxMarketCapUsd: num("DESK_MAX_MCAP_USD", 20_000_000),
+    /* $10m, matching the top of the very-high sleeve (categories.js). The two numbers
+     * are one taxonomy: a ceiling above the last sleeve creates calls no floor can
+     * receive, which is the exact failure the sleeve test was written to catch. */
+    maxMarketCapUsd: num("DESK_MAX_MCAP_USD", 10_000_000),
   },
 
   // Slippage the desk refuses to accept on a round trip at target size.

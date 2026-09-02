@@ -59,18 +59,21 @@ const call = openCall({
 });
 ok("a call was published", !!call, `id=${call?.id}`);
 
+/* A TENANT FLOOR AND THE HOUSE FLOOR NOW BEHAVE IDENTICALLY. The conviction bar and the
+   liquidity gate were tenant preferences that could refuse a call the team had already
+   researched and published; the team decides what is traded, so both are gone and the
+   only per-floor question left is size (owner, 2026-09-03). */
 const tenantFloor = 49;
 saveSettings(tenantFloor, { appetite: "aggressive" });
 const tenantDecision = decide(tenantFloor, call);
-ok("an aggressive tenant still enforces its conviction threshold",
-  tenantDecision.verdict === "skipped" && /conviction 30.*bar of 40/.test(tenantDecision.reason),
+ok("a tenant floor receives the team call the house floor received",
+  tenantDecision.verdict === "offered",
   `${tenantDecision.verdict} — ${tenantDecision.reason}`);
 
-// The exception is not a blanket HQ override: a configured liquidity gate still wins.
 saveSettings(HQ_FLOOR, { minLiqUsd: 100_000 });
 const hqLiquidityDecision = decide(HQ_FLOOR, call);
-ok("the HQ exception bypasses only conviction, not its other copy gates",
-  hqLiquidityDecision.verdict === "skipped" && /liquidity/.test(hqLiquidityDecision.reason),
+ok("a stored liquidity preference no longer refuses a published call",
+  hqLiquidityDecision.verdict === "offered",
   `${hqLiquidityDecision.verdict} — ${hqLiquidityDecision.reason}`);
 saveSettings(HQ_FLOOR, { minLiqUsd: null });
 
