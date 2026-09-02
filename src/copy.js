@@ -376,9 +376,13 @@ export function decide(floorNo, call) {
   let sizeSol = Number(raw.toFixed(4));
   let liftedForFees = false;
   if (sizeSol > 0 && sizeSol < MIN_EXECUTABLE_SOL) {
-    // The lift is bounded by what the appetite already permits per trade, so raising
-    // a size to make it executable can never exceed the risk the tenant chose.
-    const perTradeBudget = s.bankroll_sol * (s.preset.riskPctPerTrade / 100);
+    /* The lift is bounded by the risk the tenant actually chose. An EXPLICIT fixed
+     * size is that choice, stated in SOL; the appetite percentage is the AUTO rule
+     * for tenants who did not state one. This branch used to read only the
+     * percentage, so a floor with fixed_sol = 0.2 was refused with the advice
+     * "...or set a fixed size" — the house floor sat on that contradiction for a day
+     * while an armed bot polled an empty feed. */
+    const perTradeBudget = fixed != null ? fixed : s.bankroll_sol * (s.preset.riskPctPerTrade / 100);
     if (MIN_EXECUTABLE_SOL <= perTradeBudget) {
       sizeSol = MIN_EXECUTABLE_SOL;
       liftedForFees = true;

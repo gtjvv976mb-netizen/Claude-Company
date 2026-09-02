@@ -50,6 +50,20 @@ ok("a bankroll too small to trade is told so, not handed an impossible trade",
   refused.verdict === "skipped" && /network fees eat the trade/.test(refused.reason),
   refused.reason);
 
+console.log("\nAN EXPLICIT FIXED SIZE IS THE TENANT'S CHOSEN RISK");
+// Floor 50's real shape: a small declared bankroll (per-trade budget under 0.02 SOL at the
+// appetite percentage) but fixed_sol = 0.2 — the owner stated a size in SOL. The
+// refusal branch read only the percentage and told them to "set a fixed size".
+db.prepare("UPDATE copy_settings SET bankroll_sol=0.5, appetite='aggressive', fixed_sol=0.2 WHERE floor_no=?").run(FLOOR);
+const fixedFloor = copy.decide(FLOOR, tinyCall);
+ok("a floor with a fixed size is offered the executable minimum",
+  fixedFloor.verdict === "offered" && fixedFloor.sizeSol >= 0.02,
+  `${fixedFloor.verdict} ${fixedFloor.sizeSol ?? ""} — ${(fixedFloor.reason || "").slice(0, 90)}`);
+db.prepare("UPDATE copy_settings SET bankroll_sol=0.5, appetite='aggressive', fixed_sol=0 WHERE floor_no=?").run(FLOOR);
+const noFixed = copy.decide(FLOOR, tinyCall);
+ok("...and without one, the same tiny bankroll is still refused honestly",
+  noFixed.verdict === "skipped" && /network fees eat the trade/.test(noFixed.reason), noFixed.reason);
+
 console.log("\nA NORMAL SIZE IS UNTOUCHED");
 db.prepare("UPDATE copy_settings SET bankroll_sol=50, appetite='aggressive' WHERE floor_no=?").run(FLOOR);
 const normal = copy.decide(FLOOR, { ...tinyCall, desk_size_usd: 200, desk_equity_usd: 10000 });
