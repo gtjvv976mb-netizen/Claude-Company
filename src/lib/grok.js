@@ -157,7 +157,15 @@ export async function grokXRead({ symbol, mint, hook = "" }) {
   const r = await xai("/responses", {
     model: GROK_MODEL,
     max_output_tokens: 8000,
-    max_turns: 5,
+    /* TURNS ARE THE BILL. Measured on the live desk over 24 hours: 298 billed turns
+     * across ~111 workups — 2.7 per read — and this seat alone was $55.85 of a $138.89
+     * day, 40% of everything the desk spent. Each turn re-sends the accumulated
+     * context, which is why the seat's token shape is "reading" rather than "thinking".
+     * Its questions are bounded and about ONE account — how old, how many followers,
+     * what did they launch before, are they paying for reach — and those are answered
+     * in the first search or they are not in public at all. Two turns and twelve
+     * searches keep the question and drop the wandering. */
+    max_turns: Number(process.env.DESK_GROK_MAX_TURNS || 2),
     tools: [{ type: "x_search", from_date: from }],
     input: [{
       role: "user",
@@ -248,7 +256,8 @@ export async function grokXRead({ symbol, mint, hook = "" }) {
         `Say null rather than guessing. An invented follower count or an imagined prior ` +
         `rug is worse than admitting you could not find the account.`,
     }],
-  }, 120000, { seat: "XRead", maxTokens: 8000, maxSearches: 50, minSearches: 1 });
+  }, 120000, { seat: "XRead", maxTokens: 8000,
+    maxSearches: Number(process.env.DESK_GROK_MAX_SEARCHES || 12), minSearches: 1 });
   if (!r.ok) return r;
   const obj = parseLoose(responseText(r.data));
   if (!obj) return { ok: false, error: "x-read returned no parseable JSON" };
@@ -285,7 +294,9 @@ export async function grokTrendScan({ limit = 6 } = {}) {
   const r = await xai("/responses", {
     model: GROK_MODEL,
     max_output_tokens: 6000,
-    max_turns: 5,
+    // The same reasoning as the X read above: a trend either shows in the first passes
+    // or it is not a trend yet. This lane runs every twelve minutes on its own clock.
+    max_turns: Number(process.env.DESK_GROK_MAX_TURNS || 2),
     tools: [{ type: "x_search", from_date: from }],
     input: [{
       role: "user",
@@ -319,7 +330,8 @@ export async function grokTrendScan({ limit = 6 } = {}) {
         `An empty list is a valid and useful answer. Do not invent a trend to fill it — ` +
         `a fabricated theme sends the desk hunting coins that do not exist.`,
     }],
-  }, 120000, { seat: "TrendScan", maxTokens: 6000, maxSearches: 50, minSearches: 1 });
+  }, 120000, { seat: "TrendScan", maxTokens: 6000,
+    maxSearches: Number(process.env.DESK_GROK_MAX_SEARCHES || 12), minSearches: 1 });
   if (!r.ok) return r;
   const obj = parseLoose(responseText(r.data));
   const themes = Array.isArray(obj?.themes) ? obj.themes : [];

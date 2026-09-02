@@ -106,14 +106,36 @@ catch (error) { floorCallBlocked = error instanceof BudgetExhausted; }
 ok("but its next provider call cannot cross the metered ceiling", floorCallBlocked);
 
 setSpend(0);
+/* A WEB SEAT STILL RESERVES FOR CONTEXT IT CANNOT SEE — search results are injected
+ * after the request leaves this process, so payload bytes cannot account for them. What
+ * changed on 2026-09-03 is the SIZE of that ceiling, not its purpose. It used to be a
+ * complete model context, a million tokens and $20.82, for any call that merely enabled
+ * a tool — against a measured real cost of $0.18 for that same call. On a $200 day a
+ * handful of concurrent seats exhausted the reservation pool and the desk began refusing
+ * work it had the money for, reporting it as "fewer than three analysts returned": a
+ * billing failure wearing a research verdict, 2,532 times in seven days. The ceiling now
+ * scales with the number of searches the call is allowed to make. */
+const noWeb = reserveProviderBudget({ provider: "anthropic", maxTokens: 16_000,
+  maxSearches: 0, payload: "small web fixture", capUsd: 1e9 });
 const webReservation = reserveProviderBudget({ provider: "anthropic", maxTokens: 16_000,
   maxSearches: 2, payload: "small web fixture", capUsd: 25 });
 ok("a web seat reserves provider-generated search context before launch",
-  webReservation.usd >= 20.8, `$${webReservation.usd.toFixed(2)} reserved`);
+  webReservation.usd > noWeb.usd, `$${webReservation.usd.toFixed(2)} vs $${noWeb.usd.toFixed(2)} without tools`);
+const webFour = reserveProviderBudget({ provider: "anthropic", maxTokens: 16_000,
+  maxSearches: 4, payload: "small web fixture", capUsd: 1e9 });
+ok("...and reserves more when it may search more",
+  webFour.usd > webReservation.usd, `$${webFour.usd.toFixed(2)} for four vs $${webReservation.usd.toFixed(2)} for two`);
+ok("...but no longer reserves a whole context for a two-search call",
+  webReservation.usd < 5, `$${webReservation.usd.toFixed(2)} — it was $20.82`);
+ok("...while still standing well clear of what such a call actually costs",
+  webReservation.usd > 1, `$${webReservation.usd.toFixed(2)} against a measured $0.18`);
+noWeb.release(); webFour.release();
 let parallelWebBlocked = false;
 try {
-  reserveProviderBudget({ provider: "anthropic", maxTokens: 16_000,
-    maxSearches: 2, payload: "second web fixture", capUsd: 25 });
+  // Sized to the new ceiling: two web seats must still not both spend one seat's room.
+  for (let i = 0; i < 12; i++)
+    reserveProviderBudget({ provider: "anthropic", maxTokens: 16_000,
+      maxSearches: 2, payload: "second web fixture", capUsd: 25 });
 } catch (error) { parallelWebBlocked = error instanceof BudgetExhausted; }
 ok("parallel web seats cannot both consume the same unmetered search headroom", parallelWebBlocked);
 webReservation.release();

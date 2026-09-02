@@ -190,10 +190,10 @@ const PROVIDER_RESERVATION_PRICE = {
   // rate. This checkout only requests 5-minute cache entries, but reservations
   // are a ceiling, not an estimate.
   anthropic: { in: 20, out: 50, search: 0.01, inputOverhead: 4096,
-    serverToolContextTokens: 1_000_000 },
+    serverToolContextTokens: 1_000_000, perSearchContextTokens: 40_000 },
   // Grok 4.6 doubles token rates above its long-context threshold.
   xai: { in: 4, out: 12, search: 0.005, inputOverhead: 2048,
-    serverToolContextTokens: 500_000 },
+    serverToolContextTokens: 500_000, perSearchContextTokens: 40_000 },
 };
 let reservedProviderUsd = 0;
 let unpersistedProviderUsd = 0;
@@ -220,11 +220,23 @@ export function reserveProviderBudget({ provider = "anthropic", maxTokens = 1600
   // One token can never contain less than one source byte, so bytes are a safe upper
   // bound on input tokens; fixed overhead covers request/tool framing not in payload.
   const requestInputCeiling = Buffer.byteLength(serialized || "", "utf8") + price.inputOverhead;
-  // Server-side search results are injected after the request leaves this process, so
-  // payload bytes cannot reserve them. When tools are enabled, reserve a complete
-  // model context at the provider's highest applicable input/cache-write rate.
-  const inputTokenCeiling = Math.max(requestInputCeiling,
-    maxSearches > 0 ? price.serverToolContextTokens : 0);
+  /* Server-side search results are injected after the request leaves this process, so
+   * payload bytes cannot reserve them. This used to reserve a COMPLETE model context —
+   * a million tokens, $20.00 — for any call that enabled a tool, whatever it had asked
+   * the tool to do. Measured: the narrative seat reserved $20.82 against a real cost of
+   * $0.18, a hundred-fold, and on a $200 day a handful of concurrent seats could
+   * exhaust the reservation pool and start refusing work the desk had the money for.
+   * Those refusals surfaced as "fewer than three analysts returned" — a billing failure
+   * wearing a research verdict, 2,532 times in seven days.
+   *
+   * A ceiling should be generous, not arbitrary. Each search a call is ALLOWED to make
+   * can inject a bounded amount of context, so the reservation scales with the number
+   * requested and is still capped by the full-context figure for anything unbounded. */
+  const toolContextCeiling = maxSearches > 0
+    ? Math.min(price.serverToolContextTokens,
+      Math.max(price.perSearchContextTokens, maxSearches * price.perSearchContextTokens))
+    : 0;
+  const inputTokenCeiling = Math.max(requestInputCeiling, toolContextCeiling);
   const outputTokenCeiling = Math.max(1, Math.min(100_000, Number(maxTokens) || 16000));
   const searchCeiling = Math.max(0, Math.min(10_000, Number(maxSearches) || 0));
   const usd = inputTokenCeiling / 1e6 * price.in +
