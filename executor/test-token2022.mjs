@@ -2,6 +2,9 @@
 // list cannot tax, block, redirect, freeze, pause or re-denominate a transfer, and both
 // RPC providers return byte-identical mint data. Everything else fails closed.
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
+const here = fileURLToPath(new URL(".", import.meta.url));
 import { Keypair, PublicKey } from "@solana/web3.js";
 import {
   ALLOWED_MINT_EXTENSIONS, EXTENSION_NAMES, MINT_CONSENSUS_FIELDS, TOKEN_2022_PROGRAM, TOKEN_PROGRAM,
@@ -131,13 +134,29 @@ await ok("malformed extension layouts fail closed", async () => {
   assert.deepEqual(parseMintExtensions(baseMint()), []);
 });
 
-await ok("CC_TOKEN_2022=0 restores the classic-only executor", async () => {
+await ok("CC_TOKEN_2022=0 is an entry switch and never blocks reading a held mint", async () => {
   assert.equal(token2022Enabled({}), true);
   assert.equal(token2022Enabled({ CC_TOKEN_2022: "1" }), true);
   assert.equal(token2022Enabled({ CC_TOKEN_2022: "0" }), false);
+  // The audit itself must stay readable whatever the switch says: refusing to parse a
+  // mint the wallet already holds would strand that position's balance check and stop.
+  const previous = process.env.CC_TOKEN_2022;
+  process.env.CC_TOKEN_2022 = "0";
+  try {
+    assert.equal(auditMintAccount(token2022Mint(), MINT).program, TOKEN_2022_PROGRAM);
+    assert.equal(await mintTokenProgram(connection(token2022Mint()), MINT), TOKEN_2022_PROGRAM);
+    assert.equal(await independentMintProgram(connection(token2022Mint()),
+      connection(token2022Mint()), MINT), TOKEN_2022_PROGRAM);
+  } finally {
+    if (previous === undefined) delete process.env.CC_TOKEN_2022; else process.env.CC_TOKEN_2022 = previous;
+  }
+  // A caller that genuinely wants classic-only still gets it.
   assert.throws(() => auditMintAccount(token2022Mint(), MINT, { allowToken2022: false }),
-    /uses Token-2022 and CC_TOKEN_2022=0 keeps the executor classic-only/);
+    /uses Token-2022 and this caller accepts classic SPL Token only/);
   assert.equal(auditMintAccount(classicMint(), MINT, { allowToken2022: false }).program, TOKEN_PROGRAM);
+  // The switch is enforced on the poller's entry path, against the audited program.
+  const poller = fs.readFileSync(here + "poller.mjs", "utf8");
+  assert.match(poller, /if \(!token2022Enabled\(\) && \(await mintProgramFor\(ev\.mint\)\) === TOKEN_2022_PROGRAM\)/);
 });
 
 await ok("two RPC views must agree byte-for-byte before a Token-2022 entry is priced", async () => {
@@ -146,7 +165,7 @@ await ok("two RPC views must agree byte-for-byte before a Token-2022 entry is pr
   assert.equal(await independentMintProgram(connection(token2022Mint()), connection(token2022Mint()), MINT), TOKEN_2022_PROGRAM);
   assert.equal(await independentMintProgram(connection(classicMint()), connection(classicMint()), MINT), TOKEN_PROGRAM);
   const altered = token2022Mint();
-  altered.data[altered.data.length - 1] ^= 1; // one byte of TokenMetadata differs
+  altered.data[170] ^= 1; // one byte inside MetadataPointer's value
   await assert.rejects(() => independentClassicMintDecimals(connection(token2022Mint()), connection(altered), MINT),
     /disagree on dataHash/);
   await assert.rejects(() => independentClassicMintDecimals(
@@ -157,6 +176,36 @@ await ok("two RPC views must agree byte-for-byte before a Token-2022 entry is pr
   await assert.rejects(() => independentClassicMintDecimals(
     connection(token2022Mint()), connection(token2022Mint({}, [...PUMP_STYLE, [1, Buffer.alloc(40)]])), MINT),
   /rejected an RPC view: .*TransferFeeConfig is refused/);
+});
+
+await ok("the digest ignores the two things honest providers legitimately disagree about", async () => {
+  /* A bonding-curve mint's supply moves every few seconds and metadata can be edited at
+   * any time. Hashing either makes two healthy RPC reads one slot apart refuse the call,
+   * which on the entry path throws the trade away. Neither can change a safety decision;
+   * everything that can, still must match. */
+  const movedSupply = token2022Mint();
+  movedSupply.data.writeBigUInt64LE(999_999_999_999n, 36);
+  assert.notEqual(movedSupply.data.compare(token2022Mint().data), 0, "the fixture must actually differ");
+  assert.equal(await independentClassicMintDecimals(connection(token2022Mint()), connection(movedSupply), MINT), 6);
+
+  const editedMetadata = token2022Mint({}, [[18, Buffer.alloc(64, 1)], [19, Buffer.alloc(187, 9)]]);
+  assert.equal(await independentClassicMintDecimals(connection(token2022Mint()), connection(editedMetadata), MINT), 6);
+  // A metadata entry of a DIFFERENT length is still a different account length, which is
+  // compared on its own, so a renamed token is refused for that tick and retried later.
+  await assert.rejects(() => independentClassicMintDecimals(connection(token2022Mint()),
+    connection(token2022Mint({}, [[18, Buffer.alloc(64, 1)], [19, Buffer.alloc(120, 2)]])), MINT),
+  /disagree on dataLength/);
+
+  // Every other extension's bytes are still covered, including a value we act on.
+  const frozenDefault = token2022Mint({}, [...PUMP_STYLE, [6, Buffer.from([1])]]);
+  const frozenAltered = token2022Mint({}, [...PUMP_STYLE, [6, Buffer.from([1])]]);
+  frozenAltered.data[frozenAltered.data.length - 1] = 1;
+  assert.equal(auditMintAccount(frozenDefault, MINT).dataHash, auditMintAccount(frozenAltered, MINT).dataHash);
+  const classicMoved = classicMint();
+  classicMoved.data.writeBigUInt64LE(7n, 36);
+  assert.equal(auditMintAccount(classicMoved, MINT).dataHash, auditMintAccount(classicMint(), MINT).dataHash);
+  const classicReDecimalled = classicMint({ decimals: 9 });
+  assert.notEqual(auditMintAccount(classicReDecimalled, MINT).dataHash, auditMintAccount(classicMint(), MINT).dataHash);
 });
 
 await ok("mintTokenProgram answers from the same audit", async () => {
@@ -177,6 +226,12 @@ await ok("wallet custody checks work for a Token-2022 token account (ImmutableOw
     return { owner: new PublicKey(program), data };
   };
   assert.equal(walletTokenAmount(account(TOKEN_2022_PROGRAM), { program: TOKEN_2022_PROGRAM, mint: MINT, wallet: WALLET }), 5_000_000n);
+  // A token account opened directly under Token-2022 carries no extensions and is exactly
+  // 165 bytes. If the capability scan cannot classify it, it cannot tell that such an
+  // account is the wallet's own, and a route could make it writable unnoticed.
+  const bare = account(TOKEN_2022_PROGRAM);
+  bare.data = bare.data.subarray(0, 165);
+  assert.equal(walletTokenAmount(bare, { program: TOKEN_2022_PROGRAM, mint: MINT, wallet: WALLET }), 5_000_000n);
   assert.equal(walletTokenAmount(account(TOKEN_PROGRAM), { program: TOKEN_PROGRAM, mint: MINT, wallet: WALLET }), 5_000_000n);
   assert.throws(() => walletTokenAmount(account(TOKEN_2022_PROGRAM), { program: TOKEN_PROGRAM, mint: MINT, wallet: WALLET }),
     /not the wallet's expected token account/);

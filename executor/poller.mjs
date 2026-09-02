@@ -17,7 +17,9 @@ import {
 import {
   JupiterV2Executor, MAX_GROSS_RENT_LAMPORTS, WSOL, associatedTokenAddress,
   walletTokenAmount, independentClassicMintDecimals, independentMintProgram, mintTokenProgram,
+  TOKEN_2022_PROGRAM,
 } from "./jupiter.mjs";
+import { token2022Enabled } from "./token2022.mjs";
 import {
   RpcBalanceUnavailableError, verifyTrackedBalanceWithFailover,
 } from "./balance-verification.mjs";
@@ -473,21 +475,26 @@ const jupiter = JUPITER_API_KEY ? new JupiterV2Executor({
 }) : null;
 
 const openList = () => Object.values(S.positions);
-// A mint's token program never changes after initialization, so one audited answer
-// (both RPC providers agreeing) is cached for the life of the process.
+// A mint's token program never changes after initialization, so one audited answer is
+// cached for the life of the process. Both providers are asked first; if one is down,
+// the lane that IS answering still audits the mint itself. A balance read must survive
+// a single-provider outage — that failover is the whole point of the second lane — and
+// entry pricing keeps its strict two-provider requirement elsewhere.
 const MINT_PROGRAM_CACHE = new Map();
-async function mintProgramFor(mint) {
+async function mintProgramFor(mint, connection = conn) {
   if (!MINT_PROGRAM_CACHE.has(mint)) {
-    const program = secondaryConn
-      ? await independentMintProgram(conn, secondaryConn, mint)
-      : await mintTokenProgram(conn, mint);
+    let program;
+    if (secondaryConn) {
+      try { program = await independentMintProgram(conn, secondaryConn, mint); }
+      catch { program = await mintTokenProgram(connection, mint); }
+    } else program = await mintTokenProgram(connection, mint);
     MINT_PROGRAM_CACHE.set(mint, program);
   }
   return MINT_PROGRAM_CACHE.get(mint);
 }
 async function heldRaw(mint, connection = conn) {
   let program, account;
-  try { program = await mintProgramFor(mint); }
+  try { program = await mintProgramFor(mint, connection); }
   catch (error) { throw new RpcBalanceUnavailableError(error); }
   const ata = associatedTokenAddress(WALLET, mint, program);
   try { account = await connection.getAccountInfo(new PublicKey(ata), "confirmed"); }
@@ -910,6 +917,13 @@ async function onEntry(ev) {
   }
   if (!jupiter) throw new Error("Jupiter client is unavailable");
 
+  /* CC_TOKEN_2022=0 is the rollback switch, and it belongs HERE: it stops new
+   * Token-2022 entries without touching a held position. Inside the shared mint audit
+   * it would also refuse to read the balance of a coin already owned, which blocks that
+   * position's stop and, because a blocked position gates the entry queue, every
+   * classic entry too. */
+  if (!token2022Enabled() && (await mintProgramFor(ev.mint)) === TOKEN_2022_PROGRAM)
+    throw new Error("CC_TOKEN_2022=0 keeps this executor on classic SPL Token mints");
   const preliminaryAmountRaw = BigInt(Math.floor(plan.sol * LAMPORTS));
   const [preflight, tokenDecimals, solUsdOracle] = await Promise.all([
     jupiter.preflightEntry(WSOL, ev.mint, preliminaryAmountRaw.toString()),

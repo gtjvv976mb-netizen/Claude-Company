@@ -607,6 +607,7 @@ const makeExitMarkHarness = ({ payer = wallet.publicKey, presigned = false,
   chainHeight = 600, postOutputRaw = "4900000", secondaryPostOutputRaw = postOutputRaw,
   secondarySimulationError = null, orderOverrides = {}, finalChainHeight = chainHeight,
   secondaryWritableOverride = null, primaryPostWritableOverride = null,
+  primaryWritableOverride = null,
   simulationContextSlot = 702, instructions = [exitRoute] } = {}) => {
   const transaction = new VersionedTransaction(new TransactionMessage({
     payerKey: payer, recentBlockhash, instructions,
@@ -692,7 +693,7 @@ const makeExitMarkHarness = ({ payer = wallet.publicKey, presigned = false,
     },
   };
   };
-  const connection = connectionFor(postOutputRaw, null, null, primaryPostWritableOverride);
+  const connection = connectionFor(postOutputRaw, null, primaryWritableOverride, primaryPostWritableOverride);
   const secondaryConnection = connectionFor(secondaryPostOutputRaw, secondarySimulationError,
     secondaryWritableOverride);
   const fetchFn = async (url) => {
@@ -1178,10 +1179,31 @@ await ok("an unwrap exit that creates and closes the wrapped-SOL ATA nets its re
       // any OTHER refusal is outside this test's claim
     }
   }, "net-zero rent on a same-transaction unwrap must not be refused as a rent mismatch");
-  // The same transaction claiming the gross figure is an over-claim: still refused.
+  // Here the wrapped-SOL ATA already exists, so NOTHING is missing: a claim of one
+  // account's rent is an over-claim and is still refused.
   const overclaim = makeExitMarkHarness({ instructions: unwrap, orderOverrides: { rentFeeLamports: 2_039_280 } });
   await assert.rejects(() => overclaim.executor.preflightExitMark(overclaim.spec),
     /canonical ATA rent facts do not match Jupiter's rent estimate/);
+
+  /* When the wrapped-SOL ATA IS missing, the same create-and-close shape was quoted
+   * NET (0) by Jupiter on the 2026-09-02 sell and GROSS (both accounts) on the
+   * 2026-09-03 pump.fun buy. Both are chain-derived truths about the same accounts;
+   * anything else is still a mismatch. */
+  const wsolMissing = (address, account) => address === sourceAta.toBase58() ? null : account;
+  for (const [rentFeeLamports, verdict] of [[0, "net"], [2_039_280, "gross"]]) {
+    const harness = makeExitMarkHarness({ instructions: unwrap, orderOverrides: { rentFeeLamports },
+      primaryWritableOverride: wsolMissing, secondaryWritableOverride: wsolMissing });
+    await assert.doesNotReject(async () => {
+      try { await harness.executor.preflightExitMark(harness.spec); }
+      catch (error) { if (/canonical ATA rent facts do not match/.test(error.message)) throw error; }
+    }, `a missing wrapped-SOL ATA quoted ${verdict} must not be refused as a rent mismatch`);
+  }
+  for (const rentFeeLamports of [1_000_000, 2_039_281, 4_078_560]) {
+    const harness = makeExitMarkHarness({ instructions: unwrap, orderOverrides: { rentFeeLamports },
+      primaryWritableOverride: wsolMissing, secondaryWritableOverride: wsolMissing });
+    await assert.rejects(() => harness.executor.preflightExitMark(harness.spec),
+      /canonical ATA rent facts do not match Jupiter's rent estimate \(chain: 0 net of same-transaction closes, 2039280 gross; Jupiter reports/);
+  }
 });
 
 await ok("execution-readiness probe exercises both providers without signing, journaling or executing", async () => {

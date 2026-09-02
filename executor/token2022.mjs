@@ -77,6 +77,37 @@ export const ALLOWED_MINT_EXTENSIONS = Object.freeze(new Set([
   23, // TokenGroupMember
 ]));
 
+/* Two RPC providers must describe the SAME mint, but hashing the whole account makes
+ * honest providers disagree: `supply` (bytes 36..44) moves on every mint or burn, which
+ * on a live bonding curve is every few seconds, and TokenMetadata's bytes and length
+ * change whenever an update authority edits a name or URI. Hash exactly the bytes whose
+ * value could change a decision made here: the base mint with `supply` masked out, then
+ * every extension's type, plus each one's length and value except for the metadata
+ * payload. A byte flip anywhere else — a pointer, a group, a default-state — still
+ * shows up as a mismatch. */
+const MUTABLE_VALUE_EXTENSIONS = new Set([19]); // TokenMetadata
+const SUPPLY_OFFSET = 36;
+const SUPPLY_END = 44;
+
+function safetyDigest(data, extensions) {
+  const base = Buffer.from(data.subarray(0, BASE_MINT_LENGTH));
+  base.fill(0, SUPPLY_OFFSET, SUPPLY_END);
+  const hash = createHash("sha256").update(base);
+  const header = Buffer.alloc(4);
+  for (const ext of extensions) {
+    header.writeUInt16LE(ext.type, 0);
+    if (MUTABLE_VALUE_EXTENSIONS.has(ext.type)) { hash.update(header.subarray(0, 2)); continue; }
+    header.writeUInt16LE(ext.length, 2);
+    hash.update(header);
+    hash.update(ext.value);
+  }
+  return hash.digest("hex");
+}
+
+/* The rollback switch. It gates NEW Token-2022 ENTRIES only, at the entry path in the
+ * poller — never a balance read, a custody check or an exit. Refusing to parse a mint
+ * the wallet already holds would strand that position: the balance could not be
+ * verified, the stop could not fire, and the block would gate every other entry too. */
 export function token2022Enabled(env = process.env) {
   return String(env.CC_TOKEN_2022 ?? "1").trim() !== "0";
 }
@@ -163,7 +194,7 @@ export function assertTradeableExtensions(extensions, mint) {
  * Returns comparable metadata so two independent RPC views can be required to agree
  * field-by-field and byte-for-byte (`dataHash`) before an entry is priced.
  */
-export function auditMintAccount(account, mint, { allowToken2022 = token2022Enabled() } = {}) {
+export function auditMintAccount(account, mint, { allowToken2022 = true } = {}) {
   if (!account) throw new Error(`mint account is unavailable: ${mint}`);
   const owner = ownerOf(account);
   const data = accountBytes(account);
@@ -177,7 +208,7 @@ export function auditMintAccount(account, mint, { allowToken2022 = token2022Enab
       throw new Error(`mint ${mint} does not have the classic SPL mint layout`);
   } else {
     if (!allowToken2022)
-      throw new Error(`mint ${mint} uses Token-2022 and CC_TOKEN_2022=0 keeps the executor classic-only`);
+      throw new Error(`mint ${mint} uses Token-2022 and this caller accepts classic SPL Token only`);
     try { extensions = parseMintExtensions(data); }
     catch (error) { throw new Error(`mint ${mint}: ${error.message}`); }
     assertTradeableExtensions(extensions, mint);
@@ -200,7 +231,7 @@ export function auditMintAccount(account, mint, { allowToken2022 = token2022Enab
     freezeAuthority,
     extensions: extensions.map((ext) => ext.type).join(","),
     extensionNames: extensions.map((ext) => ext.name),
-    dataHash: createHash("sha256").update(data).digest("hex"),
+    dataHash: safetyDigest(data, extensions),
   };
 }
 

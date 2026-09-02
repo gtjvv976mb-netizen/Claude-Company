@@ -297,7 +297,12 @@ function tokenAccountDetails(account) {
   const data = accountData(account);
   if (!data) return null;
   const classic = program === TOKEN_PROGRAM && data.length === 165;
-  const token2022 = program === TOKEN_2022_PROGRAM && data.length >= 166 && data[165] === 2;
+  // The ATA program always adds ImmutableOwner (170 bytes), but a token account opened
+  // directly under Token-2022 carries no extensions and is exactly 165 bytes. Both must
+  // be classifiable, or the capability scan cannot tell that such an account is the
+  // wallet's and would let it be writable in a signed route.
+  const token2022 = program === TOKEN_2022_PROGRAM &&
+    (data.length === 165 || (data.length >= 166 && data[165] === 2));
   if (!classic && !token2022) return null;
   const optionKey = (offset, label) => {
     const tag = data.readUInt32LE(offset);
@@ -351,6 +356,14 @@ export function walletTokenAmount(account, { program, mint, wallet, allowMissing
   if (program !== TOKEN_PROGRAM && program !== TOKEN_2022_PROGRAM)
     throw new Error(`${label} program ${program} is not a token program`);
   return checkedTokenAmount(account, { program, mint, wallet, label, allowMissing });
+}
+
+function foreignRentAllowance(value) {
+  if (value === undefined || value === null) return 0n;
+  const lamports = Number(value);
+  if (!Number.isSafeInteger(lamports) || lamports < 0)
+    throw new Error("third-party account-rent allowance is not a valid lamport count");
+  return BigInt(lamports);
 }
 
 export function validateSimulationEffects(before, after, expected, cfg) {
@@ -418,10 +431,20 @@ export function validateSimulationEffects(before, after, expected, cfg) {
   } else {
     // ATA rent moves lamports from the wallet into another wallet-owned account;
     // aggregate the observed custody set so only swap input + network fee leaves it.
+    /* Some routes make the taker fund an account that is NOT the wallet's own ATA — a
+     * venue fee or vault account. Measured on a live pump.fun buy, 2026-09-03: one extra
+     * 165-byte token account, 2,039,280 lamports, created by an inner CPI and never
+     * returned. Those lamports leave the custody set for good, so this check must know
+     * what they may be or it refuses every such route. The allowance is Jupiter's own
+     * quoted taker rent, already matched against chain-derived figures and bounded by
+     * the gross rent cap, less the rent that lands in a wallet-owned account that stays
+     * open — that part never leaves custody and must not be spendable twice. */
     const spent = custodyBefore - custodyAfter;
+    const rentAllowance = foreignRentAllowance(expected.foreignRentAllowanceLamports);
     if (spent < BigInt(expected.amountRaw) ||
-        spent > BigInt(expected.amountRaw) + BigInt(cfg.maxNetworkFeeLamports))
-      throw new Error("simulation SOL spend is outside the exact input plus capped fees");
+        spent > BigInt(expected.amountRaw) + BigInt(cfg.maxNetworkFeeLamports) + rentAllowance)
+      throw new Error(`simulation SOL spend ${spent} is outside the exact input ${expected.amountRaw} ` +
+        `plus capped fees${rentAllowance > 0n ? ` and ${rentAllowance} lamports of quoted third-party account rent` : ""}`);
   }
 
   /* THE QUOTE MUST AGREE WITH THE CHAIN, NOT ONLY WITH ITSELF.
@@ -1359,12 +1382,15 @@ export class JupiterV2Executor {
      * TLV header = 170 bytes, so the chain charges more for it (2,074,080 vs 2,039,280
      * lamports at today's rent). Jupiter's rentFeeLamports, measured 2026-09-03 on a
      * SOL→pump.fun order, still quotes every ATA at the 165-byte figure (4,078,560 for
-     * two accounts). Both are honest descriptions of the same account set, so the
-     * strict match accepts exactly those two values and nothing else; the gross CAP
-     * and the provider-agreement facts use the true chain cost. Rent never enters the
-     * SOL-spend check: validateSimulationEffects sums wallet + token-account lamports,
-     * so rent moving into a wallet-owned ATA is not a loss there. The extra rent read
-     * happens only when this order actually opens a Token-2022 account. */
+     * two accounts) — and quoted it GROSS although that same transaction created and
+     * closed the wrapped-SOL account (a sell the day before quoted the same shape NET,
+     * 0). So the estimate can be net or gross, classic-sized or chain-sized; every one
+     * of those four figures is derived from chain facts, and the strict match accepts
+     * exactly those four and nothing else. The gross CAP and the provider-agreement
+     * facts use the true chain cost. Rent never enters the SOL-spend check:
+     * validateSimulationEffects sums wallet + token-account lamports, so rent moving
+     * into a wallet-owned ATA is not a loss there. The extra rent read happens only
+     * when this order actually opens a Token-2022 account. */
     const programOf = (address) => address === validation.inputAta
       ? validation.inputProgram : validation.outputProgram;
     const opensToken2022Ata = missingCreated.some(([address]) => programOf(address) === TOKEN_2022_PROGRAM);
@@ -1381,14 +1407,15 @@ export class JupiterV2Executor {
     const expectedNetRentLamports = stillOpen
       .reduce((sum, [address]) => sum + chainRentForAta(address), 0);
     const classicQuotedNetRentLamports = stillOpen.length * rentExemptionLamports;
+    const classicQuotedGrossRentLamports = missingCreated.length * rentExemptionLamports;
+    const acceptableRentLamports = new Set([expectedNetRentLamports, classicQuotedNetRentLamports,
+      expectedGrossRentLamports, classicQuotedGrossRentLamports]);
     const reportedRentLamports = Number(order.rentFeeLamports ?? 0);
-    if (!Number.isSafeInteger(reportedRentLamports) ||
-        (reportedRentLamports !== expectedNetRentLamports &&
-         reportedRentLamports !== classicQuotedNetRentLamports))
+    if (!Number.isSafeInteger(reportedRentLamports) || !acceptableRentLamports.has(reportedRentLamports))
       throw new Error(`${label} RPC canonical ATA rent facts do not match Jupiter's rent estimate ` +
-        `(chain expects ${expectedNetRentLamports} net of same-transaction closes` +
-        (classicQuotedNetRentLamports !== expectedNetRentLamports
-          ? `, or ${classicQuotedNetRentLamports} at Jupiter's classic 165-byte sizing` : "") +
+        `(chain: ${expectedNetRentLamports} net of same-transaction closes, ${expectedGrossRentLamports} gross` +
+        (classicQuotedGrossRentLamports !== expectedGrossRentLamports
+          ? `; at Jupiter's classic 165-byte sizing ${classicQuotedNetRentLamports} net, ${classicQuotedGrossRentLamports} gross` : "") +
         `; Jupiter reports ${reportedRentLamports})`);
     if (expectedGrossRentLamports > Number(this.cfg.maxRentLamports ?? MAX_GROSS_RENT_LAMPORTS))
       throw new Error(`${label} RPC canonical ATA rent exceeds the reviewed gross rent cap`);
@@ -1400,9 +1427,14 @@ export class JupiterV2Executor {
     if (claimedExpiry > chainHeight + (this.cfg.blockHeightWindow ?? 600))
       throw new Error(`order expiry ${claimedExpiry} is ${claimedExpiry - chainHeight} blocks ahead of the ${label} chain ` +
         `(cap ${this.cfg.blockHeightWindow ?? 600}) — an unbounded expiry wedges the journal and disarms every exit`);
+    // Rent that stays in a wallet-owned account that remains open never leaves the
+    // custody set, so only the remainder of the quoted taker rent can be spent outside it.
+    const foreignRentAllowanceLamports = Math.max(0,
+      Math.min(reportedRentLamports, Number(this.cfg.maxRentLamports ?? MAX_GROSS_RENT_LAMPORTS)) -
+      expectedNetRentLamports);
     const simulation = await this._simulateUnsigned({
       connection, tx, observedAddresses, preAccounts, validation, order, intent,
-      minContextSlot: validation.writableSnapshotSlot,
+      minContextSlot: validation.writableSnapshotSlot, foreignRentAllowanceLamports,
     });
     const postWritableSnapshot = await coherentAccountSnapshot(connection,
       validation.writableAddresses.map((address) => new PublicKey(address)), {
@@ -1635,7 +1667,7 @@ export class JupiterV2Executor {
   /** Pre-signing simulation of the UNSIGNED transaction — nothing disclosed here can
    * be broadcast, so a refusal is free and safe to retry with a fresh quote. */
   async _simulateUnsigned({ connection = this.connection, tx, observedAddresses, preAccounts,
-    validation, order, intent, minContextSlot }) {
+    validation, order, intent, minContextSlot, foreignRentAllowanceLamports = 0 }) {
     if (!Array.isArray(tx?.signatures) || tx.signatures.length !== 1 ||
         tx.signatures.some((signature) => Buffer.from(signature).some((byte) => byte !== 0)))
       throw new Error("Jupiter transaction is not unsigned");
@@ -1661,6 +1693,7 @@ export class JupiterV2Executor {
         quotedOutputRaw: String(order.outAmount),
         inputProgram: validation.inputProgram,
         outputProgram: validation.outputProgram,
+        foreignRentAllowanceLamports,
       }, this.cfg);
     return { ...effects, contextSlot };
   }
