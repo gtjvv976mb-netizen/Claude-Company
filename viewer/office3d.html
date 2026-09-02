@@ -4959,10 +4959,6 @@ function memoNode({ symbol, decision, thesis, conviction, size, stop, gmgn, ts }
     a.className = "place"; a.href = gmgn; a.target = "_blank"; a.rel = "noopener noreferrer";
     a.textContent = "Place it on GMGN →";
     m.appendChild(a);
-    const n = document.createElement("p");
-    n.className = "unsigned";
-    n.textContent = "Unsigned. Claude Company prepared this order but cannot sign or send it — that is yours.";
-    m.appendChild(n);
   }
   return m;
 }
@@ -6342,7 +6338,11 @@ async function renderTeamInto(el, { includeBot = true } = {}) {
    * cadence while the panel is on screen; the timer rides the element so pane
    * switches and re-renders never stack timers. */
   clearTimeout(el.__teamTimer);
-  el.__teamTimer = setTimeout(() => { if (el.isConnected) renderTeamInto(el, { includeBot }); }, 60_000);
+  el.__teamTimer = setTimeout(() => {
+    if (!el.isConnected) return;
+    if (document.getElementById("teampanel")?.hidden || el.contains(document.activeElement)) { el.__teamTimer = setTimeout(() => renderTeamInto(el, { includeBot }), 60_000); return; }
+    renderTeamInto(el, { includeBot });
+  }, 60_000);
   el.innerHTML = "";
   if (FLOOR == null) { el.appendChild(mk("p", "locked", "No floor in this address.")); return; }
   let R;
@@ -8043,7 +8043,8 @@ window.load_stats = async () => {
         ["Closed below entry", String(B.houseClosedDown ?? 0), "down"],
       ]) el.appendChild(drow([["span grow", k], ["b " + cls, v]]));
       const p2 = document.createElement("p"); p2.className = "dp-note";
-      p2.textContent = "Above or below entry is arithmetic on recorded closes, not advice — the record book has every call behind these numbers.";
+      p2.textContent = "Above or below entry is arithmetic on recorded closes, not advice.";
+    const go = document.createElement("button"); go.type = "button"; go.className = "chip"; go.textContent = "Open the record book"; go.onclick = () => togglePane("ledger"); el.appendChild(go);
       el.appendChild(p2);
     }
   } catch { empty(el, "Could not reach the desk."); }
@@ -8357,7 +8358,8 @@ async function loadOverviewDashboard() {
   recent.appendChild(dashNode("h4", "", "Recent published calls"));
   if (!feed.length) recent.appendChild(dashNode("p", "dp-note",
     feedR?.status === 403 ? "The tenant's call sheet is private." : feedR?.status === 200 ? "No calls have been published yet." : "The call sheet did not load (" + (feedR?.status ?? "no response") + ") \u2014 retrying in 30s."));
-  for (const call of feed.slice(0, 3)) {
+  if (feed.length > 3) recent.appendChild(dashNode("p", "dp-note", "Showing 3 of " + feed.length + " delivered calls \u2014 the full sheet is under Calls \u2192 Published."));
+    for (const call of feed.slice(0, 3)) {
     recent.appendChild(drow([
       ["b grow", call.symbol || String(call.mint || "").slice(0, 6)],
       ["span", call.status === "live" ? "live" : String(call.close_reason || "closed").replace(/_/g, " ")],
@@ -8365,21 +8367,6 @@ async function loadOverviewDashboard() {
     ]));
   }
   el.appendChild(recent);
-
-  const quick = dashNode("div", "dashsection");
-  quick.appendChild(dashNode("h4", "", "Go to"));
-  const actions = dashNode("div", "dashactions");
-  for (const [destination, label] of [
-    ["calls", "Candidate board"], ["wallste", "WALL-ST-E status"],
-    ["activity", "Live activity"], ["performance", "Performance"],
-  ]) {
-    const button = dashNode("button", "dp-btn ghost", label);
-    button.type = "button";
-    button.onclick = () => window.showDashboard?.(destination, { focus: true });
-    actions.appendChild(button);
-  }
-  quick.appendChild(actions);
-  el.appendChild(quick);
 }
 
 const CANDIDATE_BANDS = [
@@ -8783,7 +8770,7 @@ async function loadWallsteDashboard({ background = false } = {}) {
       dashMetric("Readiness providers", readiness ? String(readiness.providers || 0) + " / 2" : "Not reported",
         readiness ? (readiness.ready ? "ready" : "not ready") + " · " + String(readiness.route || "route unknown") +
           (readiness.amountLamports ? " · " + dashSol(Number(readiness.amountLamports) / 1e9) + " rehearsal" : " · size not reported")
-          : "no-sign probe")
+          : (readiness?.lastSuccessAt > 0 ? "last success " + dashWhen(readiness.lastSuccessAt) : "no-sign probe"))
     );
     healthCard.appendChild(heartbeatGrid);
     const held = Array.isArray(heartbeat?.held) ? heartbeat.held : [];
@@ -9001,7 +8988,7 @@ async function loadWallsteDashboard({ background = false } = {}) {
     const filterCard = dashNode("section", "dashsection");
     filterCard.appendChild(dashNode("h4", "", "Delivery and execution filters"));
     filterCard.appendChild(dashNode("p", "dp-note",
-      "These settings shape which published calls reach your floor and the fixed rules carried to the local poller. Saving them never starts or controls WALL-ST-E."));
+      "" + (filters?.updatedAt > 0 ? "Last saved " + dashWhen(filters.updatedAt) + ". " : "") + "These settings shape which published calls reach your floor and the fixed rules carried to the local poller. Saving them never starts or controls WALL-ST-E."));
     const form = dashNode("div", "settings-grid");
     const field = (label, input) => {
       const wrap = dashNode("div", "fieldgroup");
@@ -9405,22 +9392,8 @@ async function loadSettingsDashboard() {
     deskActions.append(deskSave, deskMessage);
     deskForm.appendChild(deskActions);
     deskCard.append(deskForm, dashNode("p", "dp-note",
-      "The webhook receives durable entry and exit alerts only. It cannot sign, control WALL-ST-E, or receive a wallet key."));
+      "Receives the same entry and exit alerts as the alert bar, so you hear them with the tab closed."));
     el.appendChild(deskCard);
-
-    const routing = dashNode("section", "dashsection");
-    routing.appendChild(dashNode("h4", "", "Controls now live where they are used"));
-    const actions = dashNode("div", "dashactions");
-    for (const [destination, label] of [["team", "Team shift and brain"], ["wallste", "WALL-ST-E filters and setup"]]) {
-      const button = dashNode("button", "dp-btn ghost", label);
-      button.type = "button"; button.onclick = () => window.showDashboard?.(destination);
-      actions.appendChild(button);
-    }
-    const theme = dashNode("button", "dp-btn ghost", "Switch day / night");
-    theme.type = "button"; theme.onclick = () => document.getElementById("shiftbtn")?.click();
-    actions.appendChild(theme);
-    routing.appendChild(actions);
-    el.appendChild(routing);
 
     const build = document.querySelector('meta[name="cc-build"]')?.content;
     if (build) {
@@ -9450,7 +9423,7 @@ window.__loadDashboardDestination = (which) => {
 (async () => {
   try {
     const { body } = await call_api("/api/callouts");
-    const newest = body.generatedAt || 0;
+    const newest = Math.max(0, ...coins.flatMap((c) => (c.callouts || []).map((k) => Number(k.ts) || 0)), 0);
     const hasMatches = Array.isArray(body.coins) && body.coins.some((coin) =>
       Array.isArray(coin?.callouts) && coin.callouts.length > 0);
     if (hasMatches && newest > Number(localStorage.getItem("cc-whales-seen") || 0))
