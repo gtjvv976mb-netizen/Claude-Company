@@ -15,8 +15,8 @@ import {
   deskExitDecisionForPosition, positionEntryBlock, requirePositiveCallId, validateRiskState,
 } from "./journal.mjs";
 import {
-  JupiterV2Executor, MAX_GROSS_RENT_LAMPORTS, TOKEN_PROGRAM, WSOL, associatedTokenAddress,
-  classicWalletTokenAmount, independentClassicMintDecimals,
+  JupiterV2Executor, MAX_GROSS_RENT_LAMPORTS, WSOL, associatedTokenAddress,
+  walletTokenAmount, independentClassicMintDecimals, independentMintProgram, mintTokenProgram,
 } from "./jupiter.mjs";
 import {
   RpcBalanceUnavailableError, verifyTrackedBalanceWithFailover,
@@ -473,13 +473,27 @@ const jupiter = JUPITER_API_KEY ? new JupiterV2Executor({
 }) : null;
 
 const openList = () => Object.values(S.positions);
+// A mint's token program never changes after initialization, so one audited answer
+// (both RPC providers agreeing) is cached for the life of the process.
+const MINT_PROGRAM_CACHE = new Map();
+async function mintProgramFor(mint) {
+  if (!MINT_PROGRAM_CACHE.has(mint)) {
+    const program = secondaryConn
+      ? await independentMintProgram(conn, secondaryConn, mint)
+      : await mintTokenProgram(conn, mint);
+    MINT_PROGRAM_CACHE.set(mint, program);
+  }
+  return MINT_PROGRAM_CACHE.get(mint);
+}
 async function heldRaw(mint, connection = conn) {
-  const ata = associatedTokenAddress(WALLET, mint, TOKEN_PROGRAM);
-  let account;
+  let program, account;
+  try { program = await mintProgramFor(mint); }
+  catch (error) { throw new RpcBalanceUnavailableError(error); }
+  const ata = associatedTokenAddress(WALLET, mint, program);
   try { account = await connection.getAccountInfo(new PublicKey(ata), "confirmed"); }
   catch (error) { throw new RpcBalanceUnavailableError(error); }
-  return classicWalletTokenAmount(account, {
-    mint, wallet: WALLET, allowMissing: true, label: `canonical ATA ${ata}`,
+  return walletTokenAmount(account, {
+    program, mint, wallet: WALLET, allowMissing: true, label: `canonical ATA ${ata}`,
   });
 }
 async function solBalance() { return (await conn.getBalance(kp.publicKey, "confirmed")) / LAMPORTS; }

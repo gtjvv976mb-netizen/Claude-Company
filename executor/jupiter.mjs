@@ -34,8 +34,8 @@ export const WRITABLE_SNAPSHOT_REQUEST_TIMEOUT_MS = 4_000;
 export const PROCESSED_SLOT_ANCHOR_REQUEST_TIMEOUT_MS = 2_000;
 export const MIN_SIGNABLE_BLOCKS_REMAINING = 32;
 export const JUPITER_V6 = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
-export const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
-export const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+import { TOKEN_PROGRAM, TOKEN_2022_PROGRAM, auditMintAccount, MINT_CONSENSUS_FIELDS } from "./token2022.mjs";
+export { TOKEN_PROGRAM, TOKEN_2022_PROGRAM };
 export const ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 export const JUPITER_EVENT_AUTHORITY = "D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf";
 const SYSTEM_PROGRAM = SystemProgram.programId.toBase58();
@@ -204,16 +204,12 @@ export function associatedTokenAddress(wallet, mint, tokenProgram = TOKEN_PROGRA
   ], new PublicKey(ATA_PROGRAM))[0].toBase58();
 }
 
-async function mintTokenProgram(connection, mint) {
+export async function mintTokenProgram(connection, mint) {
   if (mint === WSOL) return TOKEN_PROGRAM;
   const account = await connection.getAccountInfo(new PublicKey(mint), "confirmed");
-  if (!account) throw new Error(`mint account is unavailable: ${mint}`);
-  const owner = account.owner?.toBase58?.();
-  if (owner === TOKEN_2022_PROGRAM)
-    throw new Error(`mint ${mint} uses Token-2022; the first live canary accepts classic SPL Token only`);
-  if (owner !== TOKEN_PROGRAM)
-    throw new Error(`mint ${mint} is not owned by classic SPL Token`);
-  return TOKEN_PROGRAM;
+  // A Token-2022 mint is accepted only after token2022.mjs has audited its extension
+  // list; the same audit prices the entry (independentClassicMintDecimals below).
+  return auditMintAccount(account, mint).program;
 }
 
 /** Read the immutable decimals byte from a classic SPL mint account.
@@ -225,18 +221,9 @@ async function mintTokenProgram(connection, mint) {
  * point arithmetic over an impractical scale.
  */
 function classicMintMetadata(account, mint) {
-  if (!account) throw new Error(`mint account is unavailable: ${mint}`);
-  const owner = account.owner?.toBase58?.() || String(account.owner || "");
-  if (owner === TOKEN_2022_PROGRAM)
-    throw new Error(`mint ${mint} uses Token-2022; the first live canary accepts classic SPL Token only`);
-  if (owner !== TOKEN_PROGRAM) throw new Error(`mint ${mint} is not owned by classic SPL Token`);
-  const data = accountData(account);
-  if (!data || data.length !== 82) throw new Error(`mint ${mint} does not have the classic SPL mint layout`);
-  if (data[45] !== 1) throw new Error(`mint ${mint} is not initialized`);
-  const decimals = Number(data[44]);
-  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 18)
-    throw new Error(`mint ${mint} decimal count ${decimals} is outside the live canary range`);
-  return { owner, dataLength: data.length, initialized: data[45], decimals };
+  // Classic SPL Token mints keep the exact 82-byte rule; Token-2022 mints pass only with
+  // an audited extension list, no freeze authority, and byte-identical RPC views.
+  return auditMintAccount(account, mint);
 }
 
 export async function classicMintDecimals(connection, mint) {
@@ -250,8 +237,8 @@ export async function classicMintDecimals(connection, mint) {
  * the classic SPL mint metadata that controls it. A forged decimals byte from one
  * provider would otherwise move the absolute USD entry anchor by powers of ten.
  */
-export async function independentClassicMintDecimals(primaryConnection, secondaryConnection, mint) {
-  if (mint === WSOL) return 9;
+export async function independentMintAudit(primaryConnection, secondaryConnection, mint) {
+  if (mint === WSOL) return { program: TOKEN_PROGRAM, owner: TOKEN_PROGRAM, decimals: 9, extensions: "" };
   if (!primaryConnection || !secondaryConnection || primaryConnection === secondaryConnection)
     throw new Error("classic mint consensus requires two distinct RPC connections");
   const mintKey = new PublicKey(mint);
@@ -269,11 +256,20 @@ export async function independentClassicMintDecimals(primaryConnection, secondar
   } catch (error) {
     throw new Error(`classic mint consensus rejected an RPC view: ${error.message}`);
   }
-  for (const field of ["owner", "dataLength", "initialized", "decimals"]) {
+  for (const field of MINT_CONSENSUS_FIELDS) {
     if (primary[field] !== secondary[field])
       throw new Error(`classic mint RPC views disagree on ${field}`);
   }
-  return primary.decimals;
+  return primary;
+}
+
+export async function independentClassicMintDecimals(primaryConnection, secondaryConnection, mint) {
+  return (await independentMintAudit(primaryConnection, secondaryConnection, mint)).decimals;
+}
+
+/** The token program that owns a mint, agreed by both RPC providers after the audit. */
+export async function independentMintProgram(primaryConnection, secondaryConnection, mint) {
+  return (await independentMintAudit(primaryConnection, secondaryConnection, mint)).program;
 }
 
 const accountOwner = (account) => account?.owner?.toBase58?.() || String(account?.owner || "");
@@ -347,6 +343,14 @@ export function classicWalletTokenAmount(account, { mint, wallet, allowMissing =
   return checkedTokenAmount(account, {
     program: TOKEN_PROGRAM, mint, wallet, label, allowMissing,
   });
+}
+
+/** Same custody checks for a wallet token account under either token program. */
+export function walletTokenAmount(account, { program, mint, wallet, allowMissing = false,
+  label = "wallet token account" } = {}) {
+  if (program !== TOKEN_PROGRAM && program !== TOKEN_2022_PROGRAM)
+    throw new Error(`${label} program ${program} is not a token program`);
+  return checkedTokenAmount(account, { program, mint, wallet, label, allowMissing });
 }
 
 export function validateSimulationEffects(before, after, expected, cfg) {
@@ -912,9 +916,9 @@ export async function validateTransaction(transaction, expected, cfg, connection
   const tables = await lookupTables(connection, tx.message);
   const message = TransactionMessage.decompile(tx.message, { addressLookupTableAccounts: tables });
   if (message.payerKey.toBase58() !== wallet) throw new Error("decompiled payer is not the local wallet");
-  if (message.instructions.some((ix) => ix.programId.toBase58() === TOKEN_2022_PROGRAM ||
-      ix.keys.some((key) => key.pubkey.toBase58() === TOKEN_2022_PROGRAM)))
-    throw new Error("Token-2022 routes are disabled for the first live canary");
+  // Token-2022 mints reach this point only after auditMintAccount (via mintTokenProgram
+  // below) accepted their extension list. A Token-2022 instruction at the top level of
+  // the transaction is still refused by the program allow-list further down.
   const [inputProgram, outputProgram] = await Promise.all([
     mintTokenProgram(connection, expected.inputMint),
     mintTokenProgram(connection, expected.outputMint),
@@ -1350,14 +1354,42 @@ export class JupiterV2Executor {
       (!account || isClosedAccountTombstone(account)));
     // GROSS: every account this order must fund up front — what the rent CAP bounds.
     // NET: gross minus accounts the same transaction closes again — what Jupiter quotes.
-    const expectedGrossRentLamports = missingCreated.length * rentExemptionLamports;
-    const expectedNetRentLamports = missingCreated
-      .filter(([address]) => !closedAtas.has(address)).length * rentExemptionLamports;
+    /* A classic SPL token account is 165 bytes. The ATA program opens a Token-2022
+     * account with the ImmutableOwner extension: 165 + 1 account-type byte + a 4-byte
+     * TLV header = 170 bytes, so the chain charges more for it (2,074,080 vs 2,039,280
+     * lamports at today's rent). Jupiter's rentFeeLamports, measured 2026-09-03 on a
+     * SOL→pump.fun order, still quotes every ATA at the 165-byte figure (4,078,560 for
+     * two accounts). Both are honest descriptions of the same account set, so the
+     * strict match accepts exactly those two values and nothing else; the gross CAP
+     * and the provider-agreement facts use the true chain cost. Rent never enters the
+     * SOL-spend check: validateSimulationEffects sums wallet + token-account lamports,
+     * so rent moving into a wallet-owned ATA is not a loss there. The extra rent read
+     * happens only when this order actually opens a Token-2022 account. */
+    const programOf = (address) => address === validation.inputAta
+      ? validation.inputProgram : validation.outputProgram;
+    const opensToken2022Ata = missingCreated.some(([address]) => programOf(address) === TOKEN_2022_PROGRAM);
+    const token2022RentLamports = opensToken2022Ata
+      ? Number(await connection.getMinimumBalanceForRentExemption(170, "processed"))
+      : rentExemptionLamports;
+    if (!Number.isSafeInteger(token2022RentLamports) || token2022RentLamports < rentExemptionLamports)
+      throw new Error(`${label} RPC returned an invalid Token-2022 account rent exemption`);
+    const chainRentForAta = (address) => programOf(address) === TOKEN_2022_PROGRAM
+      ? token2022RentLamports : rentExemptionLamports;
+    const stillOpen = missingCreated.filter(([address]) => !closedAtas.has(address));
+    const expectedGrossRentLamports = missingCreated
+      .reduce((sum, [address]) => sum + chainRentForAta(address), 0);
+    const expectedNetRentLamports = stillOpen
+      .reduce((sum, [address]) => sum + chainRentForAta(address), 0);
+    const classicQuotedNetRentLamports = stillOpen.length * rentExemptionLamports;
     const reportedRentLamports = Number(order.rentFeeLamports ?? 0);
     if (!Number.isSafeInteger(reportedRentLamports) ||
-        reportedRentLamports !== expectedNetRentLamports)
+        (reportedRentLamports !== expectedNetRentLamports &&
+         reportedRentLamports !== classicQuotedNetRentLamports))
       throw new Error(`${label} RPC canonical ATA rent facts do not match Jupiter's rent estimate ` +
-        `(chain expects ${expectedNetRentLamports} net of same-transaction closes; Jupiter reports ${reportedRentLamports})`);
+        `(chain expects ${expectedNetRentLamports} net of same-transaction closes` +
+        (classicQuotedNetRentLamports !== expectedNetRentLamports
+          ? `, or ${classicQuotedNetRentLamports} at Jupiter's classic 165-byte sizing` : "") +
+        `; Jupiter reports ${reportedRentLamports})`);
     if (expectedGrossRentLamports > Number(this.cfg.maxRentLamports ?? MAX_GROSS_RENT_LAMPORTS))
       throw new Error(`${label} RPC canonical ATA rent exceeds the reviewed gross rent cap`);
     const claimedExpiry = Number(order.lastValidBlockHeight);

@@ -144,6 +144,25 @@ await ok("Solana Connection HTTP deadlines abort every transport without accumul
 
 const wallet = Keypair.generate();
 const mint = Keypair.generate().publicKey.toBase58();
+// Every custody/mint read traverses getAccountInfo; the mint audit needs real bytes.
+const classicMintFixture = ({ decimals = 6 } = {}) => {
+  const data = Buffer.alloc(82);
+  data[44] = decimals;
+  data[45] = 1;
+  return { owner: new PublicKey(TOKEN_PROGRAM), data };
+};
+// A pump.fun-style Token-2022 mint: MetadataPointer + TokenMetadata, no authorities.
+const token2022MintFixture = (extraEntries = []) => {
+  const entry = (type, length, fill) => {
+    const header = Buffer.alloc(4);
+    header.writeUInt16LE(type, 0);
+    header.writeUInt16LE(length, 2);
+    return Buffer.concat([header, Buffer.alloc(length, fill)]);
+  };
+  const data = Buffer.concat([classicMintFixture().data, Buffer.alloc(83), Buffer.from([1]),
+    entry(18, 64, 1), entry(19, 120, 2), ...extraEntries.map(([type, length]) => entry(type, length, 3))]);
+  return { owner: new PublicKey(TOKEN_2022_PROGRAM), data };
+};
 const orderBase = {
   mode: "manual", inputMint: WSOL, outputMint: mint, inAmount: "5000000",
   outAmount: "1000", otherAmountThreshold: "970", swapMode: "ExactIn",
@@ -242,6 +261,13 @@ const jupiterIx = new TransactionInstruction({
   ],
   data: routeV2Data(),
 });
+const destinationAta2022 = ata(wallet.publicKey, mint, TOKEN_2022_PROGRAM);
+const jupiterIx2022 = new TransactionInstruction({
+  programId: new PublicKey(JUPITER_V6),
+  keys: jupiterIx.keys.map((key, index) => index === 2 ? { ...key, pubkey: destinationAta2022 }
+    : index === 6 ? { ...key, pubkey: new PublicKey(TOKEN_2022_PROGRAM) } : key),
+  data: routeV2Data(),
+});
 const wrap = SystemProgram.transfer({
   fromPubkey: wallet.publicKey, toPubkey: sourceAta, lamports: 5_000_000,
 });
@@ -250,7 +276,7 @@ const makeTx = (instructions = [wrap, jupiterIx], payer = wallet.publicKey) => n
 );
 const validationConnection = {
   getAddressLookupTable: async () => ({ value: null }),
-  getAccountInfo: async () => ({ owner: new PublicKey(TOKEN_PROGRAM) }),
+  getAccountInfo: async () => classicMintFixture(),
   getSlot: async (commitment) => {
     assert.equal(commitment, "processed");
     return 699;
@@ -606,7 +632,7 @@ const makeExitMarkHarness = ({ payer = wallet.publicKey, presigned = false,
     let didSimulate = false;
     return {
     getAddressLookupTable: async () => ({ value: null }),
-    getAccountInfo: async () => ({ owner: new PublicKey(TOKEN_PROGRAM) }),
+    getAccountInfo: async () => classicMintFixture(),
     getSlot: async (commitment) => {
       assert.equal(commitment, "processed");
       return 701;
@@ -899,13 +925,26 @@ await ok("a wallet-owned capability beyond a provider's five-account tier is rej
     /unexpected wallet-owned token account/);
   assert.equal(snapshots, 1, "every adversarial capability must come from one bank response");
 });
-await ok("Token-2022 mints and truncated writable-account RPC data fail closed", async () => {
-  await assert.rejects(() => validateTransaction(makeTx(), expectedTx, cfg, {
+await ok("Token-2022 mints pass only with an audited extension list; truncated writable-account RPC data fails closed", async () => {
+  const token2022Connection = (mintAccount) => ({
     ...validationConnection,
-    getAccountInfo: async (key) => ({ owner: new PublicKey(
-      key.toBase58() === mint ? TOKEN_2022_PROGRAM : TOKEN_PROGRAM,
-    ) }),
-  }), /Token-2022/);
+    getAccountInfo: async (key) => key.toBase58() === mint ? mintAccount : classicMintFixture(),
+  });
+  // A transfer-fee mint is refused by name before any custody check.
+  await assert.rejects(() => validateTransaction(makeTx([wrap, jupiterIx2022]), expectedTx, cfg,
+    token2022Connection(token2022MintFixture([[1, 108]]))), /Token-2022 extension TransferFeeConfig is refused/);
+  // A mint that still has no account bytes on this RPC is refused, never guessed at.
+  await assert.rejects(() => validateTransaction(makeTx([wrap, jupiterIx2022]), expectedTx, cfg,
+    token2022Connection({ owner: new PublicKey(TOKEN_2022_PROGRAM) })), /unsupported account encoding/);
+  // A route keyed to the classic ATA of a Token-2022 mint is a custody mismatch, not a pass.
+  await assert.rejects(() => validateTransaction(makeTx(), expectedTx, cfg,
+    token2022Connection(token2022MintFixture())), (error) => !/Token-2022/.test(error.message));
+  // The pump.fun shape (MetadataPointer + TokenMetadata) validates with Token-2022 custody.
+  const validation = await validateTransaction(makeTx([wrap, jupiterIx2022]), expectedTx, cfg,
+    token2022Connection(token2022MintFixture()));
+  assert.equal(validation.inputProgram, TOKEN_PROGRAM);
+  assert.equal(validation.outputProgram, TOKEN_2022_PROGRAM);
+  assert.equal(validation.outputAta, destinationAta2022.toBase58());
   await assert.rejects(() => validateTransaction(makeTx(), expectedTx, cfg, {
     ...validationConnection,
     simulateTransaction: async (tx, options) => {
@@ -1189,7 +1228,7 @@ await ok("execution-readiness probe exercises both providers without signing, jo
     let slotReads = 0;
     return ({
     getAddressLookupTable: async () => ({ value: null }),
-    getAccountInfo: async () => ({ owner: new PublicKey(TOKEN_PROGRAM) }),
+    getAccountInfo: async () => classicMintFixture(),
     getSlot: async (commitment) => {
       calls.getSlot++;
       slotReads++;
@@ -1410,7 +1449,7 @@ await ok("transport retry reuses byte-identical signed transaction and signature
   const signedBodies = [];
   const connection = {
     getAddressLookupTable: async () => ({ value: null }),
-    getAccountInfo: async () => ({ owner: new PublicKey(TOKEN_PROGRAM) }),
+    getAccountInfo: async () => classicMintFixture(),
     getSlot: async (commitment) => commitment === "processed" ? 702 : 700,
     getMultipleAccountsInfoAndContext: async () => {
       throw new Error("atomic execution snapshot unexpectedly used getMultipleAccounts");
