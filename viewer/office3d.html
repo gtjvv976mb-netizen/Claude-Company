@@ -8975,6 +8975,29 @@ async function loadWallsteDashboard({ background = false } = {}) {
     setupCard.appendChild(setupSteps);
     el.appendChild(setupCard);
 
+    /* The last pulses, newest first. One overwritten blob meant a tenant could never
+
+     * see a mode change, a gap, or when the bot was last actually alive. */
+
+    {
+
+      const hist = Array.isArray(telemetry?.history) ? telemetry.history.slice().reverse().slice(0, 12) : [];
+
+      const hcard = dashNode("section", "dashsection");
+
+      hcard.appendChild(dashNode("h4", "", "Recent heartbeats" + (hist.length ? " \u00b7 last " + hist.length : "")));
+
+      if (!hist.length) hcard.appendChild(dashNode("p", "dp-note", "No heartbeats recorded yet."));
+
+      for (const h of hist) hcard.appendChild(dashNode("p", "dp-note",
+
+        (dashWhen(h.seenAt) || "\u2014") + " \u00b7 " + (h.mode || "?") + " \u00b7 " + String(h.open ?? 0) + " open" + (h.state ? " \u00b7 " + h.state : "")));
+
+      el.appendChild(hcard);
+
+    }
+
+
     const filterCard = dashNode("section", "dashsection");
     filterCard.appendChild(dashNode("h4", "", "Delivery and execution filters"));
     filterCard.appendChild(dashNode("p", "dp-note",

@@ -135,8 +135,6 @@ export function executorFeedPayload(floorNo, rawAfter = 0) {
 export function executorHeartbeatPayload(floorNo) {
   const raw = db.prepare("SELECT executor_heartbeat FROM copy_settings WHERE floor_no=?")
     .get(Number(floorNo))?.executor_heartbeat;
-  let heartbeatLog = [];
-  try { heartbeatLog = JSON.parse(db.prepare("SELECT executor_heartbeat_log FROM copy_settings WHERE floor_no=?").get(Number(floorNo))?.executor_heartbeat_log || "[]"); } catch {}
   let heartbeat = null;
   try { heartbeat = raw ? JSON.parse(raw) : null; } catch { heartbeat = null; }
   return { heartbeat };
@@ -186,7 +184,13 @@ export async function executorStatusPayload(floorNo, {
       balanceResult = { ok: false, error: "balance unavailable" };
     }
   }
+  let heartbeatLog = [];
+  try {
+    heartbeatLog = JSON.parse(db.prepare("SELECT executor_heartbeat_log FROM copy_settings WHERE floor_no=?")
+      .get(Number(floorNo))?.executor_heartbeat_log || "[]");
+  } catch { heartbeatLog = []; }
   return buildExecutorDashboard({
+    heartbeatLog,
     floorNo,
     heartbeat,
     balanceResult,

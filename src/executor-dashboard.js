@@ -160,6 +160,7 @@ const publicBalance = (wallet, result, requiredForReadinessSol = null) => {
 };
 
 export function buildExecutorDashboard({
+  heartbeatLog = [],
   floorNo,
   settings = {},
   heartbeat = null,
@@ -200,6 +201,11 @@ export function buildExecutorDashboard({
     telemetry: {
       source: "self-reported-by-tenant-machine",
       connected,
+      // Oldest first, bounded: the WALL-ST-E tab had no history at all before this.
+      history: Array.isArray(heartbeatLog) ? heartbeatLog.slice(-48).map((h) => ({
+        seenAt: timestamp(h?.seenAt), mode: String(h?.mode ?? "").slice(0, 16),
+        open: count(h?.open), state: h?.state == null ? null : String(h.state).slice(0, 32),
+      })).filter((h) => h.seenAt) : [],
       ageMs,
       staleAfterMs: EXECUTOR_HEARTBEAT_STALE_MS,
       heartbeat: displayedPulse,
