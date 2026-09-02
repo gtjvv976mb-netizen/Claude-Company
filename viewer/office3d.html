@@ -8116,6 +8116,14 @@ const dashLead = (title, copy, badge, badgeClass) => {
   if (badge) lead.appendChild(dashNode("span", "dashbadge " + (badgeClass || ""), badge));
   return lead;
 };
+/** Date and time for a row, in the viewer's locale — "Sep 2, 2026, 09:40". A bare
+ *  relative age ("3h ago") goes stale the moment the panel stops refreshing. */
+const dashWhen = (ts) => {
+  const ms = typeof ts === "number" ? (ts < 2e12 ? ts * (ts < 1e11 ? 1000 : 1) : ts) : Date.parse(ts);
+  if (!Number.isFinite(ms) || ms <= 0) return "";
+  try { return new Date(ms).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }); }
+  catch { return new Date(ms).toISOString().slice(0, 16).replace("T", " "); }
+};
 const dashMetric = (key, value, note) => {
   const card = dashNode("div", "dashmetric");
   card.append(dashNode("span", "k", key), dashNode("b", "", value));
@@ -9061,19 +9069,26 @@ async function loadCalloutsDashboard() {
         if (exactMatch) matched.push({ coin, callout, evidence, inflows });
       }
     }
-    el.append(dashLead("Evidence-backed matched callers",
+    const hidden = body.hidden || {};
+    const whaleBar = Number(policy.minimumCurrentValueUsd) || 0;
+    el.append(dashLead("Verified Pump.fun whales",
       "Only Pump.fun authors whose exact public wallet matches a recent confirmed pool-touching token inflow. Values use the current market mark, not reconstructed purchase cost.",
-      String(matched.length) + " MATCHED", matched.length ? "good" : ""));
+      String(matched.length) + " WHALE" + (matched.length === 1 ? "" : "S"), matched.length ? "good" : ""));
     const boundary = dashNode("div", "boundary-note");
     boundary.append(
-      dashNode("strong", "", "WALLET MATCHES, NOT SOCIAL GUESSWORK."),
+      dashNode("strong", "", "VERIFIED PROFILE + WHALE-SIZED WALLET MATCH, OR IT IS NOT POSTED."),
       document.createTextNode(" A username, badge, quote, or tracked multiple never qualifies on its own. " +
         "Policy: " + String(policy.identityClaim || "wallet-match-only") +
         " · value basis: " + String(policy.valueBasis || "token-inflow-at-current-market-mark") +
         " · purchase consideration proven: " + String(policy.purchaseConsiderationProven === true) +
         " · unmatched chatter included: " + String(policy.unmatchedChatterIncluded === true) +
         " · coverage: " + String(coverage.succeeded ?? 0) + "/" + String(coverage.attempted ?? 0) +
-        " checked" + (coverage.complete === true ? " (complete)" : " (incomplete)"))
+        " checked" + (coverage.complete === true ? " (complete)" : " (incomplete)") +
+        " · Pump.fun verification required: " + String(policy.pumpfunVerifiedRequired === true) +
+        (whaleBar ? " · whale bar " + dashMoney(whaleBar) + " matched inflow" : "") +
+        ((hidden.unverified || hidden.belowWhale)
+          ? " · hidden: " + String(hidden.unverified || 0) + " unverified, " + String(hidden.belowWhale || 0) + " below the bar"
+          : ""))
     );
     el.appendChild(boundary);
 
@@ -9095,7 +9110,12 @@ async function loadCalloutsDashboard() {
             " successfully checked coin" + (succeeded === 1 ? "" : "s") +
             (failed || partial ? "; " + failed + " check" + (failed === 1 ? "" : "s") +
               " failed and " + partial + " scan" + (partial === 1 ? " was" : "s were") + " partial" : "") + ".";
-      el.appendChild(dashNode("p", "locked", honestEmpty));
+      const hiddenNote = (hidden.unverified || hidden.belowWhale)
+        ? " " + String(hidden.unverified || 0) + " unverified author" + ((hidden.unverified || 0) === 1 ? "" : "s") +
+          " and " + String(hidden.belowWhale || 0) + " verified author" + ((hidden.belowWhale || 0) === 1 ? "" : "s") +
+          " under the " + dashMoney(whaleBar) + " whale bar were not posted."
+        : "";
+      el.appendChild(dashNode("p", "locked", honestEmpty + hiddenNote));
       return;
     }
     for (const row of matched) {
@@ -9113,8 +9133,10 @@ async function loadCalloutsDashboard() {
       card.appendChild(head);
       if (callout.text) card.appendChild(dashNode("p", "callout-evidence", "“" + String(callout.text).slice(0, 280) + "”"));
       const proof = dashNode("div", "callout-proof");
+      const posted = dashWhen(callout.ts) || dashWhen(row.inflows[0]?.timestamp);
       proof.append(
-        dashNode("span", "", dashMoney(evidence.matchedCurrentValueUsd) + " current-value inflow"),
+        dashNode("span", "", dashMoney(evidence.matchedCurrentValueUsd) + " matched inflow"),
+        ...(posted ? [dashNode("span", "", "posted " + posted)] : []),
         dashNode("span", "", String(evidence.qualifyingInflowCount || row.inflows.length) + " matching transaction" +
           ((evidence.qualifyingInflowCount || row.inflows.length) === 1 ? "" : "s")),
         dashNode("span", "", "current-value threshold " + dashMoney(evidence.thresholdUsd)),

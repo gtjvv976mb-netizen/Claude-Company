@@ -175,3 +175,21 @@ assert.match(whaleSource, /if \(includeEvidence\) result\.evidenceTrades = trade
   "the matcher can receive every bounded evidence row without widening the legacy response");
 
 console.log("evidence-backed Pump.fun callouts: exact wallet joins, truthful valuation, provenance, and coverage pass");
+
+
+/* OWNER RULE: only verified Pump.fun whales are posted. */
+{
+  const { verifiedWhaleCallouts } = await import("./src/callouts.js");
+  const rows = [
+    { id: "big-verified", verified: true, matchedCurrentValueUsd: 6_000 },
+    { id: "big-unverified", verified: false, matchedCurrentValueUsd: 9_000 },
+    { id: "small-verified", verified: true, matchedCurrentValueUsd: 800 },
+    { id: "no-badge-field", matchedCurrentValueUsd: 50_000 },
+  ];
+  const gate = verifiedWhaleCallouts(rows, { minUsd: 2_500 });
+  assert.deepEqual(gate.rows.map((r) => r.id), ["big-verified"], "only a verified author above the whale bar is posted");
+  assert.equal(gate.unverifiedHidden, 2, "unverified authors are hidden however large the buy");
+  assert.equal(gate.belowWhaleHidden, 1, "a verified author under the bar is hidden");
+  assert.equal(gate.whaleUsd, 2_500);
+  console.log("  ok   verified-whale gate keeps only verified authors above the bar and counts what it hid");
+}

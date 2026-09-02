@@ -40,7 +40,7 @@ import { walletSolBalance } from "./data/solana.js";
 import { buildExecutorDashboard } from "./executor-dashboard.js";
 import * as passes from "./passes.js";
 import { callouts, WHALE_USD } from "./whales.js";
-import { evidenceBackedPumpfunCallouts } from "./callouts.js";
+import { verifiedWhaleCallouts, CALLOUT_WHALE_MIN_USD, evidenceBackedPumpfunCallouts } from "./callouts.js";
 import { isAddress } from "./lib/base58.js";
 import { retiredBrowserRpcResponse } from "./execution-gates.js";
 import { providerCreditHealth, providerErrorForViewer } from "./provider-health.js";
@@ -1194,7 +1194,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             const [thread, flow] = await Promise.all([
               pf.callouts(m.mint, 20).catch(() => ({ ok: false, callouts: [] })),
               liveWhales(m.mint, {
-                scan: 16, minUsd: WHALE_USD, deadline, includeEvidence: true,
+                scan: 16, minUsd: CALLOUT_WHALE_MIN_USD, deadline, includeEvidence: true,
               }).catch(() => null),
             ]);
             if (!thread.ok) return { ok: false, reason: "pumpfun-callouts-unavailable" };
@@ -1206,17 +1206,17 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
                 source: { provider: "pump.fun", url: row.url ?? null },
               })),
               trades: flow.evidenceTrades,
-              minUsd: WHALE_USD,
+              minUsd: CALLOUT_WHALE_MIN_USD,
               partial: flow.partial,
               scanned: flow.scanned,
               unread: flow.unread,
               failed: flow.failed,
             });
-            const evidenceCallouts = matched.callouts.slice(0, 5).map((row) => ({
+            // Owner rule: verified Pump.fun profile AND whale-sized matched inflow.
+            const gate = verifiedWhaleCallouts(matched.callouts, { minUsd: CALLOUT_WHALE_MIN_USD });
+            const evidenceCallouts = gate.rows.slice(0, 5).map((row) => ({
               ...row,
-              verificationLevel: row.verified
-                ? "pumpfun-verified-and-wallet-inflow-matched"
-                : "wallet-inflow-matched",
+              verificationLevel: "pumpfun-verified-and-wallet-inflow-matched",
             }));
             const coin = evidenceCallouts.length ? {
               mint: m.mint,
@@ -1227,8 +1227,10 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               whales: evidenceCallouts,
               chatter: [],
               evidence: matched.evidence,
+              hidden: { unverified: gate.unverifiedHidden, belowWhale: gate.belowWhaleHidden },
             } : null;
-            return { ok: true, partial: matched.evidence.partial === true, coin };
+            return { ok: true, partial: matched.evidence.partial === true, coin,
+              hidden: { unverified: gate.unverifiedHidden, belowWhale: gate.belowWhaleHidden } };
           }));
           const successful = resolved.filter((row) => row?.ok === true);
           const failed = resolved.filter((row) => row?.ok !== true);
@@ -1251,9 +1253,14 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               complete: failed.length === 0 && partialScans === 0,
               failures: [...failureCounts].map(([reason, count]) => ({ reason, count })),
             },
+            hidden: {
+              unverified: successful.reduce((n, row) => n + (row.hidden?.unverified || 0), 0),
+              belowWhale: successful.reduce((n, row) => n + (row.hidden?.belowWhale || 0), 0),
+            },
             policy: {
               unmatchedChatterIncluded: false,
-              minimumCurrentValueUsd: WHALE_USD,
+              pumpfunVerifiedRequired: true,
+              minimumCurrentValueUsd: CALLOUT_WHALE_MIN_USD,
               valueBasis: "token-inflow-at-current-market-mark",
               purchaseConsiderationProven: false,
               identityClaim: "wallet-match-only",

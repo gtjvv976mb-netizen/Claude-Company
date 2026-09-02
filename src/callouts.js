@@ -5,6 +5,31 @@ import { decode, isAddress } from "./lib/base58.js";
  * names that basis explicitly instead of calling it purchase USD. */
 export const DEFAULT_CALLOUT_CURRENT_VALUE_THRESHOLD_USD = 500;
 
+/* OWNER RULE (2026-09-02): the Callouts tab posts only REAL WHALES with WALLETS
+ * VERIFIED ON PUMP.FUN. Two conditions, both required: the author's Pump.fun profile
+ * carries the site's own verification (isVerified), and the author's exact wallet
+ * holds confirmed pool-touching inflow worth at least the whale bar at the current
+ * mark. $500 is a buyer, not a whale; the bar defaults to $2,500 (~25 SOL) and is
+ * tunable with CALLOUT_WHALE_MIN_USD. The whale TAPE keeps its own WHALE_USD. */
+const configuredCalloutWhaleUsd = Number(process.env.CALLOUT_WHALE_MIN_USD || 2500);
+export const CALLOUT_WHALE_MIN_USD = Number.isFinite(configuredCalloutWhaleUsd) && configuredCalloutWhaleUsd > 0
+  ? configuredCalloutWhaleUsd : 2500;
+
+/** Keep only Pump.fun-verified authors whose matched inflow clears the whale bar.
+ *  Pure; returns what it dropped and why, so the tab can say so instead of going blank. */
+export function verifiedWhaleCallouts(rows, { minUsd = CALLOUT_WHALE_MIN_USD } = {}) {
+  const bar = Number.isFinite(Number(minUsd)) && Number(minUsd) > 0 ? Number(minUsd) : CALLOUT_WHALE_MIN_USD;
+  const kept = [];
+  let unverifiedHidden = 0, belowWhaleHidden = 0;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const value = Number(row?.matchedCurrentValueUsd);
+    if (row?.verified !== true) { unverifiedHidden++; continue; }
+    if (!Number.isFinite(value) || value < bar) { belowWhaleHidden++; continue; }
+    kept.push(row);
+  }
+  return { rows: kept, unverifiedHidden, belowWhaleHidden, whaleUsd: bar };
+}
+
 const record = (value) => value && typeof value === "object" && !Array.isArray(value);
 
 const finite = (value) => {
