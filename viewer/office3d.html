@@ -8776,6 +8776,10 @@ async function loadWallsteDashboard({ background = false } = {}) {
         "self-reported control state"),
       dashMetric("Blocking intent", health?.blockingIntent === true ? "PRESENT" : health ? "Clear" : "Unknown",
         "unresolved local journal intent"),
+      dashMetric("Feed / tick failures", health ? String(health.consecutiveFeedFailures ?? 0) + " / " + String(health.consecutiveTickFailures ?? 0) : "\u2014",
+        health?.feedRollback ? "feed rollback active" : "consecutive"),
+      dashMetric("Exit safety", health ? (health.exitBlocked ? "EXITS BLOCKED" : health.manualAction ? "MANUAL ACTION" : "Clear") : "\u2014",
+        health ? String(health.blockedPositions ?? 0) + " blocked positions" : "no heartbeat"),
       dashMetric("Readiness providers", readiness ? String(readiness.providers || 0) + " / 2" : "Not reported",
         readiness ? (readiness.ready ? "ready" : "not ready") + " · " + String(readiness.route || "route unknown") +
           (readiness.amountLamports ? " · " + dashSol(Number(readiness.amountLamports) / 1e9) + " rehearsal" : " · size not reported")
@@ -8792,6 +8796,7 @@ async function loadWallsteDashboard({ background = false } = {}) {
         const mint = String(position?.mint || "");
         row.append(
           dashNode("span", "", mint ? mint.slice(0, 7) + "…" + mint.slice(-7) : "Unknown mint"),
+          ...(dashWhen(position.openedAt) ? [dashNode("small", "", "opened " + dashWhen(position.openedAt))] : []),
           dashNode("strong", "", Number(position?.sol || 0).toFixed(4) + " SOL")
         );
         heldList.appendChild(row);
@@ -9164,7 +9169,7 @@ async function loadCalloutsDashboard() {
         " · purchase consideration proven: " + String(policy.purchaseConsiderationProven === true) +
         " · unmatched chatter included: " + String(policy.unmatchedChatterIncluded === true) +
         " · coverage: " + String(coverage.succeeded ?? 0) + "/" + String(coverage.attempted ?? 0) +
-        " checked" + (coverage.complete === true ? " (complete)" : " (incomplete)") +
+        " checked" + (coverage.candidates != null && coverage.candidates > (coverage.attempted ?? 0) ? " of " + coverage.candidates + " candidates" : "") + (coverage.complete === true ? " (complete)" : " (incomplete)") +
         (dashWhen(body.generatedAt) ? " \u00b7 as of " + dashWhen(body.generatedAt) : "") +
         " · Pump.fun verification required: " + String(policy.pumpfunVerifiedRequired === true) +
         (whaleBar ? " · whale bar " + dashMoney(whaleBar) + " matched inflow" : "") +
@@ -9246,6 +9251,16 @@ async function loadCalloutsDashboard() {
       links.appendChild(caChip(coin.mint));
       card.appendChild(links);
       el.appendChild(card);
+    }
+    const history = Array.isArray(body.history) ? body.history.filter((h) => !matched.some((m) => m.coin.mint === h.mint && (m.callout.id ?? m.callout.user) === (h.key || "").split(":").slice(1).join(":"))) : [];
+    if (history.length) {
+      el.appendChild(dashNode("h4", "", "Previously posted"));
+      for (const h of history.slice(0, 20)) {
+        const line = dashNode("p", "dp-note", (dashWhen(h.seenAt) || "") + " \u00b7 $" + String(h.symbol || String(h.mint || "").slice(0, 6)).replace(/^\$/, "") +
+          " \u00b7 " + (h.username ? "@" + String(h.username).replace(/^@/, "") : String(h.user || "").slice(0, 6) + "\u2026") +
+          " \u00b7 " + dashMoney(h.matchedCurrentValueUsd));
+        el.appendChild(line);
+      }
     }
   } catch (error) {
     el.innerHTML = "";

@@ -81,6 +81,9 @@ ensureColumn("copy_settings", "executor_secret", "TEXT");
 // Self-reported executor liveness: {mode,wallet,cursor,open,ts,seenAt} JSON. The site
 // never CLAIMS the bot is live — it relays what the bot last said about itself.
 ensureColumn("copy_settings", "executor_heartbeat", "TEXT");
+// The last 48 pulses, oldest first: {seenAt, mode, open, state}. The single latest blob
+// gave the WALL-ST-E tab no history at all — every past pulse was overwritten.
+ensureColumn("copy_settings", "executor_heartbeat_log", "TEXT");
 ensureColumn("copy_settings", "launchpads", "TEXT");
 ensureColumn("copy_settings", "min_liq_usd", "REAL");   // per-floor liquidity floor; null = no floor
 ensureColumn("deliveries", "size_sol", "REAL", "size_usd");

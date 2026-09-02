@@ -135,6 +135,8 @@ export function executorFeedPayload(floorNo, rawAfter = 0) {
 export function executorHeartbeatPayload(floorNo) {
   const raw = db.prepare("SELECT executor_heartbeat FROM copy_settings WHERE floor_no=?")
     .get(Number(floorNo))?.executor_heartbeat;
+  let heartbeatLog = [];
+  try { heartbeatLog = JSON.parse(db.prepare("SELECT executor_heartbeat_log FROM copy_settings WHERE floor_no=?").get(Number(floorNo))?.executor_heartbeat_log || "[]"); } catch {}
   let heartbeat = null;
   try { heartbeat = raw ? JSON.parse(raw) : null; } catch { heartbeat = null; }
   return { heartbeat };
@@ -505,13 +507,18 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             held: Array.isArray(body.held) ? body.held.slice(0, 20).map((h) => ({
               mint: String(h?.mint ?? "").slice(0, 64),
               sol: Number(h?.sol) || 0,
+              openedAt: Number(h?.openedAt) || 0,
             })).filter((h) => h.mint) : [],
             health: sanitizeExecutorHealth(body.health),
             ts: Number(body.ts) || Date.now(),
             seenAt: Date.now(),
           };
-          db.prepare("UPDATE copy_settings SET executor_heartbeat=? WHERE floor_no=?")
-            .run(JSON.stringify(hb), floorNo);
+          let ring = [];
+          try { ring = JSON.parse(db.prepare("SELECT executor_heartbeat_log FROM copy_settings WHERE floor_no=?").get(floorNo)?.executor_heartbeat_log || "[]"); } catch {}
+          if (!Array.isArray(ring)) ring = [];
+          ring.push({ seenAt: hb.seenAt, mode: hb.mode, open: hb.open, state: hb.health?.state ?? null });
+          db.prepare("UPDATE copy_settings SET executor_heartbeat=?, executor_heartbeat_log=? WHERE floor_no=?")
+            .run(JSON.stringify(hb), JSON.stringify(ring.slice(-48)), floorNo);
           return json(200, { ok: true });
         }
 
@@ -1198,7 +1205,9 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             return json(200, globalThis.__verifiedCallouts.body);
           const feed = identity.whaleFeed({ launchpad: "pump.fun", limit: 40 });
           const seen = new Set();
-          const mints = feed.filter((w) => w.mint && !seen.has(w.mint) && seen.add(w.mint)).slice(0, 3);
+          const distinct = feed.filter((w) => w.mint && !seen.has(w.mint) && seen.add(w.mint));
+          const candidateCount = distinct.length;
+          const mints = distinct.slice(0, 3);
           const pf = await import("./data/pumpfun.js");
           const { callouts: liveWhales } = await import("./whales.js");
           const deadline = now + 10_000;
@@ -1257,6 +1266,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             source: "pump.fun-callouts+solana-confirmed-pool-token-inflows",
             coverage: {
               attempted: mints.length,
+              candidates: candidateCount,
               succeeded: successful.length,
               failed: failed.length,
               partialScans,
@@ -1278,6 +1288,16 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               identityClaim: "wallet-match-only",
             },
           };
+          /* What was posted before this two-minute snapshot. Without it a whale matched
+           * at 10:00 vanished at 10:02 when its coin left the top three. Bounded, in memory. */
+          const hist = Array.isArray(globalThis.__calloutHistory) ? globalThis.__calloutHistory : [];
+          for (const coin of out) for (const row of coin.callouts || []) {
+            const key = coin.mint + ":" + (row.id ?? row.user);
+            if (!hist.some((h) => h.key === key)) hist.unshift({ key, seenAt: now, mint: coin.mint, symbol: coin.symbol,
+              user: row.user, username: row.username, matchedCurrentValueUsd: row.matchedCurrentValueUsd, ts: row.ts ?? null, url: row.url ?? null });
+          }
+          globalThis.__calloutHistory = hist.slice(0, 100);
+          body2.history = globalThis.__calloutHistory;
           globalThis.__verifiedCallouts = { at: now, body: body2 };
           return json(200, body2);
         }

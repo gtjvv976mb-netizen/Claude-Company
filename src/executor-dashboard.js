@@ -108,6 +108,7 @@ const publicHeartbeat = (value) => {
     held: Array.isArray(value.held) ? value.held.slice(0, 20).map((holding) => ({
       mint: isAddress(holding?.mint) ? holding.mint : null,
       sol: Math.max(0, finite(holding?.sol, 0)),
+      openedAt: timestamp(holding?.openedAt),
     })).filter((holding) => holding.mint) : [],
     health,
     ts: timestamp(value.ts),

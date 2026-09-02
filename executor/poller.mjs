@@ -1322,6 +1322,7 @@ function sendHeartbeat() {
       held: openList().slice(0, 20).map((p) => ({
         mint: p.mint,
         sol: Number((Number(p.entryInputLamports || 0) / LAMPORTS).toFixed(4)),
+        openedAt: Number(p.openedAtMs) || 0,
       })),
       health,
       ts: Date.now(),
