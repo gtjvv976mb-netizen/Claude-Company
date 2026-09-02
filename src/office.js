@@ -998,6 +998,19 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               isOwner: Boolean(me && holdsFloor(50)),
             }),
             lastEventTs: lastEv, grokEnabled: !!process.env.XAI_API_KEY,
+            /* WHY THE HOUSE BOT IS SILENT. A floor's executor feed only carries
+               calls the desk OFFERED it; a floor whose deliveries are all skipped
+               has a bot that never logs a thing. The verdict and reason for the
+               house floor's last five deliveries — benign strings like "cap is
+               outside this floor's sleeve" — so the owner can see the gate
+               without a tenant token. */
+            houseDeliveries: (() => { try {
+              return db.prepare(`SELECT c.symbol, d.verdict, d.reason, d.size_sol, d.delivered_at
+                FROM deliveries d LEFT JOIN calls c ON c.id = d.call_id
+                WHERE d.floor_no = ? ORDER BY d.id DESC LIMIT 5`).all(tower.HQ_FLOOR)
+                .map((r) => ({ symbol: r.symbol, verdict: r.verdict, reason: r.reason,
+                  sizeSol: r.size_sol, minutesAgo: Math.round((now - r.delivered_at) / 60000) }));
+            } catch (e) { return [{ error: String(e.message) }]; } })(),
             providerCredit: {
               blocked: provider.blocked,
               failures: provider.failures,
