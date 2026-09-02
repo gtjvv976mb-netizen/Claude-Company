@@ -26,6 +26,17 @@ export async function coinInfo(mint) {
     usdMarketCap: c.usd_market_cap ?? null,
     replyCount: c.reply_count ?? null,
     kingOfTheHillAt: c.king_of_the_hill_timestamp ?? null,
+    /* THE COIN'S OWN LORE, AND WHERE ITS CREATOR SPEAKS.
+     * pump.fun returns these on a request the desk already makes, and they were being
+     * dropped on the floor — after which the desk paid Grok, on every workup, to go and
+     * FIND the X account it had just been handed. The description is the coin's claim
+     * about itself in the launcher's own words, which is the lore the narrative seat is
+     * being asked to judge. */
+    twitter: c.twitter ?? null,
+    telegram: c.telegram ?? null,
+    website: c.website ?? null,
+    description: typeof c.description === "string" ? c.description.slice(0, 600) : null,
+    creatorUsername: c.username ?? null,
   };
 }
 

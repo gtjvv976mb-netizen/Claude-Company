@@ -14,6 +14,7 @@
 import { floorsFor, BAND_FLOORS, cfg } from "./src/config.js";
 import { wouldSurviveScreen, rank } from "./src/penthouse.js";
 import { screen } from "./src/data/evidence.js";
+import fs from "node:fs";
 
 let pass = 0, fail = 0;
 const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  — " + d : ""}`))
@@ -168,6 +169,64 @@ ok("a KNOWN pool still scores on the depth ratio, unchanged",
 ok("and an implausible ratio on a KNOWN pool is still penalised",
   rank(curveCoin({ liq: 10_000, vol: 900_000 })).why.some((w) => /implausible/i.test(w)),
   "vol/liq = 90 — wash territory");
+
+
+/* ── THE PAID SCREEN MUST AGREE WITH THE FREE ONE ─────────────────────────────
+ * These two screens are supposed to read one source, and on 2026-09-03 they did not:
+ * the free one was moved onto the band's age floor and the paid one — the authoritative
+ * one — kept the flat 1.5 hours. So every coin the ignition lane exists to find passed
+ * the free screen, had a workup paid for, and was killed as `too_new` before a single
+ * analyst ran. The existing paid-screen fixture above could not catch it: it puts
+ * ageHours under `derived` while screen() reads `pair.ageHours`, so too_new was already
+ * firing unnoticed in every one of its assertions. These drive the real shape. */
+console.log("\nTHE PAID SCREEN READS THE BAND'S FLOORS, NOT A FLAT ONE");
+{
+  const liveEv = ({ mcap, ageH, liq, totalLiq, vol, tx }) => ({
+    ok: true, mint: "M", symbol: "T",
+    pair: { marketCap: mcap, liquidityUsd: liq, volume: { h24: vol }, priceChange: {},
+      ageHours: ageH, pairCreatedAt: Date.now() - ageH * 3.6e6 },
+    pairs: { count: totalLiq === null ? 0 : 1, totalLiquidityUsd: totalLiq },
+    derived: { txns24h: tx, ageHours: ageH, volToLiqRatio: liq > 0 ? vol / liq : null },
+    exitProbe: { ok: true, roundTripLossPct: 4.5 },
+    mintAccount: { mintAuthority: null, freezeAuthority: null },
+    holders: { ok: true, top10Pct: 20, holderCount: 300 },
+  });
+  const paidCodes = (o) => (screen(liveEv(o)) ?.fails ?? []).map((f) => f.code);
+
+  const nano = { mcap: 9_300, ageH: 0.287, liq: 8_000, totalLiq: 0, vol: 18_600, tx: 40 };
+  ok("a 17-minute nano coin is no longer too_new for the paid screen",
+    !paidCodes(nano).includes("too_new"), paidCodes(nano).join(",") || "passes");
+  const fresh = { mcap: 15_500, ageH: 0.06, liq: 6_000, totalLiq: 0, vol: 12_000, tx: 25 };
+  ok("...nor is a four-minute one", !paidCodes(fresh).includes("too_new"), paidCodes(fresh).join(",") || "passes");
+  ok("...and the free screen agrees with the paid one on both",
+    wouldSurviveScreen({ mint: "M", pair: liveEv(nano).pair }) !== "too_new"
+    && wouldSurviveScreen({ mint: "M", pair: liveEv(fresh).pair }) !== "too_new");
+
+  // The floor did not go away; it went band-relative. A big coin still has to be old.
+  const bigYoung = { mcap: 5_000_000, ageH: 0.5, liq: 200_000, totalLiq: 200_000, vol: 300_000, tx: 900 };
+  ok("a $5m coin half an hour old is still too_new", paidCodes(bigYoung).includes("too_new"),
+    paidCodes(bigYoung).join(","));
+
+  /* AN UNREADABLE POOL IS NOT A THIN POOL. A coin on its bonding curve has no venue
+     pool, so the venue total arrives as 0 — and `??` kept that 0, killing it on a
+     number nobody measured. The exit probe is what answers this question. */
+  ok("a coin with no venue pool is not killed as thin on a zero nobody measured",
+    !paidCodes(nano).includes("thin_liquidity"), paidCodes(nano).join(",") || "passes");
+  const genuinelyThin = { mcap: 9_300, ageH: 0.3, liq: 200, totalLiq: 200, vol: 18_600, tx: 40 };
+  ok("...but a pool that IS readable and IS thin still dies",
+    paidCodes(genuinelyThin).includes("thin_liquidity"), paidCodes(genuinelyThin).join(","));
+}
+
+/* The seats cannot judge a horizon they are never told. */
+console.log("\nTHE EVIDENCE BUNDLE STATES THE BAND AND THE HOLD WINDOW");
+{
+  const { bandForMarketCap, holdWindowFor } = await import("./src/bands.js");
+  ok("a nano cap resolves to a 30-minute window",
+    bandForMarketCap(9_000) === "nano" && holdWindowFor(9_000).holdMaxMs === 30 * 60_000);
+  const src = fs.readFileSync("./src/data/evidence.js", "utf8");
+  ok("gather() puts both on the bundle every seat reads",
+    /band: bandForMarketCap\(/.test(src) && /hold: holdWindowFor\(/.test(src));
+}
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

@@ -154,8 +154,19 @@ export function eligibility(rec) {
   const authorizedSize = Number(rec.order?.size ?? rec.ceo?.order_size_usd ?? rec.risk?.position_size_usd);
   if (!(authorizedSize > 0))
     return decline("the team authorized zero size — there is no trade to publish", true);
+  /* THE SPIKE REFUSAL, BAND-RELATIVE.
+   *
+   * A flat "+20% in five minutes is a spike" is right for a coin the desk means to hold
+   * for hours and exactly backwards for one it means to hold for thirty minutes: the
+   * ignition lane ranks candidates BY their five-minute move, so this line refused the
+   * entire population it was built to find. On the fast bands the move is the entry and
+   * the clock is the protection — the position is sold on its band's window whether or
+   * not the target prints. On the slow bands nothing has changed. */
   const m5 = rec.ev?.pair?.priceChange?.m5 ?? 0;
-  if (m5 > 20)
+  const band = rec.ev?.band ?? null;
+  const fastBand = band === "nano" || band === "micro";
+  const spikeCeiling = fastBand ? Infinity : 20;
+  if (m5 > spikeCeiling)
     return decline(`spike-shaped entry: +${m5}% in five minutes — copiers would be the exit`, true);
 
   /* ---- ELIGIBLE. The tier records HOW MUCH the team liked it, which is what the

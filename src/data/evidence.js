@@ -2,6 +2,7 @@ import * as ds from "./dexscreener.js";
 import * as jup from "./jupiter.js";
 import * as sol from "./solana.js";
 import { cfg, MINTS, floorsFor } from "../config.js";
+import { bandForMarketCap, holdWindowFor } from "../bands.js";
 import * as snapshots from "./snapshots.js";
 import { grokXRead, hasGrok } from "../lib/grok.js";
 import { emit } from "../lib/bus.js";
@@ -135,6 +136,13 @@ export async function gather(mint, hook = "") {
     symbol: best?.baseSymbol ?? "?",
     name: best?.baseName ?? "?",
     fetchedAt: new Date().toISOString(),
+    /* WHAT KIND OF TRADE THIS IS, stated to every seat that reads the bundle.
+     * A call is now sold on its band's clock whether or not the target prints, and no
+     * seat knew: the PM was authoring theses with multi-day horizons for coins the bot
+     * closes in thirty minutes, and the analysts were judging "is the desk early or
+     * late" against no horizon at all. */
+    band: bandForMarketCap(best?.marketCap ?? best?.fdv ?? null),
+    hold: holdWindowFor(best?.marketCap ?? best?.fdv ?? null),
     pair: best,
     pairs: {
       count: px.pairs.length,
@@ -178,7 +186,15 @@ export function screen(ev) {
     "serial_deployer",
     dep?.ok ? `deployer shipped ${dep.priorLaunches}+ coins, zero ever graduated` : null);
 
-  const totalLiq = ev.pairs?.totalLiquidityUsd ?? p.liquidityUsd;
+  /* AN UNREADABLE POOL IS NOT A THIN POOL — and `??` could not tell the difference.
+   * A pump.fun coin still on its bonding curve has no DexScreener pool at all, so
+   * `totalLiquidityUsd` arrives as 0 rather than null, `??` keeps the 0, and the coin
+   * dies as `thin_liquidity` on a number nobody measured. A real zero and an unread
+   * feed are different facts. Falling back to the pair's own figure when the venue
+   * total is absent OR zero hands the question to the exit probe below, which measures
+   * the round trip directly — and `unverified_exit` still refuses anything that probe
+   * cannot measure, `cannot_exit` anything that measures worse than the ceiling. */
+  const totalLiq = (ev.pairs?.totalLiquidityUsd || null) ?? p.liquidityUsd;
   /* The SAME band-relative floors the free pre-screen used. If these two ever diverge
    * the desk pays for workups it was always going to refuse, so they read one source. */
   const fl = floorsFor(p.marketCap ?? p.fdv ?? null);
@@ -189,8 +205,20 @@ export function screen(ev) {
    * worse than the ceiling, so an unreadable pool still has to prove it can be left. */
   check(totalLiq != null && totalLiq < fl.liq,
     "thin_liquidity", `total liquidity across ${ev.pairs?.count} venues = ${totalLiq} < floor ${fl.liq} for this cap band`);
-  check(p.ageHours == null || p.ageHours < s.minPairAgeHours,
-    "too_new", `ageHours=${p.ageHours} < floor ${s.minPairAgeHours}`);
+  /* THE BAND'S FLOOR, like every other check on this screen.
+   *
+   * This line alone kept reading the flat 1.5-hour figure while `fl` — already in scope
+   * two lines above, and used by the liquidity, volume and participation checks either
+   * side of it — carried the band's own. The free pre-screen was moved to `fl.ageH`;
+   * this one, the authoritative one, was not. So every coin the ignition lane exists to
+   * find passed the free screen, had a workup paid for, and was killed here as
+   * `too_new` before forensics, flow, narrative or technical ever ran. Measured on live
+   * candidates at the moment of the audit: TORAH 17 minutes, FARTIN 6, PUFF 4 — all
+   * nano, all killed. The comment above says these two screens read one source; they
+   * did not, on the one floor that had just moved. */
+  const ageFloorH = fl.ageH ?? s.minPairAgeHours;
+  check(p.ageHours == null || p.ageHours < ageFloorH,
+    "too_new", `ageHours=${p.ageHours} < floor ${ageFloorH} for this cap band`);
   check((p.volume?.h24 ?? 0) < fl.vol,
     "no_volume", `volume.h24=${p.volume?.h24} < floor ${fl.vol} for this cap band`);
   // Was `s.minTxns24`, which is undefined — so `n < undefined` was always false and this
@@ -320,9 +348,29 @@ export function screen(ev) {
  * Mutates and returns `ev` so the caller keeps one evidence object; fails open, because
  * no X read is missing evidence, never a block.
  */
+/** The @name out of a pump.fun social link, or null. Never guesses. */
+function handleFromUrl(url) {
+  if (typeof url !== "string") return null;
+  const m = url.match(/(?:twitter\.com|x\.com)\/(?:#!\/)?@?([A-Za-z0-9_]{1,15})(?:[/?].*)?$/i);
+  const name = m?.[1];
+  if (!name) return null;
+  // A link to a POST carries the author in the same position as a profile link, but
+  // "i", "intent" and "search" are routes, not people.
+  if (/^(i|intent|search|home|hashtag|explore)$/i.test(name)) return null;
+  return "@" + name;
+}
+
 export async function enrichWithXRead(ev, hook = "") {
   if (hook === "monitor" || !hasGrok()) return ev;
-  const xr = await grokXRead({ symbol: ev.pair?.baseSymbol ?? ev.mint.slice(0, 6), mint: ev.mint, hook })
+  /* HAND GROK WHAT THE DESK ALREADY KNOWS. pump.fun returns the creator's X link and
+     the coin's own description on a request gather() already makes, and the desk was
+     dropping both and then paying for searches to rediscover the account. Starting from
+     the handle turns "find whoever launched this" into "read this account", which is
+     both cheaper and a better question. */
+  const pfCoin = ev.deployer?.coin ?? null;
+  const handle = handleFromUrl(pfCoin?.twitter) ?? pfCoin?.creatorUsername ?? null;
+  const xr = await grokXRead({ symbol: ev.pair?.baseSymbol ?? ev.mint.slice(0, 6), mint: ev.mint, hook,
+    handle, lore: pfCoin?.description ?? null })
     .catch(() => null);
   if (xr?.ok) ev.xRead = { ...xr.read, citations: xr.citations };
   else if (xr) ev.xRead = { error: xr.error };

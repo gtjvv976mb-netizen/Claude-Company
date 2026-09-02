@@ -2,7 +2,10 @@ import { ask, askWithWeb } from "../lib/llm.js";
 import { AnalystOut } from "./schemas.js";
 import { cfg } from "../config.js";
 
-const bundle = (ev) => "=== EVIDENCE BUNDLE ===\n" + JSON.stringify(ev, null, 2);
+/* Not pretty-printed. The decision seats measured the indentation at roughly a quarter
+   of their input tokens and dropped it; the five analyst seats, which run on every
+   workup rather than only on survivors, kept paying for whitespace no model needs. */
+const bundle = (ev) => "=== EVIDENCE BUNDLE ===\n" + JSON.stringify(ev);
 
 /**
  * The five analyst seats. Each is deliberately blinkered: it sees the evidence and
@@ -122,7 +125,15 @@ State plainly which of these you think you are looking at:
                a messy distribution, uneven decay and revival.
   A MACHINE  — few wallets round-tripping, uniform trade sizes, suspiciously smooth
                volume across buckets, a buy/sell ratio pinned far from 1.0 for a day.
-  A LAUNCH   — too young to tell, and saying so is a complete answer.
+  A LAUNCH   — young, and on this desk that is the ordinary case rather than an excuse.
+               "Too young to tell" WAS a complete answer when the desk hunted day-old
+               coins; it now hunts coins that are minutes old on purpose, so abstaining
+               on youth abstains on nearly everything. Judge what a launch actually
+               shows: whether buyers are arriving from different directions or one
+               wallet is round-tripping, whether size is varied or uniform, whether the
+               first minutes look like a crowd or like a bundle. Say "the data is
+               absent" only when it genuinely is — that is different from "the coin is
+               new", and only the first is a reason to stand down.
 
 PAID ATTENTION: the evidence bundle's "promotion" field says whether this token BOUGHT
 its reach (DexScreener boosts/ads) and when it last paid. Boosted attention is not

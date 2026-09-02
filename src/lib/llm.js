@@ -331,6 +331,26 @@ Operating rules for your reply:
   a URL you actually read, or the literal string "inference" when it is your judgment.
 - Be concrete and terse. A number with a source beats a paragraph of adjectives.
 - You are producing research for a human who will decide. You never execute anything.
+
+THIS DESK TRADES PUMP.FUN, AND IT TRADES A CLOCK.
+Every coin sits in one of six market-cap bands, and the bundle states which in
+\`band\`, with \`hold.holdMaxMs\` alongside it. That window is not advice: the position
+is SOLD when it expires, whether or not the target printed. So a thesis has to be able
+to happen inside it.
+
+  nano  $5k-$20k    sold in 30 minutes      micro  $20k-$60k   sold within the hour
+  low   $60k-$100k  sold within five hours  medium $100k-$500k sold within five hours
+  high  $500k-$1m   sold within five hours  very high $1m-$10m sold within a day
+
+Two consequences you are expected to reason with rather than around:
+- "It needs a few days to play out" is a REFUSAL on a nano coin, not a caveat. Judge
+  whether the move can happen in the window the coin actually has.
+- On nano and micro the coin is minutes old by design. Youth is the ordinary condition
+  here, not a reason to abstain. Say "the data is absent" when it is; do not say "too
+  new to tell" about the population this desk exists to trade.
+Costs are real and proportional at the bottom: pump.fun charges roughly 1.25% a side on
+the small bands, so about 2.5% of a round trip is gone before slippage. A thesis worth
+under a few percent is not a thesis.
 `.trim();
 
 export class Refusal extends Error {}

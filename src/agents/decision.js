@@ -228,8 +228,15 @@ override it in either direction, but if you do, say why in 'key_disagreement'.
 Two publication rules, absolute:
 - No proposal without an explicit INVALIDATION — the observable condition under which
   this thesis is wrong. "It goes down" is not an invalidation; a level or event is.
-- Never propose into a spike. If the price is vertical right now, the people copying
-  this call minutes from now are the exit liquidity. Wait or pass.`;
+- Never propose into a spike ON A COIN THAT NEEDS HOURS TO WORK. If the price is
+  vertical and the desk intends to hold for hours, the people copying this call are the
+  exit liquidity. Wait or pass.
+  ON NANO AND MICRO, THE MOVE IS THE ENTRY. Those bands are bought precisely because
+  something is happening now and are sold inside thirty to sixty minutes, so "it is
+  moving" cannot also be the reason to refuse — that rule would veto every call the
+  ignition lane exists to find. What still disqualifies there is a move that is already
+  OVER: the tape well off its own high, volume falling away rather than accelerating, or
+  a rise on almost no money. Judge the state of the move, not the fact of it.`;
 
 const pmPrompt = (ev, analysts, redteam, risk, weightedScore) => {
   const floorNo = runContext.getStore()?.floor ?? null;

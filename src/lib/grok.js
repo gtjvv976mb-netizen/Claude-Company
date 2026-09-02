@@ -151,9 +151,8 @@ export async function grokAsk({ seat, system, prompt, shape, validate, maxTokens
  * Returns deterministic-shaped evidence for the bundle; the seats do the
  * judging. Fails open: no key, no signal, no drama.
  */
-export async function grokXRead({ symbol, mint, hook = "" }) {
+export async function grokXRead({ symbol, mint, hook = "", handle = null, lore = null }) {
   if (!hasGrok()) return { ok: false, error: "no key" };
-  const from = new Date(Date.now() - 7 * 86400e3).toISOString().slice(0, 10);
   const r = await xai("/responses", {
     model: GROK_MODEL,
     max_output_tokens: 8000,
@@ -166,11 +165,23 @@ export async function grokXRead({ symbol, mint, hook = "" }) {
      * in the first search or they are not in public at all. Two turns and twelve
      * searches keep the question and drop the wandering. */
     max_turns: Number(process.env.DESK_GROK_MAX_TURNS || 2),
-    tools: [{ type: "x_search", from_date: from }],
+    /* NO from_date. It was pinned to the last seven days, which made the question this
+     * prompt itself calls the single most decisive fact available — has this creator
+     * launched before, and what happened — unanswerable by construction: a rug from
+     * last month sits outside the window. Recency belongs in the prose, where it
+     * applies to the ATTENTION half only; a creator's record is history, and history is
+     * old by definition. The trend scan below keeps its window, because a story that
+     * broke last month is not a story that is breaking. */
+    tools: [{ type: "x_search" }],
     input: [{
       role: "user",
       content:
         `Search X for the Solana token "${symbol}" (contract ${mint}). ${hook ? "Context: " + hook + ". " : ""}` +
+        (handle ? `The launchpad lists ${handle} as the coin's own account — START THERE and read ` +
+          `it directly rather than spending searches discovering who launched this. If it turns ` +
+          `out not to be the creator's account, say so.\n` : "") +
+        (lore ? `The launcher's own description, verbatim: "${lore}". Judge whether the story it ` +
+          `claims is real, and whether anyone outside the coin is repeating it.\n` : "") +
         `Assess the ATTENTION, not the price.\n\n` +
         `THE CREATOR IS THE MAIN SUBJECT. Nearly every Solana memecoin is promoted by ` +
         `its own developer on X, so their account IS the primary evidence — more ` +

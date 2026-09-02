@@ -1191,6 +1191,33 @@ export function namingRaces(universe) {
 }
 
 let freshBusy = false;
+/**
+ * THE LORE LANE'S ONE HANDOFF.
+ *
+ * scanTrends pays Grok to read what X is accelerating on and then finds the coin
+ * wearing that story. Until now the caller logged the winner's name and dropped it, so
+ * the desk was buying a front-run signal every twelve minutes and throwing the answer
+ * away — the one thing the lane exists to produce. This takes the top candidate through
+ * exactly the same gauntlet as every other coin: same screen, same seats, same red team,
+ * same publish. Being early is a reason to LOOK, never a reason to skip a check.
+ */
+export async function trendHandoff(candidates = []) {
+  const top = candidates[0];
+  if (!top?.mint) return { workedUp: 0, note: "no candidate" };
+  if (liveCallFor(top.mint)) return { workedUp: 0, note: "already live" };
+  const book = bookState();
+  if (book.full) return { workedUp: 0, halted: `book full at ${book.live}` };
+  const hook = `trend front-run \u00b7 "${top.theme}" (${top.stage ?? "?"}) \u00b7 ` +
+    `${top.whyNow ?? ""} \u00b7 establish whether THIS is the canonical token for that story; ` +
+    "a naming race pays one winner and the rest are exit liquidity";
+  const rec = await runFor(null, () => workup(
+    new Date().toISOString().replace(/[:.]/g, "-"), top.mint, hook,
+    { alwaysTicket: SEQUENTIAL, lane: "trend" }));
+  const pub = publishCall(rec, { category: rec?.ev?.category ?? "memecoin", launchpad: "pump.fun" });
+  return { workedUp: 1, symbol: top.symbol, theme: top.theme,
+    outcome: pub.outcome ?? rec?.outcome ?? rec?.finalDecision };
+}
+
 export async function freshScan({ minScore = 45 } = {}) {
   if (freshBusy) return { skipped: "busy" };
   // Same rule as every other lane: while a call is working, the fresh lane does not

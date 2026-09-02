@@ -342,10 +342,16 @@ function startPenthouse() {
       const { scanTrends } = await import("./trends.js");
       const r = await scanTrends({ maxThemes: 4 });
       if (!r.ok) { console.log(`[trend] ${r.error}`); return; }
-      if (r.candidates.length)
+      if (r.candidates.length) {
         console.log(`[trend] ${r.candidates.length} candidate(s) from ${r.themes.length} live theme(s): ` +
           r.candidates.slice(0, 3).map((c) => `${c.symbol} (${c.theme})`).join(", "));
-      else if (r.empty?.length)
+        // ...and act on the best one. Logging it and moving on meant paying Grok every
+        // twelve minutes for an answer nothing ever read.
+        const { trendHandoff } = await import("./penthouse.js");
+        const h = await trendHandoff(r.candidates);
+        if (h.workedUp) console.log(`[trend] worked up ${h.symbol} for "${h.theme}": ${h.outcome}`);
+        else if (h.halted) console.log(`[trend] ${h.halted}`);
+      } else if (r.empty?.length)
         console.log(`[trend] ${r.empty.length} story/stories live with no coin launched yet: ${r.empty.join(", ")}`);
     } catch (e) { console.log(`[trend] ${e.message}`); }
   };
