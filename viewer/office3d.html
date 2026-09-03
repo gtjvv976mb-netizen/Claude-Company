@@ -9158,7 +9158,7 @@ async function loadWallsteDashboard({ background = false } = {}) {
 async function loadCalloutsDashboard() {
   const el = document.getElementById("calloutsbody");
   if (!el || document.getElementById("calloutspanel")?.hidden) return;
-  if (el.childElementCount === 0) dashLoading(el, "Matching callout authors to confirmed wallet activity…");
+  if (el.childElementCount === 0) dashLoading(el, "Checking verified callers' wallet balances on chain…");
   else el.setAttribute("aria-busy", "true");
   try {
     const { status, body } = await call_api("/api/callouts");
@@ -9173,37 +9173,41 @@ async function loadCalloutsDashboard() {
     const policy = body.policy || {};
     const coverage = body.coverage || {};
     const coins = Array.isArray(body.coins) ? body.coins : [];
+    /* WHAT THE SERVER NOW SENDS. It used to prove a pool-touching inflow matched to the
+       caller's wallet and attach it as `evidence`; the owner's rule replaced that with
+       pump.fun's gold check plus a wallet holding at least $1,000 of SOL. This kept
+       filtering on evidence.inflows, a field that no longer exists, so a tab carrying
+       five coins of real data rendered as empty. */
     const matched = [];
     for (const coin of coins) {
       // The canonical endpoint is authoritative. Never read chatter, and do
       // not render the whales compatibility alias a second time.
       for (const callout of Array.isArray(coin.callouts) ? coin.callouts : []) {
-        const evidence = callout?.evidence;
-        const inflows = Array.isArray(evidence?.inflows) ? evidence.inflows : [];
-        const exactMatch = evidence?.kind === "recent_pool_token_inflow_current_value" &&
-          evidence?.purchaseConsiderationProven === false &&
-          typeof callout?.user === "string" && callout.user && inflows.length > 0;
-        if (exactMatch) matched.push({ coin, callout, evidence, inflows });
+        const walletUsd = Number(callout?.walletSolUsd);
+        const qualifies = callout?.verified === true &&
+          typeof callout?.user === "string" && callout.user && Number.isFinite(walletUsd);
+        if (qualifies) matched.push({ coin, callout, walletUsd });
       }
     }
+    matched.sort((a, b) => b.walletUsd - a.walletUsd);
     const hidden = body.hidden || {};
-    const whaleBar = Number(policy.minimumCurrentValueUsd) || 0;
+    const whaleBar = Number(policy.minimumWalletSolUsd) || 0;
     el.append(dashLead("",
-      "Only Pump.fun authors whose exact public wallet matches a recent confirmed pool-touching token inflow. Values use the current market mark, not reconstructed purchase cost.",
+      "Only Pump.fun-verified callers whose own wallet holds at least " + (whaleBar ? dashMoney(whaleBar) : "the bar") + " of SOL. The figure is that wallet's confirmed SOL balance — it is not a claim that they bought this coin.ucted purchase cost.",
       String(matched.length) + " WHALE" + (matched.length === 1 ? "" : "S"), matched.length ? "good" : ""));
     const boundary = dashNode("div", "boundary-note");
     boundary.append(
-      dashNode("strong", "", "VERIFIED PROFILE + WHALE-SIZED WALLET MATCH, OR IT IS NOT POSTED."),
-      document.createTextNode(" A username, badge, quote, or tracked multiple never qualifies on its own. " +
+      dashNode("strong", "", "PUMP.FUN GOLD CHECK + A WALLET HOLDING THE BAR, OR IT IS NOT POSTED."),
+      document.createTextNode(" A username, quote, or tracked multiple never qualifies on its own. " +
         "Policy: " + String(policy.identityClaim || "wallet-match-only") +
-        " · value basis: " + String(policy.valueBasis || "token-inflow-at-current-market-mark") +
+        " · value basis: " + String(policy.valueBasis || "caller-wallet-sol-balance-at-current-mark") +
         " · purchase consideration proven: " + String(policy.purchaseConsiderationProven === true) +
         " · unmatched chatter included: " + String(policy.unmatchedChatterIncluded === true) +
         " · coverage: " + String(coverage.succeeded ?? 0) + "/" + String(coverage.attempted ?? 0) +
         " checked" + (coverage.candidates != null && coverage.candidates > (coverage.attempted ?? 0) ? " of " + coverage.candidates + " candidates" : "") + (coverage.complete === true ? " (complete)" : " (incomplete)") +
         (dashWhen(body.generatedAt) ? " \u00b7 as of " + dashWhen(body.generatedAt) : "") +
         " · Pump.fun verification required: " + String(policy.pumpfunVerifiedRequired === true) +
-        (whaleBar ? " · whale bar " + dashMoney(whaleBar) + " matched inflow" : "") +
+        (whaleBar ? " · bar " + dashMoney(whaleBar) + " of wallet SOL" : "") +
         ((hidden.unverified || hidden.belowWhale)
           ? " · hidden: " + String(hidden.unverified || 0) + " unverified, " + String(hidden.belowWhale || 0) + " below the bar"
           : ""))
@@ -9222,18 +9226,22 @@ async function loadCalloutsDashboard() {
       const partial = Number(coverage.partialScans || 0);
       const failWhy = Array.isArray(coverage.failures) && coverage.failures.length
         ? " (" + coverage.failures.map((f) => f.count + "\u00d7 " + String(f.reason).replace(/-/g, " ")).join(", ") + ")" : "";
+      const withCallouts = Number(coverage.coinsWithCallouts || 0);
       const honestEmpty = attempted === 0
-        ? "No Pump.fun flow candidates were available for a caller check in this pass."
+        ? "No Pump.fun coins were available to check in this pass."
         : succeeded === 0 && failed > 0
-          ? "Caller verification was unavailable for every attempted coin. This is unknown, not evidence that no matched caller exists."
-          : "No exact author-wallet match cleared the current-value inflow threshold in the " + succeeded +
-            " successfully checked coin" + (succeeded === 1 ? "" : "s") +
-            (failed || partial ? "; " + failed + " check" + (failed === 1 ? "" : "s") +
-              " failed and " + partial + " scan" + (partial === 1 ? " was" : "s were") + " partial" : "") + failWhy + ".";
-      const hiddenNote = (hidden.unverified || hidden.belowWhale)
-        ? " " + String(hidden.unverified || 0) + " unverified author" + ((hidden.unverified || 0) === 1 ? "" : "s") +
-          " and " + String(hidden.belowWhale || 0) + " verified author" + ((hidden.belowWhale || 0) === 1 ? "" : "s") +
-          " under the " + dashMoney(whaleBar) + " whale bar were not posted."
+          ? "Pump.fun could not be reached for any coin in this pass. That is unknown, not evidence that no verified caller exists."
+          : withCallouts === 0
+            ? "None of the " + succeeded + " coins checked carried a callout at all."
+            : "No verified caller in the " + withCallouts + " coin" + (withCallouts === 1 ? "" : "s") +
+              " that carried callouts held " + (whaleBar ? dashMoney(whaleBar) : "the bar") + " of SOL" +
+              (failed ? "; " + failed + " coin" + (failed === 1 ? "" : "s") + " could not be checked" : "") + failWhy + ".";
+      const hiddenNote = (hidden.unverified || hidden.belowWhale || hidden.unreadableWallet)
+        ? " " + String(hidden.unverified || 0) + " caller" + ((hidden.unverified || 0) === 1 ? "" : "s") +
+          " without the gold check and " + String(hidden.belowWhale || 0) + " verified caller" +
+          ((hidden.belowWhale || 0) === 1 ? "" : "s") + " under the bar were not posted" +
+          (hidden.unreadableWallet ? ", and " + hidden.unreadableWallet + " wallet balance" +
+            (hidden.unreadableWallet === 1 ? "" : "s") + " could not be read" : "") + "."
         : "";
       el.appendChild(dashNode("p", "locked", honestEmpty));
       return;
@@ -9241,7 +9249,6 @@ async function loadCalloutsDashboard() {
     for (const row of matched) {
       const coin = row.coin;
       const callout = row.callout;
-      const evidence = row.evidence;
       const card = dashNode("article", "callout-card");
       const head = dashNode("div", "callout-head");
       head.appendChild(coinFace(coin.mint, coin.symbol, 28));
@@ -9255,13 +9262,12 @@ async function loadCalloutsDashboard() {
       if (callout.text) card.appendChild(dashNode("p", "callout-evidence", "“" + String(callout.text).slice(0, 280) + "”"));
       const proof = dashNode("div", "callout-proof");
       const posted = dashWhen(callout.ts);
-      const inflowWhen = dashWhen(row.inflows[0]?.timestamp);
       proof.append(
-        dashNode("span", "", dashMoney(evidence.matchedCurrentValueUsd) + " matched inflow"),
-        ...(posted ? [dashNode("span", "", "posted " + posted)] : []),
-        dashNode("span", "", String(evidence.qualifyingInflowCount || row.inflows.length) + " matching transaction" +
-          ((evidence.qualifyingInflowCount || row.inflows.length) === 1 ? "" : "s")),
-        ...(inflowWhen ? [dashNode("span", "", "inflow " + inflowWhen)] : [])
+        dashNode("span", "", dashMoney(row.walletUsd) + " of SOL in this wallet"),
+        ...(posted ? [dashNode("span", "", "called " + posted)] : []),
+        ...(Number.isFinite(Number(callout.multiple))
+          ? [dashNode("span", "", Number(callout.multiple).toFixed(1) + "x since the call, per Pump.fun")] : []),
+        dashNode("span", "", "balance is confirmed on chain; the purchase is not")
       );
       card.appendChild(proof);
       const links = dashNode("div", "dashactions");
@@ -9271,13 +9277,13 @@ async function loadCalloutsDashboard() {
         source.href = sourceUrl; source.target = "_blank"; source.rel = "noopener";
         links.appendChild(source);
       }
-      for (const inflow of row.inflows.slice(0, 4)) {
-        const text = dashMoney(inflow.currentValueUsd) + " \u00b7 " + (dashWhen(inflow.timestamp) || "time unknown");
-        if (/^https:\/\//.test(String(inflow?.link || ""))) {
-          const chain = dashNode("a", "candidate-link", text + " \u2197");
-          chain.href = inflow.link; chain.target = "_blank"; chain.rel = "noopener";
-          links.appendChild(chain);
-        } else links.appendChild(dashNode("span", "dp-note", text));
+      if (typeof callout.user === "string" && callout.user) {
+        const wallet = dashNode("a", "candidate-link",
+          String(callout.user).slice(0, 4) + "\u2026" + String(callout.user).slice(-4) + " \u2197");
+        wallet.href = "https://solscan.io/account/" + callout.user;
+        wallet.target = "_blank"; wallet.rel = "noopener";
+        wallet.title = "The caller's wallet on Solscan";
+        links.appendChild(wallet);
       }
       links.appendChild(caChip(coin.mint));
       card.appendChild(links);
@@ -9289,7 +9295,7 @@ async function loadCalloutsDashboard() {
       for (const h of history.slice(0, 20)) {
         const line = dashNode("p", "dp-note", (dashWhen(h.seenAt) || "") + " \u00b7 $" + String(h.symbol || String(h.mint || "").slice(0, 6)).replace(/^\$/, "") +
           " \u00b7 " + (h.username ? "@" + String(h.username).replace(/^@/, "") : String(h.user || "").slice(0, 6) + "\u2026") +
-          " \u00b7 " + dashMoney(h.matchedCurrentValueUsd));
+          " \u00b7 " + (h.walletSolUsd != null ? dashMoney(h.walletSolUsd) + " of SOL" : "\u2014"));
         el.appendChild(line);
       }
     }

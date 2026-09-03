@@ -39,11 +39,26 @@ assert.doesNotMatch(
   /coin\.chatter|body\.chatter/,
   "the Callouts destination never renders unmatched chatter",
 );
-assert.match(calloutsDashboard, /recent_pool_token_inflow_current_value/);
+/* THE RENDERER READS THE PAYLOAD THE SERVER SENDS.
+ * The server moved to the owner's rule — pump.fun's gold check plus a wallet holding
+ * $1,000 of SOL — and this kept filtering on evidence.inflows, a field that no longer
+ * exists, so a tab carrying five coins of real data rendered as empty. These assertions
+ * are shaped so that a contract change on either side breaks the test rather than the
+ * tab. */
+assert.match(calloutsDashboard, /callout\?\.verified === true/,
+  "the gold check is required in the view as well as the server");
+assert.match(calloutsDashboard, /Number\(callout\?\.walletSolUsd\)/,
+  "the view reads the wallet balance the server actually sends");
+assert.doesNotMatch(calloutsDashboard, /evidence\?\.inflows|row\.inflows|matchedCurrentValueUsd|recent_pool_token_inflow_current_value/,
+  "no field from the retired inflow-matching contract is read");
 assert.match(calloutsDashboard, /coverage\.succeeded/);
 assert.match(calloutsDashboard, /purchase consideration proven/);
+assert.match(calloutsDashboard, /it is not a claim that they bought this coin/,
+  "the tab says what the number is, and what it is not");
+assert.match(calloutsDashboard, /coinsWithCallouts/,
+  "an empty result distinguishes 'no callouts anywhere' from 'none cleared the bar'");
 assert.doesNotMatch(calloutsDashboard, /recent_large_onchain_buy|buy receipt|matched buys/,
-  "current-mark token inflows are never mislabeled as original purchase consideration");
+  "a wallet balance is never mislabeled as a purchase");
 
 assert.match(html, /\/executor\/status/);
 assert.match(html, /Owner-only local activation · five deliberate steps/);
