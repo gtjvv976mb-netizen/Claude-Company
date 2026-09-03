@@ -28,7 +28,23 @@ console.log("\nTHE FLOOR EXISTS AND CLEARS THE EXECUTOR'S OWN WORST CASE");
   /* The executor's arithmetic, reproduced: slippage on both legs, then fees. A floor
      that does not clear this refuses every call it lets through, one layer later. */
   const slippageHaircutPct = (1 - Math.pow(1 - 300 / 10_000, 2)) * 100;   // 5.91
-  const worstFeePct = 2.0;
+  /* DERIVED, NOT TYPED. This was `const worstFeePct = 2.0` under a comment claiming to
+     reproduce the executor's arithmetic — so the day the executor's fee assumption
+     moved, this test would have gone on asserting a number that was no longer the
+     executor's, and stayed green while the invariant it states became false. That is a
+     failure this suite has been bitten by before: a fixture that hand-builds a world
+     tests the logic and not the system.
+     Read from the executor's SOURCE rather than imported, because importing poller.mjs
+     boots the bot. `2 *` because the fee is paid on both legs, matching the executor's
+     own worstFeeRatio, and the divisor is the live per-trade size the caps line
+     reports. If either number moves in poller.mjs, this assertion moves with it. */
+  const pollerSrc = fs.readFileSync(new URL("./executor/poller.mjs", import.meta.url), "utf8");
+  const expectedFeeLamports = Number(
+    (pollerSrc.match(/expectedNetworkFeeLamports:\s*([0-9_]+)/) || [])[1]?.replace(/_/g, ""));
+  assert.ok(Number.isFinite(expectedFeeLamports),
+    "could not read expectedNetworkFeeLamports out of executor/poller.mjs");
+  const LIVE_TRADE_SOL = 0.05;
+  const worstFeePct = 2 * expectedFeeLamports / (LIVE_TRADE_SOL * 1e9) * 100;
   ok("...and it clears slippage on both legs plus worst-case fees",
     floor > slippageHaircutPct + worstFeePct,
     `${floor}% > ${slippageHaircutPct.toFixed(2)}% + ${worstFeePct}%`);
