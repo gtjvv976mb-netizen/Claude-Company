@@ -452,14 +452,54 @@ const conn = new Connection(RPC, solanaRpcConnectionConfig());
 const secondaryConn = EXECUTE
   ? new Connection(SECONDARY_RPC, solanaRpcConnectionConfig())
   : null;
-if (EXECUTE) {
-  let genesis, secondaryGenesis;
-  try { [genesis, secondaryGenesis] = await Promise.all([conn.getGenesisHash(), secondaryConn.getGenesisHash()]); }
-  catch (error) { fatal(`RPC mainnet check failed: ${error.message}`); }
-  if (genesis !== MAINNET_GENESIS) fatal(`RPC is not Solana mainnet-beta (genesis ${genesis})`);
-  if (secondaryGenesis !== MAINNET_GENESIS)
-    fatal(`secondary RPC is not Solana mainnet-beta (genesis ${secondaryGenesis})`);
+/* A NETWORK BLIP IS NOT A WRONG CHAIN, AND IT WAS COSTING THE BOT ITS LIFE.
+ *
+ * This check exists so the bot can never trade against devnet, and that part is
+ * absolutely right. But it treated "the RPC did not answer" exactly like "the RPC
+ * answered, and it is not mainnet" — both went to fatal(), which is process.exit(1),
+ * and launchd restarts. Measured over two days of the live log: 63 cap-acknowledgement
+ * lines against 14 boots, and at 06:07 on 2026-09-03 four "RPC mainnet check failed:
+ * fetch failed" refusals inside 31 seconds. The bot spent much of its life dead or
+ * restarting, and every restart hurt twice — it was not polling while down, and when it
+ * came back the calls waiting for it were already past MAX_CALL_AGE_MIN and skipped as
+ * stale ("call is 143m old (max 45m)"). A trading bot that cannot survive a dropped
+ * packet cannot trade.
+ *
+ * So the two facts are now separated. An ANSWER that is not mainnet is a configuration
+ * error: refuse at once, exactly as before, because no amount of retrying turns a
+ * devnet endpoint into mainnet. A FAILURE TO REACH the provider is weather: wait and
+ * ask again. The process stays alive and nothing trades until BOTH providers have
+ * proved mainnet, so the guard is not weakened by a single byte — it is merely allowed
+ * to be answered late.
+ */
+async function proveMainnetOrWait() {
+  const MAX_BACKOFF_MS = 30_000;
+  for (let attempt = 1; ; attempt++) {
+    let genesis, secondaryGenesis;
+    try {
+      [genesis, secondaryGenesis] = await Promise.all([
+        conn.getGenesisHash(), secondaryConn.getGenesisHash(),
+      ]);
+    } catch (error) {
+      const waitMs = Math.min(MAX_BACKOFF_MS, 1_000 * 2 ** Math.min(attempt - 1, 5));
+      // Once plainly, then every tenth attempt: a short outage still leaves a trace and
+      // a long one does not bury the log.
+      if (attempt === 1 || attempt % 10 === 0)
+        log(`RPC unreachable for the mainnet check (attempt ${attempt}: ${error.message}) —` +
+          ` waiting ${Math.round(waitMs / 1_000)}s and asking again.` +
+          ` NOTHING is traded until both providers have proved mainnet.`);
+      await new Promise((r) => setTimeout(r, waitMs));
+      continue;
+    }
+    if (genesis !== MAINNET_GENESIS) fatal(`RPC is not Solana mainnet-beta (genesis ${genesis})`);
+    if (secondaryGenesis !== MAINNET_GENESIS)
+      fatal(`secondary RPC is not Solana mainnet-beta (genesis ${secondaryGenesis})`);
+    if (attempt > 1) log(`both RPC providers proved mainnet after ${attempt} attempts`);
+    return;
+  }
 }
+
+if (EXECUTE) await proveMainnetOrWait();
 
 const jupiter = JUPITER_API_KEY ? new JupiterV2Executor({
   connection: conn,
