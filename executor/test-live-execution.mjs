@@ -1330,6 +1330,7 @@ await ok("execution-readiness probe exercises both providers without signing, jo
     ready: true, observedAt: 5_000, route: "wsol-usdc", providers: 2,
     amountLamports: readinessAmount,
     providerDivergencePct: 0, chainHeight: 600, lastValidBlockHeight: 999,
+    computeUnitLimit: 1_400_000, computeUnitPriceMicroLamports: "0",
   });
   assert.ok(Object.isFrozen(result));
   assert.deepEqual(calls, {

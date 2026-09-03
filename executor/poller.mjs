@@ -1352,7 +1352,16 @@ function maybeProbeExecutionReadiness() {
     const succeededAt = Date.now();
     if (result?.ready === true && lastReadinessError !== null) {
       lastReadinessError = null;
-      log(`READINESS proved: ${result.route} at ${CFG.maxSolPerTrade} SOL on ${result.providers} providers, nothing signed`);
+      /* The compute budget is reported because it is what the bot is actually bidding
+         with. Agave ranks buffered transactions by reward/(cost+1) where cost follows
+         the REQUESTED compute-unit limit, so a transaction asking for the 1,400,000
+         default while using a fraction of it is quietly outbid by identical money. */
+      const budget = result.computeUnitLimit != null
+        ? ` — built with ${Number(result.computeUnitLimit).toLocaleString()} CU limit` +
+          (result.computeUnitPriceMicroLamports != null
+            ? ` at ${result.computeUnitPriceMicroLamports} microlamports/CU` : "")
+        : "";
+      log(`READINESS proved: ${result.route} at ${CFG.maxSolPerTrade} SOL on ${result.providers} providers, nothing signed${budget}`);
     }
     runtimeHealth.executionReadiness = {
       ready: result?.ready === true,
