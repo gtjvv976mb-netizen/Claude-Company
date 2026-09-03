@@ -121,4 +121,40 @@ try {
   fs.rmSync(temporary, { recursive: true, force: true });
 }
 
+/* ── WHAT A TENANT IS TOLD ABOUT THE DESK ───────────────────────────────────
+ * The heartbeat's own vocabulary — RUNNING / PAUSED / BLOCKED / DEGRADED — and its
+ * reasons name the house's API keys, its daily budget, its provider balance and its
+ * build failures. None of that is a tenant's business, and none of it is something a
+ * tenant could act on; it reads as instability. The desk says only whether it is
+ * working, and the HQ floor gets the rest. The redaction is at the source: the reason
+ * is not sent, not merely unrendered. */
+{
+  const office = fs.readFileSync(new URL("./src/office.js", import.meta.url), "utf8");
+  assert.match(office, /const hqViewer = Boolean\(me && holdsFloor\(tower\.HQ_FLOOR\)\)/,
+    "the heartbeat decides detail by HQ ownership");
+  assert.match(office, /state: hqViewer \? state : publicState/, "a tenant is sent the collapsed state");
+  assert.match(office, /reason: hqViewer \? reason : null/, "a tenant is sent no reason at all");
+  for (const [field, re] of [
+    ["houseDeliveries", /houseDeliveries: !hqViewer \? \[\]/],
+    ["providerCredit", /providerCredit: hqViewer \? \{/],
+    ["seatFailures6h", /seatFailures6h: !hqViewer \? \[\]/],
+  ]) assert.match(office, re, `${field} is withheld from tenants`);
+
+  const view = fs.readFileSync(new URL("./viewer/office3d.html", import.meta.url), "utf8");
+  assert.match(view, /body\.state === "RUNNING" \|\| body\.state === "ACTIVE"/,
+    "the pulse pill treats ACTIVE as running");
+  assert.ok(!/pulse\.state !== "RUNNING"\) \? String\(pulse\.reason\)/.test(view),
+    "the Overview metric no longer manufactures an explanation");
+
+  /* A pane's title is optional now: the tab that opened it is highlighted, so a heading
+     repeating it is chrome. Titles that carry an error or a permission wall stay. */
+  assert.match(view, /if \(title\) words\.appendChild\(dashNode\("h3", "", title\)\)/,
+    "dashLead may render no title");
+  for (const restated of ['dashLead("Published calls",', 'dashLead("Verified Pump.fun whales",',
+    'dashLead("Settings", "Open a floor'])
+    assert.ok(!view.includes(restated), `a pane no longer restates its tab: ${restated}`);
+  for (const kept of ['"Settings are owner-only"', '"WALL-ST-E is owner-only"', '"Callouts unavailable"'])
+    assert.ok(view.includes(kept), `a title that says something the tab does not is kept: ${kept}`);
+}
+
 console.log("dashboard HUD, candidate separation, WALL-ST-E boundary, and Callouts contract pass");

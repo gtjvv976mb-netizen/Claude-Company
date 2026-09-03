@@ -1049,10 +1049,22 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               pct: m != null && c.entry_ref ? Number((((m - c.entry_ref) / c.entry_ref) * 100).toFixed(1)) : null };
           });
           const settled = q("SELECT COUNT(*) n, COALESCE(SUM(pnl_usd),0) pnl, SUM(pnl_usd>0) w FROM results");
+          /* WHAT A TENANT IS TOLD ABOUT THE DESK: whether it is working. Not why it
+           * is not. RUNNING / PAUSED / BLOCKED / DEGRADED and their reasons name the
+           * house's API keys, its daily budget, its provider balance and its build
+           * failures — the desk's own plumbing, which is nobody else's business and
+           * reads as instability to a customer who cannot act on it either way. The HQ
+           * floor gets every word, because the HQ floor is the operator. This is a
+           * redaction at the source, not a hidden field: a tenant is not sent the
+           * reason at all. */
+          const hqViewer = Boolean(me && holdsFloor(tower.HQ_FLOOR));
+          const publicState = state === "RUNNING" ? "ACTIVE" : "INACTIVE";
           return json(200, {
-            state, reason,
+            state: hqViewer ? state : publicState,
+            reason: hqViewer ? reason : null,
+            detailScope: hqViewer ? "hq" : "public",
             providerError: providerErrorForViewer(providerError, {
-              isOwner: Boolean(me && holdsFloor(50)),
+              isOwner: hqViewer,
             }),
             lastEventTs: lastEv, grokEnabled: !!process.env.XAI_API_KEY,
             /* WHY THE HOUSE BOT IS SILENT. A floor's executor feed only carries
@@ -1061,23 +1073,25 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
                house floor's last five deliveries — benign strings like "cap is
                outside this floor's sleeve" — so the owner can see the gate
                without a tenant token. */
-            houseDeliveries: (() => { try {
+            houseDeliveries: !hqViewer ? [] : (() => { try {
               return db.prepare(`SELECT c.symbol, d.verdict, d.reason, d.size_sol, d.delivered_at
                 FROM deliveries d LEFT JOIN calls c ON c.id = d.call_id
                 WHERE d.floor_no = ? ORDER BY d.id DESC LIMIT 5`).all(tower.HQ_FLOOR)
                 .map((r) => ({ symbol: r.symbol, verdict: r.verdict, reason: r.reason,
                   sizeSol: r.size_sol, minutesAgo: Math.round((now - r.delivered_at) / 60000) }));
             } catch (e) { return [{ error: String(e.message) }]; } })(),
-            providerCredit: {
+            // The house's billing state, and therefore the operator's business alone.
+            providerCredit: hqViewer ? {
               blocked: provider.blocked,
               failures: provider.failures,
               lastFailureTs: provider.lastFailureTs,
               lastSuccessTs: provider.lastSuccessTs,
               recoveryGraceMs: provider.recoveryGraceMs,
-            },
+            } : null,
             /* The desk's own failures, not the market's. Anything here is the desk
              * losing paid work to its own plumbing. */
-            seatFailures6h: seatFails.map((r) => ({
+            // Which of the house's own seats are erroring is a build detail, not news.
+            seatFailures6h: !hqViewer ? [] : seatFails.map((r) => ({
               seat: r.seat,
               n: r.n,
               lastTs: r.last_ts ?? null,

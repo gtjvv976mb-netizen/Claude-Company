@@ -7566,8 +7566,12 @@ async function pollPulse() {
     const el = document.getElementById("pulse");
     el.hidden = false;
     const pill = document.getElementById("pulse-pill");
-    pill.textContent = body.state;
-    pill.className = "pill " + (body.state === "RUNNING" ? "run" : "paused");
+    /* A tenant is sent ACTIVE or INACTIVE and no reason; the HQ floor is sent the real
+       state and why. Both render here, so the pill has to accept either vocabulary. */
+    const live = body.state === "RUNNING" || body.state === "ACTIVE";
+    pill.textContent = body.state === "ACTIVE" ? "ACTIVE"
+      : body.state === "INACTIVE" ? "INACTIVE" : body.state;
+    pill.className = "pill " + (live ? "run" : "paused");
     const age = body.lastEventTs ? Math.max(0, Math.round((Date.now() - body.lastEventTs) / 1000)) : null;
     const t = body.today || {};
     document.getElementById("pulse-nums").innerHTML =
@@ -8112,10 +8116,17 @@ const dashLoading = (el, text) => {
   el.appendChild(dashNode("p", "locked", text || "Loading…"));
 };
 const dashReady = (el) => el.removeAttribute("aria-busy");
+/* A pane's title is optional, and for most panes it should be absent. The tab that
+   opened the pane is highlighted while it is open, so a heading that repeats it —
+   "Settings" under the Settings tab — is chrome charged against the panel's height and
+   tells the reader nothing they did not just click. A title is kept only where it says
+   something the tab does not: an error, a permission wall, or which of two views of the
+   same tab is showing. */
 const dashLead = (title, copy, badge, badgeClass) => {
   const lead = dashNode("div", "dashlead");
   const words = dashNode("div");
-  words.append(dashNode("h3", "", title), dashNode("p", "", copy));
+  if (title) words.appendChild(dashNode("h3", "", title));
+  words.appendChild(dashNode("p", "", copy));
   lead.appendChild(words);
   if (badge) lead.appendChild(dashNode("span", "dashbadge " + (badgeClass || ""), badge));
   return lead;
@@ -8226,8 +8237,14 @@ async function loadOverviewDashboard() {
     const openCalls = Array.isArray(pulse.pnl?.openCalls) ? pulse.pnl.openCalls.length : null;
     const metrics = dashNode("div", "dashgrid");
     metrics.append(
-      dashMetric("Desk state", pulse.state || "\u2014",
-        (pulse.reason && pulse.state !== "RUNNING") ? String(pulse.reason).slice(0, 60) : "research is running"),
+      /* Working, or not working. A tenant cannot act on the desk's API keys, its daily
+         budget or its build failures, and naming them reads as instability rather than
+         as candour. The server sends the reason only to the HQ floor, so this shows
+         one only when it was actually given one. */
+      dashMetric("Desk state",
+        pulse.state === "RUNNING" ? "ACTIVE" : (pulse.state || "\u2014"),
+        pulse.reason ? String(pulse.reason).slice(0, 60)
+          : (pulse.state === "RUNNING" || pulse.state === "ACTIVE" ? "the desk is working" : "")),
       dashMetric("House calls", openCalls == null ? "\u2014" : String(openCalls) + " live",
         String(building.houseCalls ?? 0) + " published all-time"),
       dashMetric("Today", String(pulse.today?.workups ?? 0) + " workups",
@@ -8349,7 +8366,7 @@ async function loadCandidateBoard() {
     }
     if (status !== 200) throw new Error(body?.error || "candidate board unavailable");
     const captured = body.capturedAt ? new Date(body.capturedAt).toLocaleString() : "no completed sweep yet";
-    el.append(dashLead("Pre-decision memecoin candidates",
+    el.append(dashLead("",
       "Five ranked slots in every canonical market-cap tier, captured after the free screen and before any Claude, Grok, Red Team, CEO, or execution decision.",
       String(body.candidateCount ?? 0) + " CANDIDATES", "warn"));
     const boundary = dashNode("div", "boundary-note");
@@ -8456,7 +8473,7 @@ async function loadDashboardCalls(view, { force = false } = {}) {
 
     if (view === "published") {
       const published = feed.filter((call) => call.status === "live");
-      el.append(dashLead("Published calls",
+      el.append(dashLead("",
         "Decisions that cleared the research chain and remain open on the house paper book.",
         String(published.length) + " LIVE", published.length ? "good" : ""));
       const boundary = dashNode("div", "boundary-note");
@@ -8471,7 +8488,7 @@ async function loadDashboardCalls(view, { force = false } = {}) {
       else wrap.appendChild(dashNode("p", "locked", feed.length ? "No open calls right now \u2014 " + feed.length + " closed under Closed / Killed." : "No calls have been published to this floor yet."));
     } else {
       const closed = feed.filter((call) => call.status !== "live");
-      el.append(dashLead("Closed / killed",
+      el.append(dashLead("",
         "Published calls after closure, followed by candidates stopped before a call ever existed.",
         String(closed.length) + " CLOSED", ""));
       const boundary = dashNode("div", "boundary-note");
@@ -8593,7 +8610,7 @@ async function loadWallsteDashboard({ background = false } = {}) {
   if (!el || document.getElementById("wallstepanel")?.hidden) return;
   if (FLOOR_N == null) {
     el.innerHTML = "";
-    el.append(dashLead("WALL-ST-E", "Open a floor from the tower first.", "NO FLOOR", "warn"));
+    el.append(dashLead("", "Open a floor from the tower first.", "NO FLOOR", "warn"));
     return;
   }
   if (wallsteDashboardLoading) return;
@@ -8640,7 +8657,7 @@ async function loadWallsteDashboard({ background = false } = {}) {
 
     const mode = heartbeat?.mode ? String(heartbeat.mode).toUpperCase() : "NOT REPORTED";
     const connected = telemetry.connected === true;
-    el.append(dashLead("WALL-ST-E",
+    el.append(dashLead("",
       "Your self-hosted autotrader. This page observes its outbound heartbeat and confirmed public balance; it cannot start, stop, steer, sign for, or fund it.",
       connected ? mode + " · CONNECTED" : heartbeat ? mode + " · STALE" : "NOT LINKED",
       connected ? "good" : heartbeat ? "bad" : "warn"));
@@ -9049,7 +9066,7 @@ async function loadCalloutsDashboard() {
     el.innerHTML = "";
     dashReady(el);
     if (status === 401 || status === 403) {
-      el.append(dashLead("Evidence-backed callouts",
+      el.append(dashLead("",
         "Matched caller evidence is private to tenants and the house.", "TENANTS ONLY", "warn"));
       return;
     }
@@ -9072,7 +9089,7 @@ async function loadCalloutsDashboard() {
     }
     const hidden = body.hidden || {};
     const whaleBar = Number(policy.minimumCurrentValueUsd) || 0;
-    el.append(dashLead("Verified Pump.fun whales",
+    el.append(dashLead("",
       "Only Pump.fun authors whose exact public wallet matches a recent confirmed pool-touching token inflow. Values use the current market mark, not reconstructed purchase cost.",
       String(matched.length) + " WHALE" + (matched.length === 1 ? "" : "S"), matched.length ? "good" : ""));
     const boundary = dashNode("div", "boundary-note");
@@ -9189,7 +9206,7 @@ async function loadSettingsDashboard() {
   if (!el || document.getElementById("settingspanel")?.hidden) return;
   if (FLOOR_N == null) {
     el.innerHTML = "";
-    el.append(dashLead("Settings", "Open a floor from the tower first.", "NO FLOOR", "warn"));
+    el.append(dashLead("", "Open a floor from the tower first.", "NO FLOOR", "warn"));
     return;
   }
   dashLoading(el, "Loading owner settings…");
