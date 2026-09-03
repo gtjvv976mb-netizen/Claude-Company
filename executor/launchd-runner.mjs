@@ -43,7 +43,13 @@ const ALLOWED_ENV = new Set([
   "MAX_JUPITER_FEE_BPS", "MAX_NETWORK_FEE_LAMPORTS", "MAX_NETWORK_FEE_PCT",
   "MAX_OPEN_POSITIONS", "MAX_PRICE_IMPACT_PCT", "MAX_QUOTE_SHORTFALL_PCT",
   "MAX_RENT_LAMPORTS", "MAX_SOL_PER_TRADE", "MAX_TX_ATTEMPTS", "PAUSE_ENTRIES_FILE",
-  "POLL_MS", "SLIPPAGE_BPS", "SOLANA_RPC", "SOLANA_RPC_SECONDARY",
+  "POLL_MS",
+  /* How long the no-sign readiness rehearsal may run before it is abandoned. It gates
+     nothing — the rehearsal signs nothing and is not consulted before an entry — but a
+     probe that never settles used to latch the in-flight flag and silently end all
+     rehearsals, so the deadline is what releases it. Floored at 30s in the poller. */
+  "READINESS_TIMEOUT_MS",
+  "SLIPPAGE_BPS", "SOLANA_RPC", "SOLANA_RPC_SECONDARY",
   "SOL_USD_CACHE_MAX_AGE_MS", "STATE_DB", "STATE_FILE", "TRAIL_PCT",
   // Keeps entries armed while the host is on battery. Everything else about the power
   // gate is unchanged: the idle-sleep assertion is still required and still verified.
