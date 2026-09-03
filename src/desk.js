@@ -42,6 +42,28 @@ export async function buildUniverse() {
  * The full workup for one token. Returns a record regardless of outcome — a kill is
  * a result the desk wants written down, not a silent drop.
  */
+/**
+ * The first seat that refuses, or null.
+ *
+ * Named and exported because it is now load-bearing in TWO places: the desk has always
+ * ended a workup on any analyst's kill, and the same rule now decides whether the
+ * reputation read — 44.6% of the desk's entire model bill — is worth buying at all. A
+ * coin the cheap seats condemn is a coin no X read can save, so the read is never
+ * bought for it. If this ever returns null where a seat did refuse, the desk goes back
+ * to paying for research about coins it is about to reject.
+ */
+export function firstKiller(analysts) {
+  return Object.entries(analysts || {}).find(([, a]) => a?.kill) ?? null;
+}
+
+/**
+ * Whether the desk should buy the reputation read for this coin.
+ * True only while every seat that has reported so far has let the coin live.
+ */
+export function shouldBuyReputationRead(analysts) {
+  return firstKiller(analysts) === null;
+}
+
 export async function workup(cycle, mint, hook = "", opts = {}) {
   // Evaluation provenance must retain the spending/trigger lane. It is evidence about
   // how a signal was produced, not merely a label for the live scheduler.
@@ -90,34 +112,27 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
    * against a holder, and can the position be left. Reputation research is expensive
    * and only matters once that answer is yes, so the paid X read happens HERE rather
    * than inside gather(), where it was costing 107 reads against 235 screen kills. */
-  /* STARTED, NOT AWAITED. The X read is one xAI call with fifty searches behind it and a
-   * two-minute timeout, and it sat squarely in front of the analyst batch — so every
-   * workup on the desk waited on it before a single seat began, including the three
-   * seats that never read the result. Only forensics (the deployer's public record) and
-   * narrative (the story) consult ev.xRead, so only those two wait for it now. The read
-   * itself is unchanged, and so is its place in the sequence: it still happens after the
-   * safety screen, so the desk still never pays to research a coin it is about to
-   * reject as a honeypot. */
-  const xRead = enrichWithXRead(ev, hook);
-
-  // --- Stages 2-6: five independent analysts, in parallel. ---
+  /* THE MOST EXPENSIVE OPINION ON THE DESK IS NO LONGER THE FIRST ONE BOUGHT.
+   *
+   * Measured over the trailing 24 hours: XRead $84.87 of a $190.39 bill — 44.6% of
+   * everything the desk spends, 573 calls at $0.148 each — against $26.81 for the four
+   * analyst seats put together. It was bought for every coin that cleared the free
+   * screen, before a single cheap seat had looked at the chart, the pool or the tape.
+   *
+   * Any analyst returning kill ends the workup (see below), so a coin the cheap seats
+   * condemn never needed a reputation read at all. The order is now: the three seats
+   * that do not consult ev.xRead run first and in parallel; the X read, forensics and
+   * narrative are bought only if the coin is still alive. Nothing is skipped for a coin
+   * that survives, so no call this desk would have published is lost — the saving is
+   * entirely in reads the desk was buying about coins it was about to reject anyway.
+   *
+   * The cost of the reorder is one extra round trip on surviving coins. The screen
+   * still runs first, so the desk still never researches a honeypot. */
   emit("stage", { stage: "analysis", mint, symbol: ev.symbol });
-  const keys = ["forensics", "liquidity", "flow", "technical"];
-  const needsXRead = new Set(["forensics"]);
-  const settled = await Promise.allSettled([
-    ...keys.map((k) => needsXRead.has(k)
-      ? xRead.then(() => runAnalyst(k, ev)) : runAnalyst(k, ev)),
-    xRead.then(() => runNarrative(ev)),
-  ]);
-  // A failed X read must not take the workup down with it; enrichWithXRead already
-  // degrades to "no read", and the seats say so themselves when ev.xRead is missing.
-  await xRead.catch(() => {});
-  const allKeys = [...keys, "narrative"];
-
+  const cheapKeys = ["liquidity", "flow", "technical"];
   const analysts = {};
   const seatFailures = [];
-  settled.forEach((r, i) => {
-    const k = allKeys[i];
+  const collect = (k, r) => {
     if (r.status === "fulfilled") {
       analysts[k] = r.value;
       store.recordVerdict(cycle, mint, ev.symbol, k, r.value);
@@ -127,7 +142,39 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
       seatFailures.push({ seat: k, error: String(r.reason?.message || r.reason) });
       emit("seat:failed", { seat: k, mint, error: String(r.reason?.message || r.reason) });
     }
-  });
+  };
+
+  const cheap = await Promise.allSettled(cheapKeys.map((k) => runAnalyst(k, ev)));
+  cheap.forEach((r, i) => collect(cheapKeys[i], r));
+
+  /* A kill here is final, exactly as it is after the full batch — so stop, and keep the
+     X read's $0.148 plus two more seats. This is the whole saving, and it is recorded
+     so the effect is auditable rather than asserted. */
+  const cheapKiller = firstKiller(analysts);
+  if (cheapKiller) {
+    emit("stage", { stage: "xread_skipped", mint, symbol: ev.symbol,
+      detail: `${cheapKiller[0]} killed it before the reputation read was bought` });
+    const rec = { mint, symbol: ev.symbol, outcome: "killed", killedBy: cheapKiller[0],
+      reason: cheapKiller[1].kill_reason, ev, analysts, seatFailures, finalDecision: "killed" };
+    rec.reportFile = writeReport(cycle, rec);
+    emit("token:end", { mint, symbol: ev.symbol, outcome: "killed",
+      detail: `${cheapKiller[0]}: ${cheapKiller[1].kill_reason}`, report: rec.reportFile });
+    recordEvaluation(rec);
+    return rec;
+  }
+
+  /* STARTED, NOT AWAITED, and only for a coin still standing. Forensics reads the
+     deployer's public record and narrative reads the story, so both wait on it; nothing
+     else does. A failed read must not take the workup down — enrichWithXRead degrades
+     to "no read", and the seats say so themselves when ev.xRead is missing. */
+  const xRead = enrichWithXRead(ev, hook);
+  const deepKeys = ["forensics", "narrative"];
+  const deep = await Promise.allSettled([
+    xRead.then(() => runAnalyst("forensics", ev)),
+    xRead.then(() => runNarrative(ev)),
+  ]);
+  await xRead.catch(() => {});
+  deep.forEach((r, i) => collect(deepKeys[i], r));
 
   // A desk missing half its analysts is not a desk. Refuse to decide on a thin book.
   if (Object.keys(analysts).length < 3) {
@@ -138,7 +185,7 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
     return rec;
   }
 
-  const killer = Object.entries(analysts).find(([, a]) => a.kill);
+  const killer = firstKiller(analysts);
   if (killer) {
     const rec = { mint, symbol: ev.symbol, outcome: "killed", killedBy: killer[0],
       reason: killer[1].kill_reason, ev, analysts, finalDecision: "killed" };
