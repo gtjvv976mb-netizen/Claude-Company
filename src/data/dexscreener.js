@@ -92,12 +92,61 @@ export function consensus(pairs, { sample = 8, tolerancePct = 25 } = {}) {
   const sol = (pairs || []).filter((p) => p.chainId === "solana" && Number(p.priceUsd) > 0);
   if (!sol.length) return { ok: false, error: "no priced solana pairs" };
 
-  const byLiq = [...sol].sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
+  /* AN EMPTY POOL IS NOT A PRICE SOURCE, AND IT WAS OUTVOTING A REAL ONE.
+   *
+   * Measured on 24 coins from the ignition shortlist: 14 were discarded here as "no pool
+   * agrees with the median", and all 14 were the same shape. A pump.fun coin that
+   * graduates leaves its bonding curve behind, listed for ever at the launch price of
+   * about $0.0000417 with ZERO liquidity, while the real market moves to pumpswap. So
+   * the vote was $247,346 of pumpswap at $0.008676 against $0 of dead curve at
+   * $0.0000415 — an unweighted median split the difference at $0.004359, which is a
+   * price NEITHER pool quotes, and then the 25% tolerance rejected both. With exactly
+   * two pools that is the general failure: the median sits between them, so if they
+   * differ by more than about 50% nothing survives and the coin is dropped before a
+   * single piece of evidence is gathered.
+   *
+   * Two corrections, and neither weakens the check this function exists for. First, a
+   * pool with no liquidity is excluded from the vote: it is not depth, nothing can be
+   * exited through it, and it is stale by construction. Second, the anchor is now the
+   * LIQUIDITY-WEIGHTED median, so a dust pool cannot outvote a deep one — and because
+   * the anchor is always a price some real pool is quoting, `kept` can no longer come
+   * back empty while a funded pool exists.
+   *
+   * The RAY lesson still holds — a deep pool can still be a broken one — which is why
+   * the anchor was never the last line: gather() cross-checks this mark against Jupiter
+   * and KILLS on a 25% disagreement, and the exit probe measures a real round trip.
+   * Both are stronger evidence than an unweighted vote among unequal pools.
+   */
+  const funded = sol.filter((p) => Number(p.liquidity?.usd) > 0);
+  // Only prefer the funded pools when there ARE some. A coin whose venues simply do not
+  // report liquidity must still be priced, not blinded.
+  const voters = funded.length ? funded : sol;
+  const drained = sol.length - voters.length;
+
+  const byLiq = [...voters].sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
   const top = byLiq.slice(0, sample);
-  const prices = top.map((p) => Number(p.priceUsd)).sort((a, b) => a - b);
-  const median = prices.length % 2
-    ? prices[(prices.length - 1) / 2]
-    : (prices[prices.length / 2 - 1] + prices[prices.length / 2]) / 2;
+
+  /* The weighted median: sort by price, walk the cumulative liquidity, and take the
+     price standing at the halfway mark. With one pool it is that pool. With equal
+     depths it is the ordinary median. With unequal depths it is the price the money is
+     actually at. */
+  const ranked = [...top].sort((a, b) => Number(a.priceUsd) - Number(b.priceUsd));
+  const weights = ranked.map((p) => Math.max(Number(p.liquidity?.usd) || 0, 0));
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
+  let median;
+  if (totalWeight > 0) {
+    let run = 0;
+    median = Number(ranked.at(-1).priceUsd);
+    for (let i = 0; i < ranked.length; i++) {
+      run += weights[i];
+      if (run >= totalWeight / 2) { median = Number(ranked[i].priceUsd); break; }
+    }
+  } else {
+    const prices = ranked.map((p) => Number(p.priceUsd));
+    median = prices.length % 2
+      ? prices[(prices.length - 1) / 2]
+      : (prices[prices.length / 2 - 1] + prices[prices.length / 2]) / 2;
+  }
 
   const agrees = (p) => Math.abs(Number(p.priceUsd) - median) / median * 100 <= tolerancePct;
   const kept = byLiq.filter(agrees);
@@ -106,6 +155,7 @@ export function consensus(pairs, { sample = 8, tolerancePct = 25 } = {}) {
 
   if (!kept.length) return { ok: false, error: "no pool agrees with the median", median, rejected };
 
+  const spreadPrices = kept.map((p) => Number(p.priceUsd)).sort((a, b) => a - b);
   return {
     ok: true,
     priceUsd: median,
@@ -115,7 +165,10 @@ export function consensus(pairs, { sample = 8, tolerancePct = 25 } = {}) {
     deepest: kept[0],
     poolsUsed: kept.length,
     poolsRejected: rejected,
-    priceSpreadPct: prices.length > 1
-      ? Number(((prices[prices.length - 1] - prices[0]) / median * 100).toFixed(1)) : 0,
+    // How many listings were left out of the vote for holding no money at all. A
+    // graduated pump.fun coin always has exactly one.
+    drainedPoolsIgnored: drained,
+    priceSpreadPct: spreadPrices.length > 1
+      ? Number(((spreadPrices.at(-1) - spreadPrices[0]) / median * 100).toFixed(1)) : 0,
   };
 }
