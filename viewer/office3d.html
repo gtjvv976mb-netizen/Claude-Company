@@ -6642,6 +6642,56 @@ function loadJupiter() {
   return jupLoading;
 }
 
+/* THE SWAP BUTTON CAME OUT 134 PIXELS TALL.
+ *
+ * Measured in the live modal: the select controls are 36px, the header buttons 28px,
+ * and the main action button — Connect Wallet, then Swap once a wallet is attached —
+ * rendered at 134. Four times the height of everything around it, as a slab of solid
+ * green filling a third of the panel.
+ *
+ * The cause is inside the widget: the button's only child carries `h-full`, so
+ * `height: 100%` against a button that has no height of its own, and the percentage
+ * resolves against an ancestor sized to the modal rather than against the text. With
+ * the child's height set to auto the button falls to 54px, which is 20px of padding
+ * either side of a 14px line — the size the widget's own padding was written for.
+ *
+ * The widget renders into a SHADOW ROOT, so the page's stylesheet cannot reach it and
+ * an override here has to be handed to that root directly. Constructable stylesheets
+ * where they exist, a <style> element where they do not, and once per root either way.
+ *
+ * If a future Jupiter build renames the class, this rule stops matching and the button
+ * goes back to being too tall. It cannot break the widget: a selector that matches
+ * nothing does nothing, and nothing else on this desk is styled from inside that root.
+ */
+function trimJupiterSwapButton() {
+  const CSS = "button > div.h-full { height: auto !important; }";
+  const started = Date.now();
+  const apply = () => {
+    // The host is created a tick or two after init(), so look for it rather than
+    // assume it. Scoped to the widget's own container first; the document-wide scan
+    // is the fallback if Jupiter ever renames that container.
+    const scope = document.getElementById("jupiter-plugin-instance") || document;
+    let root = null;
+    for (const el of scope.querySelectorAll("*")) if (el.shadowRoot) { root = el.shadowRoot; break; }
+    if (!root) {
+      if (Date.now() - started < 5000) setTimeout(apply, 50);
+      return;
+    }
+    if (root.__deskButtonTrimmed) return;
+    root.__deskButtonTrimmed = true;
+    try {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(CSS);
+      root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
+    } catch {
+      const style = document.createElement("style");
+      style.textContent = CSS;
+      root.appendChild(style);
+    }
+  };
+  apply();
+}
+
 async function openSwap({ mint, symbol, sol, side = "buy" }) {
   const ok = await loadJupiter();
   if (!ok) {
@@ -6664,6 +6714,7 @@ async function openSwap({ mint, symbol, sol, side = "buy" }) {
       if (txid) window.tape?.("Filled", `${symbol || mint.slice(0, 6)} — ${txid.slice(0, 8)}… (your wallet, your signature)`, "hi");
     },
   });
+  trimJupiterSwapButton();
 }
 
 window.__renderWatchInto = (el) => loadWatchboard(el);
