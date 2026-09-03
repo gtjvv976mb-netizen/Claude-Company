@@ -3648,7 +3648,7 @@ function drawGrokBoard() {
     x.fillStyle = "#c8ccd0";
     x.font = '700 30px "JetBrains Mono", ui-monospace, monospace';
     x.textAlign = "center";
-    x.fillText(grokOnDuty ? "THE BOOK IS FLAT" : "OFF DUTY \u2014 ASLEEP", W / 2, 126);
+    x.fillText(grokOnDuty ? "NOTHING HELD" : "OFF DUTY \u2014 ASLEEP", W / 2, 126);
 
     // Even with nothing held, the wall carries the floor's live numbers: what is
     // on the sheet, what is actually held, how much of it is memecoin, and the
@@ -3689,8 +3689,8 @@ function drawGrokBoard() {
   x.fillStyle = "#6b7075"; x.textAlign = "left";
   x.fillText("TICKER", 26, 100);
   x.fillText("SIZE", 300, 100);
-  x.fillText("ENTRY", 420, 100);
-  x.fillText("MARK", 560, 100);
+  x.fillText("ENTRY MC", 420, 100);
+  x.fillText("TARGET MC", 560, 100);
   x.textAlign = "right"; x.fillText("P&L", W - 26, 100);
 
   let y = 138;
@@ -3704,8 +3704,8 @@ function drawGrokBoard() {
     x.font = '500 20px "JetBrains Mono", ui-monospace, monospace';
     x.fillStyle = "#c8ccd0";
     x.fillText(p.size != null ? p.size.toFixed(3) : "\u2014", 300, y);
-    x.fillText(p.entry != null ? fmtPx(p.entry) : "\u2014", 420, y);
-    x.fillText(p.mark != null ? fmtPx(p.mark) : "\u2014", 560, y);
+    x.fillText(p.entryCap != null ? fmtCap(p.entryCap) : "\u2014", 420, y);
+    x.fillText(p.targetCap != null ? fmtCap(p.targetCap) : "\u2014", 560, y);
     x.textAlign = "right";
     x.fillStyle = col;
     x.font = '700 23px "JetBrains Mono", ui-monospace, monospace';
@@ -3726,6 +3726,14 @@ function drawGrokBoard() {
   grokBoard.tex.needsUpdate = true;
 }
 const fmtPx = (v) => v >= 1 ? v.toFixed(2) : v >= 0.01 ? v.toFixed(4) : v.toExponential(1);
+/** A market cap the way a trader says it out loud: $9.3K, $412K, $5.1M. */
+const fmtCap = (v) => {
+  if (!(v > 0)) return "\u2014";
+  if (v >= 1e9) return "$" + (v / 1e9).toFixed(v >= 1e10 ? 0 : 1) + "B";
+  if (v >= 1e6) return "$" + (v / 1e6).toFixed(v >= 1e7 ? 0 : 1) + "M";
+  if (v >= 1e3) return "$" + (v / 1e3).toFixed(v >= 1e4 ? 0 : 1) + "K";
+  return "$" + Math.round(v);
+};
 
 /** Every trade as its own object: one standing ticket per open position, green up,
  *  red down, tallest = biggest position. */
@@ -3755,11 +3763,25 @@ function drawGrokTickets() {
 window.__grokBoardUpdate = (feed = []) => {
   const live = feed.filter((c) => c.status === "live");
   const open = live.filter((c) => c.verdict === "offered");
+  /* HIS BOOK IS WHAT THIS FLOOR ACTUALLY HOLDS.
+   *
+   * It used to show every call OFFERED to the floor, which is the team's paper book —
+   * a wall of positions nobody owns. A call is only on his board once the bot took it
+   * (owner, 2026-09-03). The offered count still appears in the flat-book panel below,
+   * where it is labelled as what it is. */
+  const held = open.filter((c) => c.taken === true);
   grokBook.record = window.__floorRecord || grokBook.record;
-  grokBook.positions = open.map((c) => {
-    const entry = c.entry_ref ?? null, mark = c.last_mark ?? null;
-    return { symbol: c.symbol, size: c.size_sol ?? null, entry, mark,
-             category: c.category || null, taken: !!c.taken,
+  grokBook.positions = held.map((c) => {
+    const entry = c.entry_ref ?? null, target = c.target ?? null;
+    /* IN MARKET CAP, NOT IN DECIMALS. A memecoin price is a string of zeros that tells
+       a reader nothing; the cap is the number people actually trade on. Cap scales with
+       price at constant supply, so the call's own cap at entry converts both. */
+    const capAtCall = Number(c.mcap_at_call) > 0 ? Number(c.mcap_at_call) : null;
+    const capOf = (px) => (capAtCall && entry > 0 && px > 0) ? capAtCall * (px / entry) : null;
+    const mark = c.last_mark ?? null;
+    return { symbol: c.symbol, size: c.size_sol ?? null,
+             entryCap: capAtCall, targetCap: capOf(target),
+             category: c.category || null, taken: true,
              pnlPct: (entry && mark) ? ((mark - entry) / entry) * 100 : null };
   });
   // The counts he keeps on the wall: what is live, what is actually held, and

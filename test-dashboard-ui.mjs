@@ -157,4 +157,31 @@ try {
     assert.ok(view.includes(kept), `a title that says something the tab does not is kept: ${kept}`);
 }
 
+/* ── GROX MULDER'S BOARD SHOWS WHAT THE FLOOR HOLDS ────────────────────────────
+ * It used to draw every call OFFERED to the floor, which is the team's paper book — a
+ * wall of positions nobody owns. A call reaches his board only once the bot took it, and
+ * the two price columns are market caps, because a memecoin price is a string of zeros
+ * that tells a reader nothing while the cap is the number people trade on
+ * (owner, 2026-09-03). */
+{
+  const view = html;
+  assert.match(view, /const held = open\.filter\(\(c\) => c\.taken === true\)/,
+    "only taken positions reach the board");
+  assert.match(view, /grokBook\.positions = held\.map/,
+    "...and the board is built from those, not from every offer");
+  assert.match(view, /x\.fillText\("ENTRY MC"/, "the entry column is a market cap");
+  assert.match(view, /x\.fillText\("TARGET MC"/, "the second column is the target, not the mark");
+  assert.ok(!/x\.fillText\("MARK", \d+, 100\)/.test(view), "the MARK column is gone");
+  assert.match(view, /entryCap: capAtCall, targetCap: capOf\(target\)/,
+    "both columns carry caps derived from the call's own cap at entry");
+  assert.match(view, /capAtCall \* \(px \/ entry\)/,
+    "a target cap is the entry cap scaled by the price ratio — supply is constant");
+  assert.match(view, /const fmtCap = /, "caps are formatted as $9.3K / $412K / $5.1M");
+  assert.ok(!/p\.mark != null \? fmtPx\(p\.mark\)/.test(view),
+    "the board no longer prints a decimal mark");
+  // P&L still needs the live mark, which is why it is still carried on the row.
+  assert.match(view, /pnlPct: \(entry && mark\) \? \(\(mark - entry\) \/ entry\) \* 100 : null/,
+    "P&L is still computed from the live mark");
+}
+
 console.log("dashboard HUD, candidate separation, WALL-ST-E boundary, and Callouts contract pass");
