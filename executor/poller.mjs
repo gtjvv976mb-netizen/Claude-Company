@@ -1346,9 +1346,35 @@ function maybeProbeExecutionReadiness() {
       Date.now() - lastReadinessProbeAt < 2 * 60_000) return;
   lastReadinessProbeAt = Date.now();
   readinessProbeInFlight = true;
-  Promise.resolve(jupiter.probeExecutionReadiness({
-    amountLamports: Math.floor(CFG.maxSolPerTrade * LAMPORTS),
-  })).then((result) => {
+  /* A PROBE THAT NEVER SETTLES TAKES THE REHEARSAL WITH IT, PERMANENTLY.
+   *
+   * `readinessProbeInFlight` is cleared in a .finally(), which is correct for a promise
+   * that resolves or rejects — and useless for one that does neither. Every leg inside
+   * has its own timeout today, but "every leg I know about" is not the same as "the
+   * whole thing terminates", and the failure is silent and absorbing: the flag stays
+   * true, every later tick returns early, and the bot stops rehearsing with no line in
+   * the log to say so. Observed on 2026-09-03: no readiness line of either kind for
+   * nineteen minutes across roughly eighty ticks, on a process whose tick loop was
+   * demonstrably alive.
+   *
+   * So the probe is raced against a deadline generous enough that it never truncates a
+   * healthy rehearsal — the /order fetch alone is allowed twelve seconds — and the race
+   * is what the .finally() hangs off. A timeout is reported like any other failure, so
+   * a hang is now visible instead of absorbing. This gates nothing: the rehearsal signs
+   * nothing and is not consulted before an entry, so the only thing at risk was our
+   * ability to see. */
+  const readinessDeadlineMs = Math.max(30_000, Number(process.env.READINESS_TIMEOUT_MS) || 90_000);
+  let readinessTimer = null;
+  const readinessDeadline = new Promise((_, reject) => {
+    readinessTimer = setTimeout(
+      () => reject(new Error(`readiness rehearsal exceeded ${Math.round(readinessDeadlineMs / 1000)}s and was abandoned`)),
+      readinessDeadlineMs);
+    readinessTimer.unref?.();
+  });
+  Promise.race([
+    jupiter.probeExecutionReadiness({ amountLamports: Math.floor(CFG.maxSolPerTrade * LAMPORTS) }),
+    readinessDeadline,
+  ]).then((result) => {
     const succeededAt = Date.now();
     if (result?.ready === true && lastReadinessError !== null) {
       lastReadinessError = null;
@@ -1397,7 +1423,7 @@ function maybeProbeExecutionReadiness() {
       amountLamports: Math.floor(CFG.maxSolPerTrade * LAMPORTS),
       lastError: reason,
     };
-  }).finally(() => { readinessProbeInFlight = false; });
+  }).finally(() => { clearTimeout(readinessTimer); readinessProbeInFlight = false; });
 }
 const noteFeedFailure = () => { runtimeHealth.consecutiveFeedFailures++; };
 const noteFeedSuccess = () => {

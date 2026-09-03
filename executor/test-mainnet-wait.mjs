@@ -86,5 +86,30 @@ console.log("\nEVERY OTHER REFUSAL IS STILL A REFUSAL");
     !/catch[^{]*\{\s*fatal\(`RPC/.test(src), "the genesis catch was the only one");
 }
 
+console.log("\nA HUNG REHEARSAL CANNOT SILENCE THE REHEARSAL");
+{
+  /* readinessProbeInFlight is cleared in a .finally(), which is correct for a promise
+     that settles and useless for one that does neither. The failure is silent and
+     absorbing: the flag stays true, every later tick returns early, and the bot stops
+     rehearsing with nothing in the log. Observed live on 2026-09-03 — no readiness line
+     of either kind for nineteen minutes across ~80 ticks, on a tick loop that was
+     demonstrably alive (sockets opening, CPU advancing). */
+  const probe = src.slice(src.indexOf("function maybeProbeExecutionReadiness()"),
+    src.indexOf("function sendHeartbeat"));
+  ok("the probe is raced against a deadline", /Promise\.race\(\[/.test(probe));
+  ok("...and the deadline rejects rather than resolving quietly",
+    /setTimeout\(\s*\(\) => reject\(/.test(probe));
+  ok("the in-flight flag is cleared by the RACE, not the probe",
+    /\}\)\.finally\(\(\) => \{ clearTimeout\(readinessTimer\); readinessProbeInFlight = false; \}\)/.test(probe));
+  ok("the timer is cleared so a fast probe leaves nothing pending", /clearTimeout\(readinessTimer\)/.test(probe));
+  ok("...and never holds the process open", /readinessTimer\.unref\?\.\(\)/.test(probe));
+  const floor = (probe.match(/Math\.max\((\d+_?\d*), Number\(process\.env\.READINESS_TIMEOUT_MS\)/) || [])[1];
+  ok("the deadline has a floor, so it cannot be tuned to zero", floor != null, `${floor} ms`);
+  ok("the deadline is generous enough not to truncate a healthy rehearsal",
+    /\|\| 90_000/.test(probe), "90s against a 12s order fetch");
+  // The rehearsal must remain advisory: it signs nothing and gates no entry.
+  ok("the rehearsal still gates nothing", !/pauseEntries|entrySubmissionGate/.test(probe));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
