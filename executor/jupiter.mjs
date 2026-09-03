@@ -1588,23 +1588,6 @@ export class JupiterV2Executor {
       providerDivergencePct: prepared.simulation.divergencePct,
       chainHeight: prepared.chainHeight,
       lastValidBlockHeight: Number(prepared.order.lastValidBlockHeight),
-      /* WHAT WE ARE ACTUALLY BIDDING WITH.
-       *
-       * Agave's central scheduler ranks buffered transactions by
-       * `reward * 1_000_000 / (cost + 1)`, and `cost` is driven by the compute-unit
-       * limit the transaction REQUESTS, not by what it consumes or what it pays. So a
-       * transaction asking for the 1,400,000 default while really using ~70k carries a
-       * ~20x penalty in the denominator against an identical bid that asked for what it
-       * needs. The validator already parses both numbers out of the built transaction
-       * and nothing ever looked at them, so we have never known which of those two we
-       * are. Reporting them costs nothing and answers it from the next rehearsal.
-       *
-       * Deliberately NOT changing the request. This endpoint's parameters for trimming
-       * the limit could not be confirmed without the live API key, and an unknown query
-       * parameter that 400s would break every entry. Measure first. */
-      computeUnitLimit: prepared.validation?.computeLimit ?? null,
-      computeUnitPriceMicroLamports: prepared.validation?.computePrice != null
-        ? String(prepared.validation.computePrice) : null,
     });
   }
 
