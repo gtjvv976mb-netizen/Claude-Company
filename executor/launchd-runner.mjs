@@ -45,6 +45,9 @@ const ALLOWED_ENV = new Set([
   "MAX_RENT_LAMPORTS", "MAX_SOL_PER_TRADE", "MAX_TX_ATTEMPTS", "PAUSE_ENTRIES_FILE",
   "POLL_MS", "SLIPPAGE_BPS", "SOLANA_RPC", "SOLANA_RPC_SECONDARY",
   "SOL_USD_CACHE_MAX_AGE_MS", "STATE_DB", "STATE_FILE", "TRAIL_PCT",
+  // Keeps entries armed while the host is on battery. Everything else about the power
+  // gate is unchanged: the idle-sleep assertion is still required and still verified.
+  "WALLSTE_ALLOW_BATTERY_ENTRIES",
 ]);
 const SAFE_INHERITED_ENV = new Set([
   "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LOGNAME", "PATH", "SHELL", "TMPDIR", "TZ", "USER",

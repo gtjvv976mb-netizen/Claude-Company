@@ -442,3 +442,55 @@ try {
 }
 
 console.log("\nmacOS caffeinate assertion is bound to the exact lock owner and independently verifiable\n");
+
+/* ── RUNNING ON BATTERY, BY EXPLICIT CHOICE ─────────────────────────────────
+ * On AC macOS grants caffeinate both PreventUserIdleSystemSleep and PreventSystemSleep;
+ * on battery only the first, so the machine still will not sleep from idle but CAN sleep
+ * on a closed lid or a flat battery — and a position open across that has no stop until
+ * it wakes. That is a real risk and it is the operator's to take, so it is a setting.
+ * What the setting must NOT do is stop checking: every other failure still pauses. */
+{
+  const { requireMacEntryPower, batteryEntriesAllowed } = await import("./sleep-assertion.mjs");
+  const onBattery = {
+    commandBound: true, powerSource: "battery", acPower: false,
+    idleSystemSleep: true, systemSleep: false, ok: false,
+    reason: "host is drawing battery power",
+  };
+  const batteryDir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-battery-"));
+  const lockFile = path.join(batteryDir, "battery.sqlite.lock");
+  const pauseFile = path.join(batteryDir, "battery.sqlite.pause-entries");
+  const clear = () => { try { fs.unlinkSync(pauseFile); } catch {} };
+
+  assert.equal(batteryEntriesAllowed({}), false, "off unless asked for");
+  assert.equal(batteryEntriesAllowed({ WALLSTE_ALLOW_BATTERY_ENTRIES: "1" }), true);
+  assert.equal(batteryEntriesAllowed({ WALLSTE_ALLOW_BATTERY_ENTRIES: "true" }), false,
+    "only the literal 1 arms it");
+
+  clear();
+  assert.throws(() => requireMacEntryPower({ ownerPid: 4242, lockFile, pauseEntriesFile: pauseFile,
+    verify: () => onBattery, allowBatteryEntries: false }), /entry power gate is closed/,
+  "battery refuses entries by default");
+  assert.ok(fs.existsSync(pauseFile), "...and durably pauses them");
+
+  clear();
+  assert.deepEqual(requireMacEntryPower({ ownerPid: 4242, lockFile, pauseEntriesFile: pauseFile,
+    verify: () => onBattery, allowBatteryEntries: true }), onBattery,
+  "with the setting on, a battery host with the idle assertion held may enter");
+  assert.ok(!fs.existsSync(pauseFile), "...and nothing is paused");
+
+  /* THE SETTING IS NOT A BLINDFOLD. Each of these is a different way of failing, and
+     every one still pauses and refuses even with battery entries allowed. */
+  for (const [what, evidence] of [
+    ["a caffeinate not bound to this process", { ...onBattery, commandBound: false }],
+    ["the idle-sleep assertion missing", { ...onBattery, idleSystemSleep: false }],
+    ["power evidence that could not be read", { commandBound: false, ok: false,
+      reason: "macOS power assertion evidence could not be read" }],
+  ]) {
+    clear();
+    assert.throws(() => requireMacEntryPower({ ownerPid: 4242, lockFile, pauseEntriesFile: pauseFile,
+      verify: () => evidence, allowBatteryEntries: true }), /entry power gate is closed/, what);
+    assert.ok(fs.existsSync(pauseFile), `${what} still pauses`);
+  }
+  fs.rmSync(batteryDir, { recursive: true, force: true });
+  console.log("battery entries are an explicit setting, and every other power failure still refuses");
+}

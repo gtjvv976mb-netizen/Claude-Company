@@ -244,6 +244,7 @@ export const batteryPowerIsOperational = (evidence) => evidence?.commandBound ==
 /** Strict, synchronous entry boundary: pause first, then refuse if AC proof is absent. */
 export function requireMacEntryPower({
   ownerPid = process.pid, lockFile, pauseEntriesFile, verify = verifyMacSleepAssertion,
+  allowBatteryEntries = batteryEntriesAllowed(),
 } = {}) {
   if (!lockFile)
     throw new Error("entry power gate is closed (canonical lock path is missing)");
@@ -257,6 +258,11 @@ export function requireMacEntryPower({
   }
   const evidence = verify({ ownerPid, lockFile });
   if (evidence?.ok === true) return evidence;
+  /* The same operator decision the supervisor honours, enforced at the moment of entry.
+     It accepts battery ONLY when the idle-sleep assertion is genuinely held by a
+     caffeinate bound to this process — every other way of failing this gate, including
+     unreadable evidence or a dead caffeinate, still pauses and refuses. */
+  if (allowBatteryEntries && batteryPowerIsOperational(evidence)) return evidence;
   let result;
   try {
     result = publishAutomaticPause({ lockFile, pauseEntriesFile,
@@ -308,10 +314,29 @@ const unlinkMatchingRecord = (file, ownerPid, assertionPid) => {
 };
 
 /** Start and continuously supervise the exact caffeinate assertion for this runner pid. */
+/* RUNNING ON BATTERY, BY EXPLICIT CHOICE.
+ *
+ * On AC, macOS grants caffeinate both PreventUserIdleSystemSleep and PreventSystemSleep.
+ * On battery it grants only the first, so the machine still will not sleep from idle but
+ * CAN sleep if the lid closes or the battery runs out — and a position open across that
+ * is a position with no stop until the machine wakes. That is why battery has always
+ * paused entries.
+ *
+ * It is a real risk and it is the operator's to take, so it is a setting rather than a
+ * rule: WALLSTE_ALLOW_BATTERY_ENTRIES=1 keeps entries armed while the host is on battery.
+ * Everything else is unchanged and still fail-closed — the idle-sleep assertion must
+ * genuinely be held by a caffeinate bound to this process, and if that evidence is lost,
+ * unreadable, or the caffeinate dies, entries pause and the runner exits exactly as
+ * before. This flag says "battery alone is not a reason to stop"; it does not say
+ * "stop checking". */
+export const batteryEntriesAllowed = (env = process.env) =>
+  String(env.WALLSTE_ALLOW_BATTERY_ENTRIES ?? "0").trim() === "1";
+
 export async function startMacSleepAssertion({
   ownerPid = process.pid, lockFile, pauseEntriesFile, caffeinatePath = CAFFEINATE_PATH,
   verify = verifyMacSleepAssertion, spawnFn = spawn, intervalMs = 15_000,
   setIntervalFn = setInterval, clearIntervalFn = clearInterval,
+  allowBatteryEntries = batteryEntriesAllowed(),
   onDegraded = (reason) => console.error(
     `WALL-ST-E launchd: battery power detected; entries paused (${reason})`),
   onRestored = () => console.error(
@@ -403,6 +428,17 @@ export async function startMacSleepAssertion({
 
   let batteryDegraded = false;
   const enterBatteryMode = (current) => {
+    /* The operator has accepted the battery risk. The idle-sleep assertion is still
+       required and still verified on every tick — this branch only declines to publish
+       the pause that battery alone would otherwise cause. */
+    if (allowBatteryEntries) {
+      if (!batteryDegraded)
+        onDegraded(`${current?.reason || "battery power"} — entries CONTINUE, ` +
+          "WALLSTE_ALLOW_BATTERY_ENTRIES=1; the machine can still sleep on a closed lid " +
+          "or a flat battery, and a position open across that has no stop until it wakes");
+      batteryDegraded = true;
+      return;
+    }
     const result = publishAutomaticPause({ lockFile, pauseEntriesFile,
       reason: `automatic pause: ${current?.reason || "battery power"}`,
     });
