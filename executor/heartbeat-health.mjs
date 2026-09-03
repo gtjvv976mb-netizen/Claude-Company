@@ -78,6 +78,11 @@ export function executorHeartbeatHealth({
         Number(executionReadiness.amountLamports) >= 1 &&
         Number(executionReadiness.amountLamports) <= 50_000_000
         ? Number(executionReadiness.amountLamports) : 0,
+      // Why it is not ready, in the bot's own words. Bounded and free of secrets: it is
+      // an error message about a route and a balance, and without it the dashboard can
+      // only show 0/2 and leave the operator guessing.
+      lastError: typeof executionReadiness.lastError === "string"
+        ? executionReadiness.lastError.slice(0, 300) : null,
     } : null,
     caps: capsValid ? publicCaps : null,
     runtimeCommit: /^[0-9a-f]{7,40}$/i.test(String(runtimeCommit || ""))

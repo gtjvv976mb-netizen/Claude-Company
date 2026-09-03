@@ -8739,8 +8739,17 @@ async function loadWallsteDashboard({ background = false } = {}) {
       dashMetric("Exit safety", health ? (health.exitBlocked ? "EXITS BLOCKED" : health.manualAction ? "MANUAL ACTION" : "Clear") : "\u2014",
         health ? String(health.blockedPositions ?? 0) + " blocked positions" : "no heartbeat"),
       dashMetric("Readiness providers", readiness ? String(readiness.providers || 0) + " / 2" : "Not reported",
-        readiness ? (readiness.ready ? "ready" : "not ready") + " · " + String(readiness.route || "route unknown") +
-          (readiness.amountLamports ? " · " + dashSol(Number(readiness.amountLamports) / 1e9) + " rehearsal" : " · size not reported")
+        readiness
+          ? (readiness.ready
+            ? "ready · " + String(readiness.route || "route unknown") +
+              (readiness.amountLamports ? " · " + dashSol(Number(readiness.amountLamports) / 1e9) + " rehearsal" : "")
+            /* WHY, NOT JUST 0/2. An operator with both RPCs green read "0 / 2" and went
+               to the source to find out whether the probe existed at all. It does, it
+               runs every two minutes, and the commonest reason it fails is an unfunded
+               wallet — which the bot now names. */
+            : "not ready · " + (readiness.lastError
+              ? String(readiness.lastError).slice(0, 120)
+              : "the bot reported no reason"))
           : (readiness?.lastSuccessAt > 0 ? "last success " + dashWhen(readiness.lastSuccessAt) : "no-sign probe"))
     );
     healthCard.appendChild(heartbeatGrid);

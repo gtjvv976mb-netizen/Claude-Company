@@ -36,7 +36,7 @@ assert.equal(ready.state, "entries-paused");
 assert.equal(ready.feedRollback, false);
 assert.deepEqual(ready.executionReadiness, {
   ready: true, lastSuccessAt: now - 1000, observedAt: now - 1200,
-  route: "wsol-usdc", providers: 2, amountLamports: 50_000_000,
+  route: "wsol-usdc", providers: 2, amountLamports: 50_000_000, lastError: null,
 });
 assert.deepEqual(ready.caps, {
   maxSolPerTrade: 0.05, dailySolCap: 0.5, dailyLossLimitSol: 0.15, maxOpenPositions: 4,
@@ -64,8 +64,23 @@ const malformed = sanitizeExecutorHealth({ state: "healthy", feedRollback: "fals
 assert.equal(malformed.feedRollback, false, "only a literal boolean is retained");
 assert.deepEqual(malformed.executionReadiness, {
   ready: false, lastSuccessAt: 0, observedAt: now, route: null, providers: 0,
-  amountLamports: 0,
+  amountLamports: 0, lastError: null,
 });
+
+/* THE REASON IS SANITISED LIKE EVERYTHING ELSE ON THIS SURFACE. It exists so an
+   operator with both RPCs green can see why the rehearsal did not pass instead of a
+   bare "0 / 2" — but it arrives from a tenant machine, so it is a bounded string or it
+   is nothing, and control bytes never survive it. */
+const reasoned = sanitizeExecutorHealth({ state: "degraded",
+  executionReadiness: { ready: false, lastSuccessAt: 0, observedAt: now,
+    route: "wsol-usdc", providers: 0, amountLamports: 5_000_000,
+    lastError: "execution-readiness wallet reserve is insufficient\u0000 on one or both RPC providers" } });
+assert.match(reasoned.executionReadiness.lastError, /wallet reserve is insufficient/);
+assert.ok(!/\u0000/.test(reasoned.executionReadiness.lastError), "control bytes are stripped");
+assert.equal(sanitizeExecutorHealth({ executionReadiness: { ready: false,
+  lastError: { nested: "readiness-secret-must-not-cross" } } }).executionReadiness.lastError, null);
+assert.equal(sanitizeExecutorHealth({ executionReadiness: { ready: false,
+  lastError: "y".repeat(900) } }).executionReadiness.lastError.length, 300);
 assert.equal(malformed.caps, null);
 assert.equal(malformed.state, "degraded",
   "malformed rollback/readiness evidence fails status closed");

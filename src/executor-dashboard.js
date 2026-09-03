@@ -46,6 +46,9 @@ const publicReadiness = (value) => {
     providers: Number(value.providers) === 2 ? 2 : 0,
     amountLamports: Number.isSafeInteger(amountLamports) && amountLamports >= 1 &&
       amountLamports <= 50_000_000 ? amountLamports : 0,
+    // Why the rehearsal did not pass, as the bot reported it. "0/2" alone sent an
+    // operator to the source to find out whether the probe even existed.
+    lastError: typeof value.lastError === "string" ? value.lastError.slice(0, 300) : null,
   };
 };
 

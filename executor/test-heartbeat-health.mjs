@@ -16,8 +16,25 @@ const readiness = executorHeartbeatHealth({ executionReadiness: {
 } });
 assert.deepEqual(readiness.executionReadiness, {
   ready: true, lastSuccessAt: 100, observedAt: 99, route: "wsol-usdc", providers: 2,
-  amountLamports: 50_000_000,
+  amountLamports: 50_000_000, lastError: null,
 });
+
+/* WHY IT IS NOT READY TRAVELS WITH THE FACT THAT IT IS NOT.
+ * The probe's failure path was an empty catch, so a bot with both RPCs green reported
+ * "providers 0" and nothing else — an operator could not tell whether the probe had run
+ * at all, and went to the source to find out. The reason rides on the heartbeat now. */
+const refused = executorHeartbeatHealth({ executionReadiness: {
+  ready: false, lastSuccessAt: 0, observedAt: 99, route: "wsol-usdc", providers: 0,
+  amountLamports: 5_000_000,
+  lastError: "execution-readiness wallet reserve is insufficient on one or both RPC providers",
+} });
+assert.match(refused.executionReadiness.lastError, /wallet reserve is insufficient/);
+assert.equal(refused.executionReadiness.providers, 0);
+// Bounded, and never a non-string: this is a self-reported field from a tenant machine.
+assert.equal(executorHeartbeatHealth({ executionReadiness: {
+  ready: false, lastError: { evil: true } } }).executionReadiness.lastError, null);
+assert.equal(executorHeartbeatHealth({ executionReadiness: {
+  ready: false, lastError: "x".repeat(900) } }).executionReadiness.lastError.length, 300);
 assert.deepEqual(readiness.caps, {
   maxSolPerTrade: 0.05, dailySolCap: 0.5, dailyLossLimitSol: 0.15, maxOpenPositions: 4,
 });

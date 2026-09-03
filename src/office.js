@@ -248,7 +248,12 @@ export function sanitizeExecutorHealth(value) {
       ? readinessObject.amountLamports : 0;
     const ready = readinessObject.ready === true && lastSuccessAt > 0 && observedAt > 0 &&
       route === "wsol-usdc" && providers === 2 && amountLamports > 0;
-    executionReadiness = { ready, lastSuccessAt, observedAt, route, providers, amountLamports };
+    /* The bot's own reason, carried through so the dashboard can say more than 0/2.
+       Bounded and sanitised like everything else on this self-reported surface: it is an
+       error string about a route and a balance, never a secret or a key path. */
+    const lastError = typeof readinessObject.lastError === "string"
+      ? readinessObject.lastError.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 300) : null;
+    executionReadiness = { ready, lastSuccessAt, observedAt, route, providers, amountLamports, lastError };
     readinessFailed = !ready;
   }
   const rawCaps = value.caps;

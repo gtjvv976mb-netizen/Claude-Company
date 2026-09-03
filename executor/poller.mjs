@@ -17,7 +17,7 @@ import {
 import {
   JupiterV2Executor, MAX_GROSS_RENT_LAMPORTS, WSOL, associatedTokenAddress,
   walletTokenAmount, independentClassicMintDecimals, independentMintProgram, mintTokenProgram,
-  TOKEN_2022_PROGRAM,
+  TOKEN_2022_PROGRAM, EXECUTION_READINESS_ROUTE,
 } from "./jupiter.mjs";
 import { token2022Enabled } from "./token2022.mjs";
 import {
@@ -1261,6 +1261,7 @@ const runtimeHealth = {
 };
 let readinessProbeInFlight = false;
 let lastReadinessProbeAt = 0;
+let lastReadinessError = null;
 function maybeProbeExecutionReadiness() {
   if (!EXECUTE || !jupiter || readinessProbeInFlight ||
       Date.now() - lastReadinessProbeAt < 2 * 60_000) return;
@@ -1270,6 +1271,10 @@ function maybeProbeExecutionReadiness() {
     amountLamports: Math.floor(CFG.maxSolPerTrade * LAMPORTS),
   })).then((result) => {
     const succeededAt = Date.now();
+    if (result?.ready === true && lastReadinessError !== null) {
+      lastReadinessError = null;
+      log(`READINESS proved: ${result.route} at ${CFG.maxSolPerTrade} SOL on ${result.providers} providers, nothing signed`);
+    }
     runtimeHealth.executionReadiness = {
       ready: result?.ready === true,
       lastSuccessAt: result?.ready === true ? succeededAt : 0,
@@ -1278,12 +1283,31 @@ function maybeProbeExecutionReadiness() {
       providers: Number(result?.providers) === 2 ? 2 : 0,
       amountLamports: Number(result?.amountLamports) || 0,
     };
-  }).catch(() => {
+  }).catch((error) => {
+    /* SAY WHY IT IS NOT READY.
+     *
+     * This catch was empty, so a failing probe set providers to 0 and wrote nothing
+     * anywhere. An operator watching "READINESS PROVIDERS 0/2" could not tell whether
+     * the probe had never run, could not reach a provider, or had run and been refused
+     * — and the commonest cause by far is simply an unfunded wallet, which the message
+     * names outright. A refusal that cannot be read is the same defect as a refusal
+     * that never happened. Repeats are collapsed so a persistent cause logs once. */
+    const reason = String(error?.message || error).slice(0, 300);
+    if (reason !== lastReadinessError) {
+      lastReadinessError = reason;
+      const need = Math.floor(CFG.maxSolPerTrade * LAMPORTS) +
+        Number(jupiter.cfg.maxNetworkFeeLamports ?? 500_000) +
+        Number(jupiter.cfg.maxRentLamports ?? 4_200_000) + 10_000_000;
+      log(`READINESS not proved (${EXECUTION_READINESS_ROUTE} at ${CFG.maxSolPerTrade} SOL): ${reason}` +
+        ` — this no-sign rehearsal needs about ${(need / LAMPORTS).toFixed(4)} SOL in the wallet ` +
+        "(the trade size, the network-fee ceiling, two ATAs of rent and an untouched reserve)");
+    }
     runtimeHealth.executionReadiness = {
       ready: false,
       lastSuccessAt: Number(runtimeHealth.executionReadiness?.lastSuccessAt) || 0,
       observedAt: Date.now(), route: "wsol-usdc", providers: 0,
       amountLamports: Math.floor(CFG.maxSolPerTrade * LAMPORTS),
+      lastError: reason,
     };
   }).finally(() => { readinessProbeInFlight = false; });
 }
