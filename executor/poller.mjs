@@ -543,7 +543,41 @@ async function heldRaw(mint, connection = conn) {
     program, mint, wallet: WALLET, allowMissing: true, label: `canonical ATA ${ata}`,
   });
 }
-async function solBalance() { return (await conn.getBalance(kp.publicKey, "confirmed")) / LAMPORTS; }
+/* ONE READ, NO RETRY, NO FAILOVER — ON THE PATH THAT DECIDES WHETHER WE CAN AFFORD
+ * THE TRADE. A single RPC hiccup here dropped the whole call, and the log shows how
+ * ordinary those hiccups are: "Solana RPC HTTP request timed out after 4000ms" and
+ * "RPC could not obtain a processed-slot freshness anchor" appear throughout, and
+ * roughly half the readiness rehearsals fail for transport reasons rather than trading
+ * ones. Three lines below, inspectTrackedBalance already reads a token balance through
+ * verifyTrackedBalanceWithFailover against BOTH providers; this read simply never
+ * learned the same trick.
+ *
+ * Retry the primary once, then ask the independent secondary. Still throws when nothing
+ * answers, because an unknown balance must never be treated as a sufficient one. */
+async function solBalance() {
+  const read = async (connection, label) => {
+    const lamports = await connection.getBalance(kp.publicKey, "confirmed");
+    if (!Number.isFinite(lamports)) throw new Error(`${label} returned a non-numeric balance`);
+    return lamports / LAMPORTS;
+  };
+  let lastError;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try { return await read(conn, "primary RPC"); }
+    catch (error) {
+      lastError = error;
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+  if (secondaryConn) {
+    try {
+      const balance = await read(secondaryConn, "secondary RPC");
+      log("wallet balance: the primary RPC did not answer twice; the independent secondary did" +
+        ` (${lastError?.message || lastError})`);
+      return balance;
+    } catch (error) { lastError = error; }
+  }
+  throw lastError;
+}
 
 async function inspectTrackedBalance(pos) {
   const balance = await verifyTrackedBalanceWithFailover({
