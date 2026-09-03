@@ -1106,7 +1106,8 @@ const CREW = Object.fromEntries(STAFF.map((s) => [s.id, s.name]));
 const crewName = (id) => CREW[id] || id;
 
 const SPOTS = {
-  ceoDoor:  [0, -6.6],        // the threshold. Staff stop here; only the CEO goes in.
+  ceoDoor:  [0, -6.6],        // the threshold: where the walk-in begins
+  bossDesk: [0.85, -8.75],    // INSIDE, by the visitor chair, facing his desk
   printer:  [-11.6, 3.4],
   cooler:   [10.6, 3.4],
   shredder: [-15.0, 1.7],
@@ -1442,19 +1443,19 @@ function buildCodexDesk(at, yaw, y = 0) {
   box(g, [0.02, 0.40, 0.28], [-0.272, 1.32, -0.76], 0x0d1b34);
   for (let i = 0; i < 7; i++)
     box(g, [0.01, 0.018, 0.07 + (i % 3) * 0.06],
-      [-0.262, 1.49 - i * 0.052, -0.84 + (i % 3) * 0.04], i % 4 === 0 ? 0x10a37f : 0x6f91ff);
+      [-0.262, 1.49 - i * 0.052, -0.84 + (i % 3) * 0.04], i % 4 === 0 ? 0xf2f4f5 : 0x8b9096);
 
   // The test tower, up on the shelf where he can see it from the door.
   box(g, [0.12, 0.03, 0.12], [-0.42, 1.12, 0.76], RACK);
   for (let i = 0; i < 4; i++)
-    pulse(box(g, [0.07, 0.05, 0.07], [-0.42, 1.16 + i * 0.06, 0.76], i < 3 ? 0x10a37f : 0xe0ad3d),
+    pulse(box(g, [0.07, 0.05, 0.07], [-0.42, 1.16 + i * 0.06, 0.76], i < 3 ? 0xf2f4f5 : 0xe0ad3d),
       { period: 2.6, phase: i * 0.5, floor: 0.35 });
 
   /* THE MACHINE ITSELF, under the bench and visible. An engineer's desk shows
      the hardware; a trader's hides it. Its drive lights are the room's pulse. */
   box(g, [0.34, 0.40, 0.46], [-0.22, 0.45, 0.60], RACK, 0.6);
   for (let i = 0; i < 3; i++)
-    pulse(box(g, [0.02, 0.03, 0.06], [-0.048, 0.58 - i * 0.07, 0.60], i === 0 ? 0x10a37f : 0x6f91ff),
+    pulse(box(g, [0.02, 0.03, 0.06], [-0.048, 0.58 - i * 0.07, 0.60], i === 0 ? 0xf2f4f5 : 0x8b9096),
       { period: 1.1 + i * 0.4, phase: i * 1.3, floor: 0.15 });
   box(g, [0.02, 0.18, 0.30], [-0.048, 0.36, 0.60], 0x101215);      // the vent
 
@@ -3445,10 +3446,10 @@ const DESK_KIT = {
                   // lines of code, ragged the way code is, in editor green and blue
                   for (let i = 0; i < 7; i++)
                     b([0.01, 0.018, 0.07 + (i % 3) * 0.06], [-0.262, 1.42 - i * 0.055, -0.78 + (i % 3) * 0.04],
-                      i % 4 === 0 ? 0x10a37f : 0x6f91ff);
+                      i % 4 === 0 ? 0xf2f4f5 : 0x8b9096);
                   b([0.14, 0.03, 0.12], [-0.02, 0.79, -0.92], 0x30343a);          // the test tower
                   for (let i = 0; i < 4; i++)
-                    b([0.06, 0.045, 0.06], [-0.02, 0.83 + i * 0.055, -0.92], i < 3 ? 0x10a37f : 0xe0ad3d);
+                    b([0.06, 0.045, 0.06], [-0.02, 0.83 + i * 0.055, -0.92], i < 3 ? 0xf2f4f5 : 0xe0ad3d);
                   b([0.24, 0.03, 0.26], [-0.04, 0.79, 0.40], 0x2a2f36);           // the proposal tray
                   for (let i = 0; i < 3; i++)
                     b([0.20, 0.012, 0.22], [-0.04, 0.815 + i * 0.014, 0.40], 0xf0e4c7); },
@@ -3571,7 +3572,13 @@ window.__floorHeightAt = (x, z) => {
 
 const CODEX_OFFICE = { x0: -9.65, x1: -5.9, z0: -12.5, z1: -8.6, cx: -7.78 };
 const CODEX_DAIS = 0.22;                         // the same junior step as Grox's
-const GPT_GREEN = 0x10a37f, GPT_INK = 0x0e0f11, GPT_EDGE = 0x2a2f2d;
+/* OpenAI's mark is monochrome now, so this office is too: the 2023 green
+   (#10a37f) read as a period detail next to a black-and-white knot. GPT_GREEN
+   keeps its name — every call site means "the house accent of this room" — and
+   is simply white. Anything that has to signal a STATE keeps a hue, because a
+   status light that cannot be told apart from its neighbour is decoration. */
+const GPT_GREEN = 0xf2f4f5, GPT_INK = 0x0b0b0c, GPT_EDGE = 0x24262a;
+const GPT_DIM = 0x8b9096;                       // the grey between the two
 const codexOffice = new THREE.Group();
 scene.add(codexOffice);
 (() => {
@@ -3587,7 +3594,7 @@ scene.add(codexOffice);
 
   const dais = bx(W, CODEX_DAIS, D, O.cx, CODEX_DAIS / 2, zc, 0x15171a, 0.9);
   dais.receiveShadow = true;
-  bx(W, 0.05, 0.12, O.cx, CODEX_DAIS, O.z1 - 0.02, GPT_GREEN, 0.5, GPT_GREEN, 0.25);  // green nosing
+  bx(W, 0.05, 0.12, O.cx, CODEX_DAIS, O.z1 - 0.02, GPT_GREEN, 0.5, GPT_GREEN, 0.25);  // white nosing
 
   // his own back wall, carrying the board
   bx(W - 0.16, 3.1, 0.12, O.cx, CODEX_DAIS + 1.55, O.z0 + 0.15, GPT_INK, 0.88);
@@ -3618,7 +3625,7 @@ scene.add(codexOffice);
      circles offset from the centre, each stopping short of its neighbours, so
      the petals interlock around a clean hexagonal hole. Tuned by eye against a
      full-size preview rather than guessed. */
-  x.strokeStyle = "#10a37f"; x.lineWidth = 26; x.lineCap = "round";
+  x.strokeStyle = "#f2f4f5"; x.lineWidth = 26; x.lineCap = "round";
   for (let k = 0; k < 6; k++) {
     const a = (k / 6) * Math.PI * 2;
     x.beginPath();
@@ -3649,7 +3656,7 @@ scene.add(codexOffice);
   const g2 = c.getContext("2d");
   g2.fillStyle = "#0e0f11"; g2.fillRect(0, 0, 768, 448);
   g2.fillStyle = "#141618"; g2.fillRect(0, 0, 768, 74);
-  g2.strokeStyle = "#10a37f"; g2.lineWidth = 2;
+  g2.strokeStyle = "#f2f4f5"; g2.lineWidth = 2;
   g2.beginPath(); g2.moveTo(0, 74); g2.lineTo(768, 74); g2.stroke();
   g2.fillStyle = "#fafafa"; g2.textBaseline = "middle"; g2.textAlign = "left";
   g2.font = '700 34px "JetBrains Mono", ui-monospace, monospace';
@@ -3665,7 +3672,7 @@ scene.add(codexOffice);
   ];
   let y = 132;
   for (const [k, v] of lines) {
-    g2.fillStyle = "#10a37f";
+    g2.fillStyle = "#f2f4f5";
     g2.font = '700 22px "JetBrains Mono", ui-monospace, monospace';
     g2.fillText(k, 30, y);
     g2.fillStyle = "#c8ccd0";
@@ -3890,20 +3897,20 @@ scene.add(officeDecor);
   b([0.50, 1.70, 0.04], [CX - 1.02, CD + 0.93, -11.6], 0x0d0f12, 0.5);
   for (let i = 0; i < 9; i++) {
     b([0.46, 0.14, 0.02], [CX - 1.03, CD + 0.24 + i * 0.19, -11.6], 0x1f242a, 0.6);
-    pulse(b([0.05, 0.035, 0.02], [CX - 1.02, CD + 0.24 + i * 0.19, -11.72], i % 3 === 0 ? 0xe0ad3d : 0x10a37f),
+    pulse(b([0.05, 0.035, 0.02], [CX - 1.02, CD + 0.24 + i * 0.19, -11.72], i % 3 === 0 ? 0xe0ad3d : 0xf2f4f5),
       { period: 0.9 + (i % 5) * 0.45, phase: i * 0.7, floor: 0.12 });
   }
   solid(CX - 1.30, -11.6, 0.56, 0.62);
   b([0.05, 1.05, 1.50], [CX - 1.60, CD + 1.35, -9.9], 0xf2f4f5, 0.4);    // whiteboard
   b([0.02, 0.95, 1.40], [CX - 1.572, CD + 1.35, -9.9], 0xfbfcfc, 0.35);
   for (let i = 0; i < 4; i++)                                            // boxes-and-arrows
-    b([0.01, 0.16, 0.26], [CX - 1.560, CD + 1.62 - i * 0.20, -10.35 + (i % 2) * 0.5], i % 2 ? 0x2f6fb0 : 0x10a37f);
+    b([0.01, 0.16, 0.26], [CX - 1.560, CD + 1.62 - i * 0.20, -10.35 + (i % 2) * 0.5], i % 2 ? 0x3a4046 : 0x1c1f23);
   for (let i = 0; i < 3; i++)
     b([0.01, 0.02, 0.22], [CX - 1.560, CD + 1.52 - i * 0.20, -10.05 + (i % 2) * 0.2], 0x3a4046);
   b([0.62, 0.05, 0.30], [CX + 1.30, CD + 1.06, -11.85], 0x3a3026, 0.9);  // manuals shelf
   for (let i = 0; i < 7; i++)
     b([0.07, 0.28, 0.22], [CX + 1.06 + i * 0.08, CD + 1.22, -11.85],
-      [0x10a37f, 0x2f6fb0, 0x8a4a3a, 0x3a4046][i % 4], 0.9);
+      [0xf2f4f5, 0x8b9096, 0x2a2d31, 0x3a4046][i % 4], 0.9);
   solid(CX + 1.30, -11.85, 0.62, 0.30);
   b([0.42, 0.06, 0.42], [CX + 1.32, CD + 0.03, -9.2], 0x8a6a4a, 0.95);   // the living plant
   b([0.34, 0.30, 0.34], [CX + 1.32, CD + 0.18, -9.2], 0x9a7a55, 0.95);
@@ -3911,7 +3918,7 @@ scene.add(officeDecor);
     b([0.20, 0.10, 0.20], [CX + 1.32 + (i % 3 - 1) * 0.10, CD + 0.40 + i * 0.09, -9.2 + (i % 2 - 0.5) * 0.10], 0x3f7d52, 0.9);
   solid(CX + 1.32, -9.2, 0.42, 0.42);
   // the build light: one green orb on the wall, the whole room's mood in a glance
-  pulse(b([0.16, 0.16, 0.16], [CX - 1.62, CD + 2.05, -11.0], 0x10a37f, 0.3), { period: 3.4, floor: 0.4 });
+  pulse(b([0.16, 0.16, 0.16], [CX - 1.62, CD + 2.05, -11.0], 0xf2f4f5, 0.3), { period: 3.4, floor: 0.4 });
 })();
 
 /* The Assistant Director is ALWAYS in the building — hiding him made the room
@@ -5616,6 +5623,26 @@ async function deliver(from, toId, msg, kind = "") {
   await from.goHome();
 }
 
+/* What the boss asks when somebody walks a proposal into his office, and what
+   the PM has ready. Short, because they are spoken over a desk, not written. */
+const BOSS_ASKS = [
+  "What kills it?",
+  "Who's on the other side of this trade?",
+  "If you're wrong, where do we find out?",
+  "Red Team had a go at this?",
+  "Size it like you mean it, or don't bring it.",
+  "What's the exit look like?",
+];
+const PM_ANSWERS = [
+  "Stop's tight. Invalidation is written.",
+  "Liquidity holds at our size. I checked twice.",
+  "It survived the attack. Wounded, not refuted.",
+  "Small. First one back covers the rest.",
+  "If the flow turns, we're out on the same candle.",
+  "I'd rather be early and small than right and late.",
+];
+let PENDING_PITCH = null;       // the PM waiting in the boss's office for a ruling
+
 /* ═══ BEHAVIOUR — one pipeline event, one thing a person does ════════════ */
 const ANALYSTS = ["Forensics", "Liquidity", "Flow", "Technical", "Narrative"];
 
@@ -5797,23 +5824,37 @@ const HANDLERS = {
         p.carry(true, e.detail === "PROPOSE" ? "green" : "");
         p.say(`${e.detail}${score}`);
         if (e.detail === "PROPOSE") {
-          // Only a proposal goes up, and the PM stops at the threshold. Nobody
-          // else crosses into that office.
+          /* HE GOES IN. The proposal is the one moment on this floor where money
+             might actually move, and it used to be an envelope pushed under a
+             door — the PM stopped at the threshold and the boss came out to
+             collect it. Nobody ever spoke. Now the PM walks into the office,
+             stands at the desk, pitches it, takes the boss's question, answers
+             it, and waits for the ruling to his face. */
           await p.moveTo(SPOTS.ceoDoor[0], SPOTS.ceoDoor[1]);
-          puff(p, "✉");
-          p.say("For BIG C.");
-          p.carry(false);
+          p.say("Boss — one for you.");
+          await p.moveTo(SPOTS.bossDesk[0], SPOTS.bossDesk[1]);
           const ceo = who("CEO");
-          ceo?.run(async () => {
-            // The boss comes to the door for a proposal — the one walk on the
-            // floor that means money might move. Nobody else crosses; he does.
-            ceo.say("Something's come under the door.");
-            await ceo.moveTo(SPOTS.ceoDoor[0], SPOTS.ceoDoor[1] - 0.9);
-            ceo.carry(true, "green");
-            puff(ceo, "📥");
-            await pause(900);
-            await ceo.goHome();
-          });
+          puff(p, "✉");
+          p.say(`${e.symbol || "This one"}${score}. I want it.`);
+          await pause(1500);
+          ceo?.say(BOSS_ASKS[(Math.random() * BOSS_ASKS.length) | 0]);
+          await pause(1800);
+          p.say(PM_ANSWERS[(Math.random() * PM_ANSWERS.length) | 0]);
+          p.carry(false);
+          /* He stays for the answer. PENDING_PITCH lets the CEO's verdict — which
+             arrives as its own event, seconds or minutes later — be delivered to
+             his face instead of into an empty room. The timestamp is the whole
+             safety of it: without one, a run that dies between the pitch and the
+             ruling would leave the PM standing in that office until the page
+             reloaded. */
+          PENDING_PITCH = { pm: p, at: Date.now() };
+          setTimeout(() => {
+            if (PENDING_PITCH && PENDING_PITCH.pm === p) {
+              PENDING_PITCH = null;
+              p.run(async () => { p.say("I'll leave it with you."); await p.goHome(); });
+            }
+          }, 45000);
+          return;                       // he does NOT walk home yet
         } else {
           await p.moveTo(SPOTS.meeting[0], SPOTS.meeting[1]);
           puff(p, "▤"); p.carry(false);
@@ -5828,6 +5869,25 @@ const HANDLERS = {
         puff(p, e.detail === "APPROVE" ? "✓" : e.detail === "HOLD" ? "‖" : "✕");
         p.say(e.one_line || e.detail, 5600);
         p.carry(true, e.detail === "APPROVE" ? "green" : "red");
+        // The ruling, in his own words, on his own screen — the reason is the
+        // decision; the verdict word alone is just a rubber stamp.
+        drawScreen("CEO", { title: e.detail, lines: [String(e.one_line || "").slice(0, 46)],
+          good: e.detail === "APPROVE", bad: e.detail === "DECLINE" });
+        if (e.detail === "APPROVE") { puff(p, "🖊"); }
+        // If the PM is still standing there, he hears it from the boss and
+        // answers before he goes — the other half of the conversation.
+        const held = PENDING_PITCH;
+        if (held && Date.now() - held.at < 45000) {
+          PENDING_PITCH = null;
+          await pause(1200);
+          const pm = held.pm;
+          pm.run(async () => {
+            pm.say(e.detail === "APPROVE" ? "On it." : e.detail === "HOLD" ? "Understood — I'll watch it."
+                                                     : "Fair. Next.");
+            await pause(1200);
+            await pm.goHome();
+          });
+        }
       });
       return;
     }
@@ -5846,6 +5906,28 @@ const HANDLERS = {
     tape("CEO", `preparing an unsigned order for ${e.symbol}`, "hi");
     who("CEO")?.run(async () => who("CEO").say("Preparing the order. I'll sign it myself."));
   },
+  /* THE PART OF THE JOB NOBODY WATCHES: living with it. A call closing was a
+     line in the tape and nothing else — the man who authorised it never
+     reacted. He does now, with the real number, and a loss taken at the
+     authored stop is treated as the system working, because on this desk it is. */
+  "call:close": (e) => {
+    const pnl = Number(e.pnlPct);
+    const known = Number.isFinite(pnl);
+    tape("CEO", `${e.symbol} closed${known ? ` ${pnl >= 0 ? "+" : ""}${pnl.toFixed(1)}%` : ""} — ${e.reason || "exit"}`,
+      known && pnl >= 0 ? "good" : "warn");
+    const p = who("CEO");
+    p?.run(async () => {
+      puff(p, known && pnl >= 0 ? "✓" : "—");
+      p.say(!known ? `${e.symbol} is closed. Write it up.`
+        : pnl > 20 ? `${e.symbol}, ${pnl.toFixed(0)}%. That is what the process is for.`
+        : pnl > 0 ? `${e.symbol} green. Small and green still counts.`
+        : pnl > -12 ? `Stopped where we said we would. That is the system working.`
+        : `${e.symbol} cost us ${Math.abs(pnl).toFixed(0)}%. I want the debrief.`, 5200);
+      drawScreen("CEO", { title: known ? `${pnl >= 0 ? "+" : ""}${pnl.toFixed(1)}%` : "CLOSED",
+        lines: [String(e.symbol || ""), String(e.reason || "")], good: known && pnl >= 0, bad: known && pnl < 0 });
+    });
+  },
+
   "order:slip": (e) => {
     tape("CEO", `${e.ruling} — ${e.symbol} $${e.size} · ${e.file}`, e.ruling === "APPROVE" ? "good" : "warn");
     if (e.gmgn) tape("Order", `GMGN: ${e.gmgn}`, "hi");
