@@ -40,7 +40,10 @@ t("hit rate under W_min is refused", p4.action==="skip" && /under the/.test(p4.r
 
 // book heat
 const p5 = planEntry({ call: wide, cfg: KELLY, state: st({bookHeat: 0.079}) });
-t("book heat cap blocks the next entry", p5.action==="skip" && /book heat/.test(p5.reason), p5.reason);
+t("a nearly full book caps the next entry at the room left, and says so",
+  p5.action === "skip"
+    ? /book heat/.test(p5.reason)
+    : /book heat/.test(p5.reason) && 0.079 + p5.f <= KELLY.bookHeatMax + 1e-9, p5.reason);
 
 // f is risk-at-stop — but the flat per-trade cap may legitimately bind first
 const eq=5, sf=0.40;
@@ -54,13 +57,19 @@ t("...and the flat cap binds when Kelly asks for more",
 
 // THE FIXED FUND — the owner's default: same size every trade, refusals unchanged
 const pf = planEntry({ call: wide, cfg: DEFAULTS, state: st({wins:20, losses:10}) });
-t("fixed fund sizes every trade identically", /fixed fund/.test(pf.reason) && Math.abs(pf.sol-DEFAULTS.fixedSol)<1e-9, pf.reason);
+/* The fixed fund is now the operator's CEILING rather than a flat size: risk may
+   size UNDER it and never over it (owner's rule, 2026-09-03 — "more risk, less size
+   of trade"). With nothing binding, it still sizes exactly at the ceiling. */
+t("the fixed fund is the ceiling, and is taken in full when nothing binds",
+  /operator ceiling/.test(pf.reason) && Math.abs(pf.sol-DEFAULTS.fixedSol)<1e-9, pf.reason);
 const pfBad = planEntry({ call: wide, cfg: DEFAULTS, state: st({wins:3, losses:29}) });
 t("fixed fund does NOT override Kelly's refusals", pfBad.action==="skip", pfBad.reason);
 const unsafeFixed = planEntry({ call: wide, cfg: { ...DEFAULTS, maxSolPerTrade: 0.02 },
   state: st({ equitySol: 0.05 }) });
-t("fixed fund cannot exceed the per-name risk rail on a small burner",
-  unsafeFixed.action==="skip" && /actual stop risk/.test(unsafeFixed.reason), unsafeFixed);
+t("fixed fund still cannot exceed the per-name risk rail on a small burner",
+  unsafeFixed.action==="skip"
+    ? /per-name risk cap|actual stop risk/.test(unsafeFixed.reason)
+    : unsafeFixed.f <= DEFAULTS.fNameMax + 1e-9, unsafeFixed);
 const frictionSized = planEntry({ call: wide, cfg: { ...KELLY, measuredRoundTripLossPct: 5 }, state: st() });
 t("measured round-trip friction is included in actual stop risk",
   frictionSized.action==="buy" && frictionSized.sol <= p2.sol && frictionSized.f >= 0, frictionSized);

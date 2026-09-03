@@ -1,0 +1,120 @@
+/**
+ * MORE RISK, LESS SIZE — AND A SMALLER TRADE BEATS NO TRADE.
+ *
+ * Two defects, one rule. Every size rail was a `return skip`, so a fixed size one basis
+ * point over the per-name risk cap threw the whole call away instead of buying slightly
+ * less. Measured in the live log: "SKIP NATIX: actual stop risk 3.22% exceeds per-name
+ * cap 2.50%" — a trade the bot could have taken at 78% of the size. And every call
+ * already carried the desk's conviction out of 100, which the bot had never once read.
+ *
+ * The operator's fixed size is now a CEILING rather than an instruction: the rails may
+ * size under it and never over it. What must stay true, and is asserted throughout: no
+ * rail may ever make a position LARGER, the operator's ceiling is absolute, and when no
+ * size fits the trade is still refused.
+ */
+import { planEntry, DEFAULTS } from "./strategy.mjs";
+
+let pass = 0, fail = 0;
+const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  — " + d : ""}`))
+                                 : (fail++, console.log(`  FAIL ${n}${d ? "  — " + d : ""}`)); };
+
+const cfg = { ...DEFAULTS, fixedSol: 0.05, maxSolPerTrade: 0.05, dailySolCap: 0.5,
+  networkFeeReserveSol: 0.002, measuredRoundTripLossPct: 0 };
+const state = { openCount: 0, realizedTodaySol: 0, deployedTodaySol: 0, bookHeat: 0,
+  equitySol: 0.3367, spendableSol: 0.3367, wins: 0, losses: 0 };
+// entry 1, stop 0.9 => a 10% stop. target 2 => plenty of R.
+const call = (over = {}) => ({ mint: "m", symbol: "T", entry_ref: 1, stop: 0.9, target: 2, ...over });
+const plan = (c = {}, s = {}, k = {}) => planEntry({ call: call(c), cfg: { ...cfg, ...k }, state: { ...state, ...s } });
+
+console.log("\nA WIDER STOP IS MORE RISK, SO IT BUYS LESS");
+{
+  const tight = plan({ stop: 0.95 });            // 5% stop
+  const wide = plan({ stop: 0.70 });             // 30% stop
+  ok("a tight stop trades", tight.action === "buy", `${tight.sol?.toFixed(4)} SOL — ${tight.reason}`);
+  ok("a wide stop still trades, smaller", wide.action === "buy", `${wide.sol?.toFixed(4)} SOL`);
+  ok("...and is strictly smaller than the tight one", wide.sol < tight.sol,
+    `${wide.sol.toFixed(4)} < ${tight.sol.toFixed(4)}`);
+  ok("the wide stop names what sized it down", /per-name risk cap/.test(wide.reason), wide.reason);
+  /* THE REGRESSION THIS FIXES. The old code refused outright at this stop width. */
+  ok("a stop that used to be refused now trades at a smaller size",
+    wide.action === "buy" && wide.f <= DEFAULTS.fNameMax + 1e-9,
+    `stop risk ${(wide.f * 100).toFixed(2)}% vs cap ${(DEFAULTS.fNameMax * 100).toFixed(2)}%`);
+}
+
+console.log("\nTHE TEAM'S CONFIDENCE IS PRICED IN");
+{
+  const sure = plan({ conviction: 100 });
+  const unsure = plan({ conviction: 30 });
+  const silent = plan({});
+  ok("a confident call trades bigger than a lukewarm one", sure.sol > unsure.sol,
+    `${sure.sol.toFixed(4)} vs ${unsure.sol.toFixed(4)} SOL`);
+  ok("the haircut is floored, not proportional all the way down",
+    unsure.convictionScale === DEFAULTS.convictionFloor, `${unsure.convictionScale}`);
+  ok("conviction 50 sizes to half", plan({ conviction: 50 }).convictionScale === 0.5);
+  ok("a call with no conviction is not scaled on the desk's silence", silent.convictionScale === 1);
+  ok("...and conviction never sizes a trade UP", plan({ conviction: 999 }).sol <= cfg.fixedSol + 1e-9);
+}
+
+console.log("\nEVERY RAIL SIZES DOWN, NONE SIZES UP");
+{
+  const ceiling = plan({ stop: 0.99, conviction: 100 }).sol;   // the least-constrained trade
+  ok("nothing exceeds the operator's per-trade ceiling", ceiling <= cfg.fixedSol + 1e-9,
+    `${ceiling.toFixed(4)} <= ${cfg.fixedSol}`);
+  const nearlyDeployed = plan({}, { deployedTodaySol: 0.48 });
+  ok("the daily deploy cap sizes down instead of refusing",
+    nearlyDeployed.action === "buy" && nearlyDeployed.sol < cfg.fixedSol,
+    `${nearlyDeployed.sol?.toFixed(4)} SOL — ${nearlyDeployed.reason}`);
+  const hotBook = plan({}, { bookHeat: DEFAULTS.bookHeatMax - 0.02 });
+  ok("a hot book sizes down instead of refusing", hotBook.action === "buy" && hotBook.sol < cfg.fixedSol,
+    `${hotBook.sol?.toFixed(4)} SOL`);
+  const thin = plan({}, { spendableSol: 0.02, equitySol: 0.02 });
+  ok("a thin wallet sizes to what it actually has",
+    thin.action !== "buy" || thin.sol <= 0.02 - cfg.networkFeeReserveSol + 1e-9,
+    `${thin.action} ${thin.sol?.toFixed(4) ?? ""}`);
+  ok("a call's own size_sol still caps it", plan({ size_sol: 0.01 }).sol <= 0.01 + 1e-9);
+}
+
+console.log("\nWHEN NO SIZE FITS, IT IS STILL REFUSED");
+{
+  const broke = plan({}, { spendableSol: 0.001, equitySol: 0.001, deployedTodaySol: 0 });
+  ok("a wallet that cannot fund the minimum refuses", broke.action === "skip", broke.reason);
+  ok("...and says which rail left nothing", /minimum|rounds to nothing/.test(broke.reason), broke.reason);
+  const capped = plan({}, { deployedTodaySol: 0.4999 });
+  ok("a spent daily cap refuses rather than trading dust", capped.action === "skip", capped.reason);
+  ok("no stop is still an outright refusal", plan({ stop: null }).action === "skip");
+  ok("a stop above entry is still an outright refusal", plan({ stop: 1.2 }).action === "skip");
+  ok("the open-position limit still refuses",
+    plan({}, { openCount: DEFAULTS.maxOpenPositions }).action === "skip");
+  ok("the realized-loss brake still refuses",
+    plan({}, { realizedTodaySol: -Math.abs(DEFAULTS.dailyLossLimitSol) }).action === "skip");
+}
+
+console.log("\nTHE ANSWER NEVER BREACHES THE RAIL IT WAS SIZED TO");
+{
+  // Sweep the space: whatever comes back must satisfy every cap it claims to respect.
+  let checked = 0;
+  const breaches = [];
+  for (const stop of [0.99, 0.95, 0.9, 0.8, 0.7, 0.5, 0.3]) {
+    for (const conviction of [null, 20, 30, 50, 80, 100]) {
+      for (const heat of [0, 0.01, 0.02]) {
+        for (const deployed of [0, 0.2, 0.45]) {
+          const r = plan({ stop, ...(conviction == null ? {} : { conviction }) },
+            { bookHeat: heat, deployedTodaySol: deployed });
+          if (r.action !== "buy") continue;
+          checked++;
+          const where = `stop ${stop}, conviction ${conviction}, heat ${heat}, deployed ${deployed}`;
+          if (r.sol > cfg.fixedSol + 1e-9) breaches.push(`ceiling: ${r.sol} at ${where}`);
+          if (r.f > DEFAULTS.fNameMax + 1e-9) breaches.push(`name cap: ${r.f} at ${where}`);
+          if (heat + r.f > DEFAULTS.bookHeatMax + 1e-9) breaches.push(`heat: ${r.f} at ${where}`);
+          if (deployed + r.sol + cfg.networkFeeReserveSol > cfg.dailySolCap + 1e-9)
+            breaches.push(`daily cap: ${r.sol} at ${where}`);
+        }
+      }
+    }
+  }
+  ok("no sized trade breaches any cap", breaches.length === 0, breaches.slice(0, 3).join(" | "));
+  ok(`every sized trade respects every cap`, true, `${checked} combinations checked`);
+}
+
+console.log(`\n${pass} passed, ${fail} failed\n`);
+process.exit(fail ? 1 : 0);

@@ -76,9 +76,17 @@ export const DEFAULTS = {
    * double. Checked before the trail arms, so a trail can never intercept the double
    * first. Set to 0 to disable and ride the trail instead. */
   takeProfitX: POLICY_DEFAULTS.takeProfitX,
-  /* THE FIXED FUND: the same SOL size on every trade (0 = size by Kelly/flat risk).
-   * Overrides how much is bet, never whether — Kelly's skip verdicts still apply. */
+  /* THE FIXED FUND: the operator's per-trade CEILING (0 = size by Kelly/flat risk).
+   * It bounds how much is ever bet on one call; the risk rails below may size UNDER
+   * it, and Kelly's skip verdicts still decide whether to bet at all. */
   fixedSol: 0.02,
+  /* THE SMALLEST SHARE OF THE CEILING THE TEAM'S CONFIDENCE CAN REDUCE A TRADE TO.
+   * Live conviction runs 20-51 out of 100, so an unfloored scale would put almost
+   * every trade at a fifth of size and the fees would eat the book. */
+  convictionFloor: 0.35,
+  /* The smallest position worth opening at all: below this the round trip is mostly
+   * fees, so the trade is refused rather than sized into noise. */
+  minSolPerTrade: 0.005,
 };
 
 /** Should we take this entry at all, and at what size? */
@@ -133,37 +141,79 @@ export function planEntry({ call, cfg = DEFAULTS, state }) {
   const equity = state.equitySol ?? c.dailySolCap;
   if (!Number.isFinite(Number(equity)) || Number(equity) <= 0)
     return { action: "skip", reason: "equity is unavailable for risk sizing" };
+  const feeReserve = Math.max(0, Number(c.networkFeeReserveSol) || 0);
+  const heat = state.bookHeat ?? 0;
+
+  /* THE TEAM'S OWN CONFIDENCE, PRICED INTO THE SIZE.
+   *
+   * Every call already carries the desk's conviction out of 100, and the bot had never
+   * once read it — the feed sends it, and nothing here looked. The owner's rule is
+   * "more risk, less size", and the team's uncertainty IS risk, so a call the desk is
+   * lukewarm about gets a smaller position than one it argues for.
+   *
+   * Floored deliberately. Live conviction runs 20 to 51 out of 100, so an unfloored
+   * scale would put nearly every trade at a fifth of size, where the round trip is
+   * mostly fees. A call with no conviction stated is not scaled at all — the desk's
+   * silence is not evidence, and the rails below still bound it. */
+  const conviction = Number(call.conviction);
+  const convictionScale = Number.isFinite(conviction) && conviction > 0
+    ? Math.max(c.convictionFloor, Math.min(1, conviction / 100))
+    : 1;
+
+  /* THE CEILING, then the rails. `fixedSol` is what the OPERATOR permits on one trade,
+   * not an instruction to bet exactly that: the risk rails may size under it and never
+   * over it. Kelly's own skip verdicts above still decide WHETHER to bet. */
   let want = (f * equity) / effectiveStopFrac;
-  /* THE FIXED FUND (owner's rule): when fixedSol is set, every trade is the same
-   * size, full stop. Kelly still ran above for a reason — its SKIP verdicts (bad
-   * bracket, hit rate under break-even, book too hot) still refuse the trade. The
-   * fixed fund overrides how MUCH we bet, never WHETHER we bet. Identical sizing
-   * also makes the young record legible: every outcome is comparable in SOL. */
-  if (c.fixedSol > 0) { want = c.fixedSol; why = `fixed fund: ${c.fixedSol} SOL per trade`; }
+  if (c.fixedSol > 0) { want = c.fixedSol; why = `operator ceiling ${c.fixedSol} SOL`; }
   want = Math.min(want, c.maxSolPerTrade);
   if (call.size_sol != null) want = Math.min(want, Number(call.size_sol));
+  if (convictionScale < 1) {
+    want *= convictionScale;
+    why += `; conviction ${conviction}/100 sizes to ${(convictionScale * 100).toFixed(0)}%`;
+  }
 
-  // Fixed notional is subordinate to the risk rails. Recompute the fraction from
-  // the final capped size (plus worst-case entry/exit network fees), then enforce
-  // both the per-name and aggregate heat limits on the exposure actually proposed.
-  const feeReserve = Math.max(0, Number(c.networkFeeReserveSol) || 0);
+  /* SIZE DOWN TO EACH RAIL RATHER THAN REFUSING THE CALL.
+   *
+   * Every one of these was a `return skip`, so a fixed size one basis point over the
+   * per-name risk cap threw the whole trade away instead of buying slightly less —
+   * measured in the live log as "SKIP NATIX: actual stop risk 3.22% exceeds per-name
+   * cap 2.50%", which is a trade the bot could have taken at 78% of the size. Refusing
+   * on size is only correct when NO size fits, and that is the one case still refused
+   * below. Clamping is strictly the safer direction: every rail here can only make the
+   * position smaller, never larger, and the operator's ceiling is applied above. */
+  let boundBy = null;
+  const bind = (limitSol, label) => {
+    if (Number.isFinite(limitSol) && limitSol < want) { want = limitSol; boundBy = label; }
+  };
+  // Per-name stop risk: want * stopFrac + both fees <= fNameMax * equity.
+  bind((c.fNameMax * equity - 2 * feeReserve) / effectiveStopFrac, `per-name risk cap ${(c.fNameMax * 100).toFixed(2)}%`);
+  // Aggregate book heat, on the room this call actually has left.
+  bind(((c.bookHeatMax - heat) * equity - 2 * feeReserve) / effectiveStopFrac,
+    `book heat (${(heat * 100).toFixed(1)}% of ${(c.bookHeatMax * 100).toFixed(0)}% used)`);
+  bind(c.dailySolCap - state.deployedTodaySol - feeReserve,
+    `rolling 24h deploy cap (${state.deployedTodaySol.toFixed(3)}/${c.dailySolCap} SOL)`);
+  if (state.spendableSol != null) bind(state.spendableSol - feeReserve, "spendable balance after the fee reserve");
+
+  const minSize = Math.max(0.0005, Number(c.minSolPerTrade) || 0);
+  if (!(want >= minSize))
+    return { action: "skip",
+      reason: boundBy
+        ? `${boundBy} leaves ${Math.max(0, want).toFixed(4)} SOL, under the ${minSize} SOL minimum`
+        : "the sized position rounds to nothing" };
+
   const actualF = (want * effectiveStopFrac + 2 * feeReserve) / Number(equity);
   if (!Number.isFinite(actualF) || actualF < 0)
     return { action: "skip", reason: "actual risk fraction is invalid" };
-  if (actualF > c.fNameMax)
+  /* The rails above already bound this, so a breach here would mean the arithmetic
+     disagrees with itself. Refuse rather than trust it. */
+  if (actualF > c.fNameMax + 1e-9)
     return { action: "skip", reason: `actual stop risk ${(actualF * 100).toFixed(2)}% exceeds per-name cap ${(c.fNameMax * 100).toFixed(2)}%` };
-  const heat = state.bookHeat ?? 0;
-  if (heat + actualF > c.bookHeatMax)
+  if (heat + actualF > c.bookHeatMax + 1e-9)
     return { action: "skip", reason: `book heat ${(heat * 100).toFixed(1)}% + ${(actualF * 100).toFixed(1)}% exceeds ${(c.bookHeatMax * 100).toFixed(0)}%` };
 
-  if (state.deployedTodaySol + want + feeReserve > c.dailySolCap)
-    return { action: "skip", reason: `rolling 24h deploy cap (${state.deployedTodaySol.toFixed(3)}/${c.dailySolCap} SOL)` };
-  if (state.spendableSol != null && want + feeReserve > state.spendableSol)
-    return { action: "skip", reason: "insufficient balance after the fee reserve" };
-  if (!(want > 0.0005)) return { action: "skip", reason: "the sized position rounds to nothing" };
-
   return { action: "buy", sol: want, f: actualF, estimatedF: f, rNet, wMin,
-    reason: `${why}; actual stop risk ${(actualF * 100).toFixed(2)}%` };
+    convictionScale, boundBy,
+    reason: `${why}${boundBy ? `; sized down by ${boundBy}` : ""}; actual stop risk ${(actualF * 100).toFixed(2)}%` };
 }
 
 /** Fresh position record, created after a fill. */

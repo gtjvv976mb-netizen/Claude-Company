@@ -967,8 +967,13 @@ async function onEntry(ev) {
 
   Object.assign(S.state, journal.rollingRisk(Date.now()));
   S.state.openCount = openList().length;
-  S.state.spendableSol = EXECUTE ? Math.max(0, (await solBalance()) - FEE_RESERVE) : null;
-  S.state.equitySol = EXECUTE ? await solBalance() : (S.state.equitySol ?? CFG.dailySolCap);
+  /* ONE READ, NOT TWO. These were two separate getBalance round trips a line apart, so
+     every entry paid the RPC twice for the same number and could see two DIFFERENT
+     numbers if a block landed between them — spendable computed from one balance and
+     equity from another. Read the wallet once and derive both. */
+  const walletSol = EXECUTE ? await solBalance() : null;
+  S.state.spendableSol = EXECUTE ? Math.max(0, walletSol - FEE_RESERVE) : null;
+  S.state.equitySol = EXECUTE ? walletSol : (S.state.equitySol ?? CFG.dailySolCap);
   S.state.bookHeat = openList().reduce((sum, pos) => sum + (pos.riskF || 0), 0);
 
   const entryReference = validateEntryReference(ev, {
