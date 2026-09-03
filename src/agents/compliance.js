@@ -81,6 +81,23 @@ export function complianceCheck({ pm, risk, redteam, ticket, ev }) {
     v(ticket.stop_price > 0 && ticket.stop_price >= ticket.entry_zone_low,
       "stop_above_entry", `stop ${ticket.stop_price} is not below entry low ${ticket.entry_zone_low}.`);
 
+    /* A STOP INSIDE THE ROUND-TRIP COST IS A LOSS THE DESK HAS ALREADY BOOKED.
+     *
+     * The executor plans for a worst case near 9% — its slippage tolerance applied to
+     * both legs, a worst-case network fee, and pump.fun's own cut — and refuses to sign
+     * anything whose stop sits inside that, because the costs alone would trigger it. It
+     * refused four consecutive live calls this way on 2026-09-03 (HeeHaw, TOAD, USWS and
+     * a second HeeHaw, stops 5% to 6.5% below entry). The seats are told the floor, but a
+     * prompt is a request; this is the check. Publishing a call the desk's own bot can
+     * prove is already lost wastes the offer and teaches the tenant nothing. */
+    const stopFloorPct = Number(cfg.minStopDistancePct) || 0;
+    if (stopFloorPct > 0 && ticket.stop_price > 0 && ticket.entry_zone_low > 0) {
+      const distPct = (1 - ticket.stop_price / ticket.entry_zone_low) * 100;
+      v(distPct < stopFloorPct, "stop_inside_costs",
+        `stop is ${distPct.toFixed(1)}% below entry; the round trip alone costs about ` +
+        `${stopFloorPct}%, so this stop is triggered by costs before the thesis is wrong.`);
+    }
+
     const tpSum = (ticket.take_profit || []).reduce((a, t) => a + (t.pct_to_sell || 0), 0);
     v(tpSum > 100.01, "tp_over_100", `take-profit legs sum to ${tpSum}% of the position.`);
 

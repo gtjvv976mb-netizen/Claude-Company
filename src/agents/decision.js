@@ -172,6 +172,21 @@ Choose exactly one tier:
 
 The stop must be an observable level that makes the THESIS wrong, not a round number
 chosen to manufacture a convenient size. It must be below the current evidence price.
+
+A STOP TIGHTER THAN THE COST OF THE ROUND TRIP IS NOT A STOP. Getting in and out of one
+of these coins costs roughly 9% in the worst case the executor plans for: it applies its
+slippage tolerance to both legs, adds a worst-case network fee, and pump.fun takes about
+1.25% a side on the small bands. A stop inside that is triggered by the costs alone, and
+the bot proves it before signing and refuses the trade — four consecutive live calls
+were refused this way on 2026-09-03 carrying stops 5% to 6.5% below entry. So the stop
+must sit at least ${cfg.minStopDistancePct}% below the entry price. If the level
+that genuinely invalidates the thesis is closer than that, the honest answer is that
+this coin cannot be traded at this size on this desk — say so and choose the minimal
+tier rather than moving the level to fit.
+
+Remember what these coins are: on the nano and micro bands a name routinely moves 20% in
+a few minutes, so a 5% stop is not tight risk management, it is a coin flip on noise
+that pays the spread on the way out.
 Set liquidity_adjusted when measured exit friction is material. Missing or contradictory
 data lowers the tier and confidence; never fill a gap with a plausible number.`,
     prompt: `Choose the stop and risk tier for ${ev.symbol}.\n\n${bundle(ev)}\n\n${book(analysts)}\n\n=== RED TEAM ===\n${JSON.stringify(redteam)}`,

@@ -90,6 +90,21 @@ minLiquidityUsd: num("DESK_MIN_LIQUIDITY_USD", 12000),
   // Slippage the desk refuses to accept on a round trip at target size.
   maxRoundTripSlippagePct: num("DESK_MAX_RT_SLIPPAGE", 8),
 
+    /* THE STOP THAT COSTS ALONE WOULD TRIGGER.
+     *
+     * A stop closer to entry than the cost of getting in and out is not a stop; it is a
+     * guaranteed exit charged to the book. The executor refuses those before signing,
+     * and on 2026-09-03 it refused four consecutive live calls for exactly this —
+     * HeeHaw, TOAD and USWS carried stops 5% to 6.5% below entry against a conservative
+     * round-trip cost of about 9%. The desk was authoring trades its own bot could
+     * prove were already lost.
+     *
+     * The number: the executor applies its slippage tolerance to BOTH legs
+     * (1 - 0.97^2 = 5.91% at 300bps), adds a worst-case network fee near 2%, and pump.fun
+     * itself takes about 1.25% a side on the small bands. Round to a floor of 12%, which
+     * clears all three with room for the measured round trip on top. */
+    minStopDistancePct: num("DESK_MIN_STOP_DISTANCE_PCT", 12),
+
   /* REWEIGHTED FOR THE MARKET THIS DESK IS ACTUALLY IN.
    *
    * Narrative was the LOWEST-weighted seat at 0.14 — on a memecoin desk, where the
