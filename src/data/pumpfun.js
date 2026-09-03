@@ -37,6 +37,10 @@ export async function coinInfo(mint) {
     website: c.website ?? null,
     description: typeof c.description === "string" ? c.description.slice(0, 600) : null,
     creatorUsername: c.username ?? null,
+    // The coin's OWN pool and curve, so holder concentration can exclude them by name
+    // rather than hoping a shared authority happens to cover it.
+    bondingCurve: c.bonding_curve ?? null,
+    poolAddress: c.pool_address ?? null,
   };
 }
 

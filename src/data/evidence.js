@@ -50,9 +50,14 @@ export async function gather(mint, hook = "") {
     // which need prices rather than biographies.
     wantsDeployer ? pf.deployerProfile(mint).catch(() => null) : Promise.resolve(null),
   ]);
-  // The one genuine dependency: holder concentration is a share OF the supply.
+  // The one genuine dependency: holder concentration is a share OF the supply. The
+  // coin's own pool and curve come from the deployer read in the same batch, so the
+  // exclusion can name them instead of relying on a shared authority.
   const holders = mintAcct.ok && mintAcct.supply
-    ? await sol.topHolders(mint, mintAcct.supply)
+    ? await sol.topHolders(mint, mintAcct.supply, {
+      poolAddress: deployerRaw?.coin?.poolAddress ?? null,
+      bondingCurve: deployerRaw?.coin?.bondingCurve ?? null,
+    })
     : { ok: false, error: "mint info unavailable" };
 
   const jupPrice = jp?.[mint] ?? null;

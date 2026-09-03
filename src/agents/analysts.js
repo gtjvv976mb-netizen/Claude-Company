@@ -45,7 +45,14 @@ a launchpad:
   public. xRead.desk_record is what THIS desk already concluded about that handle on a
   previous coin — a record is stronger than a fresh read, because it means the pattern
   repeated.
-- The largest accounts include LP vaults, burn addresses and CEX omnibus wallets. Say
+- POOLS ARE ALREADY OUT, BY OWNER. holders.poolsExcluded says how many pool and
+  bonding-curve accounts were removed before the percentages were computed, and
+  holders.poolShareOfSupplyPct how much of the supply they held. Until 2026-09-03 they
+  were NOT removed — the filter compared an account address to an owner authority and so
+  never fired — and every coin on a bonding curve read as one holder owning 40-99% of
+  supply. If holders.ownersResolved is false the exclusion could not run at all: say the
+  concentration is unverified rather than reading it as a finding.
+- What remains still includes burn addresses and CEX omnibus wallets. Say
   which you think each is and how confident you are. Do not call a pool vault an
   insider; that mistake reads as rigour and is just noise.
 - Holder concentration is a QUESTION, not a verdict: the largest token accounts include

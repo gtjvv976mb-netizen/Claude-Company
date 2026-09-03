@@ -46,13 +46,67 @@ export async function mintInfo(mint) {
 }
 
 /** Holder concentration. Public RPC frequently 429s here — that is reported, not faked. */
-export async function topHolders(mint, supplyRaw) {
+/* Authorities that hold a POOL's tokens rather than a person's. The Raydium one was
+   already here and was being compared to the wrong thing for its entire life. */
+const POOL_AUTHORITIES = new Set([
+  "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1",   // Raydium AMM authority
+]);
+/* Programs whose PDAs hold a pool's or a curve's tokens. An owner account owned by one
+   of these is not a holder. This is what catches a pump.fun bonding curve even when the
+   caller could not tell us its address. */
+const POOL_PROGRAMS = new Set([
+  "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",     // pump.fun bonding curve
+  "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",     // PumpSwap AMM
+  "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8",     // Raydium AMM v4
+  "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",     // Raydium CLMM
+  "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",      // Meteora DLMM
+  "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",      // Orca Whirlpool
+]);
+
+/**
+ * Holder concentration. Public RPC frequently 429s here — that is reported, not faked.
+ *
+ * THE POOL EXCLUSION NEVER FIRED. getTokenLargestAccounts returns TOKEN ACCOUNT
+ * addresses; the Raydium constant above is an OWNER authority. The two can never be
+ * equal, so for the whole life of this function the pool was counted as a holder.
+ * Measured on live coins at the moment this was fixed: a graduated coin read 62.6% and
+ * 26.8% for its top two "holders", both of which were pools, and every coin still on
+ * its bonding curve read the curve itself as a single holder of 50-99% of supply. The
+ * forensics seat was being handed a rug signature for the entire population this desk
+ * hunts. Owners are now resolved and matched, which costs one extra RPC call.
+ */
+export async function topHolders(mint, supplyRaw, { poolAddress = null, bondingCurve = null } = {}) {
   const r = await readRpc(cfg.rpc, "getTokenLargestAccounts", [mint]);
   if (!r.ok) return { ok: false, error: r.error };
-  // The Raydium authority's token account is the POOL — counting it as a holder
-  // both masks and manufactures concentration. Exclude it before any math.
-  const RAYDIUM_AUTH = "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1";
-  const accounts = (r.data?.value || []).filter((a) => a.address !== RAYDIUM_AUTH);
+  const raw = r.data?.value || [];
+  const known = new Set([...POOL_AUTHORITIES, poolAddress, bondingCurve].filter(Boolean));
+
+  /* Resolve each token account's owner, then ask what program owns THAT. A pool's
+     authority is often a plain PDA with no data, so the program test alone misses it —
+     hence both the address set above and this. */
+  let owners = [], excluded = [], ownerUnknown = false;
+  try {
+    const infos = await readRpc(cfg.rpc, "getMultipleAccounts",
+      [raw.map((a) => a.address), { encoding: "jsonParsed" }]);
+    const vals = infos.ok ? (infos.data?.value || []) : [];
+    if (!infos.ok || vals.length !== raw.length) ownerUnknown = true;
+    owners = vals.map((v) => v?.data?.parsed?.info?.owner ?? null);
+    const ownerAddrs = [...new Set(owners.filter(Boolean))];
+    let ownerPrograms = new Map();
+    if (ownerAddrs.length) {
+      const oi = await readRpc(cfg.rpc, "getMultipleAccounts", [ownerAddrs, { encoding: "base64" }]);
+      if (oi.ok) (oi.data?.value || []).forEach((v, i) => ownerPrograms.set(ownerAddrs[i], v?.owner ?? null));
+    }
+    owners.forEach((o, i) => {
+      if (!o) return;
+      if (known.has(o) || POOL_PROGRAMS.has(ownerPrograms.get(o)))
+        excluded.push({ account: raw[i].address, owner: o,
+          pct: Number(((Number(raw[i].amount) / Number(supplyRaw)) * 100).toFixed(2)) });
+    });
+  } catch { ownerUnknown = true; }
+
+  const excludedAccounts = new Set(excluded.map((e) => e.account));
+  const accounts = raw.filter((a) => !excludedAccounts.has(a.address));
   const supply = Number(supplyRaw);
   if (!supply || !accounts.length) return { ok: false, error: "no supply or no accounts" };
 
@@ -103,7 +157,15 @@ export async function topHolders(mint, supplyRaw) {
     ok: true,
     // NOTE: these are the largest *token accounts*, which include LP vaults, CEX
     // omnibus wallets and burn addresses. High top-10 is a question, not a verdict.
-    note: "Largest token accounts include LP pool vaults and exchange wallets; not all are insiders.",
+    note: ownerUnknown
+      ? "Owners could not be resolved, so pool vaults may still be counted as holders — treat concentration as unverified."
+      : "Pool and bonding-curve accounts were excluded by OWNER. What remains may still include exchange wallets and burn addresses; high top-10 is a question, not a verdict.",
+    /* WHAT WAS TAKEN OUT, AND WHETHER IT COULD BE. A seat reading concentration needs
+       to know the number was cleaned, and needs to distrust it when it could not be. */
+    poolsExcluded: excluded.length,
+    poolShareOfSupplyPct: Number(excluded.reduce((a, e) => a + (e.pct || 0), 0).toFixed(2)),
+    excludedPools: excluded.slice(0, 5),
+    ownersResolved: !ownerUnknown,
     top1Pct: pct(amounts[0] || 0),
     top10Pct: pct(top10),
     // Bundle signature: how many of the top accounts sit within 8% of each other.
