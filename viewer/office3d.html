@@ -200,10 +200,14 @@ body{
 .dashbadge.good{color:var(--good);border-color:color-mix(in srgb,var(--good) 48%,var(--card-line))}
 .dashbadge.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 48%,var(--card-line))}
 .dashbadge.bad{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 48%,var(--card-line))}
-.dashgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+/* A metric grid sizes itself to what it is inside. Three hard columns are right across
+   the full panel and wrong inside the WALL-ST-E split, where they left each cell about
+   85px wide and broke "Clear" into "Cle / ar" and "65s ago" into "65s / ag / o". */
+.dashgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:9px}
 .dashmetric{min-width:0;padding:8px 10px;border:1px solid var(--card-line);border-radius:8px;background:var(--card)}
-.dashmetric .k{font:600 9px "JetBrains Mono",monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint)}
-.dashmetric b{display:block;margin-top:4px;font-size:14px;line-height:1.2;overflow-wrap:anywhere}
+.dashmetric .k{font:600 9px "JetBrains Mono",monospace;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-faint);overflow-wrap:break-word;hyphens:none;line-height:1.35}
+.dashmetric b{display:block;margin-top:4px;font-size:14px;line-height:1.2;overflow-wrap:break-word;hyphens:none}
 .dashmetric small{display:block;margin-top:4px;color:var(--ink-faint);font-size:10.5px;line-height:1.35}
 .dashsection{padding:12px;border:1px solid var(--card-line);border-radius:10px;background:var(--card)}
 .dashsection h4{margin:0 0 8px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint)}
@@ -550,7 +554,10 @@ select.dp-in{cursor:pointer}
   .rail, .rail p, .rail li{font-size:12.5px}
   .railhead{padding:12px 14px}
   .dashbody{padding:11px}
-  .dashgrid,.candidate-grid,.settings-grid,.wallste-grid{grid-template-columns:1fr!important}
+  .candidate-grid,.settings-grid,.wallste-grid{grid-template-columns:1fr!important}
+  /* The metric grid keeps choosing for itself: on a narrow screen auto-fit gives one or
+     two columns on its own, and forcing a single column wasted most of the width. */
+  .dashgrid{grid-template-columns:repeat(auto-fit,minmax(132px,1fr))!important}
   .subtabs{overflow-x:auto;scrollbar-width:none}
   .subtabs::-webkit-scrollbar{display:none}
   .subtab{flex:0 0 auto}
