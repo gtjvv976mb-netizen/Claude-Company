@@ -1358,6 +1358,50 @@ export function writeWitnessMark(callId, mark) {
   noteEvent(callId, "mark", null, mark);
   return true;
 }
+/* A CALL WHOSE WHOLE LIFE IS SHORTER THAN A FEW MONITOR PASSES.
+ *
+ * The exit check runs on one flat ten-minute timer for every band, and the bands do not
+ * have one flat life. A nano call is held between one and thirty MINUTES, so it was
+ * looked at perhaps three times before it closed, and a coin that doubled and gave it
+ * all back inside a single gap was recorded — and published — as whatever it happened
+ * to be worth when the timer next fired. You cannot sell high at ten-minute resolution
+ * on a thirty-minute position.
+ *
+ * The price is already in hand: the sub-tick fetches it for every live call every 45
+ * seconds to write witness marks. Only the DECISION was waiting for the slow timer.
+ *
+ * The rule is a ratio rather than a list of band names, so it stays true if either
+ * clock is retuned: a call is on the fast lane when its own hold window gives it fewer
+ * than twelve chances to act on the slow timer. Today that is nano (30m) and micro
+ * (1h); low, medium and high get 30 passes over 5h and very_high 144 over a day.
+ */
+export const FAST_LANE_MIN_PASSES = 12;
+export function needsFastExitLane(call, { monitorMs = null } = {}) {
+  const holdMax = Number(call?.hold_max_ms);
+  if (!Number.isFinite(holdMax) || holdMax <= 0) return false;      // no clock, no fast lane
+  const slow = Number(monitorMs) > 0 ? Number(monitorMs)
+    : Math.max(1, Number(process.env.PENTHOUSE_MONITOR_MINS || 10)) * 60_000;
+  return holdMax / slow < FAST_LANE_MIN_PASSES;
+}
+
+/* THE ONE PLACE A CALL IS CLOSED BY AN EXIT. Both the slow pass and the fast tick land
+   here, so the debrief, the event and the tenant announcement cannot drift apart —
+   and closeCall refuses a call that is not live, so the two clocks racing on the same
+   coin is a no-op rather than a double exit. */
+function fireExit(call, exit, mark, { lane = "monitor" } = {}) {
+  const closedRow = closeCall(call.id, exit.code, mark);
+  if (!closedRow) return false;                 // another pass got there first
+  const landing = { ...call, closed_at: Date.now(), close_mark: mark, close_reason: exit.code };
+  import("./agents/review.js").then((r) => runForEvidence({
+    floor: call.source_floor ?? null,
+    evidenceScope: call.source_attributed ? call.source_scope : "unattributed",
+  }, () => r.runDebrief(landing))).catch(() => {});
+  emit("call:exit", { callId: call.id, symbol: call.symbol, code: exit.code,
+    urgency: exit.urgency, detail: exit.detail, mark, lane });
+  announceExit(call, exit).catch((e) => noteEvent(call.id, "announce_failed", String(e.message || e)));
+  return true;
+}
+
 export function startSubTickMarks(secs = 45) {
   if (_subTickArmed) return false;
   _subTickArmed = true;
@@ -1370,7 +1414,7 @@ export async function subTickMarks() {
   if (_subTickBusy) return { marked: 0, confirmed: 0, skipped: "busy" };
   _subTickBusy = true;
   try {
-    let marked = 0, confirmed = 0;
+    let marked = 0, confirmed = 0, fastClosed = 0;
     const minSpacingMs = (_subTickSecs / 2) * 1000;
     /* Witness marks flow for LIVE calls AND for closes still awaiting adjudication.
      * Both writers used to gate on status='live', and closeCall flips status first —
@@ -1387,13 +1431,35 @@ export async function subTickMarks() {
       .all(Date.now() - WITNESS_WINDOW_MS);
     for (const call of live) {
       try {
+        /* A short-clock call is read on every tick even when the witness door would
+           refuse the mark, because here the price is not only a witness — it is the
+           only chance this call gets to be sold at a sensible number. */
+        const row = db.prepare("SELECT * FROM calls WHERE id=?").get(call.id);
+        const fast = row?.status === "live" && needsFastExitLane(row);
         const last = db.prepare(`SELECT MAX(ts) t FROM call_events
           WHERE call_id=? AND mark IS NOT NULL`).get(call.id)?.t ?? 0;
-        if (Date.now() - last < minSpacingMs) continue;      // a witness must be a separate observation
+        if (!fast && Date.now() - last < minSpacingMs) continue;   // a witness must be a separate observation
         const px = await ds.pairsFor(call.mint);
         if (!px?.ok) continue;
         const cons = ds.consensus(px.pairs);
         if (cons.ok && writeWitnessMark(call.id, cons.priceUsd)) marked++;
+
+        /* THE FAST LANE. Price only — no flags, no round-trip probe, no liquidity read,
+           because this tick does not gather them. evaluateExit skips every one of those
+           triggers when its input is null, so the only thing that can fire here is the
+           price policy: the stop, the target, the trailing take-profit and the band's
+           own clock. The chain-failure exits stay on the full pass that can actually
+           observe them, which is where they belong: they are facts about the token, and
+           they need the bundle. flagsReadable is stated false so a call opened with
+           known flags is never closed for "an authority appeared" on a read that never
+           looked. */
+        if (fast && cons.ok && cons.priceUsd > 0) {
+          const exit = evaluateExit(row, { mark: cons.priceUsd, flagsReadable: false });
+          if (exit.fire) {
+            fastClosed++;
+            fireExit(row, exit, cons.priceUsd, { lane: "subtick" });
+          }
+        }
       } catch { /* a failed read is a missing witness, never an error */ }
     }
     /* CLOSE-PRINT CONFIRMATION, adjudicated from HISTORY, bounded by CONSERVATISM.
@@ -1473,7 +1539,7 @@ export async function subTickMarks() {
         }
       } catch { /* unconfirmed stays unconfirmed; the next loop tries again */ }
     }
-    return { marked, confirmed };
+    return { marked, confirmed, fastClosed };
   } finally { _subTickBusy = false; }
 }
 
@@ -1569,19 +1635,11 @@ export async function monitorCalls() {
 
         const exit = evaluateExit(call, now);
         if (exit.fire) {
-          closeCall(call.id, exit.code, now.mark);
-          // COLONEL DEBRIEF grades the landing — fire and forget; exits never wait.
-          const landing = { ...call, closed_at: Date.now(), close_mark: now.mark, close_reason: exit.code };
-          import("./agents/review.js").then((r) => runForEvidence({
-            floor: call.source_floor ?? null,
-            evidenceScope: call.source_attributed ? call.source_scope : "unattributed",
-          }, () => r.runDebrief(landing))).catch(() => {});
-          emit("call:exit", { callId: call.id, symbol: call.symbol, code: exit.code,
-            urgency: exit.urgency, detail: exit.detail, mark: now.mark });
-          // Durable, per-floor, regardless of arrears — and never awaited: thirty
-          // tenants with hung webhooks must not delay the NEXT call's exit check.
-          announceExit(call, exit).catch((e) => noteEvent(call.id, "announce_failed", String(e.message || e)));
-          closed++;
+          /* COLONEL DEBRIEF grades the landing, the event goes out, and the tenant
+             announcement is never awaited — thirty tenants with hung webhooks must not
+             delay the NEXT call's exit check. All of it lives in fireExit now, shared
+             with the fast lane so the two clocks cannot disagree about what an exit is. */
+          if (fireExit(call, exit, now.mark)) closed++;
         } else {
           /* The 'ok' mark rides the shared spacing door: an overlapping sub-tick pass
            * must not let one DexScreener cache interval witness itself twice. When the
