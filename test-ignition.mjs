@@ -32,7 +32,8 @@ console.log("\nTHE MOMENTUM RULER SAYS WHAT A PERSON WOULD SAY");
   ok("...and the same over fifteen, because nothing moved before it",
     Math.abs(m.pct15m - 61.051) < 0.01, `${m.pct15m.toFixed(3)}%`);
   ok("a flat tape reads as zero, not as noise", momentumFrom(tape(Array(30).fill(1))).pct5m === 0);
-  ok("the tape length is reported honestly", m.minutes === 31, `${m.minutes} minutes`);
+  ok("the tape length is reported honestly", m.candles === 31 && m.coverageMins === 30,
+    `${m.candles} candles over ${m.coverageMins} minutes`);
   ok("the drawdown from the high is zero at the high", Math.abs(m.drawdownFromHighPct) < 1e-9);
   const off = momentumFrom(tape([1, 1, 1, 2, 2, 2, 1.5]));
   ok("a coin 25% off its high says so", Math.abs(off.drawdownFromHighPct + 25) < 0.01,
@@ -57,6 +58,48 @@ console.log("\nVOLUME ACCELERATION COMPARES LIKE WITH LIKE");
   ok("...but its volume is still counted", fromNothing.vol5mUsd === 2500);
   ok("too short a tape says nothing at all", momentumFrom(tape([1, 2])) === null);
   ok("an empty tape says nothing at all", momentumFrom([]) === null && momentumFrom(null) === null);
+}
+
+console.log("\nA \u201c1m\u201d CANDLE IS NOT A MINUTE");
+{
+  /* THE CASE EVERY TEST ABOVE MISSED. Each tape above has one candle per minute, which
+   * is the one shape pump.fun never returns: it emits a row only for a minute that
+   * traded. Measured on eight live coins, the span of the last five candles ran from 4
+   * minutes to 2,665 — so the old ruler, which summed the last five ROWS and called it
+   * five minutes, reported forty-four hours of trickle as a busy five minutes. The
+   * sparser the tape, the bigger the number: it rewarded exactly the inactivity it
+   * existed to detect. Every assertion here is on a gapped tape. */
+  const at = (minsAgo, close, volume) => ({ ts: NOW - minsAgo * MIN, open: close, high: close,
+    low: close, close, volume });
+  // Six rows spanning three hours. Only the last two are inside a five-minute window.
+  const sparse = [
+    at(180, 1, 900), at(120, 1, 900), at(60, 1, 900),
+    at(30, 1, 900), at(4, 1, 40), at(0, 1.2, 60),
+  ];
+  const m = momentumFrom(sparse);
+  ok("only the volume inside the five minutes is counted", m.vol5mUsd === 100,
+    `$${m.vol5mUsd} (row count would have said $${900 + 900 + 900 + 40 + 60})`);
+  ok("the tape reports the span it truly covers", m.coverageMins === 180, `${m.coverageMins} min`);
+  ok("six rows are six rows, not six minutes", m.candles === 6);
+  ok("the five-minute change is measured from five minutes ago", Math.abs(m.pct5m - 20) < 1e-9,
+    `${m.pct5m}%`);
+  // Nothing printed between 30 and 15 minutes ago, so the prior window is genuinely empty.
+  ok("an empty prior window claims no ratio", m.volAccel === null);
+
+  /* A tape that stops an hour before you read it has no five-minute reading, and the
+     old code would have handed one over from whatever its last five rows happened to
+     be. Staleness is only knowable against a clock, so it is null until one is given. */
+  const stale = momentumFrom(sparse, { now: NOW + 90 * MIN });
+  ok("a tape read 90 minutes later says so", stale.stalenessMins === 90, `${stale.stalenessMins} min`);
+  ok("...and reports no volume in the last five minutes", stale.vol5mUsd === 0);
+  ok("without a clock, staleness is unknown rather than zero", m.stalenessMins === null);
+
+  // A dense tape must still give exactly the answers it always gave.
+  const dense = momentumFrom(tape([...Array(15).fill(1), ...Array(5).fill(2)],
+    [...Array(15).fill(100), ...Array(5).fill(200)]));
+  ok("a one-per-minute tape is unchanged: 2.00x acceleration", Math.abs(dense.volAccel - 2) < 1e-9,
+    `${dense.volAccel.toFixed(4)}x`);
+  ok("...and a 100% five-minute move", Math.abs(dense.pct5m - 100) < 1e-9, `${dense.pct5m}%`);
 }
 
 console.log("\nBANDS COME FROM THE MARKET CAP, NEVER FROM A GUESS");

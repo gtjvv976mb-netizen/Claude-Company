@@ -102,8 +102,17 @@ export function ignitionScore(momentum, { band } = {}) {
   const dd = momentum.drawdownFromHighPct ?? 0;
   if (dd < -35) add(-14, `${Math.round(-dd)}% off its high already`);
 
-  // Too short a tape is not evidence of anything.
-  if (momentum.minutes < 5) add(-6, `only ${momentum.minutes} minutes of tape`);
+  /* Too short a tape is not evidence of anything — and "short" is a span, not a row
+     count. This read `momentum.minutes`, which was the NUMBER OF CANDLES: a coin that
+     traded in forty scattered minutes across two days scored as a mature tape, while a
+     coin genuinely four minutes into its life scored the same as one four candles into
+     a quiet week. The feed omits minutes nobody traded, so the two are unrelated. */
+  const cover = momentum.coverageMins ?? 0;
+  if (cover < 5) add(-6, `only ${cover.toFixed(0)} minutes of tape`);
+  /* A LIVE FIVE-MINUTE WINDOW, OR NO CREDIT FOR ONE. If the last print is older than
+     the window it is supposed to describe, vol5mUsd is a number about the past. */
+  if (momentum.stalenessMins != null && momentum.stalenessMins > 5)
+    add(-10, `last trade ${Math.round(momentum.stalenessMins)} minutes ago`);
 
   return { score: Math.round(score), reasons, band: band ?? null };
 }
@@ -127,7 +136,8 @@ export async function ignitionSweep({ solUsd = null, freshPages = 2, tradedPages
   }
   const all = [...seen.values()];
   const picked = shortlist(all, { now, limit: tapes });
-  const momentum = await momentumFor(picked.map((c) => c.mint), { limit: tapeMinutes, concurrency });
+  const momentum = await momentumFor(picked.map((c) => c.mint),
+    { limit: tapeMinutes, concurrency, now });
 
   const ranked = [];
   for (const c of picked) {

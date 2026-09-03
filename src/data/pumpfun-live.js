@@ -172,40 +172,82 @@ export async function candles(mint, { limit = 40, interval = "1m" } = {}) {
  * gets checked before anything is measured with it. Returns null rather than a
  * confident zero when the tape is too short to say anything.
  */
-export function momentumFrom(tape) {
+export function momentumFrom(tape, { now = null } = {}) {
   if (!Array.isArray(tape) || tape.length < 3) return null;
-  const close = tape.map((k) => k.close);
-  const vol = tape.map((k) => k.volume || 0);
-  const last = close.at(-1);
-  if (!(last > 0)) return null;
-  const back = (n) => close[Math.max(0, close.length - 1 - n)];
-  const pct = (n) => { const then = back(n); return then > 0 ? ((last / then) - 1) * 100 : null; };
-  const sum = (a) => a.reduce((x, y) => x + y, 0);
-  const recentVol = sum(vol.slice(-5));
-  const priorSlice = vol.slice(-15, -5);
-  // The prior window is ten minutes against a five-minute recent one, so halve it to
-  // compare like with like. Without that the acceleration reads 2x low, every time.
-  const priorVol = priorSlice.length ? sum(priorSlice) / 2 : 0;
-  const high = Math.max(...close);
+  const last = tape.at(-1);
+  if (!(last?.close > 0) || last.ts == null) return null;
+
+  /* A "1m" CANDLE IS NOT A MINUTE.
+   *
+   * This counted candles and named the answer in minutes: vol5mUsd summed the last
+   * five rows, pct5m compared against the row five back. That is only the same thing
+   * if the feed emits an empty candle for every minute nobody traded, and it does not
+   * — it returns rows only where trades happened. Measured on eight live coins, the
+   * span of the last five candles ran from 4 minutes to 2,665: on ZODs this summed
+   * forty-four hours of trickle and reported it as five minutes of volume, and the
+   * ignition shortlist ranked that above a coin genuinely doing $400 in four minutes.
+   * The sparser the tape, the bigger the number — the ruler rewarded exactly the
+   * inactivity it was built to detect.
+   *
+   * The windows are now cut on the timestamps. `now` defaults to the last candle
+   * rather than the wall clock so the reading is about the tape rather than about how
+   * long ago it was fetched; pass one to measure staleness deliberately. */
+  const end = now ?? last.ts;
+  const MIN = 60_000;
+  const inWindow = (from, to) => tape.filter((k) => k.ts > end - to * MIN && k.ts <= end - from * MIN);
+  const sumVol = (rows) => rows.reduce((a, k) => a + (k.volume || 0), 0);
+
+  /* The close as of N minutes ago: the last candle at or before that instant. Null when
+   * the tape does not reach back that far — a coin eight minutes old has no 30-minute
+   * change, and inventing one from its first ever print is how a new coin reads as a
+   * moonshot. */
+  const closeAt = (minsAgo) => {
+    const cut = end - minsAgo * MIN;
+    let found = null;
+    for (const k of tape) { if (k.ts <= cut) found = k; else break; }
+    return found?.close ?? null;
+  };
+  const pct = (mins) => {
+    const then = closeAt(mins);
+    return then > 0 ? ((last.close / then) - 1) * 100 : null;
+  };
+
+  const recent = inWindow(0, 5);
+  const prior = inWindow(5, 15);
+  const recentVol = sumVol(recent);
+  // Ten minutes of prior against five of recent, so halve it to compare like with like.
+  const priorVol = prior.length ? sumVol(prior) / 2 : 0;
+  const coverageMins = (last.ts - tape[0].ts) / MIN;
+  const high = Math.max(...tape.map((k) => k.close));
+
   return {
-    minutes: tape.length,
-    lastPriceUsd: last,
+    candles: tape.length,
+    // How much history the tape actually spans, so a caller can tell a coin with a
+    // thin window from one with a long quiet one.
+    coverageMins: Number(coverageMins.toFixed(1)),
+    // Whether the last print is recent enough for a five-minute reading to mean
+    // anything at all. Only meaningful when `now` was supplied.
+    stalenessMins: now == null ? null : Number(((now - last.ts) / MIN).toFixed(1)),
+    lastPriceUsd: last.close,
     pct5m: pct(5), pct15m: pct(15), pct30m: pct(30),
     vol5mUsd: recentVol,
     volPrior5mUsd: priorVol,
     // Null, not Infinity: a coin whose prior window was silent has no ratio to report.
     volAccel: priorVol > 0 ? recentVol / priorVol : null,
-    drawdownFromHighPct: high > 0 ? ((last / high) - 1) * 100 : null,
+    drawdownFromHighPct: high > 0 ? ((last.close / high) - 1) * 100 : null,
   };
 }
 
 /** The minute tape for many mints at once, bounded so a sweep cannot melt the host. */
-export async function momentumFor(mints, { limit = 40, concurrency = 8 } = {}) {
+export async function momentumFor(mints, { limit = 40, concurrency = 8, now = null } = {}) {
   const out = new Map();
-  const queue = [...new Set(mints)].filter(Boolean);
+  // A single mint passed by mistake would otherwise be spread into its characters and
+  // fetched letter by letter, and every reading would come back null.
+  const list = typeof mints === "string" ? [mints] : (Array.isArray(mints) ? mints : []);
+  const queue = [...new Set(list)].filter(Boolean);
   const workers = Array.from({ length: Math.max(1, Math.min(16, concurrency)) }, async () => {
     for (let mint = queue.pop(); mint; mint = queue.pop()) {
-      try { out.set(mint, momentumFrom(await candles(mint, { limit }))); }
+      try { out.set(mint, momentumFrom(await candles(mint, { limit }), { now })); }
       catch { out.set(mint, null); }
     }
   });

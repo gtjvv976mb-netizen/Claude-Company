@@ -256,7 +256,17 @@ export function wouldSurviveScreen(c) {
    * softer one: five minutes must carry a fifth of what the band asks of a whole day.
    * Only a coin still inside its band's hunt window may be judged this way; an old coin
    * with no daily volume is an old coin nobody is trading. */
-  const tape = c.momentum || null;
+  /* A TAPE THAT DESCRIBES THE PAST IS NOT A TAPE. vol5mUsd used to sum the last five
+     candles regardless of when they printed, and pump.fun emits a candle only for a
+     minute that traded — so five rows spanning forty-four hours of trickle read as a
+     busy five minutes and let the coin past the volume floor it was built to fail.
+     Both guards are now on the reading itself: the window has to be live, and the tape
+     has to cover the window it claims. */
+  const rawTape = c.momentum || null;
+  const tapeIsLive = rawTape != null &&
+    (rawTape.stalenessMins == null || rawTape.stalenessMins <= 5) &&
+    (rawTape.coverageMins ?? 0) >= 5;
+  const tape = tapeIsLive ? rawTape : null;
   const tapeVol = tape?.vol5mUsd ?? 0;
   const mcap = p.marketCap ?? p.fdv ?? null;
   const age = p.ageHours ?? 0;
