@@ -94,6 +94,28 @@ function startMonitoring() {
   setInterval(watch, monitorMins * 60000);
   setTimeout(watch, 20000);
   console.log(`[monitor] exit checks every ${monitorMins}m — key or no key`);
+
+  /* THE COACH'S SHIFT. Grading is arithmetic over marks that have already landed, so
+     it runs often and costs nothing; the technique review thinks, so it runs rarely.
+     Both are wrapped: a coach that throws must never take the desk down with it, and
+     a desk that trades without a coach is exactly what it was last week. */
+  const tutorMins = Number(process.env.TUTOR_REVIEW_MINS || 180);
+  const coach = async () => {
+    try {
+      const { tutorTick } = await import("./agents/codex-tutor.js");
+      const r = await tutorTick();
+      const applied = (r.review?.changes || []).filter((c) => c.ok).length;
+      if (r.graded.calls || applied || r.health?.reverted) {
+        console.log(`[coach] graded ${r.graded.calls} calls / ${r.graded.seats} seat-verdicts` +
+          (applied ? `, applied ${applied} change(s)` : "") +
+          (r.health?.reverted ? `, REVERTED ${r.health.why}` : "") +
+          (r.review?.held ? `, holding: ${r.review.held}` : ""));
+      }
+    } catch (e) { console.log(`[coach] ${e.message}`); }
+  };
+  setInterval(coach, tutorMins * 60000);
+  setTimeout(coach, 90000);
+  console.log(`[coach] grading + technique review every ${tutorMins}m`);
 }
 
 function dbOwedWallets() {

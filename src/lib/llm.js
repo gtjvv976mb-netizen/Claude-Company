@@ -3,6 +3,8 @@ import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { emit, runContext } from "./bus.js";
 import { CHARTER, cfg } from "../config.js";
 import db, { ensureColumn } from "./store.js";
+// No cycle: desk-policy reaches only store, bus and canonical, never back into llm.
+import { withPolicy } from "../desk-policy.js";
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS llm_spend (
@@ -391,7 +393,14 @@ export async function ask({
         max_tokens: maxTokens,
         system: [
           { type: "text", text: SHARED_RULES, cache_control: { type: "ephemeral" } },
-          ...(system ? [{ type: "text", text: system }] : []),
+          /* THE SEAT'S STANDING ORDERS. Its charter is the constant its module ships;
+             the orders below it are written by the coach from the desk's own graded
+             results, between workups. Injected here, once, so every seat in the
+             building learns the same way — and so a new seat cannot be added that
+             quietly opts out of the feedback loop. Uncached deliberately: guidance
+             changes far more often than a charter, and a stale cached copy would mean
+             a seat working under orders that were reverted an hour ago. */
+          ...(system ? [{ type: "text", text: withPolicy(seat, system) }] : []),
         ],
         messages: [{ role: "user", content: prompt }],
         output_config: haiku
