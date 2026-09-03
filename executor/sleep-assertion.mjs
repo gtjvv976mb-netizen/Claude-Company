@@ -189,6 +189,64 @@ const commandIdentity = (output, { ownerPid, assertionPid, caffeinatePath }) => 
 };
 
 /** Verify the protected record, exact parent/child command, AC source, and both IOPM assertions. */
+/* THE PAUSE THE BOT PUBLISHES TO ITSELF ON THE WAY OUT, AND THEN CANNOT LIFT.
+ *
+ * stop() publishes an entry pause on EVERY process exit — its own comment says so: a
+ * startup refusal, an uncaught exception, a SIGTERM, an operator upgrade and a clean
+ * exit code 0 all take that path. That is right: an exit is not proof that anything is
+ * safe, and a machine that sleeps with an open position must not keep entering.
+ *
+ * What was missing is the other half. NOTHING in the poller ever removed that pause.
+ * The only remover was an `rm -f` inside an interactive shell script, so the bot could
+ * not restart itself into a trading state: one crash, one upgrade, one power flap and
+ * it came back alive, healthy, holding both sleep assertions on AC power — and skipping
+ * every call it was offered until a human intervened. Measured over two days of the
+ * live log: 74 automatic pauses published, and at 06:39:38 on 2026-09-03 a real call
+ * was refused with "SKIP Shrek: PAUSE ENTRIES file is present", 31 minutes after the
+ * crash loop that wrote it, on a process that was by then perfectly healthy.
+ *
+ * So a pause this supervisor wrote is lifted at startup, and ONLY that kind. The
+ * conditions are deliberately narrow:
+ *   - the fault latch must be absent, because a latched fault outranks everything;
+ *   - the pause file must be owner-only and well formed, as always;
+ *   - its recorded reason must begin with the exact prefix stop() writes.
+ * An operator-authored pause reads as anything else and is left exactly where it is,
+ * as is a pause whose reason cannot be read. The publish-on-exit behaviour is not
+ * touched, so nothing that protects an open position across a sleep is weakened. The
+ * pause simply stops outliving the condition that caused it.
+ *
+ * The caller must only reach here AFTER the sleep assertion has started and verified,
+ * which is what makes "the condition is over" a fact rather than a hope.
+ */
+export const AUTOMATIC_PAUSE_PREFIX = "automatic pause:";
+
+export function liftAutomaticEntryPause({ lockFile, pauseEntriesFile } = {}) {
+  const absolute = path.resolve(pauseEntriesFile || "");
+  if (!pauseEntriesFile) return { lifted: false, reason: "no entry pause path configured" };
+
+  // A latched sleep-assertion fault outranks every other consideration.
+  const fault = inspectOwnerControlFile(sleepAssertionFaultPath(lockFile),
+    { label: "sleep assertion fault latch" });
+  if (fault.present)
+    return { lifted: false, reason: "sleep assertion fault latch is present" };
+
+  const pause = inspectOwnerControlFile(absolute, { label: "entry pause" });
+  if (!pause.present) return { lifted: false, reason: "no entry pause to lift" };
+  if (!pause.valid) return { lifted: false, reason: pause.reason };
+
+  let recorded;
+  try { recorded = fs.readFileSync(absolute, "utf8"); }
+  catch (error) { return { lifted: false, reason: `entry pause is unreadable (${error?.code || "read error"})` }; }
+
+  const text = String(recorded).trim();
+  if (!text.startsWith(AUTOMATIC_PAUSE_PREFIX))
+    return { lifted: false, reason: "the entry pause was not published by this supervisor", recorded: text.slice(0, 160) };
+
+  try { fs.unlinkSync(absolute); }
+  catch (error) { return { lifted: false, reason: `entry pause could not be cleared (${error?.code || "unlink error"})` }; }
+  return { lifted: true, reason: text.slice(0, 160) };
+}
+
 export function verifyMacSleepAssertion({
   ownerPid, lockFile, caffeinatePath = CAFFEINATE_PATH, pmsetPath = PMSET_PATH,
   psPath = PS_PATH, execFile = execFileSync, killFn = process.kill.bind(process),

@@ -822,7 +822,14 @@ export function sleepAssertionFaultPath(lockFile) { return lockFile + ".sleep-as
     !sleepAssertionSource.includes('["displaysleep"') &&
     !sleepAssertionSource.includes('["hibernatemode"'));
   check("battery degradation pauses entries while preserving the exact idle-bound runner",
-    runnerSource.includes("pauseEntriesFile: resolvePauseEntries") &&
+    /const pauseEntriesFile = resolvePauseEntries\(/.test(runnerSource) &&
+    /startMacSleepAssertion\(\{[^}]*pauseEntriesFile[^}]*\}\)/.test(runnerSource) &&
+    // The re-arm may lift ONLY a pause this supervisor published, and never while a
+    // fault is latched — both enforced in liftAutomaticEntryPause, called here.
+    /liftAutomaticEntryPause\(\{ lockFile, pauseEntriesFile \}\)/.test(runnerSource) &&
+    sleepAssertionSource.includes("AUTOMATIC_PAUSE_PREFIX") &&
+    /startsWith\(AUTOMATIC_PAUSE_PREFIX\)/.test(sleepAssertionSource) &&
+    /sleepAssertionFaultPath\(lockFile\)[\s\S]{0,200}fault latch is present/.test(sleepAssertionSource) &&
     runnerSource.includes("batteryPowerIsOperational") &&
     sleepAssertionSource.includes("ensureEntryPauseFile(pauseEntriesFile") &&
     sleepAssertionSource.includes("batteryPowerIsOperational(current)") &&

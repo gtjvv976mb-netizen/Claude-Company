@@ -832,10 +832,28 @@ if (command === "render-plist") {
   process.env.WALLSTE_SERVICE_LABEL = options["--label"];
   process.chdir(workdir);
   if (process.platform === "darwin") {
-    const { startMacSleepAssertion } = await import(
+    const { startMacSleepAssertion, liftAutomaticEntryPause } = await import(
       pathToFileURL(path.join(workdir, "sleep-assertion.mjs")).href);
-    await startMacSleepAssertion({ ownerPid: process.pid, lockFile,
-      pauseEntriesFile: resolvePauseEntries(environment.values, workdir) });
+    const pauseEntriesFile = resolvePauseEntries(environment.values, workdir);
+    await startMacSleepAssertion({ ownerPid: process.pid, lockFile, pauseEntriesFile });
+    /* The assertion has started and verified, so the condition that caused any pause
+       this supervisor wrote on its way out is demonstrably over. Lift that pause and
+       ONLY that pause: an operator's own pause and a latched fault are left alone. See
+       liftAutomaticEntryPause. Without this the bot came back from every crash, upgrade
+       or power flap alive and healthy but silently disarmed, and only a human could arm
+       it again — which is why it skipped a real call 31 minutes after a crash. */
+    try {
+      const lift = liftAutomaticEntryPause({ lockFile, pauseEntriesFile });
+      if (lift.lifted) console.log("WALL-ST-E launchd: entries re-armed — the automatic pause " +
+        `from the previous run is cleared (${lift.reason})`);
+      else if (lift.recorded) console.log("WALL-ST-E launchd: entries remain paused — " +
+        `${lift.reason}: ${lift.recorded}`);
+      else console.log(`WALL-ST-E launchd: entries not re-armed (${lift.reason})`);
+    } catch (error) {
+      // Never let re-arming decide whether the bot runs. A failure here leaves the
+      // pause in place, which is the safe direction.
+      console.log(`WALL-ST-E launchd: entry re-arm check failed (${error?.message || error})`);
+    }
   }
   await import(pathToFileURL(poller).href);
 } else {
