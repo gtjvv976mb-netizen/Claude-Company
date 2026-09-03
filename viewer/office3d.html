@@ -3643,6 +3643,22 @@ function drawGrokBoard() {
   x.font = '500 20px "JetBrains Mono", ui-monospace, monospace';
   x.fillText(grokOnDuty ? "ASST DIRECTOR \u00b7 ON THE BOOK" : "ASST DIRECTOR \u00b7 STANDBY", 268, 40);
 
+  /* THE MONEY HE IS ACTUALLY TRADING WITH. It lived only in the funding panel, so the
+     wall showed positions without ever showing the balance behind them. Read-only, from
+     the chain, refreshed every twenty seconds. */
+  {
+    const bb = window.__botBalance;
+    const stale = bb && Date.now() - bb.at > 90_000;
+    const text = !bb ? "WALLET \u2014"
+      : bb.ok && bb.sol != null ? "WALLET " + bb.sol.toFixed(3) + " SOL" + (stale ? " (stale)" : "")
+        : "WALLET UNREADABLE";
+    x.textAlign = "right";
+    x.font = '700 22px "JetBrains Mono", ui-monospace, monospace';
+    x.fillStyle = !bb || !bb.ok ? "#9aa0a6" : bb.sol > 0 ? (stale ? "#c8a24a" : "#4ec9a5") : "#e0ad3d";
+    x.fillText(text, W - 26, 38);
+    x.textAlign = "left";
+  }
+
   const pos = grokBook.positions || [];
   if (!pos.length) {
     x.fillStyle = "#c8ccd0";
@@ -3660,6 +3676,12 @@ function drawGrokBoard() {
       ["POSITIONS HELD", st.taken != null ? String(st.taken) : "\u2014"],
       ["OF WHICH MEMECOIN", st.memecoins != null ? String(st.memecoins) : "\u2014"],
       ["EXPOSURE", st.exposureSol != null ? st.exposureSol.toFixed(3) + " SOL" : "\u2014"],
+      ["BOT WALLET", (() => {
+        const bb = window.__botBalance;
+        if (!bb) return "\u2014";
+        if (!bb.ok || bb.sol == null) return "unreadable";
+        return bb.sol.toFixed(4) + " SOL" + (bb.sol === 0 ? " \u00b7 cannot trade" : "");
+      })()],
     ];
     x.font = '500 18px "JetBrains Mono", ui-monospace, monospace';
     let ry = 178;
@@ -6701,6 +6723,44 @@ function showBotWallet(after, wallet) {
   }).catch(() => { bal.textContent = "balance unavailable"; });
 }
 
+/* THE BOT'S BALANCE, IN ONE PLACE.
+ *
+ * The funding panel fetched it and kept it to itself, so Grox Mulder's board — the wall
+ * that is supposed to show what the floor is actually doing — had no idea how much money
+ * the bot had. This owns it: the address comes from the heartbeat, the balance from the
+ * same read-only relay the panel uses, and both the panel and the board read the result.
+ * Throttled, because it is a chain read and the board redraws often. */
+window.__botBalance = null;
+let botBalanceAt = 0, botBalanceInFlight = false;
+async function refreshBotBalance({ force = false } = {}) {
+  const wallet = window.__botHeartbeat?.wallet || window.__botBalance?.wallet || null;
+  if (!wallet || botBalanceInFlight) return window.__botBalance;
+  if (!force && Date.now() - botBalanceAt < 20_000) return window.__botBalance;
+  botBalanceInFlight = true;
+  try {
+    const r = await fetch((window.__API_BASE__ || "") + "/api/bot/rpc", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getBalance", params: [wallet] }),
+    });
+    const d = await r.json();
+    const lamports = d?.result?.value;
+    // An unreadable balance stays unreadable rather than becoming zero: "empty" and
+    // "could not ask" are different things to tell someone about their own money.
+    window.__botBalance = Number.isFinite(Number(lamports))
+      ? { wallet, sol: Number(lamports) / 1e9, at: Date.now(), ok: true }
+      : { wallet, sol: null, at: Date.now(), ok: false };
+    botBalanceAt = Date.now();
+  } catch {
+    window.__botBalance = { wallet, sol: null, at: Date.now(), ok: false };
+    botBalanceAt = Date.now();
+  } finally {
+    botBalanceInFlight = false;
+    try { drawGrokBoard(); } catch {}
+  }
+  return window.__botBalance;
+}
+setInterval(() => { refreshBotBalance().catch(() => {}); }, 20_000);
+
 function updateBotHb(settings) {
   const el = document.getElementById("bot-hb");
   if (!el) return;
@@ -6718,6 +6778,7 @@ function updateBotHb(settings) {
        existed only in the installer's output, scrolled off a terminal hours
        ago. Address, live balance, one-tap copy. */
     showBotWallet(el, hb.wallet);
+    refreshBotBalance().catch(() => {});
   } else if (hb && age != null) {
     el.style.color = "var(--bad,#b0503f)";
     el.textContent = `○ WALL-ST-E's last heartbeat was ${Math.round(age / 60e3)}m ago` +

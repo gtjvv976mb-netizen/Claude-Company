@@ -184,4 +184,28 @@ try {
     "P&L is still computed from the live mark");
 }
 
+/* ── THE BOT'S BALANCE IS ON HIS WALL ──────────────────────────────────────────
+ * The board showed positions without ever showing the money behind them: the balance
+ * was fetched by the funding panel and kept there. One owner now holds it, both surfaces
+ * read it, and the states a person needs to tell apart stay apart — empty is not the
+ * same as unreadable, and a stale read says so. */
+{
+  const view = html;
+  assert.match(view, /async function refreshBotBalance/, "one owner for the live balance");
+  assert.match(view, /method: "getBalance", params: \[wallet\]/,
+    "read through the existing read-only relay, not a new signing path");
+  assert.match(view, /setInterval\(\(\) => \{ refreshBotBalance\(\)/,
+    "it refreshes on its own rather than only when a panel is open");
+  assert.match(view, /Date\.now\(\) - botBalanceAt < 20_000/, "and is throttled");
+  assert.match(view, /Number\.isFinite\(Number\(lamports\)\)\n?\s*\? \{ wallet, sol: Number\(lamports\) \/ 1e9/,
+    "a readable balance is a number");
+  assert.match(view, /: \{ wallet, sol: null, at: Date\.now\(\), ok: false \}/,
+    "an unreadable one is null, never zero — those are different things to tell someone about their money");
+  assert.match(view, /x\.fillText\(text, W - 26, 38\)/, "the header carries it beside his title");
+  assert.match(view, /\["BOT WALLET"/, "and the flat-book panel carries it as a row");
+  assert.match(view, /"WALLET UNREADABLE"/, "unreadable is said out loud");
+  assert.match(view, /cannot trade/, "an empty wallet says what that means");
+  assert.match(view, /Date\.now\(\) - bb\.at > 90_000/, "a stale read is labelled stale");
+}
+
 console.log("dashboard HUD, candidate separation, WALL-ST-E boundary, and Callouts contract pass");
