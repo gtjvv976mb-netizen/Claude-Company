@@ -1341,6 +1341,8 @@ const runtimeHealth = {
 let readinessProbeInFlight = false;
 let lastReadinessProbeAt = 0;
 let lastReadinessError = null;
+/* 0 means "never logged one", so the first success after boot always speaks. */
+let lastReadinessSuccessLoggedAt = 0;
 function maybeProbeExecutionReadiness() {
   if (!EXECUTE || !jupiter || readinessProbeInFlight ||
       Date.now() - lastReadinessProbeAt < 2 * 60_000) return;
@@ -1376,9 +1378,40 @@ function maybeProbeExecutionReadiness() {
     readinessDeadline,
   ]).then((result) => {
     const succeededAt = Date.now();
-    if (result?.ready === true && lastReadinessError !== null) {
+    /* A REHEARSAL THAT SUCCEEDS SILENTLY IS INDISTINGUISHABLE FROM ONE THAT NEVER RAN.
+     *
+     * This logged a success ONLY when it cleared a previous failure, so on a healthy
+     * process — where lastReadinessError starts null and stays null — a passing
+     * rehearsal every two minutes wrote nothing at all. Every "proved" line in the log
+     * is therefore a RECOVERY, which is why they only ever appear paired with a "not
+     * proved" line above them.
+     *
+     * That cost real time and two restarts of the live bot on 2026-09-03: I read the
+     * silence after a clean boot as the rehearsal having stopped, went looking for a
+     * hang that was not there, and reverted a good change on the correlation. Silence
+     * meant it was working.
+     *
+     * So a success now speaks: always the first one after boot, so an operator learns
+     * the bot can trade rather than inferring it; then at most one an hour, so a
+     * healthy desk leaves a heartbeat in the log without burying it. A recovery still
+     * logs immediately, as it always did. */
+    const readinessSuccessQuietMs = 3_600_000;
+    const recovered = result?.ready === true && lastReadinessError !== null;
+    const dueForHeartbeat = result?.ready === true &&
+      succeededAt - lastReadinessSuccessLoggedAt >= readinessSuccessQuietMs;
+    if (recovered || dueForHeartbeat) {
       lastReadinessError = null;
-      log(`READINESS proved: ${result.route} at ${CFG.maxSolPerTrade} SOL on ${result.providers} providers, nothing signed`);
+      lastReadinessSuccessLoggedAt = succeededAt;
+      /* The compute budget is reported because it is what the bot is actually bidding
+         with. Agave ranks buffered transactions by reward/(cost+1) where cost follows
+         the REQUESTED compute-unit limit, so a transaction asking for the 1,400,000
+         default while using a fraction of it is quietly outbid by identical money. */
+      const budget = result.computeUnitLimit != null
+        ? ` — built with ${Number(result.computeUnitLimit).toLocaleString()} CU limit` +
+          (result.computeUnitPriceMicroLamports != null
+            ? ` at ${result.computeUnitPriceMicroLamports} microlamports/CU` : "")
+        : "";
+      log(`READINESS proved: ${result.route} at ${CFG.maxSolPerTrade} SOL on ${result.providers} providers, nothing signed${budget}`);
     }
     runtimeHealth.executionReadiness = {
       ready: result?.ready === true,

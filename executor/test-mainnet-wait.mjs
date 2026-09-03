@@ -111,5 +111,27 @@ console.log("\nA HUNG REHEARSAL CANNOT SILENCE THE REHEARSAL");
   ok("the rehearsal still gates nothing", !/pauseEntries|entrySubmissionGate/.test(probe));
 }
 
+console.log("\nA HEALTHY REHEARSAL IS AUDIBLE");
+{
+  /* The success line used to fire ONLY when it cleared a previous failure, so a
+     process that was rehearsing correctly every two minutes wrote nothing, and every
+     "proved" line in the log was really a recovery. On 2026-09-03 I read that silence
+     as the rehearsal having stopped, hunted a hang that did not exist, reverted a good
+     change on the correlation, and restarted the live bot twice. Silence meant it was
+     working. */
+  const probe = src.slice(src.indexOf("function maybeProbeExecutionReadiness()"),
+    src.indexOf("const noteFeedFailure"));
+  ok("a recovery still logs immediately", /const recovered = result\?\.ready === true && lastReadinessError !== null/.test(probe));
+  ok("a plain success can log too, on its own clock", /dueForHeartbeat/.test(probe));
+  ok("either one logs", /if \(recovered \|\| dueForHeartbeat\)/.test(probe));
+  ok("the first success after boot always speaks",
+    /let lastReadinessSuccessLoggedAt = 0;/.test(src), "0 means never logged");
+  const quiet = (probe.match(/readinessSuccessQuietMs = ([0-9_]+)/) || [])[1];
+  ok("...and then it is rate limited, so it cannot bury the log", quiet != null, `${quiet} ms`);
+  ok("the failure path still collapses repeats", /if \(reason !== lastReadinessError\)/.test(probe));
+  ok("the compute budget is reported again, since it was never the cause",
+    /computeUnitLimit/.test(src));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
