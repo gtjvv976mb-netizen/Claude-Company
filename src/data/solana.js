@@ -190,6 +190,35 @@ const walletBalanceCache = new Map();
 /** Public SOL balance for one validated wallet. This is used only to show a
  * tenant whether their self-hosted burner is funded; it cannot move funds. A short
  * cache prevents an open dashboard from turning status refreshes into RPC load. */
+/**
+ * Many wallets' SOL balances in one call.
+ *
+ * The callouts tab asks the same question of a handful of wallets at a time — what does
+ * this verified caller actually hold — and asking it one at a time is a request per
+ * wallet against an endpoint that rate-limits. getMultipleAccounts answers a hundred at
+ * once. A wallet that cannot be read is ABSENT from the result rather than zero: the
+ * caller must be able to tell "holds nothing" from "could not be measured".
+ */
+export async function walletSolBalances(wallets, { chunk = 100 } = {}) {
+  const out = new Map();
+  const list = [...new Set((Array.isArray(wallets) ? wallets : []).filter(isAddress))];
+  for (let i = 0; i < list.length; i += chunk) {
+    const slice = list.slice(i, i + chunk);
+    const r = await readRpc(cfg.rpc, "getMultipleAccounts",
+      [slice, { commitment: "confirmed", encoding: "base64" }], { attempts: 2, timeoutMs: 8_000 });
+    if (!r.ok) continue;
+    const values = r.data?.value;
+    if (!Array.isArray(values) || values.length !== slice.length) continue;
+    values.forEach((v, k) => {
+      // A wallet that has never been funded has no account at all, and that IS zero.
+      const lamports = v == null ? 0 : Number(v.lamports);
+      if (Number.isSafeInteger(lamports) && lamports >= 0)
+        out.set(slice[k], { lamports, sol: lamports / 1e9 });
+    });
+  }
+  return out;
+}
+
 export async function walletSolBalance(wallet, { maxAgeMs = 30_000 } = {}) {
   if (!isAddress(wallet))
     return { ok: false, error: "invalid wallet" };

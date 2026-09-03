@@ -145,20 +145,31 @@ const route = officeSource.slice(routeStart, routeEnd);
 assert.ok(routeStart > 0 && routeEnd > routeStart, "the canonical Callouts route exists");
 assert.match(route, /url\.pathname === "\/api\/callouts"/,
   "Callouts has a canonical non-Whales route");
-assert.match(route, /evidenceBackedPumpfunCallouts/,
-  "the API uses the evidence matcher rather than displaying raw callout chatter");
+/* THE OWNER'S RULE (2026-09-03): pump.fun's own gold verification, and a caller wallet
+ * holding at least $1,000 of SOL. It replaced a rule that also demanded a confirmed
+ * pool-touching inflow matched to that exact wallet — a far harder thing to prove, which
+ * needed a signature scan per coin, so the desk attempted only three coins a run and the
+ * tab was empty for days. What the assertions below protect is unchanged in spirit: no
+ * unverified chatter, honest coverage, and a claim no larger than the measurement. */
+assert.match(route, /verifiedHolderCallouts/,
+  "the API gates on the owner's rule rather than displaying raw callout chatter");
 assert.match(route, /unmatchedChatterIncluded: false/);
-assert.match(route, /minimumCurrentValueUsd/);
+assert.match(route, /minimumWalletSolUsd/);
 assert.match(route, /purchaseConsiderationProven: false/);
+assert.match(route, /identityClaim: "pumpfun-verified-profile-and-its-wallet-balance"/,
+  "the payload claims a verified profile and a balance — never that the caller bought the coin");
 assert.match(route, /coverage:/,
   "the API distinguishes verification coverage from an honestly empty result");
-assert.match(route, /verifiedEmpty: successful\.filter\(\(row\) => !row\.partial && !row\.coin\)\.length/,
-  "only complete no-match scans are counted as verified empty");
-assert.match(route, /incompleteEmpty: successful\.filter\(\(row\) => row\.partial && !row\.coin\)\.length/,
-  "partial no-match scans stay explicitly incomplete");
-assert.match(route, /includeEvidence: true/);
-assert.match(route, /trades: flow\.evidenceTrades/,
-  "the matcher receives the complete bounded evidence set rather than the legacy top-12 preview");
+assert.match(route, /coinsWithCallouts: withCallouts\.length/,
+  "coverage separates coins that had callouts from coins merely scanned");
+assert.match(route, /verifiedCallers: wallets\.length/,
+  "coverage says how many verified callers were priced");
+assert.match(route, /walletSolBalances\(wallets\)/,
+  "wallet balances are read in one batched call, not one request per caller");
+assert.match(route, /if \(!bal \|\| !\(solUsd > 0\)\) return null/,
+  "with no SOL price the bar cannot be applied, so nothing passes rather than everything");
+assert.match(route, /unreadableWallet: gate\.unreadableHidden/,
+  "a wallet that could not be read is reported, not silently treated as empty");
 assert.doesNotMatch(route, /quotes\.filter|chatter\.length/,
   "unmatched Pump.fun posts never enter the default API payload");
 
@@ -168,6 +179,8 @@ assert.match(pumpfunCallouts, /!r\.ok \|\| !Array\.isArray\(r\.data\?\.callouts\
 assert.doesNotMatch(pumpfunCallouts, /!rows\.length/,
   "a successfully fetched empty Pump.fun thread is verified-empty, not a coverage failure");
 
+/* The whale TAPE still values matched inflow and still keeps its own bar; only the
+   Callouts tab moved to the wallet-balance rule. These assertions cover the tape. */
 const whaleSource = fs.readFileSync(new URL("./src/whales.js", import.meta.url), "utf8");
 assert.match(whaleSource, /unread: skipped \+ failedReads/,
   "failed transaction reads make evidence coverage partial");
@@ -192,4 +205,46 @@ console.log("evidence-backed Pump.fun callouts: exact wallet joins, truthful val
   assert.equal(gate.belowWhaleHidden, 1, "a verified author under the bar is hidden");
   assert.equal(gate.whaleUsd, 2_500);
   console.log("  ok   verified-whale gate keeps only verified authors above the bar and counts what it hid");
+}
+
+/* ── THE OWNER'S GATE, EXACTLY ─────────────────────────────────────────────────
+ * A caller posts on the tab when pump.fun's own gold check is on their profile AND
+ * their wallet holds at least $1,000 of SOL. Measured against the seven verified
+ * callers found live on 2026-09-03: six cleared the bar, one held $284 and did not. */
+{
+  const { verifiedHolderCallouts, CALLOUT_MIN_WALLET_USD } = await import("./src/callouts.js");
+  assert.equal(CALLOUT_MIN_WALLET_USD, 1000, "the bar the owner set");
+  const W = {
+    netvyxe: "HmUt3Jn46j7c7ANdURmEyjSRj8i3Em6MhjQUi37PZ219",
+    mitch: "4Be9CvxqHW6BYiRAxW9Q3xu1ycTMWaL5z8NX4HR3ha7t",
+    edward: "C4Svaa7djC8d3CVxaohrsedccaKqimNoJrWe9iNPdix5",
+    dex: "2VKv5Kc2mwWVsANnHdLRuESoxgkSkgCBcrrjenYv6tyw",
+  };
+  const held = { [W.netvyxe]: 201219, [W.mitch]: 2389, [W.edward]: 284, [W.dex]: 17583 };
+  const walletUsdOf = (w) => (w in held ? held[w] : null);
+  const rows = [
+    { user: W.mitch, verified: true, username: "mitch" },
+    { user: W.edward, verified: true, username: "edward" },      // verified, only $284
+    { user: W.netvyxe, verified: true, username: "netvyxe" },
+    { user: W.dex, verified: false, username: "dex" },           // rich, but no gold check
+    { user: "not-a-wallet", verified: true, username: "bogus" },
+    { user: "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1", verified: true, username: "unread" },
+  ];
+  const gate = verifiedHolderCallouts(rows, { walletUsdOf });
+  assert.deepEqual(gate.rows.map((r) => r.username), ["netvyxe", "mitch"],
+    "verified and above the bar, biggest holder first");
+  assert.equal(gate.unverifiedHidden, 1, "no gold check, no post — however rich");
+  assert.equal(gate.belowBarHidden, 1, "verified but holding $284 does not clear $1,000");
+  assert.equal(gate.unreadableHidden, 2, "a bad address and an unreadable balance are both dropped");
+  assert.equal(gate.rows[0].walletSolUsd, 201219, "what the wallet holds travels with the row");
+
+  /* AN UNMEASURED BALANCE IS NOT A ZERO AND IS NOT A PASS. The desk's standing rule for
+     a number it could not read applies here too: the caller is dropped, and counted. */
+  const blind = verifiedHolderCallouts(rows, { walletUsdOf: () => null });
+  assert.equal(blind.rows.length, 0, "with no balances readable, nothing is posted");
+  assert.equal(blind.unreadableHidden, 5, "and every verified caller is accounted for");
+
+  const raised = verifiedHolderCallouts(rows, { minUsd: 100_000, walletUsdOf });
+  assert.deepEqual(raised.rows.map((r) => r.username), ["netvyxe"], "the bar is tunable");
+  console.log("  ok   the owner's gate: pump.fun gold check plus $1,000 of wallet SOL");
 }

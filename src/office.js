@@ -40,7 +40,8 @@ import { walletSolBalance } from "./data/solana.js";
 import { buildExecutorDashboard } from "./executor-dashboard.js";
 import * as passes from "./passes.js";
 import { callouts, WHALE_USD } from "./whales.js";
-import { verifiedWhaleCallouts, CALLOUT_WHALE_MIN_USD, evidenceBackedPumpfunCallouts } from "./callouts.js";
+import { verifiedWhaleCallouts, verifiedHolderCallouts, CALLOUT_WHALE_MIN_USD,
+  CALLOUT_MIN_WALLET_USD, evidenceBackedPumpfunCallouts } from "./callouts.js";
 import { isAddress } from "./lib/base58.js";
 import { retiredBrowserRpcResponse } from "./execution-gates.js";
 import { providerCreditHealth, providerErrorForViewer } from "./provider-health.js";
@@ -1248,98 +1249,124 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           const now = Date.now();
           if (globalThis.__verifiedCallouts && now - globalThis.__verifiedCallouts.at < 120e3)
             return json(200, globalThis.__verifiedCallouts.body);
-          const feed = identity.whaleFeed({ launchpad: "pump.fun", limit: 40 });
-          const seen = new Set();
-          const distinct = feed.filter((w) => w.mint && !seen.has(w.mint) && seen.add(w.mint));
-          const candidateCount = distinct.length;
-          const mints = distinct.slice(0, 3);
+          /* WHERE THE CALLOUTS COME FROM.
+           *
+           * This used to walk the desk's own whale tape and take the first THREE mints,
+           * then try to prove a matched pool inflow for each. Measured: three coins a
+           * run, and the tab was empty for days. Callouts do not live on the coins the
+           * desk happens to be watching — they live wherever pump.fun users are posting,
+           * so the scan now reads pump.fun's own recently-traded listing. Free, and it
+           * covers a couple of hundred coins instead of three. Measured 2026-09-03: of
+           * 70 coins, 22 carried callouts. */
+          const live = await import("./data/pumpfun-live.js");
           const pf = await import("./data/pumpfun.js");
-          const { callouts: liveWhales } = await import("./whales.js");
-          const deadline = now + 10_000;
-          const resolved = await Promise.all(mints.map(async (m) => {
-            const [thread, flow] = await Promise.all([
-              pf.callouts(m.mint, 20).catch(() => ({ ok: false, callouts: [] })),
-              liveWhales(m.mint, {
-                scan: 16, minUsd: CALLOUT_WHALE_MIN_USD, deadline, includeEvidence: true,
-              }).catch(() => null),
-            ]);
-            if (!thread.ok) return { ok: false, reason: "pumpfun-callouts-unavailable" };
-            if (!flow?.ok) return { ok: false, reason: "solana-tape-unavailable" };
-            const matched = evidenceBackedPumpfunCallouts({
-              mint: m.mint,
-              callouts: thread.callouts.map((row) => ({
-                ...row,
-                source: { provider: "pump.fun", url: row.url ?? null },
-              })),
-              trades: flow.evidenceTrades,
-              minUsd: CALLOUT_WHALE_MIN_USD,
-              partial: flow.partial,
-              scanned: flow.scanned,
-              unread: flow.unread,
-              failed: flow.failed,
-            });
-            // Owner rule: verified Pump.fun profile AND whale-sized matched inflow.
-            const gate = verifiedWhaleCallouts(matched.callouts, { minUsd: CALLOUT_WHALE_MIN_USD });
-            const evidenceCallouts = gate.rows.slice(0, 5).map((row) => ({
-              ...row,
-              verificationLevel: "pumpfun-verified-and-wallet-inflow-matched",
+          const sol = await import("./data/solana.js");
+          const jup = await import("./data/jupiter.js");
+
+          const traded = await live.recentlyTraded({ pages: 3 }).catch(() => []);
+          const candidates = traded.filter((c) => c?.mint && !c.is_banned);
+          const candidateCount = candidates.length;
+          const scanLimit = Math.max(1, Math.min(120, Number(process.env.CALLOUT_SCAN_COINS || 60)));
+          const mints = candidates.slice(0, scanLimit);
+
+          /* One coin at a time in small waves: pump.fun rate-limits a burst, and a
+             throttled sweep reads as "no callouts anywhere" rather than as an error. */
+          const threads = [];
+          for (let i = 0; i < mints.length; i += 6) {
+            const wave = await Promise.all(mints.slice(i, i + 6).map(async (c) => {
+              const thread = await pf.callouts(c.mint, 20).catch(() => ({ ok: false, callouts: [] }));
+              return { coin: c, thread };
             }));
-            const coin = evidenceCallouts.length ? {
-              mint: m.mint,
-              symbol: m.symbol,
-              netUsd: m.net_usd ?? null,
-              callouts: evidenceCallouts,
-              // Compatibility for the former viewer. Chatter is intentionally empty.
-              whales: evidenceCallouts,
-              chatter: [],
-              evidence: matched.evidence,
-              hidden: { unverified: gate.unverifiedHidden, belowWhale: gate.belowWhaleHidden },
-            } : null;
-            return { ok: true, partial: matched.evidence.partial === true, coin,
-              hidden: { unverified: gate.unverifiedHidden, belowWhale: gate.belowWhaleHidden } };
+            threads.push(...wave);
+          }
+          const reachable = threads.filter((t) => t.thread.ok);
+          const withCallouts = reachable.filter((t) => t.thread.callouts.length > 0);
+
+          /* Every verified caller across the whole sweep, priced in one balance read and
+             one SOL quote rather than per coin. */
+          const verifiedRows = withCallouts.flatMap((t) =>
+            t.thread.callouts.filter((row) => row?.verified === true)
+              .map((row) => ({ ...row, mint: t.coin.mint, symbol: t.coin.pair?.baseSymbol ?? t.coin.symbol ?? null })));
+          const wallets = [...new Set(verifiedRows.map((r) => r.user).filter(Boolean))];
+          const [balances, priceMap] = await Promise.all([
+            wallets.length ? sol.walletSolBalances(wallets).catch(() => new Map()) : new Map(),
+            jup.price(["So11111111111111111111111111111111111111112"]).catch(() => null),
+          ]);
+          const solUsd = Number(priceMap?.["So11111111111111111111111111111111111111112"]?.usdPrice
+            ?? priceMap?.["So11111111111111111111111111111111111111112"]?.price) || null;
+          const walletUsdOf = (wallet) => {
+            const bal = balances.get(wallet);
+            // No SOL price means the bar cannot be applied honestly, so nothing passes
+            // rather than everything passing on an assumed rate.
+            if (!bal || !(solUsd > 0)) return null;
+            return bal.sol * solUsd;
+          };
+
+          const gate = verifiedHolderCallouts(verifiedRows, {
+            minUsd: CALLOUT_MIN_WALLET_USD, walletUsdOf,
+          });
+          const unverifiedSeen = withCallouts.reduce(
+            (n, t) => n + t.thread.callouts.filter((r) => r?.verified !== true).length, 0);
+
+          // Group what cleared the bar back onto its coin, biggest holder first.
+          const byMint = new Map();
+          for (const row of gate.rows) {
+            if (!byMint.has(row.mint)) byMint.set(row.mint, { mint: row.mint, symbol: row.symbol, callouts: [] });
+            const bucket = byMint.get(row.mint);
+            if (bucket.callouts.length < 5) bucket.callouts.push({
+              ...row,
+              verificationLevel: "pumpfun-verified-and-wallet-sol-above-bar",
+            });
+          }
+          const out = [...byMint.values()].map((coin) => ({
+            ...coin,
+            netUsd: null,
+            whales: coin.callouts,       // compatibility with the former viewer
+            chatter: [],
+            hidden: { unverified: unverifiedSeen, belowWhale: gate.belowBarHidden },
           }));
-          const successful = resolved.filter((row) => row?.ok === true);
-          const failed = resolved.filter((row) => row?.ok !== true);
-          const partialScans = successful.filter((row) => row.partial).length;
-          const out = successful.map((row) => row.coin).filter(Boolean);
-          const failureCounts = new Map();
-          for (const row of failed)
-            failureCounts.set(row.reason, (failureCounts.get(row.reason) ?? 0) + 1);
+
           const body2 = {
             coins: out,
             generatedAt: Date.now(),
-            source: "pump.fun-callouts+solana-confirmed-pool-token-inflows",
+            source: "pump.fun-callouts+solana-wallet-sol-balance",
             coverage: {
               attempted: mints.length,
               candidates: candidateCount,
-              succeeded: successful.length,
-              failed: failed.length,
-              partialScans,
-              verifiedEmpty: successful.filter((row) => !row.partial && !row.coin).length,
-              incompleteEmpty: successful.filter((row) => row.partial && !row.coin).length,
-              complete: failed.length === 0 && partialScans === 0,
-              failures: [...failureCounts].map(([reason, count]) => ({ reason, count })),
+              succeeded: reachable.length,
+              failed: threads.length - reachable.length,
+              coinsWithCallouts: withCallouts.length,
+              verifiedCallers: wallets.length,
+              partialScans: 0,
+              verifiedEmpty: withCallouts.length - byMint.size,
+              incompleteEmpty: 0,
+              complete: reachable.length === threads.length && solUsd > 0,
+              failures: solUsd > 0 ? [] : [{ reason: "sol-usd-price-unavailable", count: 1 }],
             },
             hidden: {
-              unverified: successful.reduce((n, row) => n + (row.hidden?.unverified || 0), 0),
-              belowWhale: successful.reduce((n, row) => n + (row.hidden?.belowWhale || 0), 0),
+              unverified: unverifiedSeen,
+              belowWhale: gate.belowBarHidden,
+              unreadableWallet: gate.unreadableHidden,
             },
             policy: {
               unmatchedChatterIncluded: false,
               pumpfunVerifiedRequired: true,
-              minimumCurrentValueUsd: CALLOUT_WHALE_MIN_USD,
-              valueBasis: "token-inflow-at-current-market-mark",
+              minimumWalletSolUsd: CALLOUT_MIN_WALLET_USD,
+              valueBasis: "caller-wallet-sol-balance-at-current-mark",
+              solUsd,
               purchaseConsiderationProven: false,
-              identityClaim: "wallet-match-only",
+              /* Say exactly what is claimed. This is a verified caller and what their
+                 wallet holds — it is NOT evidence that they bought this coin. */
+              identityClaim: "pumpfun-verified-profile-and-its-wallet-balance",
             },
           };
-          /* What was posted before this two-minute snapshot. Without it a whale matched
-           * at 10:00 vanished at 10:02 when its coin left the top three. Bounded, in memory. */
+          /* What was posted before this two-minute snapshot. Without it a caller matched
+           * at 10:00 vanished at 10:02 when their coin left the sweep. Bounded, in memory. */
           const hist = Array.isArray(globalThis.__calloutHistory) ? globalThis.__calloutHistory : [];
           for (const coin of out) for (const row of coin.callouts || []) {
             const key = coin.mint + ":" + (row.id ?? row.user);
             if (!hist.some((h) => h.key === key)) hist.unshift({ key, seenAt: now, mint: coin.mint, symbol: coin.symbol,
-              user: row.user, username: row.username, matchedCurrentValueUsd: row.matchedCurrentValueUsd, ts: row.ts ?? null, url: row.url ?? null });
+              user: row.user, username: row.username, walletSolUsd: row.walletSolUsd ?? null, ts: row.ts ?? null, url: row.url ?? null });
           }
           globalThis.__calloutHistory = hist.slice(0, 100);
           body2.history = globalThis.__calloutHistory;

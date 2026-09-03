@@ -5,15 +5,58 @@ import { decode, isAddress } from "./lib/base58.js";
  * names that basis explicitly instead of calling it purchase USD. */
 export const DEFAULT_CALLOUT_CURRENT_VALUE_THRESHOLD_USD = 500;
 
-/* OWNER RULE (2026-09-02): the Callouts tab posts only REAL WHALES with WALLETS
- * VERIFIED ON PUMP.FUN. Two conditions, both required: the author's Pump.fun profile
- * carries the site's own verification (isVerified), and the author's exact wallet
- * holds confirmed pool-touching inflow worth at least the whale bar at the current
- * mark. $500 is a buyer, not a whale; the bar defaults to $2,500 (~25 SOL) and is
- * tunable with CALLOUT_WHALE_MIN_USD. The whale TAPE keeps its own WHALE_USD. */
+/* OWNER RULE (2026-09-03): the Callouts tab posts a call when the caller carries
+ * pump.fun's own gold verification AND their wallet holds at least $1,000 of SOL.
+ *
+ * It replaces an earlier rule that also demanded confirmed pool-touching INFLOW worth
+ * $2,500 at the current mark, matched to the caller's exact wallet. That bar is a much
+ * harder thing to prove — it needs a signature scan per coin that frequently cannot
+ * match, so the desk only ever attempted three coins a run and the tab stayed empty for
+ * days. Measured 2026-09-03 across 70 pump.fun coins: 22 carried callouts, 146 callouts
+ * from 143 distinct callers, 8 of them verified, and 6 of those 7 verified wallets held
+ * more than $1,000 of SOL. The new rule is answerable with one balance read.
+ *
+ * What it claims is exactly what it measures: this caller is verified by pump.fun, and
+ * this is what their wallet holds. It is NOT a claim that they bought this coin. */
+const configuredCalloutWalletUsd = Number(process.env.CALLOUT_MIN_WALLET_USD || 1000);
+export const CALLOUT_MIN_WALLET_USD = Number.isFinite(configuredCalloutWalletUsd) && configuredCalloutWalletUsd > 0
+  ? configuredCalloutWalletUsd : 1000;
+
+/* Retained for the whale TAPE, which still values matched inflow and keeps its own bar. */
 const configuredCalloutWhaleUsd = Number(process.env.CALLOUT_WHALE_MIN_USD || 2500);
 export const CALLOUT_WHALE_MIN_USD = Number.isFinite(configuredCalloutWhaleUsd) && configuredCalloutWhaleUsd > 0
   ? configuredCalloutWhaleUsd : 2500;
+
+/**
+ * Keep only pump.fun-verified callers whose own wallet clears the SOL bar.
+ *
+ * Pure. `walletUsdOf` answers what a wallet holds in dollars, or null when it could not
+ * be read — and an unreadable balance is dropped rather than assumed, the same rule the
+ * rest of the desk follows for a number it did not measure. Returns what it dropped and
+ * why, so the tab can say "nothing cleared the bar" instead of going silently blank.
+ */
+export function verifiedHolderCallouts(rows, { minUsd = CALLOUT_MIN_WALLET_USD, walletUsdOf } = {}) {
+  const bar = Number.isFinite(Number(minUsd)) && Number(minUsd) > 0 ? Number(minUsd) : CALLOUT_MIN_WALLET_USD;
+  const read = typeof walletUsdOf === "function" ? walletUsdOf : () => null;
+  const kept = [];
+  let unverifiedHidden = 0, belowBarHidden = 0, unreadableHidden = 0;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.verified !== true) { unverifiedHidden++; continue; }
+    const wallet = typeof row.user === "string" ? row.user : null;
+    /* Number(null) is 0, which would file every unreadable balance as "holds nothing"
+       and hide a measurement failure inside an ordinary rejection. Read first, then
+       decide whether there is a number at all. */
+    const raw = wallet && isAddress(wallet) ? read(wallet) : undefined;
+    const usd = raw == null ? NaN : Number(raw);
+    if (!Number.isFinite(usd)) { unreadableHidden++; continue; }
+    if (usd < bar) { belowBarHidden++; continue; }
+    kept.push({ ...row, walletSolUsd: Math.round(usd) });
+  }
+  // Biggest holder first: on a tab that shows five, the wallet with the most at stake
+  // is the one worth reading.
+  kept.sort((a, b) => (b.walletSolUsd ?? 0) - (a.walletSolUsd ?? 0));
+  return { rows: kept, unverifiedHidden, belowBarHidden, unreadableHidden, walletUsd: bar };
+}
 
 /** Keep only Pump.fun-verified authors whose matched inflow clears the whale bar.
  *  Pure; returns what it dropped and why, so the tab can say so instead of going blank. */
