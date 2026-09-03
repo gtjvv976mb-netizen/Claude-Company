@@ -493,7 +493,7 @@ not evidence of an edge.
 | `SLIPPAGE_BPS` | policy default | Maximum requested swap slippage |
 | `MAX_PRICE_IMPACT_PCT` | `5` | Strict maximum impact for a new entry |
 | `MAX_EXIT_PRICE_IMPACT_PCT` | `50` | Emergency impact ceiling for a managed exit; above it requires manual action |
-| `MAX_NETWORK_FEE_LAMPORTS` | `500000` live ceiling | Absolute network-fee cap, checked before signing and at finality |
+| `MAX_NETWORK_FEE_LAMPORTS` | `2000000` live ceiling | Absolute network-fee cap, checked before signing and at finality |
 | `MAX_NETWORK_FEE_PCT` | `10` live ceiling | Network-fee cap relative to exact trade basis |
 | `MAX_RENT_LAMPORTS` | `4200000` live ceiling | Gross account-rent cap for at most the canonical temporary WSOL and destination ATAs; independently bound to both RPCs' classic-token rent facts. Rent is not a network fee, and an explicitly lower value remains lower on upgrade |
 | `MAX_ENTRY_ROUND_TRIP_LOSS_PCT` | `12` live ceiling | Maximum measured forward/reverse entry preflight loss |

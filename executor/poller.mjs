@@ -85,7 +85,43 @@ const LIVE_LIMITS = Object.freeze({
   maxPriceImpactPct: 5,
   maxExitPriceImpactPct: 50,
   maxFeeBps: 100,
-  maxNetworkFeeLamports: 500_000,
+  /* THE PRIORITY FEE CEILING, RAISED FROM 500,000 ON THE OWNER'S INSTRUCTION.
+   *
+   * Exceeding this REFUSES the entry — see the networkFees check in jupiter.mjs — so it
+   * is not a budget, it is a gate, and the question is only whether a congested moment
+   * can close it. Measured on four live rehearsals between 16:31 and 18:59 on
+   * 2026-09-03, Jupiter's own priority price moved 79x: 10,000, then 38,785, then
+   * 50,002, then 793,188 microlamports per compute unit, which on a ~135k CU
+   * transaction is 1,356 to 92,207 lamports. The old ceiling sat about 5x above that
+   * peak, so a further ordinary-looking move would have started refusing entries — and
+   * the moment it happened would be a congested one, which is exactly when a coin worth
+   * catching is being caught.
+   *
+   * Raising a REFUSAL threshold does not raise what a quiet market costs: Jupiter's
+   * estimate decides what is actually paid, and every measured fee so far is under a
+   * fifth of the OLD ceiling. The change is only felt in the tail. What it does cost is
+   * the tail itself — at 0.05 SOL a trade this is 4% of notional, against 0.19% at the
+   * observed peak — and maxNetworkFeePct below still refuses anything over 10% of the
+   * trade, so that remains the outer limit and this sits at half of it. */
+  maxNetworkFeeLamports: 2_000_000,
+  /* THE SAME NUMBER WAS DOING TWO OPPOSITE JOBS.
+   *
+   * As a GATE, maxNetworkFeeLamports is the fee above which an entry is refused, and
+   * raising it can only ever admit trades. As a COST MODEL it was also charged against
+   * every trade — networkFeeReserveSol below, and worstFeeRatio in the entry guard —
+   * where raising it can only ever refuse them. Coupled, the owner's instruction to
+   * stop congestion refusing fills would have refused ALL of them: reviewed against the
+   * real sizing engine at the live 0.3366 SOL wallet, a 2,000,000 cost model leaves no
+   * stop width between 8% and 95%, at any round-trip friction from 0% to 5%, that still
+   * yields a buy, and lifts the wallet floor for a 30%-stop position from 0.140 to
+   * 0.380 SOL. The bot would have gone silent in every market, not just a congested one.
+   *
+   * So the cost model is now its own constant and deliberately UNCHANGED at the old
+   * value. That makes the split provably behaviour-neutral: every sizing decision, every
+   * stop-distance band and every downstream derivation keeps the number it was built
+   * from. Lowering it to flatter the measured fee would loosen the executable-cost band
+   * that the desk's 12% stop floor exists to enforce — a change nobody asked for. */
+  expectedNetworkFeeLamports: 500_000,
   maxNetworkFeePct: 10,
   // Gross creation rent for one temporary WSOL ATA plus one destination ATA is
   // currently 4,078,560 lamports. The reviewed ceiling leaves only a narrow buffer;
@@ -335,6 +371,9 @@ const JUPITER_CFG = {
   maxNetworkFeeLamports: number("MAX_NETWORK_FEE_LAMPORTS",
     process.env.MAX_NETWORK_FEE_LAMPORTS || LIVE_LIMITS.maxNetworkFeeLamports,
     { min: 5_000, max: EXECUTE ? LIVE_LIMITS.maxNetworkFeeLamports : 100_000_000 }),
+  expectedNetworkFeeLamports: number("EXPECTED_NETWORK_FEE_LAMPORTS",
+    process.env.EXPECTED_NETWORK_FEE_LAMPORTS || LIVE_LIMITS.expectedNetworkFeeLamports,
+    { min: 5_000, max: EXECUTE ? LIVE_LIMITS.expectedNetworkFeeLamports : 100_000_000 }),
   maxNetworkFeePct: number("MAX_NETWORK_FEE_PCT",
     process.env.MAX_NETWORK_FEE_PCT || LIVE_LIMITS.maxNetworkFeePct,
     { min: 0.1, max: EXECUTE ? LIVE_LIMITS.maxNetworkFeePct : 25 }),
@@ -984,7 +1023,7 @@ async function onEntry(ev) {
   const takeProfitRule = resolveTakeProfitRule(ev.take_profit_x, CFG.takeProfitX);
   const fixed = Number(ev.fixed_sol) > 0 ? Math.min(Number(ev.fixed_sol), CFG.maxSolPerTrade) : CFG.fixedSol;
   const perCall = { ...CFG, ...takeProfitRule, fixedSol: fixed,
-    networkFeeReserveSol: EXECUTE ? jupiter.cfg.maxNetworkFeeLamports / LAMPORTS : 0 };
+    networkFeeReserveSol: EXECUTE ? jupiter.cfg.expectedNetworkFeeLamports / LAMPORTS : 0 };
   const normalizedCall = { ...ev, entry_ref: 1, stop: entryReference.stopRatio,
     target: entryReference.targetRatio };
   let plan = planEntry({ call: normalizedCall, cfg: perCall, state: S.state });
@@ -1012,7 +1051,7 @@ async function onEntry(ev) {
   entryEventSubmissionGate({ kind: "entry", context: { event: ev } });
   const executableReturnRatio = Number(BigInt(preflight.reverse.outAmount) * 1_000_000n /
     preliminaryAmountRaw) / 1_000_000;
-  const worstFeeRatio = 2 * jupiter.cfg.maxNetworkFeeLamports / Number(preliminaryAmountRaw);
+  const worstFeeRatio = 2 * jupiter.cfg.expectedNetworkFeeLamports / Number(preliminaryAmountRaw);
   const slippageHaircut = (1 - jupiter.cfg.slippageBps / 10_000) ** 2;
   const conservativeReturnRatio = executableReturnRatio * slippageHaircut - worstFeeRatio;
   if (conservativeReturnRatio <= entryReference.stopRatio)
@@ -1021,7 +1060,12 @@ async function onEntry(ev) {
      * for a coin's real liquidity, or a reconstruction too pessimistic to ever pass.
      * "It keeps refusing" is not actionable; a measured round trip against a stop
      * ratio is. */
+    /* And say WHICH term dominated. Once the fee model can outweigh the measured round
+       trip, a message that only names "the authored stop" sends the reader to the desk
+       for a problem that lives in this file — the exact misattribution the note above
+       was written to cure. */
     throw new Error(`entry round trip plus worst-case fees is already at/below the authored stop ` +
+      `[dominant term: ${worstFeeRatio > (1 - executableReturnRatio * slippageHaircut) ? "the fee model" : "the measured round trip"}] ` +
       `(measured round trip ${Number(preflight.lossPct ?? 0).toFixed(2)}% → executable ${(executableReturnRatio * 100).toFixed(2)}%; ` +
       `slippage haircut ${((1 - slippageHaircut) * 100).toFixed(2)}%, worst-case fees ${(worstFeeRatio * 100).toFixed(2)}%; ` +
       `conservative return ${(conservativeReturnRatio * 100).toFixed(2)}% vs stop at ${(entryReference.stopRatio * 100).toFixed(2)}% of entry)`);

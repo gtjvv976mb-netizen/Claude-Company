@@ -14,7 +14,10 @@ const jupiter = new JupiterV2Executor({
   apiKey: process.env.JUPITER_API_KEY, baseUrl: process.env.JUPITER_API_BASE || "https://api.jup.ag/swap/v2",
   hardStop: () => false, submissionGate: () => {}, log,
   config: { slippageBps: 300, maxPriceImpactPct: 5, maxExitPriceImpactPct: 50, maxFeeBps: 100,
-    maxNetworkFeeLamports: 500_000, maxNetworkFeePct: 10, maxRentLamports: MAX_GROSS_RENT_LAMPORTS,
+    // Matches the poller's live gate. An emergency exit must never refuse a fee the
+  // automated entry would have paid: the one real live round trip paid 92 lamports of
+  // priority on the entry and 280,276 on the EXIT, so the exit leg is the hungry one.
+  maxNetworkFeeLamports: 2_000_000, expectedNetworkFeeLamports: 500_000, maxNetworkFeePct: 10, maxRentLamports: MAX_GROSS_RENT_LAMPORTS,
     maxAttempts: 3, maxExitAttempts: 12, blockHeightWindow: 600, maxQuoteShortfallPct: 15, finalityTimeoutMs: 60_000 },
 });
 const before = await conn.getBalance(kp.publicKey);

@@ -40,6 +40,12 @@ export const ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 export const JUPITER_EVENT_AUTHORITY = "D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf";
 const SYSTEM_PROGRAM = SystemProgram.programId.toBase58();
 const COMPUTE_PROGRAM = ComputeBudgetProgram.programId.toBase58();
+
+/* What a healthy transaction's network fee actually is, for the two custody
+   reconciliation checks below. Falls back to the refusal ceiling only when no expected
+   figure is configured, so a caller that predates the split behaves exactly as before. */
+const reconciliationFeeTolerance = (cfg) =>
+  Number(cfg?.expectedNetworkFeeLamports ?? cfg?.maxNetworkFeeLamports ?? 500_000);
 const SNAPSHOT_MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 const FINAL_HEIGHT_ATTEMPTS = 4;
 const FINAL_HEIGHT_REQUEST_TIMEOUT_MS = 2_000;
@@ -441,8 +447,14 @@ export function validateSimulationEffects(before, after, expected, cfg) {
      * open — that part never leaves custody and must not be spendable twice. */
     const spent = custodyBefore - custodyAfter;
     const rentAllowance = foreignRentAllowance(expected.foreignRentAllowanceLamports);
+    /* THE TOLERANCE IS NOT THE GATE. This is the only bound on unexplained lamports
+       leaving custody during an entry, and it happened to be spelled with the fee
+       ceiling. When that ceiling was raised to admit congested fills, this band would
+       have widened with it — four times more undetectable drain, for a reason that has
+       nothing to do with priority fees. It is pinned to the expected-fee constant, which
+       is what a healthy transaction actually costs. */
     if (spent < BigInt(expected.amountRaw) ||
-        spent > BigInt(expected.amountRaw) + BigInt(cfg.maxNetworkFeeLamports) + rentAllowance)
+        spent > BigInt(expected.amountRaw) + BigInt(reconciliationFeeTolerance(cfg)) + rentAllowance)
       throw new Error(`simulation SOL spend ${spent} is outside the exact input ${expected.amountRaw} ` +
         `plus capped fees${rentAllowance > 0n ? ` and ${rentAllowance} lamports of quoted third-party account rent` : ""}`);
   }
@@ -483,7 +495,7 @@ export function validateSimulationEffects(before, after, expected, cfg) {
     const receivedNet = custodyAfter - custodyBefore;
     if (receivedNet <= 0n)
       throw new Error("simulation SOL proceeds are not positive");
-    if (receivedNet + BigInt(cfg.maxNetworkFeeLamports) < minOutput)
+    if (receivedNet + BigInt(reconciliationFeeTolerance(cfg)) < minOutput)
       throw new Error("simulation SOL proceeds are below the signed minimum after capped fees");
     if (receivedNet * 100n > quotedOutput * (100n + shortfallCapPct))
       throw new Error(`the chain delivers ${receivedNet} lamports against a quote of ${quotedOutput} — the quote is ` +

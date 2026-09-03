@@ -70,7 +70,7 @@ ok("live deployment and transaction ceilings cannot be raised by environment", (
     ["MAX_PRICE_IMPACT_PCT", "5.01"],
     ["MAX_EXIT_PRICE_IMPACT_PCT", "50.01"],
     ["MAX_JUPITER_FEE_BPS", "101"],
-    ["MAX_NETWORK_FEE_LAMPORTS", "500001"],
+    ["MAX_NETWORK_FEE_LAMPORTS", "2000001"],
     ["MAX_NETWORK_FEE_PCT", "10.01"],
     ["MAX_RENT_LAMPORTS", "4200001"],
     ["MAX_ENTRY_ROUND_TRIP_LOSS_PCT", "12.01"],
