@@ -1092,12 +1092,12 @@ const STAFF = [
   // CODEX BANKS — the teen-spy parody for the improvement engineer, in his own
   // suite WEST of the boss (Grox mirrors him east). Advisory only: he studies
   // the system and files proposals, and never forms a trade.
-  { id:"Codex",      name:"CODEX BANKS", role:"Improvement Engineer · advisory only", desk:[-7.78,-10.8], stand:[-7.78,-9.7], y:0.22, apron:P.codex, codex:true },
+  { id:"Codex",      name:"CODEX BANKS", role:"Improvement Engineer · grades every call", desk:[-7.78,-10.8], stand:[-7.78,-9.3], y:0.22, apron:P.codex, codex:true },
   // Gruk is NOT the boss — the boss is the tenant's own MD. Gruk Mulder is the
   // Assistant Director who works the trades, in his own suite BESIDE the boss's:
   // same architecture, smaller, X-dark. Only appears when this floor's brain is
   // Grok (see __setGrokPresent). He never roams — like the CEO, he keeps his room.
-  { id:"GrokAD",     name:"GROX MULDER", role:"Assistant Director — works the trades", desk:[7.78,-10.8], stand:[7.78,-9.7], y:0.22, apron:0x2a2c30, grok:true },
+  { id:"GrokAD",     name:"GROX MULDER", role:"Assistant Director — works the trades", desk:[7.78,-10.8], stand:[7.78,-9.3], y:0.22, apron:0x2a2c30, grok:true },
 ];
 
 /** seat id -> crew name, for anything arriving from the server keyed by id. */
@@ -3239,14 +3239,27 @@ const DESK_KIT = {
                    b([0.18, 0.03, 0.24], [0.16, 0.81, -0.52], 0xf0e4c7); },
   // CODEX — twin code displays, a test-status stack and one proposal tray. The
   // station reads as an engineering bench, not another market terminal.
-  Codex: (b) => { b([0.05, 0.50, 0.78], [-0.44, 1.24, 0], 0x172451);
-                  b([0.02, 0.08, 0.54], [-0.41, 1.38, 0], 0x8ff7ff);
-                  b([0.02, 0.05, 0.38], [-0.41, 1.22, 0.08], 0x6f91ff);
-                  b([0.02, 0.05, 0.26], [-0.41, 1.08, -0.12], 0x66a348);
-                  b([0.30, 0.10, 0.42], [0.12, 0.86, 0.42], 0x29458f);
-                  b([0.24, 0.02, 0.34], [0.12, 0.92, 0.42], 0x172451);
-                  for (let i = 0; i < 4; i++) b([0.05, 0.05, 0.05], [0.18, 0.84 + i * 0.06, -0.46], i < 3 ? 0x66a348 : 0xe0ad3d);
-                  for (let i = 0; i < 3; i++) b([0.22, 0.025, 0.30], [-0.10, 0.82 + i * 0.035, -0.28], 0xf0e4c7); },
+  /* CODEX — an engineering bench, not another market terminal. It used to hang a
+     second display panel at x -0.44, directly BEHIND the standard monitor at
+     -0.30, with three coloured bars floating in the gap between them; from the
+     seated side that read as one broken screen. The second display is now beside
+     the first, portrait, on its own plinth, and every piece here is placed clear
+     of the standard keyboard (z -0.26..0.26), paper tray (z 0.56..0.88) and mug
+     (x 0.16, z -0.62). */
+  Codex: (b) => { b([0.16, 0.02, 0.16], [-0.26, 0.79, -0.70], 0x30343a);          // plinth
+                  b([0.05, 0.20, 0.05], [-0.26, 0.89, -0.70], 0x30343a);          // neck
+                  b([0.05, 0.50, 0.36], [-0.30, 1.24, -0.70], 0x14161a);          // portrait bezel
+                  b([0.02, 0.44, 0.30], [-0.272, 1.24, -0.70], 0x0d1b34);         // the code panel
+                  // lines of code, ragged the way code is, in editor green and blue
+                  for (let i = 0; i < 7; i++)
+                    b([0.01, 0.018, 0.07 + (i % 3) * 0.06], [-0.262, 1.42 - i * 0.055, -0.78 + (i % 3) * 0.04],
+                      i % 4 === 0 ? 0x10a37f : 0x6f91ff);
+                  b([0.14, 0.03, 0.12], [-0.02, 0.79, -0.92], 0x30343a);          // the test tower
+                  for (let i = 0; i < 4; i++)
+                    b([0.06, 0.045, 0.06], [-0.02, 0.83 + i * 0.055, -0.92], i < 3 ? 0x10a37f : 0xe0ad3d);
+                  b([0.24, 0.03, 0.26], [-0.04, 0.79, 0.40], 0x2a2f36);           // the proposal tray
+                  for (let i = 0; i < 3; i++)
+                    b([0.20, 0.012, 0.22], [-0.04, 0.815 + i * 0.014, 0.40], 0xf0e4c7); },
 };
 
 /* ── desks and chairs ─────────────────────────────────────────────────────── */
@@ -3265,7 +3278,12 @@ const seatPoint = (spec) => {
 };
 window.__seatPoint = seatPoint;
 for (const spec of STAFF) {
-  if (spec.grok) continue;          // built into his own (toggleable, unbaked) office
+  // Both side offices build their own desk and chair, up on their dais and out of
+  // the baked room. Codex was NOT skipped here, so he had two desks in the same
+  // square metre — one from this loop carrying his kit, one from his office
+  // carrying none — and the office's kitless desk is the one that registered his
+  // (never-drawn) screen.
+  if (spec.grok || spec.codex) continue;
   const yaw = deskYaw(spec);
   buildDesk(spec.desk, yaw + Math.PI, spec.y ?? 0, spec.claude ? P.claude : P.teal, spec.id);
   buildChair(seatPoint(spec), yaw, spec.y ?? 0);
@@ -3419,8 +3437,12 @@ scene.add(codexOffice);
   codexOffice.add(deck);
 
   // his desk and chair, up on the dais, out of the baked room
-  const desk = buildDesk([O.cx, -10.8], -Math.PI / 2, 0, 0x1b1e1c, null);
-  const chair = buildChair([O.cx, -9.7 - SIT_IN], Math.PI / 2, 0);   // where he actually sits
+  /* "Codex" so his bench and his live screen exist at all: a null kit built the
+     standard desk and registered a screen nobody could see. And the chair sits
+     at the FLOOR'S OWN spacing — the hardcoded -9.7 put it at -10.48, inside a
+     slab that spans -11.33 to -10.28, which is why he overlapped his own desk. */
+  const desk = buildDesk([O.cx, -10.8], -Math.PI / 2, 0, 0x1b1e1c, "Codex");
+  const chair = buildChair([O.cx, -9.3 - SIT_IN], Math.PI / 2, 0);   // where he actually sits
   for (const g of [desk, chair]) { room.remove(g); codexOffice.add(g); g.position.y += CODEX_DAIS; }
 
   // ── THE BOARD: what he is for — tests, proposals, and the standing promise
@@ -3537,8 +3559,10 @@ const grokBoard = (() => {
 
   // ── his desk and chair, black to match the room, up on the dais
   const deskYawG = -Math.PI / 2;                   // facing the floor, like the boss
-  const desk = buildDesk([O.cx, -10.8], deskYawG, 0, 0x1b1c1e, null);
-  const chair = buildChair([O.cx, -9.7 - SIT_IN], deskYawG + Math.PI, 0);
+  // Same two fixes as Codex's office: his own kit and screen, and a chair that is
+  // not inside the desk.
+  const desk = buildDesk([O.cx, -10.8], deskYawG, 0, 0x1b1c1e, "GrokAD");
+  const chair = buildChair([O.cx, -9.3 - SIT_IN], deskYawG + Math.PI, 0);
   for (const g of [desk, chair]) {
     room.remove(g); grokOffice.add(g);             // out of the baked room
     g.position.y += GROX_DAIS;                     // up on his dais
