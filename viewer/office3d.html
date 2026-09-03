@@ -915,6 +915,7 @@ window.__step = (ms) => {
     elapsed += dt;
     for (const id in workers) workers[id].update(dt, elapsed);
     separateFigures(dt);              // the frame loop runs this too — so must the stepper
+    breatheDeskLights(elapsed);       // ditto: a probe must be able to see the room breathe
   }
   return "stepped " + ms + "ms";
 };
@@ -1298,7 +1299,9 @@ const SCREEN_IDLE = {
   Risk: ["SIZE", "risk at stop"], PM: ["DECIDE", "propose · watch · pass"],
   Execution: ["TICKET", "unsigned"], Compliance: ["RULES", "code, not opinion"],
   Scribe: ["FILE", "the record"], Regime: ["WEATHER", "risk on/off"],
-  Review: ["DEBRIEF", "grade the landing"], Codex: ["IMPROVE", "advisory only"],
+  Review: ["DEBRIEF", "grade the landing"],
+  // Codex stopped being advisory-only the day he got the policy layer.
+  Codex: ["COACH", "grading every call"], GrokAD: ["ORDER FLOW", "the truth is in it"],
   CEO: ["THE DOOR", "approve · decline"],
 };
 function registerScreen(seat, canvas, tex) {
@@ -1371,6 +1374,147 @@ function buildDesk(at, yaw, y = 0, accent = P.teal, kitId = null) {
 
   const kit = kitId && DESK_KIT[kitId];
   if (kit) kit((size, at2, colour, rough = 0.82) => box(g, size, at2, colour, rough));
+
+  room.add(g);
+  registerSolid(g);
+  return g;
+}
+
+/* ── THE TWO BESPOKE BENCHES ──────────────────────────────────────────────────
+   Sixteen seats share buildDesk because sixteen people doing the same job should
+   have the same tools. The two principals in the side offices do not do that job:
+   one grades the desk's own history, one works the order flow. They had the
+   bullpen slab with a different kit bolted on, which read as what it was — a
+   trader's desk with an engineer sitting at it.
+   Both keep buildDesk's contract exactly: same origin and rotation, same 1.05
+   half-width so the seat maths and the 0.195 clearance are unchanged, the live
+   screen registered under the seat's own id, and the group registered solid. */
+
+/** Lights that breathe, so a workstation reads as running rather than modelled. */
+const DESK_LIGHTS = [];
+window.__deskLights = DESK_LIGHTS;
+const pulse = (mesh, { period = 2.2, phase = 0, floor = 0.25, ceil = 1.0 } = {}) => {
+  mesh.material = mesh.material.clone();          // never pulse a shared material
+  DESK_LIGHTS.push({ mesh, period, phase, floor, ceil, base: mesh.material.color.clone() });
+  return mesh;
+};
+
+function buildCodexDesk(at, yaw, y = 0) {
+  const g = new THREE.Group();
+  g.position.set(at[0], y, at[1]);
+  g.rotation.y = yaw;
+  const STEELDK = 0x2a2f36, RACK = 0x1b1e22, SHELF = 0x353b43;
+
+  // A steel bench top with a timber inlay where his hands actually are.
+  box(g, [1.05, 0.06, 2.0], [0, 0.745, 0], STEELDK, 0.55, 0.25);
+  box(g, [0.60, 0.012, 1.70], [0.14, 0.781, 0], TIMBER, 0.85);
+  // Trestle frames, not turned legs: two end frames and one stretcher.
+  for (const dz of [-0.80, 0.80]) {
+    box(g, [0.07, 0.70, 0.07], [-0.40, 0.37, dz], STEELDK, 0.5, 0.3);
+    box(g, [0.07, 0.70, 0.07], [0.40, 0.37, dz], STEELDK, 0.5, 0.3);
+    box(g, [0.92, 0.05, 0.05], [0, 0.22, dz], STEELDK, 0.5, 0.3);
+  }
+  box(g, [0.05, 0.05, 1.56], [0, 0.22, 0], STEELDK, 0.5, 0.3);
+
+  // A shelf across the back, carrying the displays clear of the work surface.
+  for (const dz of [-0.82, 0.82]) box(g, [0.05, 0.30, 0.05], [-0.44, 0.92, dz], SHELF, 0.6);
+  box(g, [0.22, 0.04, 1.74], [-0.42, 1.08, 0], SHELF, 0.6);
+
+  /* THE MACHINE, on an arm off the shelf rather than a foot on the desk — the
+     surface stays clear, which is the whole difference between a bench and a
+     terminal. The screen is the same live canvas every seat gets. */
+  box(g, [0.05, 0.30, 0.05], [-0.40, 1.24, 0], SHELF, 0.6);
+  box(g, [0.20, 0.04, 0.04], [-0.32, 1.38, 0], SHELF, 0.6);
+  box(g, [0.05, 0.50, 0.86], [-0.30, 1.30, 0], 0x14161a);
+  const sc = document.createElement("canvas"); sc.width = 256; sc.height = 150;
+  const stex = new THREE.CanvasTexture(sc);
+  stex.colorSpace = THREE.SRGBColorSpace;
+  const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.78, 0.44),
+    new THREE.MeshBasicMaterial({ map: stex, toneMapped: false }));
+  scr.rotation.y = Math.PI / 2;
+  scr.position.set(-0.272, 1.30, 0);
+  scr.userData.noBake = true;
+  g.add(scr);
+  registerScreen("Codex", sc, stex);
+
+  // The portrait code panel, second on the same shelf.
+  box(g, [0.05, 0.46, 0.34], [-0.30, 1.32, -0.76], 0x14161a);
+  box(g, [0.02, 0.40, 0.28], [-0.272, 1.32, -0.76], 0x0d1b34);
+  for (let i = 0; i < 7; i++)
+    box(g, [0.01, 0.018, 0.07 + (i % 3) * 0.06],
+      [-0.262, 1.49 - i * 0.052, -0.84 + (i % 3) * 0.04], i % 4 === 0 ? 0x10a37f : 0x6f91ff);
+
+  // The test tower, up on the shelf where he can see it from the door.
+  box(g, [0.12, 0.03, 0.12], [-0.42, 1.12, 0.76], RACK);
+  for (let i = 0; i < 4; i++)
+    pulse(box(g, [0.07, 0.05, 0.07], [-0.42, 1.16 + i * 0.06, 0.76], i < 3 ? 0x10a37f : 0xe0ad3d),
+      { period: 2.6, phase: i * 0.5, floor: 0.35 });
+
+  /* THE MACHINE ITSELF, under the bench and visible. An engineer's desk shows
+     the hardware; a trader's hides it. Its drive lights are the room's pulse. */
+  box(g, [0.34, 0.40, 0.46], [-0.22, 0.45, 0.60], RACK, 0.6);
+  for (let i = 0; i < 3; i++)
+    pulse(box(g, [0.02, 0.03, 0.06], [-0.048, 0.58 - i * 0.07, 0.60], i === 0 ? 0x10a37f : 0x6f91ff),
+      { period: 1.1 + i * 0.4, phase: i * 1.3, floor: 0.15 });
+  box(g, [0.02, 0.18, 0.30], [-0.048, 0.36, 0.60], 0x101215);      // the vent
+
+  box(g, [0.30, 0.02, 0.52], [0.18, 0.79, 0], DARK);                // keyboard
+  box(g, [0.24, 0.03, 0.26], [0.06, 0.79, 0.76], 0x2a2f36);         // the proposal tray
+  for (let i = 0; i < 3; i++) box(g, [0.20, 0.012, 0.22], [0.06, 0.815 + i * 0.014, 0.76], 0xf0e4c7);
+
+  room.add(g);
+  registerSolid(g);
+  return g;
+}
+
+function buildGrokDesk(at, yaw, y = 0) {
+  const g = new THREE.Group();
+  g.position.set(at[0], y, at[1]);
+  g.rotation.y = yaw;
+  const IRON = 0x22252a, CORK = 0x6b5535;
+
+  box(g, [1.05, 0.06, 2.0], [0, 0.745, 0], IRON, 0.7);
+  for (const [dx, dz] of [[-0.42,-0.86],[0.42,-0.86],[-0.42,0.86],[0.42,0.86]])
+    box(g, [0.08, 0.72, 0.08], [dx, 0.37, dz], IRON, 0.6);
+
+  /* THE PIN-BOARD. His office board is the BOOK; this is the working copy —
+     cards and red thread, the investigator's desk rather than the analyst's. */
+  box(g, [0.05, 0.60, 1.52], [-0.46, 1.08, 0], CORK, 0.95);
+  const pins = [[-0.30, 1.28], [0.10, 1.34], [0.40, 1.20], [-0.10, 1.02], [0.30, 0.94]];
+  for (const [pz, py] of pins) box(g, [0.02, 0.13, 0.17], [-0.432, py, pz], 0xe8e2d2, 0.9);
+  for (let i = 0; i < pins.length - 1; i++) {                       // the thread between them
+    const a = pins[i], b2 = pins[i + 1];
+    box(g, [0.012, 0.012, Math.hypot(b2[0] - a[0], b2[1] - a[1])],
+      [-0.425, (a[1] + b2[1]) / 2, (a[0] + b2[0]) / 2], 0xb5352c, 0.9);
+  }
+
+  // A heavy CRT, not a slim panel — and the same live canvas as every seat.
+  box(g, [0.16, 0.46, 0.62], [-0.26, 1.02, 0.34], 0x1a1d21);
+  const sc = document.createElement("canvas"); sc.width = 256; sc.height = 150;
+  const stex = new THREE.CanvasTexture(sc);
+  stex.colorSpace = THREE.SRGBColorSpace;
+  const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.54, 0.36),
+    new THREE.MeshBasicMaterial({ map: stex, toneMapped: false }));
+  scr.rotation.y = Math.PI / 2;
+  scr.position.set(-0.177, 1.03, 0.34);
+  scr.userData.noBake = true;
+  g.add(scr);
+  registerScreen("GrokAD", sc, stex);
+  pulse(box(g, [0.03, 0.03, 0.03], [-0.176, 0.80, 0.34], 0x4ec9a5), { period: 3.0, floor: 0.2 });
+
+  // The field kit: a recorder with two reels, a torch, and the file itself.
+  box(g, [0.22, 0.06, 0.30], [0.14, 0.80, -0.60], 0x2a2c30, 0.7);
+  for (const dz of [-0.68, -0.52]) box(g, [0.09, 0.02, 0.09], [0.14, 0.84, dz], 0x8a9095, 0.6);
+  box(g, [0.07, 0.07, 0.26], [0.24, 0.81, 0.30], 0x5b6a70, 0.6);
+  pulse(box(g, [0.05, 0.05, 0.03], [0.24, 0.81, 0.44], 0xe0ad3d), { period: 4.5, floor: 0.1 });
+  box(g, [0.32, 0.04, 0.42], [0.02, 0.79, 0.76], 0xd9cfba, 0.9);
+  box(g, [0.28, 0.012, 0.06], [0.02, 0.815, 0.76], 0xb5352c, 0.9);
+
+  box(g, [0.04, 0.28, 0.04], [-0.38, 0.91, -0.82], 0x3a4046, 0.6); // desk lamp
+  box(g, [0.18, 0.07, 0.18], [-0.32, 1.06, -0.82], 0x3a4046, 0.6);
+  pulse(box(g, [0.12, 0.02, 0.12], [-0.32, 1.02, -0.82], 0xffd9a0), { period: 5.0, floor: 0.55 });
+
+  box(g, [0.28, 0.02, 0.48], [0.18, 0.79, 0.02], DARK);             // keyboard
 
   room.add(g);
   registerSolid(g);
@@ -3441,7 +3585,7 @@ scene.add(codexOffice);
      standard desk and registered a screen nobody could see. And the chair sits
      at the FLOOR'S OWN spacing — the hardcoded -9.7 put it at -10.48, inside a
      slab that spans -11.33 to -10.28, which is why he overlapped his own desk. */
-  const desk = buildDesk([O.cx, -10.8], -Math.PI / 2, 0, 0x1b1e1c, "Codex");
+  const desk = buildCodexDesk([O.cx, -10.8], -Math.PI / 2, 0);
   const chair = buildChair([O.cx, -9.3 - SIT_IN], Math.PI / 2, 0);   // where he actually sits
   for (const g of [desk, chair]) { room.remove(g); codexOffice.add(g); g.position.y += CODEX_DAIS; }
 
@@ -3561,7 +3705,7 @@ const grokBoard = (() => {
   const deskYawG = -Math.PI / 2;                   // facing the floor, like the boss
   // Same two fixes as Codex's office: his own kit and screen, and a chair that is
   // not inside the desk.
-  const desk = buildDesk([O.cx, -10.8], deskYawG, 0, 0x1b1c1e, "GrokAD");
+  const desk = buildGrokDesk([O.cx, -10.8], deskYawG, 0);
   const chair = buildChair([O.cx, -9.3 - SIT_IN], deskYawG + Math.PI, 0);
   for (const g of [desk, chair]) {
     room.remove(g); grokOffice.add(g);             // out of the baked room
@@ -4747,6 +4891,21 @@ window.__floor = { THREE, renderer, scene, camera, workers, room,
     following: followSeat,
   }) };
 let elapsed = 0;
+/* THE DESKS BREATHE. Drive lights, a test tower, a recorder's standby lamp —
+   the cheap difference between a room that is modelled and a room that is
+   running. Both benches live outside the static bake, so their materials are
+   still addressable; each light owns its clone, so a pulse never leaks into the
+   shared material every other prop draws from. Called by the frame loop AND by
+   __step, per this file's rule that the hand-stepper must run whatever the frame
+   runs — otherwise the only way to check the room is alive is to look at it. */
+function breatheDeskLights(t) {
+  for (const L of DESK_LIGHTS) {
+    const s2 = (Math.sin(t * (Math.PI * 2 / L.period) + L.phase) + 1) / 2;
+    const k = L.floor + (L.ceil - L.floor) * s2;
+    L.mesh.material.color.setRGB(L.base.r * k, L.base.g * k, L.base.b * k);
+  }
+}
+
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
   elapsed += dt;
@@ -4765,6 +4924,7 @@ function frame() {
   }
   separateFigures(dt);
   botTick(dt, elapsed);
+  breatheDeskLights(elapsed);
   if (window.__grokZzz && window.__grokZzz.visible) {
     const z = window.__grokZzz;
     z.position.y = 2.45 + Math.sin(elapsed * 1.6) * 0.09;
@@ -5304,6 +5464,32 @@ async function deliver(from, toId, msg, kind = "") {
 const ANALYSTS = ["Forensics", "Liquidity", "Flow", "Technical", "Narrative"];
 
 const HANDLERS = {
+  /* THE COACH, ON SCREEN. The tutor grades every call and rewrites the seats'
+     standing orders on the server; without these four lines the most consequential
+     thing happening in the building would be invisible in the building. Each one
+     drives Codex's own monitor and the tape, so a visitor watching the floor sees
+     the desk learn rather than being told that it does. */
+  "tutor:graded": (e) => {
+    drawScreen("Codex", { title: "GRADING", lines: [`${e.calls} calls`, `${e.seats} seat verdicts`], good: true });
+    tape("Codex", `Graded ${e.calls} calls — ${e.seats} seat verdicts at the ${e.horizonMin}m mark`);
+  },
+  "tutor:held": (e) => {
+    drawScreen("Codex", { title: "HOLDING", lines: [`${e.best}/${e.need} graded`, "sample gate"] });
+    tape("Codex", `Holding: no seat has ${e.need} graded calls yet (best ${e.best}). Changing technique on this would be learning noise.`);
+  },
+  "policy:changed": (e) => {
+    drawScreen("Codex", { title: `REWROTE ${String(e.seat).toUpperCase()}`, lines: [String(e.rationale || "").slice(0, 40)], good: true });
+    tape("Codex", `Rewrote ${e.seat}'s standing orders — ${e.rationale || "on the numbers"}`, "hi");
+    who("Codex")?.say(`${e.seat}, new standing order.`);
+  },
+  "policy:refused": (e) => {
+    drawScreen("Codex", { title: "REFUSED", lines: [e.invariant, "invariant"], bad: true });
+    tape("Codex", `Refused a change to ${e.seat}: ${e.why}`, "warn");
+  },
+  "policy:reverted": (e) => {
+    drawScreen("Codex", { title: "REVERTED", lines: [`${e.notes} orders`, "cohort was worse"], bad: true });
+    tape("Codex", `Reverted ${e.version} — ${e.why}`, "warn");
+  },
   "cycle:start": (e) => {
     tape("Floor", `Cycle ${String(e.cycle).slice(0, 16)} opened`, "hi");
     const p = who("Scout");
