@@ -1,4 +1,81 @@
+import db from "./lib/store.js";
 import { decode, isAddress } from "./lib/base58.js";
+
+/* A ROLLING BOARD, NOT A SNAPSHOT.
+ *
+ * Each sweep sees only what pump.fun happens to be trading in that two-minute window,
+ * and a verified caller is about one callout in eighteen — so the tab showed five cards,
+ * then one, then none, and read as broken when it was working. What the reader wants is
+ * "who has called something recently", which is a question about the last few hours, not
+ * about this instant. Every caller that clears the bar is kept here and the tab is drawn
+ * from the window; a caller seen again updates in place rather than appearing twice.
+ *
+ * Durable, because Render restarts on every deploy and an in-memory board would empty
+ * itself several times a day for reasons that have nothing to do with the market. */
+db.exec(`
+CREATE TABLE IF NOT EXISTS verified_callouts (
+  mint          TEXT NOT NULL,
+  caller        TEXT NOT NULL,
+  symbol        TEXT,
+  username      TEXT,
+  text          TEXT,
+  multiple      REAL,
+  wallet_sol_usd REAL,
+  callout_id    TEXT,
+  url           TEXT,
+  called_at     INTEGER,
+  first_seen    INTEGER NOT NULL,
+  last_seen     INTEGER NOT NULL,
+  PRIMARY KEY (mint, caller)
+);
+CREATE INDEX IF NOT EXISTS idx_verified_callouts_seen ON verified_callouts(last_seen DESC);
+`);
+
+/** The window the board covers. A call older than this is history, not news. */
+export const CALLOUT_BOARD_HOURS = Math.max(1, Math.min(168,
+  Number(process.env.CALLOUT_BOARD_HOURS || 12) || 12));
+
+/** Record what cleared the bar. Re-seeing a caller refreshes their balance and time. */
+export function rememberVerifiedCallouts(rows, { now = Date.now() } = {}) {
+  const write = db.prepare(`
+    INSERT INTO verified_callouts
+      (mint, caller, symbol, username, text, multiple, wallet_sol_usd, callout_id, url, called_at, first_seen, last_seen)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(mint, caller) DO UPDATE SET
+      symbol=excluded.symbol, username=excluded.username, text=excluded.text,
+      multiple=excluded.multiple, wallet_sol_usd=excluded.wallet_sol_usd,
+      url=excluded.url, called_at=excluded.called_at, last_seen=excluded.last_seen`);
+  let kept = 0;
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r?.mint || !r?.user) continue;
+    try {
+      write.run(r.mint, r.user, r.symbol ?? null, r.username ?? null,
+        typeof r.text === "string" ? r.text.slice(0, 240) : null,
+        Number.isFinite(Number(r.multiple)) ? Number(r.multiple) : null,
+        Number.isFinite(Number(r.walletSolUsd)) ? Number(r.walletSolUsd) : null,
+        r.id ?? null, r.url ?? null,
+        Number.isFinite(Number(r.ts)) ? Number(r.ts) : null, now, now);
+      kept++;
+    } catch { /* one bad row never costs the sweep */ }
+  }
+  // Bounded: the window prunes by age, and this caps a pathological burst.
+  try {
+    db.prepare(`DELETE FROM verified_callouts WHERE last_seen < ?`)
+      .run(now - CALLOUT_BOARD_HOURS * 3600e3);
+    db.prepare(`DELETE FROM verified_callouts WHERE rowid NOT IN
+      (SELECT rowid FROM verified_callouts ORDER BY last_seen DESC LIMIT 400)`).run();
+  } catch { /* pruning is housekeeping, never a reason to fail a request */ }
+  return kept;
+}
+
+/** The board: everything that cleared the bar inside the window, freshest first. */
+export function verifiedCalloutBoard({ now = Date.now(), hours = CALLOUT_BOARD_HOURS, limit = 60 } = {}) {
+  try {
+    return db.prepare(`SELECT * FROM verified_callouts WHERE last_seen >= ?
+      ORDER BY last_seen DESC, wallet_sol_usd DESC LIMIT ?`)
+      .all(now - hours * 3600e3, Math.max(1, Math.min(200, limit)));
+  } catch { return []; }
+}
 
 /** The tape values a confirmed token inflow at the current market mark. It does not
  * reconstruct the wallet's original quote-token consideration, so the public contract

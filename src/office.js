@@ -41,7 +41,8 @@ import { buildExecutorDashboard } from "./executor-dashboard.js";
 import * as passes from "./passes.js";
 import { callouts, WHALE_USD } from "./whales.js";
 import { verifiedWhaleCallouts, verifiedHolderCallouts, CALLOUT_WHALE_MIN_USD,
-  CALLOUT_MIN_WALLET_USD, evidenceBackedPumpfunCallouts } from "./callouts.js";
+  CALLOUT_MIN_WALLET_USD, CALLOUT_BOARD_HOURS, rememberVerifiedCallouts,
+  verifiedCalloutBoard, evidenceBackedPumpfunCallouts } from "./callouts.js";
 import { isAddress } from "./lib/base58.js";
 import { retiredBrowserRpcResponse } from "./execution-gates.js";
 import { providerCreditHealth, providerErrorForViewer } from "./provider-health.js";
@@ -1308,13 +1309,24 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           const unverifiedSeen = withCallouts.reduce(
             (n, t) => n + t.thread.callouts.filter((r) => r?.verified !== true).length, 0);
 
-          // Group what cleared the bar back onto its coin, biggest holder first.
+          /* THE BOARD IS A WINDOW, NOT THIS INSTANT. A sweep sees only what pump.fun is
+             trading in these two minutes, and a verified caller is about one callout in
+             eighteen — so the tab showed five cards, then one, then none, and read as
+             broken while working correctly. What cleared the bar is recorded, and the
+             tab is drawn from everything recorded inside the window. */
+          rememberVerifiedCallouts(gate.rows, { now });
+          const board = verifiedCalloutBoard({ now });
+
           const byMint = new Map();
-          for (const row of gate.rows) {
+          for (const row of board) {
             if (!byMint.has(row.mint)) byMint.set(row.mint, { mint: row.mint, symbol: row.symbol, callouts: [] });
             const bucket = byMint.get(row.mint);
             if (bucket.callouts.length < 5) bucket.callouts.push({
-              ...row,
+              id: row.callout_id, user: row.caller, username: row.username,
+              verified: true, text: row.text, multiple: row.multiple,
+              ts: row.called_at, url: row.url, mint: row.mint, symbol: row.symbol,
+              walletSolUsd: row.wallet_sol_usd,
+              firstSeenAt: row.first_seen, lastSeenAt: row.last_seen,
               verificationLevel: "pumpfun-verified-and-wallet-sol-above-bar",
             });
           }
@@ -1338,7 +1350,10 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               coinsWithCallouts: withCallouts.length,
               verifiedCallers: wallets.length,
               partialScans: 0,
-              verifiedEmpty: withCallouts.length - byMint.size,
+              verifiedEmpty: Math.max(0, withCallouts.length - gate.rows.length),
+              newThisSweep: gate.rows.length,
+              onBoard: board.length,
+              boardHours: CALLOUT_BOARD_HOURS,
               incompleteEmpty: 0,
               complete: reachable.length === threads.length && solUsd > 0,
               failures: solUsd > 0 ? [] : [{ reason: "sol-usd-price-unavailable", count: 1 }],

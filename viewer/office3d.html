@@ -9203,6 +9203,8 @@ async function loadCalloutsDashboard() {
         " · value basis: " + String(policy.valueBasis || "caller-wallet-sol-balance-at-current-mark") +
         " · purchase consideration proven: " + String(policy.purchaseConsiderationProven === true) +
         " · unmatched chatter included: " + String(policy.unmatchedChatterIncluded === true) +
+        (coverage.boardHours ? " · board covers the last " + coverage.boardHours + "h" +
+          (coverage.newThisSweep != null ? ", " + coverage.newThisSweep + " found this sweep" : "") : "") +
         " · coverage: " + String(coverage.succeeded ?? 0) + "/" + String(coverage.attempted ?? 0) +
         " checked" + (coverage.candidates != null && coverage.candidates > (coverage.attempted ?? 0) ? " of " + coverage.candidates + " candidates" : "") + (coverage.complete === true ? " (complete)" : " (incomplete)") +
         (dashWhen(body.generatedAt) ? " \u00b7 as of " + dashWhen(body.generatedAt) : "") +
@@ -9233,8 +9235,9 @@ async function loadCalloutsDashboard() {
           ? "Pump.fun could not be reached for any coin in this pass. That is unknown, not evidence that no verified caller exists."
           : withCallouts === 0
             ? "None of the " + succeeded + " coins checked carried a callout at all."
-            : "No verified caller in the " + withCallouts + " coin" + (withCallouts === 1 ? "" : "s") +
-              " that carried callouts held " + (whaleBar ? dashMoney(whaleBar) : "the bar") + " of SOL" +
+            : "No verified caller has held " + (whaleBar ? dashMoney(whaleBar) : "the bar") + " of SOL in the last " +
+              (coverage.boardHours || 12) + " hours. " + withCallouts + " coin" + (withCallouts === 1 ? "" : "s") +
+              " carried callouts in this sweep" +
               (failed ? "; " + failed + " coin" + (failed === 1 ? "" : "s") + " could not be checked" : "") + failWhy + ".";
       const hiddenNote = (hidden.unverified || hidden.belowWhale || hidden.unreadableWallet)
         ? " " + String(hidden.unverified || 0) + " caller" + ((hidden.unverified || 0) === 1 ? "" : "s") +
@@ -9262,9 +9265,11 @@ async function loadCalloutsDashboard() {
       if (callout.text) card.appendChild(dashNode("p", "callout-evidence", "“" + String(callout.text).slice(0, 280) + "”"));
       const proof = dashNode("div", "callout-proof");
       const posted = dashWhen(callout.ts);
+      const found = dashWhen(callout.lastSeenAt ?? callout.firstSeenAt);
       proof.append(
         dashNode("span", "", dashMoney(row.walletUsd) + " of SOL in this wallet"),
         ...(posted ? [dashNode("span", "", "called " + posted)] : []),
+        ...(found ? [dashNode("span", "", "seen " + found)] : []),
         ...(Number.isFinite(Number(callout.multiple))
           ? [dashNode("span", "", Number(callout.multiple).toFixed(1) + "x since the call, per Pump.fun")] : []),
         dashNode("span", "", "balance is confirmed on chain; the purchase is not")
