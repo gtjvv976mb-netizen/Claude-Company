@@ -923,6 +923,12 @@ function applyConfirmedEntry(intent) {
     .reduce((sum, position) => sum + (Number(position.riskF) || 0), 0);
   journal.markAccounted(intent.id, next, { consumeDeferredDeskExit: Boolean(deferredExit) });
   S = next;
+  /* The desk is told what the bot did. Queued rather than awaited: a fill is a fact
+     about the chain and must never be delayed or undone by the desk being unreachable. */
+  if (Number.isInteger(Number(pos?.callId)) && Number(pos.callId) > 0) {
+    unreportedFills.add(Number(pos.callId));
+    flushUnreportedFills().catch(() => {});
+  }
   log(`${independentlyVerified ? "BOUGHT" : "RECOVERED + QUARANTINED"} ` +
     `${event.symbol || intent.mint.slice(0, 6)} — ${paidSol.toFixed(6)} SOL → ${output} raw — ` +
     `https://solscan.io/tx/${intent.signature}`);
@@ -1585,6 +1591,63 @@ const noteFeedSuccess = () => {
   runtimeHealth.lastFeedSuccessAt = Date.now();
   runtimeHealth.consecutiveFeedFailures = 0;
 };
+/* TELLING THE DESK THE TRADE HAPPENED.
+ *
+ * The `taken` flag is what the site reads to show a position on the floor's board, and
+ * nothing in this executor ever set it — only a human clicking in the UI did. So on
+ * 2026-09-04 the bot bought TOAD (signed, confirmed, finalized, 491m tokens in the
+ * wallet) and the site showed nothing at all. The trade was real and invisible, which
+ * is indistinguishable from a bot that never traded.
+ *
+ * Reported on the same read-only secret as the feed and the heartbeat: this states a
+ * fact about our own floor and gives the server no control over us.
+ *
+ * NOT fire-and-forget. That mistake is already in this codebase once — the desk's entry
+ * alert was posted without awaiting it and a failed write lost a call silently. A fill
+ * that cannot be reported stays in the queue and is retried on every tick until the
+ * desk acknowledges it, and the queue is rebuilt from the journal at boot so a restart
+ * mid-report does not drop it. */
+const unreportedFills = new Set();
+let reportingFills = false;
+
+async function reportTakenCall(callId) {
+  const response = await fetch(`${API}/api/floor/${FLOOR}/executor/take`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${SECRET}`, "content-type": "application/json" },
+    body: JSON.stringify({ callId, taken: true }),
+    redirect: "error",
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`take HTTP ${response.status}`);
+  return true;
+}
+
+async function flushUnreportedFills() {
+  if (reportingFills || !unreportedFills.size) return;
+  reportingFills = true;
+  try {
+    for (const callId of [...unreportedFills]) {
+      try {
+        await reportTakenCall(callId);
+        unreportedFills.delete(callId);
+        log(`reported fill of call ${callId} to the desk`);
+      } catch (error) {
+        // Left in the queue on purpose; the next tick tries again.
+        log(`could not report fill of call ${callId} (${error.message}) — will retry`);
+      }
+    }
+  } finally { reportingFills = false; }
+}
+
+/** Every open position whose fill the desk has not acknowledged. Rebuilt at boot so a
+ *  restart between the fill and the report does not lose it. */
+function queueUnreportedFillsFromJournal() {
+  for (const position of Object.values(S.positions || {})) {
+    const callId = Number(position?.callId);
+    if (Number.isInteger(callId) && callId > 0) unreportedFills.add(callId);
+  }
+}
+
 function sendHeartbeat() {
   if (Date.now() - lastHeartbeatAt < 60_000) return;
   lastHeartbeatAt = Date.now();
@@ -1852,6 +1915,7 @@ async function tick() {
     runtimeHealth.consecutiveTickFailures = tickFailed
       ? runtimeHealth.consecutiveTickFailures + 1 : 0;
     maybeProbeExecutionReadiness();
+    flushUnreportedFills().catch(() => {});
     sendHeartbeat();
     ticking = false;
     scheduleBackgroundRecovery();
@@ -1865,6 +1929,7 @@ log(`caps: ${CFG.maxSolPerTrade} SOL/trade, ${CFG.dailySolCap} SOL/rolling 24h d
   `${CFG.maxOpenPositions} open (a sentinel — book heat and the wallet bind first)`);
 log(`journal: ${STATE_DB}; entries pause: ${PAUSE_ENTRIES_FILE}; ` +
   `sleep fault: ${SLEEP_ASSERTION_FAULT_FILE}; hard stop: ${HARD_STOP_FILE}`);
+queueUnreportedFillsFromJournal();
 log(`resuming ${openList().length} position(s) from cursor ${S.cursor}`);
 await tick();
 setInterval(tick, POLL_MS);

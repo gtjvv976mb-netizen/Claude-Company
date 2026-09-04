@@ -551,6 +551,32 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
            Browser session auth protects the tenant's wallet/filter telemetry. The
            only chain action is one fixed getBalance for the public burner address;
            no user-supplied RPC method or transaction can cross this route. */
+        /* ── THE BOT TELLING THE DESK IT ACTUALLY FILLED ────────────────────
+           The `take` flag is what the site reads to show a position on the
+           floor's board, and only a human clicking in the UI ever set it. So on
+           2026-09-04 the bot bought TOAD — signed, confirmed, finalized, 491m
+           tokens in the wallet — and the site showed nothing, because the desk
+           had never been told. The trade was real and invisible.
+
+           Same read-only secret as the feed and the heartbeat: this reports a
+           fact about the bot's own floor and grants the server no control. */
+        const takeMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/executor\/take$/);
+        if (takeMatch) {
+          const floorNo = Number(takeMatch[1]);
+          const secret = db.prepare("SELECT executor_secret FROM copy_settings WHERE floor_no=?").get(floorNo)?.executor_secret;
+          const auth = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+          const okAuth = secret && auth && (() => {
+            try { return cryptoTimingEqual(auth, secret); } catch { return false; }
+          })();
+          if (!okAuth) return json(401, { error: "bad or missing executor secret" });
+          if (req.method !== "POST") return json(405, { error: "method not allowed" });
+          const body = await readBody();
+          const callId = Number(body?.callId);
+          if (!Number.isInteger(callId) || callId <= 0) return json(400, { error: "callId is required" });
+          const ok = copy.markTaken(floorNo, callId, body?.taken !== false);
+          return json(200, { ok: Boolean(ok), callId });
+        }
+
         const executorStatusMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/executor\/status$/);
         if (executorStatusMatch) {
           if (req.method !== "GET") return json(405, { error: "method not allowed" });
