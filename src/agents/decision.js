@@ -179,7 +179,12 @@ slippage tolerance to both legs, adds a worst-case network fee, and pump.fun tak
 1.25% a side on the small bands. A stop inside that is triggered by the costs alone, and
 the bot proves it before signing and refuses the trade — four consecutive live calls
 were refused this way on 2026-09-03 carrying stops 5% to 6.5% below entry. So the stop
-must sit at least ${cfg.minStopDistancePct}% below the entry price. If the level
+must sit at least ${stopFloorForCoin(ev, cfg).toFixed(1)}% below the entry price \
+(this coin's own figure: its measured round trip is \
+${Number(ev?.exitProbe?.roundTripLossPct ?? NaN).toFixed(2)}%, slippage costs \
+${(( 1 - (1 - (Number(cfg.executorSlippageBps) || 300) / 10_000) ** 2) * 100).toFixed(2)}% \
+and fees about ${((Number(cfg.executorWorstFeeRatio) || 0.057) * 100).toFixed(1)}% of the \
+position the bot will size). If the level
 that genuinely invalidates the thesis is closer than that, the honest answer is that
 this coin cannot be traded at this size on this desk — say so and choose the minimal
 tier rather than moving the level to fit.
@@ -266,6 +271,18 @@ const pmPrompt = (ev, analysts, redteam, risk, weightedScore) => {
       `=== WEIGHTED ANALYST COMPOSITE ===\n${weightedScore.toFixed(1)} / 100 ` +
       `(weights: ${JSON.stringify(cfg.weights)})`;
 };
+
+/** The stop distance THIS coin must clear, reproducing the executor's own guard so the
+ *  PM is told the number compliance will actually check it against. Falls back to the
+ *  flat floor when the round trip was not measured. */
+export function stopFloorForCoin(ev, cfg) {
+  const flat = Number(cfg?.minStopDistancePct) || 0;
+  const rtPct = Number(ev?.exitProbe?.roundTripLossPct);
+  if (!Number.isFinite(rtPct)) return flat;
+  const haircut = (1 - (Number(cfg?.executorSlippageBps) || 300) / 10_000) ** 2;
+  const feeRatio = Number(cfg?.executorWorstFeeRatio) || 0.057;
+  return Math.max(flat, (1 - ((1 - rtPct / 100) * haircut - feeRatio)) * 100);
+}
 
 export async function runPM(ev, analysts, redteam, risk, weightedScore, opts = {}) {
   // A tenant floor may hire Grok as its Managing Director: the PM seat of that

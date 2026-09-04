@@ -103,7 +103,15 @@ minLiquidityUsd: num("DESK_MIN_LIQUIDITY_USD", 12000),
      * (1 - 0.97^2 = 5.91% at 300bps), adds a worst-case network fee near 2%, and pump.fun
      * itself takes about 1.25% a side on the small bands. Round to a floor of 12%, which
      * clears all three with room for the measured round trip on top. */
+    /* The absolute floor, used when a coin's round trip could not be measured. The
+       real floor is derived per coin in compliance.js from the executor's own guard. */
     minStopDistancePct: num("DESK_MIN_STOP_DISTANCE_PCT", 12),
+    /* Mirrors of the executor's cost model, so the desk refuses exactly what the bot
+       would refuse. executorWorstFeeRatio is the fee as a share of the position the bot
+       ACTUALLY sizes — conviction shrinks a 0.05 SOL trade to about 0.0175, where a
+       fixed 0.0005 SOL fee each way is 5.7% rather than 2%. */
+    executorSlippageBps: num("EXECUTOR_SLIPPAGE_BPS", 300),
+    executorWorstFeeRatio: Number(process.env.EXECUTOR_WORST_FEE_RATIO || 0.057),
 
   /* REWEIGHTED FOR THE MARKET THIS DESK IS ACTUALLY IN.
    *

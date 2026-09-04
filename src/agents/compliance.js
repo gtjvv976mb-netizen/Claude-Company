@@ -90,12 +90,46 @@ export function complianceCheck({ pm, risk, redteam, ticket, ev }) {
      * a second HeeHaw, stops 5% to 6.5% below entry). The seats are told the floor, but a
      * prompt is a request; this is the check. Publishing a call the desk's own bot can
      * prove is already lost wastes the offer and teaches the tenant nothing. */
-    const stopFloorPct = Number(cfg.minStopDistancePct) || 0;
-    if (stopFloorPct > 0 && ticket.stop_price > 0 && ticket.entry_zone_low > 0) {
+    /* THE FLOOR IS THIS COIN'S OWN ARITHMETIC, NOT A FLAT NUMBER.
+     *
+     * A single figure cannot be right for every coin, because what the round trip costs
+     * is a fact about the coin. Measured against the desk's eight most recent published
+     * calls, the flat 12% let seven through that the executor then refused — the four
+     * with 5% to 8.5% stops were never tradeable at any size, and even the 12% and 15%
+     * ones failed once conviction had shrunk the position and the fixed fee became a
+     * larger share of it.
+     *
+     * So the floor is now the executor's own guard, run here before publishing:
+     *   conservative = (1 - roundTrip) * slippageHaircut - feeRatio
+     *   the call is refused unless conservative > stopRatio
+     * which rearranges to a minimum stop distance this coin must carry. Publish only
+     * what the bot can take, and every published call is actionable by construction.
+     *
+     * A coin whose honest invalidation level is tighter than that is not a coin this
+     * desk can trade at this size. That is the answer the PM prompt already asks for —
+     * say so and decline, rather than moving the level to fit. */
+    const floorPct = Number(cfg.minStopDistancePct) || 0;
+    if (ticket.stop_price > 0 && ticket.entry_zone_low > 0) {
       const distPct = (1 - ticket.stop_price / ticket.entry_zone_low) * 100;
-      v(distPct < stopFloorPct, "stop_inside_costs",
-        `stop is ${distPct.toFixed(1)}% below entry; the round trip alone costs about ` +
-        `${stopFloorPct}%, so this stop is triggered by costs before the thesis is wrong.`);
+      const rtPct = Number(ev?.exitProbe?.roundTripLossPct);
+      const haircut = (1 - (Number(cfg.executorSlippageBps) || 300) / 10_000) ** 2;
+      const feeRatio = Number(cfg.executorWorstFeeRatio) || 0.057;
+      /* Derived only when the round trip was actually measured. An unmeasured coin
+         falls back to the flat floor rather than to a number invented from nothing. */
+      const derivedPct = Number.isFinite(rtPct)
+        ? (1 - ((1 - rtPct / 100) * haircut - feeRatio)) * 100
+        : null;
+      const requiredPct = Math.max(floorPct, derivedPct ?? 0);
+      v(distPct < requiredPct, "stop_inside_costs",
+        `stop is ${distPct.toFixed(1)}% below entry, but this coin needs at least ` +
+        `${requiredPct.toFixed(1)}%` +
+        (derivedPct != null
+          ? ` — its measured round trip is ${rtPct.toFixed(2)}%, slippage costs ` +
+            `${((1 - haircut) * 100).toFixed(2)}% and fees about ${(feeRatio * 100).toFixed(1)}% ` +
+            `of the position the bot will actually size`
+          : ` (the flat floor; this coin's round trip was not measured)`) +
+        `. A stop inside that is triggered by the costs before the thesis is wrong, and ` +
+        `the executor proves it and refuses to sign.`);
     }
 
     const tpSum = (ticket.take_profit || []).reduce((a, t) => a + (t.pct_to_sell || 0), 0);

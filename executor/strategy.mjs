@@ -101,6 +101,9 @@ export const DEFAULTS = {
    * Live conviction runs 20-51 out of 100, so an unfloored scale would put almost
    * every trade at a fifth of size and the fees would eat the book. */
   convictionFloor: 0.35,
+  /* The most of a trade the round trip's network fees may be. Conviction cannot shrink
+     a position below the size where fees exceed this — see planEntry. */
+  maxFeeShareOfTrade: 0.025,
   /* The smallest position worth opening at all: below this the round trip is mostly
    * fees, so the trade is refused rather than sized into noise. */
   minSolPerTrade: 0.005,
@@ -201,8 +204,34 @@ export function planEntry({ call, cfg = DEFAULTS, state }) {
   want = Math.min(want, c.maxSolPerTrade);
   if (call.size_sol != null) want = Math.min(want, Number(call.size_sol));
   if (convictionScale < 1) {
-    want *= convictionScale;
-    why += `; conviction ${conviction}/100 sizes to ${(convictionScale * 100).toFixed(0)}%`;
+    /* SCALING DOWN STOPS HELPING ONCE FEES DOMINATE.
+     *
+     * Network fees are FIXED per trade, so halving the position doubles them as a share
+     * of it. Measured against the desk's eight most recent published calls: at the full
+     * 0.05 SOL the fee is 2.0% of the trade and four were tradeable; scaled to 0.0175
+     * by a conviction of 30 the fee becomes 5.7% and only ONE was. Shrinking the
+     * position did not reduce risk — it converted the trade into fees and then failed
+     * the executor's own cost guard.
+     *
+     * So conviction may scale down only to the point where the round trip still costs
+     * less than maxFeeShareOfTrade. Below that a smaller trade is strictly worse: the
+     * same lamports of fee against less upside. This does not overrule the owner's
+     * "more risk, less size" — it stops that rule running past the point where it
+     * inverts. */
+    const feeFloorSol = feeReserve > 0 && c.maxFeeShareOfTrade > 0
+      ? (2 * feeReserve) / c.maxFeeShareOfTrade
+      : 0;
+    const scaled = want * convictionScale;
+    if (scaled >= feeFloorSol) {
+      want = scaled;
+      why += `; conviction ${conviction}/100 sizes to ${(convictionScale * 100).toFixed(0)}%`;
+    } else if (want > feeFloorSol) {
+      want = feeFloorSol;
+      why += `; conviction ${conviction}/100 would size to ${scaled.toFixed(4)} SOL, held at ` +
+        `${feeFloorSol.toFixed(4)} where fees are ${(c.maxFeeShareOfTrade * 100).toFixed(1)}% of the trade`;
+    }
+    // If even the ceiling is under the fee floor, leave it alone — the rails below and
+    // the minimum-size check decide, and they already refuse a position of pure fees.
   }
 
   /* SIZE DOWN TO EACH RAIL RATHER THAN REFUSING THE CALL.

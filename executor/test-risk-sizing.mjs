@@ -19,7 +19,7 @@ const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  —
                                  : (fail++, console.log(`  FAIL ${n}${d ? "  — " + d : ""}`)); };
 
 const cfg = { ...DEFAULTS, fixedSol: 0.05, maxSolPerTrade: 0.05, dailySolCap: 0.5,
-  networkFeeReserveSol: 0.002, measuredRoundTripLossPct: 0 };
+  networkFeeReserveSol: 0.0005, measuredRoundTripLossPct: 0 };
 const state = { openCount: 0, realizedTodaySol: 0, deployedTodaySol: 0, bookHeat: 0,
   equitySol: 0.3367, spendableSol: 0.3367, wins: 0, losses: 0 };
 // entry 1, stop 0.9 => a 10% stop. target 2 => plenty of R.
@@ -46,8 +46,30 @@ console.log("\nTHE TEAM'S CONFIDENCE IS PRICED IN");
   const sure = plan({ conviction: 100 });
   const unsure = plan({ conviction: 30 });
   const silent = plan({});
-  ok("a confident call trades bigger than a lukewarm one", sure.sol > unsure.sol,
-    `${sure.sol.toFixed(4)} vs ${unsure.sol.toFixed(4)} SOL`);
+  /* THE HAIRCUT HAS ALMOST NO ROOM AT A 0.05 SOL CEILING, and that is a finding rather
+     than a bug. Fees are fixed, so a position cannot be shrunk below the size where
+     they dominate — 0.04 SOL at a 0.0005 SOL round-trip fee and a 2.5% share. Between
+     that floor and the 0.05 ceiling there is a 20% band for conviction to work in, and
+     once the per-name risk cap binds first there is none at all. Measured against the
+     desk's own calls, letting conviction size past that floor cut the bot from taking
+     four of eight to taking one. So the property is asserted where the rule can
+     actually operate — a ceiling with room above the fee floor. */
+  const roomy = (over) => planEntry({ call: call(over),
+    state: { ...state, equitySol: 4, spendableSol: 4 },
+    cfg: { ...cfg, fixedSol: 0.2, maxSolPerTrade: 0.2 } });
+  ok("a confident call trades bigger than a lukewarm one, where there is room to scale",
+    roomy({ conviction: 100 }).sol > roomy({ conviction: 30 }).sol,
+    `${roomy({ conviction: 100 }).sol.toFixed(4)} vs ${roomy({ conviction: 30 }).sol.toFixed(4)} SOL`);
+  /* At the live 0.05 ceiling the band is 0.05 down to the 0.04 fee floor — conviction
+     can cut a fifth off a position and no more. That is the honest shape of "less size"
+     on a bankroll this small, and it is why letting it size past the floor cost the bot
+     three of the four calls it could otherwise take. */
+  ok("...and at the live 0.05 ceiling the band is only down to the fee floor",
+    unsure.sol >= 0.0399 && unsure.sol < sure.sol,
+    `${sure.sol.toFixed(4)} -> ${unsure.sol.toFixed(4)} SOL, a ${((1 - unsure.sol / sure.sol) * 100).toFixed(0)}% band`);
+  ok("a position is never shrunk into its own fees",
+    unsure.sol >= (2 * cfg.networkFeeReserveSol) / DEFAULTS.maxFeeShareOfTrade - 1e-9,
+    `${unsure.sol.toFixed(4)} SOL, floor ${((2 * cfg.networkFeeReserveSol) / DEFAULTS.maxFeeShareOfTrade).toFixed(4)}`);
   ok("the haircut is floored, not proportional all the way down",
     unsure.convictionScale === DEFAULTS.convictionFloor, `${unsure.convictionScale}`);
   ok("conviction 50 sizes to half", plan({ conviction: 50 }).convictionScale === 0.5);
@@ -64,9 +86,15 @@ console.log("\nEVERY RAIL SIZES DOWN, NONE SIZES UP");
   ok("the daily deploy cap sizes down instead of refusing",
     nearlyDeployed.action === "buy" && nearlyDeployed.sol < cfg.fixedSol,
     `${nearlyDeployed.sol?.toFixed(4)} SOL — ${nearlyDeployed.reason}`);
-  const hotBook = plan({}, { bookHeat: DEFAULTS.bookHeatMax - 0.02 });
+  const hotBook = plan({}, { bookHeat: DEFAULTS.bookHeatMax - 0.016 });
   ok("a hot book sizes down instead of refusing", hotBook.action === "buy" && hotBook.sol < cfg.fixedSol,
     `${hotBook.sol?.toFixed(4)} SOL`);
+  /* But only down to the fee floor. Past that there is no partial trade to make — the
+     remaining budget buys a position that is mostly fees — so it refuses instead. That
+     is the fee floor working, not the heat cap failing. */
+  const veryHot = plan({}, { bookHeat: DEFAULTS.bookHeatMax - 0.004 });
+  ok("...and refuses rather than trading a position of pure fees when the room runs out",
+    veryHot.action === "skip", veryHot.reason?.slice(0, 60));
   const thin = plan({}, { spendableSol: 0.02, equitySol: 0.02 });
   ok("a thin wallet sizes to what it actually has",
     thin.action !== "buy" || thin.sol <= 0.02 - cfg.networkFeeReserveSol + 1e-9,

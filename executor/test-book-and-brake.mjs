@@ -38,7 +38,9 @@ const fillBook = (c = cfg()) => {
 console.log("\nRISK DECIDES HOW MANY MEMECOINS RUN AT ONCE, NOT A COUNT");
 {
   const book = fillBook();
-  ok("the book holds far more than the old four", book.n >= 10, `${book.n} positions, ${book.deployed.toFixed(3)} SOL deployed`);
+  /* Fewer than the raw heat budget alone would allow, because positions can no longer
+     be shrunk into their own fees — each one is bigger, so the wallet holds fewer. */
+  ok("the book holds far more than the old four", book.n >= 8, `${book.n} positions, ${book.deployed.toFixed(3)} SOL deployed`);
   ok("...and it is RISK that stops it, not the position sentinel",
     !/of max/.test(book.stoppedBy), book.stoppedBy.slice(0, 70));
   const old = fillBook(cfg({ bookHeatMax: 0.08, maxOpenPositions: 4 }));

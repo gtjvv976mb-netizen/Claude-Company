@@ -15,6 +15,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { cfg } from "./src/config.js";
+import { stopFloorForCoin } from "./src/agents/decision.js";
 import { complianceCheck } from "./src/agents/compliance.js";
 
 let pass = 0, fail = 0;
@@ -83,8 +84,13 @@ console.log("\nTHE FOUR LIVE REFUSALS WOULD NOW BE CAUGHT BEFORE PUBLICATION");
   const wide = codes(25);
   ok("a 25% stop — ordinary for a coin that moves 20% in minutes — is not refused for this",
     !wide.includes("stop_inside_costs"), wide.join(",") || "clean");
-  ok("...and neither is one exactly at the floor",
-    !codes(Number(cfg.minStopDistancePct)).includes("stop_inside_costs"));
+  /* The floor is this coin's own arithmetic now, not the flat fallback: what the round
+     trip costs is a fact about the coin. A stop exactly at THAT is still accepted. */
+  const derived = stopFloorForCoin(evFor(), cfg);
+  ok("...and neither is one exactly at this coin's derived floor",
+    !codes(derived + 0.01).includes("stop_inside_costs"), `${derived.toFixed(1)}%`);
+  ok("...while a stop just inside it is refused",
+    codes(derived - 0.5).includes("stop_inside_costs"), `${(derived - 0.5).toFixed(1)}%`);
 }
 
 console.log("\nTHE SEAT THAT PICKS THE STOP IS TOLD, TOO");
