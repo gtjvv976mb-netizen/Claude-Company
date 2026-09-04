@@ -30,7 +30,8 @@ const EXECUTOR_COMMIT = releaseBuild
 // route becomes a plain relative link — which also keeps the site working when GitHub
 // Pages hosts it under a /claude-tower/ subpath.
 const PAGES = [
-  { src: "index.html",    out: "index.html" },
+  { src: "index.html",    out: "index.html" },   // the gateway — two towers, one desk
+  { src: "solana.html",   out: "solana.html" },  // Claude Tower on Solana, the original homepage
   { src: "tower.html",    out: "tower.html" },
   { src: "office3d.html", out: "floor.html" },
   { src: "buy.html",      out: "buy.html" },
@@ -195,6 +196,7 @@ for (const { src: name, out } of PAGES) {
   // the dev server's routes become relative links
   html = html.replace(/<link rel="icon"[^>]*>/, '<link rel="icon" href="assets/favicon.png" type="image/png">');
   html = html.replace(/href="\/tower"/g, 'href="tower.html"');
+  html = html.replace(/href="\/solana(#[\w-]*)?"/g, (_, hash) => `href="solana.html${hash || ""}"`);
   html = html.replace(/href="\/floor\/(\d+)"/g, (_, n) => `href="floor.html?floor=${n}"`);
   html = html.replace(/href="\/"(?=[ >])/g, 'href="index.html"');
   html = html.replace(/\/floor\/\$\{f\.n\}/g, "floor.html?floor=${f.n}");   // keep the floor number

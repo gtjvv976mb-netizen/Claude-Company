@@ -1598,7 +1598,8 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
 
     // Routes: / is the site, /tower is the building, /floor/N is one desk's trading floor.
     let page = url.pathname.slice(1);
-    if (url.pathname === "/") page = "index.html";
+    if (url.pathname === "/") page = "index.html";            // the gateway — two towers
+    else if (url.pathname === "/solana") page = "solana.html"; // Claude Tower on Solana, the original homepage
     else if (url.pathname === "/tower") page = "tower.html";
     else if (/^\/floor\/\d+$/.test(url.pathname)) page = "office3d.html";
     else if (url.pathname === "/buy") page = "buy.html";
