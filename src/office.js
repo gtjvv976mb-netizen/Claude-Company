@@ -25,6 +25,7 @@ function cryptoTimingEqual(a, b) {
   return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
 }
 import * as tower from "./tower.js";
+import { seatScorecard } from "./agents/codex-tutor.js";
 import * as auth from "./auth.js";
 import * as leasing from "./leasing.js";
 import * as rooms from "./rooms.js";
@@ -716,6 +717,14 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
 
         // The house record, computed from chain data rather than self-reported.
         if (url.pathname === "/api/record") return json(200, perf.houseRecord());
+        /* THE SCOREBOARD, public and aggregate: per seat, how often its direction was right
+           and what the coins it killed did next. Counts and averages only — no prompt, no
+           evidence, no wallet — so a port to another chain can keep the seats that predicted
+           and drop the ones that did not, instead of carrying every weight over on faith. */
+        if (url.pathname === "/api/seats/scorecard") {
+          const horizonMin = Math.max(15, Math.min(2880, Number(url.searchParams.get("horizon")) || 1440));
+          return json(200, { horizonMin, seats: seatScorecard({ horizonMin }) });
+        }
 
         /* WHERE THE MODEL BILL GOES, by seat. Aggregate and read-only — seat, model,
            effort, call count, dollars and tokens. No prompt text and no evidence. The
