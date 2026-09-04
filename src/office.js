@@ -18,6 +18,7 @@ import { spend, spendSince, spendBySeat } from "./lib/llm.js";
 import { cfg } from "./config.js";
 import * as store from "./lib/store.js";
 import db from "./lib/store.js";
+import { reconcileMissingEntryAlerts } from "./alerts.js";
 import crypto from "node:crypto";
 function cryptoTimingEqual(a, b) {
   const ab = Buffer.from(String(a)), bb = Buffer.from(String(b));
@@ -66,6 +67,14 @@ function queryLimit(url, def, max) {
 }
 
 export function executorFeedPayload(floorNo, rawAfter = 0) {
+  /* HEAL THE ONE SILENT DROP BEFORE SERVING. broadcast() writes the delivery row
+     durably and then fires the entry alert without awaiting it, and the alerts table is
+     the bot's only entry channel — so a failed write leaves a call 'offered' for ever
+     with nothing in the feed and nothing in any log. Repairing it here means the bot's
+     own poll fixes the gap on its next tick. Idempotent, bounded, and it never
+     resurrects a call the desk has already closed. */
+  try { reconcileMissingEntryAlerts(floorNo); } catch { /* never fail a poll to repair one */ }
+
   // A malformed cursor must not bind as NaN — SQLite compares everything to NULL as
   // false, so the bot would poll a permanently empty feed at HTTP 200 and never trade.
   const parsedAfter = Number(rawAfter);

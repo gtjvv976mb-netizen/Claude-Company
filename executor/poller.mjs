@@ -684,7 +684,9 @@ function entryEventSubmissionGate(intent) {
   assertEntriesUnpaused();
   const event = intent.context?.event;
   validEntryEvent(event);
-  if (Date.now() - Number(event.ts) > MAX_CALL_AGE_MS)
+  /* The same clock at submission time: a call that went stale between the preflight and
+     the signature must not be signed on a price that has moved on. */
+  if (Date.now() - Number(event.ts) > callExpiryMs(event))
     throw new Error("entry call became stale before submission");
   validateEntryReference(event, {
     nowMs: Date.now(), maxMarkAgeMs: MAX_ENTRY_MARK_AGE_MS,
@@ -1003,8 +1005,9 @@ async function onEntry(ev) {
   if (unresolvedPosition)
     return log(`SKIP ${ev.symbol}: ${unresolvedPosition.symbol} blocks new exposure — ${positionEntryBlock(unresolvedPosition)}`);
   const age = Date.now() - Number(ev.ts);
-  if (age > MAX_CALL_AGE_MS)
-    return log(`SKIP ${ev.symbol}: call is ${Math.round(age / 60_000)}m old (max ${MAX_CALL_AGE_MS / 60_000}m)`);
+  if (age > callExpiryMs(ev))
+    return log(`SKIP ${ev.symbol}: call is ${Math.round(age / 60_000)}m old ` +
+      `(the ${ev.hold_band || "default"} band holds for at least ${expiryLabel(ev)}, so the entry is past)`);
   if (feedRollbackActive())
     return log(`SKIP ${ev.symbol}: authenticated feed latest_id rolled behind durable cursor — entries frozen`);
   if (pauseEntries()) return log(`SKIP ${ev.symbol}: PAUSE ENTRIES file is present`);
@@ -1531,6 +1534,32 @@ const bumpEntryRetry = (key) => {
   // is acknowledged is deleted, and a bounded feed cannot grow it without limit.
   if (entryRetries.size > 200) for (const k of entryRetries.keys()) { entryRetries.delete(k); break; }
   return next;
+};
+
+/* HOW LONG A PUBLISHED CALL STAYS GOOD — the band's own clock, not a flat number.
+ *
+ * One 45-minute window was wrong in both directions. A nano coin's move is decided in
+ * minutes, so a 40-minute-old nano call is an entry into something already over; a $5m
+ * coin held for a day is still a perfectly good entry an hour after it was published.
+ * The flat figure also ate two real calls in one restart window — "SKIP FWOG: call is
+ * 143m old", "SKIP Jimothy: call is 130m old", both at 06:08:30 on 2026-09-03.
+ *
+ * The expiry is the band's MINIMUM HOLD, which the desk already publishes on every
+ * call: nano 1 minute, micro 20, low/medium/high 1 hour, very_high 5. The reasoning is
+ * the owner's — if more time has passed than you would have held the position for, the
+ * entry idea is gone. A call carrying no band falls back to the flat setting.
+ *
+ * The floor exists because the poll is 15 seconds: an expiry under a minute could
+ * retire a call before the bot ever saw it. */
+const MIN_CALL_EXPIRY_MS = 60_000;
+const callExpiryMs = (ev) => {
+  const holdMin = Number(ev?.hold_min_ms);
+  if (!Number.isFinite(holdMin) || holdMin <= 0) return MAX_CALL_AGE_MS;
+  return Math.max(MIN_CALL_EXPIRY_MS, Math.min(holdMin, MAX_CALL_AGE_MS * 8));
+};
+const expiryLabel = (ev) => {
+  const ms = callExpiryMs(ev);
+  return ms >= 3_600_000 ? `${(ms / 3_600_000).toFixed(0)}h` : `${Math.round(ms / 60_000)}m`;
 };
 
 const noteFeedFailure = () => { runtimeHealth.consecutiveFeedFailures++; };

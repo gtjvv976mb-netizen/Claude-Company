@@ -142,6 +142,57 @@ async function push(url, title, body) {
  * only by opening the Calls pane later — and about the desk's work only at the
  * exit. Durable alert + webhook, same machinery as exits, kind 'entry'.
  */
+/**
+ * THE ONE COMPLETELY SILENT WAY A PUBLISHED CALL CAN VANISH.
+ *
+ * broadcast() writes the delivery row durably and then fires announceEntry WITHOUT
+ * awaiting it — `.then(...).catch(() => {})` in copy.js. The alerts table is the bot's
+ * ONLY entry channel, so if that write never lands the call sits for ever as
+ * verdict='offered' while the bot polls an empty feed. Nothing logs anything: the
+ * executor's own "not offered" reporter deliberately skips verdict='offered', because
+ * from its side the call simply is not there.
+ *
+ * Nothing anywhere re-created a missing alert, so this repairs it from the durable side.
+ * It is called by the feed route, which means the bot's own poll heals the gap on its
+ * next tick. raise() is idempotent through UNIQUE(floor_no, call_id, kind), so a
+ * repeated sweep cannot duplicate an alert, and a call the desk has already closed is
+ * deliberately left alone — resurrecting a dead call is worse than losing it.
+ */
+export function reconcileMissingEntryAlerts(floorNo, { withinMs = 6 * 3600e3, limit = 20 } = {}) {
+  let rows;
+  try {
+    rows = db.prepare(`
+      SELECT d.call_id, d.size_sol, c.mint, c.symbol, c.thesis
+        FROM deliveries d
+        JOIN calls c ON c.id = d.call_id
+        LEFT JOIN alerts a
+          ON a.floor_no = d.floor_no AND a.call_id = d.call_id AND a.kind = 'entry'
+       WHERE d.floor_no = ? AND d.verdict = 'offered' AND a.id IS NULL
+         AND c.status = 'live' AND d.delivered_at > ?
+       ORDER BY d.delivered_at DESC LIMIT ?`)
+      .all(floorNo, Date.now() - withinMs, Math.max(1, Math.min(100, limit)));
+  } catch { return 0; }
+
+  let repaired = 0;
+  for (const r of rows) {
+    const sym = r.symbol || String(r.mint).slice(0, 6);
+    const fresh = raise({
+      floorNo, callId: r.call_id, kind: "entry", urgency: "normal",
+      title: `New call — ${sym}`,
+      body: `${r.thesis || "The desk has published a call."}\n` +
+        `Your floor sized it at ${r.size_sol ?? "?"} SOL. Open your floor's Calls tab for the ticket. ` +
+        `This is research; you trade from your own wallet or not at all.`,
+      mint: r.mint,
+    });
+    if (fresh) {
+      repaired++;
+      emit("alert:repaired", { floorNo, callId: r.call_id, symbol: sym,
+        note: "an offered delivery had no entry alert; the bot could never have seen this call" });
+    }
+  }
+  return repaired;
+}
+
 export async function announceEntry(call) {
   const rows = db.prepare(`SELECT d.floor_no, d.size_sol, c.webhook_url
                            FROM deliveries d LEFT JOIN copy_settings c ON c.floor_no = d.floor_no
