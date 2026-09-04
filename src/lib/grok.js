@@ -268,7 +268,7 @@ export async function grokXRead({ symbol, mint, hook = "", handle = null, lore =
         `rug is worse than admitting you could not find the account.`,
     }],
   }, 120000, { seat: "XRead", maxTokens: 8000,
-    maxSearches: Number(process.env.DESK_GROK_MAX_SEARCHES || 12), minSearches: 1 });
+    maxSearches: Number(process.env.DESK_GROK_MAX_SEARCHES || 20), minSearches: 1 });
   if (!r.ok) return r;
   const obj = parseLoose(responseText(r.data));
   if (!obj) return { ok: false, error: "x-read returned no parseable JSON" };
@@ -342,7 +342,7 @@ export async function grokTrendScan({ limit = 14 } = {}) {
         `a fabricated theme sends the desk hunting coins that do not exist.`,
     }],
   }, 120000, { seat: "TrendScan", maxTokens: 6000,
-    maxSearches: Number(process.env.DESK_GROK_MAX_SEARCHES || 12), minSearches: 1 });
+    maxSearches: Number(process.env.DESK_GROK_MAX_SEARCHES || 20), minSearches: 1 });
   if (!r.ok) return r;
   const obj = parseLoose(responseText(r.data));
   const themes = Array.isArray(obj?.themes) ? obj.themes : [];

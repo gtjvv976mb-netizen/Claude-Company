@@ -358,11 +358,19 @@ function startPenthouse() {
    * It costs one Grok call per pass, so it runs on its own slow clock rather than
    * inside the research loop, and each theme carries its own 90-minute cooldown. With
    * no XAI key it returns "no grok key" and nothing happens. */
-  const trendMins = Number(process.env.PENTHOUSE_TREND_MINS || 12);
+  /* THE LANE RUNS OFTENER NOW, and the interval is the only thing that decides how
+     much of the day it actually covers. Measured over 24 hours it fired 10 times, not
+     the 120 a 12-minute interval implies — every deploy restarts the process and its
+     timer, and the desk was redeployed constantly. That settles on its own once the
+     pushing stops; the interval below is what governs a steady process. */
+  const trendMins = Number(process.env.PENTHOUSE_TREND_MINS || 8);
   const trendHunt = async () => {
     try {
       const { scanTrends } = await import("./trends.js");
-      const r = await scanTrends({ maxThemes: 4 });
+      /* No maxThemes here. It was pinned to 4 and silently overrode the lane's own
+         default, so widening the scan in trends.js changed nothing at all — the caller
+         had the last word and nobody looking at trends.js could see it. */
+      const r = await scanTrends();
       if (!r.ok) { console.log(`[trend] ${r.error}`); return; }
       if (r.candidates.length) {
         console.log(`[trend] ${r.candidates.length} candidate(s) from ${r.themes.length} live theme(s): ` +
