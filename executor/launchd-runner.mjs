@@ -35,6 +35,10 @@ const ALLOWED_ENV = new Set([
   "DAILY_LOSS_LIMIT_SOL",
   /* What a healthy transaction is expected to cost, as opposed to the fee above which
      an entry is REFUSED. See LIVE_LIMITS in poller.mjs. */
+  /* How many times a TRANSIENT entry failure is retried before the call is
+     acknowledged. Bounded so a failing entry can never head-of-line block a later
+     exit; a deterministic refusal is never retried at all. */
+  "MAX_ENTRY_RETRIES",
   "EXPECTED_NETWORK_FEE_LAMPORTS", "DAILY_SOL_CAP", "EXECUTE", "EXECUTOR_SOURCE_COMMIT",
   "FEE_RESERVE_SOL", "FINALITY_TIMEOUT_MS", "F_DEFAULT", "F_NAME_MAX", "HARD_STOP_FILE",
   "INIT_ONLY", "JUPITER_API_BASE", "JUPITER_API_KEY", "KEYPAIR", "LIVE_CAPS_ACK",

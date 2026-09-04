@@ -1502,6 +1502,37 @@ function maybeProbeExecutionReadiness() {
     };
   }).finally(() => { clearTimeout(readinessTimer); readinessProbeInFlight = false; });
 }
+/* WHICH ENTRY FAILURES DESERVE ANOTHER LOOK.
+ *
+ * Deliberately an allowlist of TRANSPORT failures, matched on the message. Anything not
+ * listed is treated as a decision and acknowledged at once, so a misclassification costs
+ * a retry that never happens rather than a call retried for ever. Every pattern here is
+ * one observed in the live log. */
+const TRANSIENT_ENTRY_FAILURE = [
+  /timed out/i, /timeout/i, /fetch failed/i, /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN/i,
+  /socket hang up/i, /network error|network request failed|temporarily unavailable/i,
+  /minimum context slot has not been reached/i,
+  /could not (?:obtain|produce)[^.]*(?:anchor|snapshot)/i,
+  /failed to get quotes/i, /HTTP 5\d\d/i, /\b(?:429|502|503|504)\b/,
+  /rate limit/i, /blockhash not found/i,
+];
+const isTransientEntryFailure = (error) => {
+  const message = String(error?.message || error);
+  return TRANSIENT_ENTRY_FAILURE.some((re) => re.test(message));
+};
+/* Six attempts at a 15-second poll is about ninety seconds of patience — long enough to
+ * outlast the RPC hiccups in the log, short enough that a call cannot block the queue. */
+const MAX_ENTRY_RETRIES = Math.max(1, Math.min(20, Number(process.env.MAX_ENTRY_RETRIES) || 6));
+const entryRetries = new Map();
+const bumpEntryRetry = (key) => {
+  const next = (entryRetries.get(key) || 0) + 1;
+  entryRetries.set(key, next);
+  // The map only ever holds events currently being retried; anything that succeeds or
+  // is acknowledged is deleted, and a bounded feed cannot grow it without limit.
+  if (entryRetries.size > 200) for (const k of entryRetries.keys()) { entryRetries.delete(k); break; }
+  return next;
+};
+
 const noteFeedFailure = () => { runtimeHealth.consecutiveFeedFailures++; };
 const noteFeedSuccess = () => {
   runtimeHealth.lastFeedSuccessAt = Date.now();
@@ -1710,7 +1741,10 @@ async function tick() {
           }
           for (const ev of events) {
             try {
-              if (ev.type === "entry") await onEntry(ev);
+              if (ev.type === "entry") {
+                await onEntry(ev);
+                entryRetries.delete(String(ev.event_id || `${FLOOR}:${ev.id}`));
+              }
               else if (ev.type === "exit") {
                 const disposition = await handleDeskExitEvent(ev);
                 if (disposition === "not-held") log(`EXIT ${ev.symbol} — not held`);
@@ -1721,8 +1755,36 @@ async function tick() {
               const intent = ev.type === "entry"
                 ? journal.getIntent(`entry:${ev.event_id || `${FLOOR}:${ev.id}`}`) : null;
               if (ev.type === "entry" && (!intent || ["planned", "failed", "expired"].includes(intent.state))) {
-                // New exposure is optional; a permanently unsafe or pre-sign failed
-                // entry must not become a head-of-line denial of every later exit.
+                /* A DROPPED PACKET IS NOT A DECISION.
+                 *
+                 * This acknowledged the event and advanced the cursor for ANY error, so
+                 * a four-second RPC timeout consumed a published call exactly like a
+                 * refusal did — permanently, with no retry. Measured in the live log
+                 * across 2026-09-01 to 09-04, eight real calls went this way: TOAD,
+                 * MACRODUCK, Hosico, TripleT, HeeHaw, TOAD, USWS, HeeHaw.
+                 *
+                 * The reason for acknowledging is still right and is kept: new exposure
+                 * is optional, and an entry that keeps failing must not become a
+                 * head-of-line denial of every later EXIT. So a transient failure is
+                 * retried a bounded number of times — the cursor stays pinned and the
+                 * next poll re-reads the same event — and only then acknowledged. A
+                 * deterministic refusal still acknowledges at once, as before.
+                 *
+                 * Unrecognised errors acknowledge immediately, which is today's
+                 * behaviour: the retry is an allowlist, so a misclassification can only
+                 * cost a retry that never happens, never a call held forever. */
+                const key = String(ev.event_id || `${FLOOR}:${ev.id}`);
+                if (isTransientEntryFailure(error) && bumpEntryRetry(key) <= MAX_ENTRY_RETRIES) {
+                  log(`RETRY ${ev.symbol || ev.id}: ${error.message} — transient, ` +
+                    `attempt ${entryRetries.get(key)} of ${MAX_ENTRY_RETRIES}; the call stays on the feed`);
+                  break;             // leave the cursor where it is; re-read next poll
+                }
+                if (entryRetries.has(key)) {
+                  log(`SKIP ${ev.symbol || ev.id}: ${error.message} — gave up after ` +
+                    `${entryRetries.get(key)} transient attempts`);
+                  entryRetries.delete(key);
+                  S.cursor = Number(ev.id); save(); continue;
+                }
                 log(`SKIP ${ev.symbol || ev.id}: ${error.message} — entry acknowledged without a trade`);
                 S.cursor = Number(ev.id);
                 save();
