@@ -128,7 +128,25 @@ const LIVE_LIMITS = Object.freeze({
   // core 0.005/0.01-SOL exposure caps are unchanged.
   maxRentLamports: MAX_GROSS_RENT_LAMPORTS,
   maxEntryRoundTripLossPct: 12,
-  maxEntryQuoteDriftPct: 5,
+  /* HOW FAR JUPITER'S EXECUTABLE QUOTE MAY SIT FROM OUR OWN ANCHORED MARK.
+   *
+   * This is a quote-sanity check, not a price-movement one: it asks whether the
+   * executable rate agrees with a mark we monitored independently. At 5% it refused a
+   * real entry on 2026-09-04 — "SKIP Pistacio: final executable entry drift 8.20%
+   * exceeds 5% cap" — one second after sizing the position and clearing every other
+   * gate.
+   *
+   * On these coins 8% between a seconds-old anchor and a live quote is the market
+   * moving, not a bad quote: the owner's whole thesis is that a nano or micro name
+   * routinely travels 20% in minutes, which is why the desk holds them for minutes.
+   * A cap tuned for a slow book refuses the fast ones it exists to catch.
+   *
+   * Raising it does NOT loosen where we actually buy. Immediately below, the same
+   * function still refuses a quote outside the desk's authored entry zone, one that has
+   * already breached the authored stop, and one that has already reached the target —
+   * and those are the checks that bound the price paid. This one bounds only how much
+   * the two price sources may disagree before we distrust the quote itself. */
+  maxEntryQuoteDriftPct: 15,
   maxEntryPreflightAgeMs: 60_000,
   maxExitTriggerAgeMs: 60_000,
   solUsdCacheMaxAgeMs: 30 * 60_000,
