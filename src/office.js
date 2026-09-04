@@ -573,8 +573,13 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           const body = await readBody();
           const callId = Number(body?.callId);
           if (!Number.isInteger(callId) || callId <= 0) return json(400, { error: "callId is required" });
+          /* 404 WHEN NOTHING WAS UPDATED, matching the operator's own take route.
+             Answering 200 regardless made the bot log "reported fill" for a write that
+             never happened — a success message is worse than an error when it is not
+             true, because it ends the retry that would have surfaced the problem. */
           const ok = copy.markTaken(floorNo, callId, body?.taken !== false);
-          return json(200, { ok: Boolean(ok), callId });
+          return json(ok ? 200 : 404, { ok: Boolean(ok), callId,
+            error: ok ? undefined : "no offered delivery for this call on this floor" });
         }
 
         const executorStatusMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/executor\/status$/);

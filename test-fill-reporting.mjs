@@ -30,7 +30,10 @@ console.log("\nTHE BOT CAN NOW SAY WHAT IT DID");
   ok("...authenticated by the same read-only secret as the feed and heartbeat",
     /takeMatch[\s\S]{0,700}bad or missing executor secret/.test(office));
   ok("...and it only ever sets a flag, granting the server no control",
-    /takeMatch[\s\S]{0,900}copy\.markTaken\(floorNo, callId/.test(office));
+    /takeMatch[\s\S]{0,1400}copy\.markTaken\(floorNo, callId/.test(office));
+  /* A 200 for a write that did not happen ends the retry that would have surfaced it. */
+  ok("it answers 404 when no offered delivery matched, rather than a false success",
+    /return json\(ok \? 200 : 404/.test(office));
   ok("a malformed callId is refused",
     /if \(!Number\.isInteger\(callId\) \|\| callId <= 0\) return json\(400/.test(office));
   ok("the bot posts to it", /\/api\/floor\/\$\{FLOOR\}\/executor\/take/.test(poller));
