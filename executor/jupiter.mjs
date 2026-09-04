@@ -41,6 +41,12 @@ export const JUPITER_EVENT_AUTHORITY = "D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9
 const SYSTEM_PROGRAM = SystemProgram.programId.toBase58();
 const COMPUTE_PROGRAM = ComputeBudgetProgram.programId.toBase58();
 
+/* How far ABOVE the chain's own rent figure a quote may sit and still be accepted.
+   Jupiter's stale constant is 1.09x the current chain value; 1.25 leaves room for that
+   and for the next revision, while still refusing a quote that is simply wrong. An
+   UNDER-estimate is never accepted at any margin. */
+const RENT_OVER_ESTIMATE_MULTIPLE = 1.25;
+
 /* What a healthy transaction's network fee actually is, for the two custody
    reconciliation checks below. Falls back to the refusal ceiling only when no expected
    figure is configured, so a caller that predates the split behaves exactly as before. */
@@ -1423,7 +1429,32 @@ export class JupiterV2Executor {
     const acceptableRentLamports = new Set([expectedNetRentLamports, classicQuotedNetRentLamports,
       expectedGrossRentLamports, classicQuotedGrossRentLamports]);
     const reportedRentLamports = Number(order.rentFeeLamports ?? 0);
-    if (!Number.isSafeInteger(reportedRentLamports) || !acceptableRentLamports.has(reportedRentLamports))
+    /* AN OVER-ESTIMATE IS THE SAFE DIRECTION, AND IT WAS BEING REFUSED.
+     *
+     * This demanded an EXACT match against one of the four chain-derived figures. On
+     * 2026-09-04 that refused the bot's first ever autonomous entry — "SKIP Mobi:
+     * secondary RPC canonical ATA rent facts do not match Jupiter's rent estimate" —
+     * one second after it had sized the position and taken it to the last gate.
+     *
+     * Measured against public mainnet, the chain is right and Jupiter is stale: a
+     * 165-byte token account is rent-exempt at 1,855,569 lamports and a 170-byte one at
+     * 1,887,234, while Jupiter still quotes the older 2,039,280. Both of our providers
+     * agreed with the chain; only Jupiter disagreed, and it disagreed HIGH.
+     *
+     * Quoting more rent than the chain will take cannot hurt us: the rent goes to an
+     * account we own and comes back when it closes, validateSimulationEffects bounds
+     * what actually leaves the wallet, and MAX_GROSS_RENT_LAMPORTS still caps the
+     * absolute figure. Quoting LESS is the dangerous direction and is still refused
+     * outright. So an over-estimate is accepted within a bounded margin of the chain's
+     * own number — generous enough for a stale constant, tight enough that a wildly
+     * wrong quote is still a refusal. */
+    const chainGross = Math.max(...acceptableRentLamports);
+    const overEstimateCeiling = Math.min(
+      Math.floor(chainGross * RENT_OVER_ESTIMATE_MULTIPLE),
+      Number(this.cfg.maxRentLamports ?? MAX_GROSS_RENT_LAMPORTS));
+    const rentIsAcceptable = acceptableRentLamports.has(reportedRentLamports) ||
+      (reportedRentLamports > chainGross && reportedRentLamports <= overEstimateCeiling);
+    if (!Number.isSafeInteger(reportedRentLamports) || !rentIsAcceptable)
       throw new Error(`${label} RPC canonical ATA rent facts do not match Jupiter's rent estimate ` +
         `(chain: ${expectedNetRentLamports} net of same-transaction closes, ${expectedGrossRentLamports} gross` +
         (classicQuotedGrossRentLamports !== expectedGrossRentLamports

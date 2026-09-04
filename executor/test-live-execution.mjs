@@ -1198,7 +1198,22 @@ await ok("an unwrap exit that creates and closes the wrapped-SOL ATA nets its re
       catch (error) { if (/canonical ATA rent facts do not match/.test(error.message)) throw error; }
     }, `a missing wrapped-SOL ATA quoted ${verdict} must not be refused as a rent mismatch`);
   }
-  for (const rentFeeLamports of [1_000_000, 2_039_281, 4_078_560]) {
+  /* AN OVER-ESTIMATE INSIDE THE BOUND IS NOW ACCEPTED, and that is deliberate: Jupiter
+     quotes a stale rent constant 1.09x the chain's own figure, and demanding an exact
+     match refused the bot's first ever autonomous entry on 2026-09-04. Quoting MORE rent
+     than the chain takes cannot hurt — it goes to an account we own, the simulation
+     bounds what actually leaves the wallet, and the absolute cap still applies. */
+  for (const rentFeeLamports of [2_039_281, Math.floor(2_039_280 * 1.25)]) {
+    const harness = makeExitMarkHarness({ instructions: unwrap, orderOverrides: { rentFeeLamports },
+      primaryWritableOverride: wsolMissing, secondaryWritableOverride: wsolMissing });
+    await assert.doesNotReject(async () => {
+      try { await harness.executor.preflightExitMark(harness.spec); }
+      catch (error) { if (/canonical ATA rent facts do not match/.test(error.message)) throw error; }
+    }, `an over-estimate of ${rentFeeLamports} inside the bound must not be refused`);
+  }
+  /* Under-quoting is still refused at any margin — that is the direction that leaves the
+     wallet short — and so is an over-estimate beyond the bound. */
+  for (const rentFeeLamports of [1_000_000, Math.floor(2_039_280 * 1.25) + 1, 4_078_560]) {
     const harness = makeExitMarkHarness({ instructions: unwrap, orderOverrides: { rentFeeLamports },
       primaryWritableOverride: wsolMissing, secondaryWritableOverride: wsolMissing });
     await assert.rejects(() => harness.executor.preflightExitMark(harness.spec),
