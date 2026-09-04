@@ -218,6 +218,12 @@ export async function techniqueReview({ horizonMin = GRADE_HORIZON_MIN, dryRun =
   try {
     out = await ask({
       seat: "Codex",
+      /* ask() has no default model. Without one this request left with model: undefined
+         and the API 400'd — non-retryable, surfaced only as tutor:failed — so the whole
+         standing-orders loop never ran once a seat crossed MIN_GRADED_CALLS. A 3-hourly
+         call over a small scorecard: Opus at medium is the right spend. */
+      model: process.env.DESK_MODEL_TUTOR || "claude-opus-5",
+      effort: "medium",
       schema: TutorOut,
       system: TUTOR_SYSTEM,
       prompt:

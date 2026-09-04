@@ -372,6 +372,9 @@ export async function ask({
   maxTokens,
   attempts = 3,
 }) {
+  /* A request without a model is a guaranteed 400 that costs a round trip and a retry
+     budget and reads as a provider failure. Refuse it here, where the caller is named. */
+  if (!model) throw new Error(`ask(): model is required (seat ${seat ?? "?"})`);
   // Thinking counts against max_tokens, so the deeper the effort the more headroom the
   // visible answer needs. 8000 flat starved the xhigh seats of any room to reply.
   maxTokens ??= effort === "max" ? 32000 : effort === "xhigh" ? 24000 : 16000;
