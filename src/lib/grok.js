@@ -299,7 +299,7 @@ export async function grokXRead({ symbol, mint, hook = "", handle = null, lore =
  * here: by then the winner has run and the desk would be buying the top. So the prompt
  * spends most of its weight on stage rather than on volume.
  */
-export async function grokTrendScan({ limit = 6 } = {}) {
+export async function grokTrendScan({ limit = 14 } = {}) {
   if (!hasGrok()) return { ok: false, error: "no key" };
   const from = new Date(Date.now() - 2 * 86400e3).toISOString().slice(0, 10);
   const r = await xai("/responses", {

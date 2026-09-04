@@ -60,17 +60,49 @@ const REACH_SCORE = { niche: 6, notable: 14, mainstream: 8 };   // mainstream is
  * three minutes old and invisible to a search engine. Free, and additive: a failure
  * here leaves the DexScreener search below exactly as it was.
  */
+/* Words too common to be evidence of a theme. Without these a story containing "the
+   coin" matches every coin on the feed and the lane reports noise as a discovery. */
+const STOP_WORDS = new Set(["coin", "token", "meme", "memecoin", "crypto", "solana",
+  "pump", "moon", "this", "that", "with", "from", "have", "will", "your", "about",
+  "into", "over", "just", "like", "than", "then", "they", "them", "what", "when",
+  "news", "viral", "trend", "trending", "video", "clip", "post", "posts"]);
+
 async function padCoinsForTheme(terms, { maxAgeHours }) {
   const { newLaunches, recentlyTraded, asCandidate } = await import("./data/pumpfun-live.js");
   const [fresh, traded] = await Promise.all([
     newLaunches({ pages: 2 }).catch(() => []), recentlyTraded({ pages: 3 }).catch(() => []),
   ]);
-  const needles = terms.map((t) => t.trim().toLowerCase()).filter((t) => t.length >= 3);
+  /* WHAT COUNTS AS THE THEME SHOWING UP IN A COIN.
+   *
+   * This matched a term against the NAME AND SYMBOL only, and only as a whole
+   * substring. That is the narrowest possible reading of a theme: a story about "the
+   * penguin video" found a coin called PENGUIN and missed one called PESTO whose own
+   * description says it is the penguin. pump.fun hands us that description on the same
+   * free request, and the launcher writes it precisely to say what the coin is about.
+   *
+   * The theme's WORDS are matched individually too, not just the phrase. Grok returns
+   * search terms as phrases — "penguin video", "gypsy rose" — and a launcher rarely
+   * uses the whole phrase in a ticker. A phrase match still ranks above a word match
+   * so the tightest evidence wins when both exist.
+   *
+   * All of this is free: it is string work over a feed already fetched. The Grok call
+   * that produced the themes is one request whatever we do here. */
+  const phrases = terms.map((t) => t.trim().toLowerCase()).filter((t) => t.length >= 3);
+  const words = [...new Set(phrases.flatMap((t) => t.split(/[^a-z0-9]+/i))
+    .map((w) => w.toLowerCase())
+    .filter((w) => w.length >= 4 && !STOP_WORDS.has(w)))];
   const out = [];
   for (const row of [...fresh, ...traded]) {
-    const hay = `${row.name ?? ""} ${row.symbol ?? ""}`.toLowerCase();
-    const matchedTerm = needles.find((n) => hay.includes(n));
+    const identity = `${row.name ?? ""} ${row.symbol ?? ""}`.toLowerCase();
+    const described = `${identity} ${String(row.description ?? "").slice(0, 400)}`.toLowerCase();
+    const phrase = phrases.find((n) => described.includes(n));
+    const word = phrase ? null : words.find((w) => new RegExp(`\\b${w}\\b`).test(described));
+    const matchedTerm = phrase ?? word;
     if (!matchedTerm) continue;
+    // How the coin matched, so a reader can tell a ticker hit from a description hit.
+    const matchStrength = phrase
+      ? (identity.includes(phrase) ? "phrase-in-name" : "phrase-in-description")
+      : (identity.includes(word) ? "word-in-name" : "word-in-description");
     const c = asCandidate(row, {});
     if (!c || c.live.banned) continue;
     /* Only coins the desk could actually trade. Without this the race is won by
@@ -84,14 +116,14 @@ async function padCoinsForTheme(terms, { maxAgeHours }) {
       // race on the market cap, which is the number this feed states directly.
       liquidityUsd: c.pair.marketCap ?? 0,
       marketCap: c.pair.marketCap, ageHours: c.pair.ageHours,
-      buysH1: c.live.replyCount ?? 0, matchedTerm, launchpad: "pump.fun",
+      buysH1: c.live.replyCount ?? 0, matchedTerm, matchStrength, launchpad: "pump.fun",
     });
   }
   return out;
 }
 
 export async function coinsForTheme(theme, { maxAgeHours = 72 } = {}) {
-  const terms = (theme.search_terms ?? []).filter((t) => typeof t === "string" && t.trim().length >= 2).slice(0, 5);
+  const terms = (theme.search_terms ?? []).filter((t) => typeof t === "string" && t.trim().length >= 2).slice(0, 10);
   const seen = new Map();
   // pump.fun first: its rows are the youngest, and the first entry for a mint wins.
   for (const c of await padCoinsForTheme(terms, { maxAgeHours }).catch(() => []))
@@ -145,10 +177,20 @@ export function raceWinner(coins) {
  * has to know this lane exists — they are ordinary candidates that happen to have been
  * found early, and they face exactly the same gauntlet.
  */
-export async function scanTrends({ maxThemes = 4, maxAgeHours = 72 } = {}) {
+/* MORE THEMES PER PASS COSTS NOTHING.
+ *
+ * grokTrendScan is ONE request that returns a list, so asking for ten stories instead
+ * of four is the same call at the same price — the only extra work is free string
+ * matching over a pump.fun feed already in hand. The per-COIN reads are what cost
+ * money, and they happen later and are unchanged.
+ *
+ * The age window widens with it. A story that broke yesterday can still be launching
+ * coins today, and 72 hours was cutting the tail off exactly the slow-burn themes this
+ * lane is best at finding. */
+export async function scanTrends({ maxThemes = 10, maxAgeHours = 120 } = {}) {
   if (!hasGrok()) return { ok: false, error: "no grok key", candidates: [] };
 
-  const scan = await grokTrendScan({ limit: maxThemes + 2 }).catch(() => null);
+  const scan = await grokTrendScan({ limit: maxThemes + 4 }).catch(() => null);
   if (!scan?.ok) return { ok: false, error: scan?.error ?? "trend scan failed", candidates: [] };
 
   const now = Date.now();
