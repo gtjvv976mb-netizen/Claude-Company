@@ -1750,7 +1750,10 @@ async function tick() {
 }
 
 log(`up — floor ${FLOOR} — wallet ${WALLET} — ${EXECUTE ? "LIVE MAINNET" : "PAPER"}`);
-log(`caps: ${CFG.maxSolPerTrade} SOL/trade, ${CFG.dailySolCap} SOL/rolling 24h deploy, ${CFG.dailyLossLimitSol} SOL/rolling realized-loss entry brake, ${CFG.maxOpenPositions} open`);
+log(`caps: ${CFG.maxSolPerTrade} SOL/trade, ${CFG.dailySolCap} SOL/rolling 24h deploy, ` +
+  `realized-loss entry brake = the TIGHTER of ${CFG.dailyLossLimitSol} SOL and ` +
+  `${(DEFAULTS.dailyLossPctOfEquity * 100).toFixed(0)}% of the bankroll, ` +
+  `${CFG.maxOpenPositions} open (a sentinel — book heat and the wallet bind first)`);
 log(`journal: ${STATE_DB}; entries pause: ${PAUSE_ENTRIES_FILE}; ` +
   `sleep fault: ${SLEEP_ASSERTION_FAULT_FILE}; hard stop: ${HARD_STOP_FILE}`);
 log(`resuming ${openList().length} position(s) from cursor ${S.cursor}`);
