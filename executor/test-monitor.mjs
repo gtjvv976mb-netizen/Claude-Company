@@ -60,7 +60,7 @@ const heartbeat = (now, extra = {}) => ({
     },
     caps: {
       maxSolPerTrade: 0.005, dailySolCap: 0.01,
-      dailyLossLimitSol: 0.01, maxOpenPositions: 4,
+      dailyLossLimitSol: 0.01, maxOpenPositions: 24,
     },
   },
   ...extra,
@@ -78,14 +78,14 @@ const heartbeat = (now, extra = {}) => ({
 {
   const dir = tmp();
   writeConfig(dir, ["MAX_SOL_PER_TRADE=0.05", "DAILY_SOL_CAP=0.5",
-    "DAILY_LOSS_LIMIT_SOL=0.15", "MAX_OPEN_POSITIONS=4"]);
+    "DAILY_LOSS_LIMIT_SOL=0.15", "MAX_OPEN_POSITIONS=24"]);
   makeDb(path.join(dir, ".cc-executor.sqlite"));
   fs.writeFileSync(path.join(dir, ".cc-executor.sqlite.lock"), `${process.pid}\n`, { mode: 0o600 });
   const now = 1_000_000;
   const raisedHealth = {
     ...heartbeat(now).health,
     caps: { maxSolPerTrade: 0.05, dailySolCap: 0.5,
-      dailyLossLimitSol: 0.15, maxOpenPositions: 4 },
+      dailyLossLimitSol: 0.15, maxOpenPositions: 24 },
     executionReadiness: { ...heartbeat(now).health.executionReadiness,
       amountLamports: 50_000_000 },
   };

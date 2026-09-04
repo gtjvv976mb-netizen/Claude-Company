@@ -2,6 +2,10 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+/* The ceiling the poller enforces on MAX_OPEN_POSITIONS. Kept in step with
+   LIVE_LIMITS.maxOpenPositions in poller.mjs — a sentinel, not an exposure cap. */
+const MAX_OPEN_POSITION_SENTINEL = 24;
+
 const POSITION_FLAGS = ["callIdentityIncomplete", "accountingIncomplete", "balanceReconciliationRequired",
   "riskDataUnavailable", "exitExecutionRequired", "manualExitRequired"];
 
@@ -52,8 +56,14 @@ export function executorHeartbeatHealth({
     maxSolPerTrade: boundedCap(caps.maxSolPerTrade, 0.05),
     dailySolCap: boundedCap(caps.dailySolCap, 0.5),
     dailyLossLimitSol: boundedCap(caps.dailyLossLimitSol, 0.15),
+    /* The open-position figure is a SENTINEL, not an exposure cap: risk decides how many
+       memecoins run at once (book heat, the per-name cap, the daily deploy cap and the
+       wallet all bind before it). This bound was 4 and the sentinel moved to 24, so a
+       perfectly healthy bot reported itself DEGRADED — the cap read as invalid, and
+       nothing about the money had changed. The three figures below it are the real
+       exposure caps and their bounds are unchanged. */
     maxOpenPositions: Number.isInteger(Number(caps.maxOpenPositions)) &&
-      Number(caps.maxOpenPositions) >= 1 && Number(caps.maxOpenPositions) <= 4
+      Number(caps.maxOpenPositions) >= 1 && Number(caps.maxOpenPositions) <= MAX_OPEN_POSITION_SENTINEL
       ? Number(caps.maxOpenPositions) : null,
   } : null;
   const capsValid = publicCaps && Object.values(publicCaps).every((value) => value != null) &&

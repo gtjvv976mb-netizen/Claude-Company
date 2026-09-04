@@ -459,7 +459,7 @@ export async function inspectExecutor({
     maxSolPerTrade: configuredCap("MAX_SOL_PER_TRADE", mode === "live" ? 0.005 : 0.05),
     dailySolCap: configuredCap("DAILY_SOL_CAP", mode === "live" ? 0.01 : 0.5),
     dailyLossLimitSol: configuredCap("DAILY_LOSS_LIMIT_SOL", mode === "live" ? 0.01 : 0.15),
-    maxOpenPositions: configuredCap("MAX_OPEN_POSITIONS", 4),
+    maxOpenPositions: configuredCap("MAX_OPEN_POSITIONS", 24),
   };
   expectedCaps.maxSolPerTradeLamports = Math.floor(expectedCaps.maxSolPerTrade * 1_000_000_000);
   const localRuntimeFingerprint = runtimeFingerprintFn(dir);
