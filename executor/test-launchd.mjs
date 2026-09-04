@@ -226,6 +226,8 @@ export function batteryPowerIsOperational(value) { return value.commandBound ===
 export function inspectOwnerControlFile(file) { return { present: fs.existsSync(file),
   valid: fs.existsSync(file) }; }
 export function sleepAssertionFaultPath(lockFile) { return lockFile + ".sleep-assertion-fault"; }
+export const batteryEntriesAllowed = (env = process.env) =>
+  String(env.WALLSTE_ALLOW_BATTERY_ENTRIES ?? "0").trim() === "1";
 `, { mode: 0o600 });
     const defaultPauseFile = `${stateDb}.pause-entries`;
     fs.writeFileSync(defaultPauseFile, "battery pause\n", { mode: 0o600 });
@@ -248,6 +250,25 @@ export function sleepAssertionFaultPath(lockFile) { return lockFile + ".sleep-as
     check("battery startup without a validated pause cannot report readiness",
       unpausedBattery.status === 5 && unpausedBattery.stderr.includes("not ready"),
       unpausedBattery.stderr.trim());
+
+    /* ...UNLESS THE OPERATOR HAS SAID TO KEEP TRADING ON BATTERY.
+     *
+     * The rule above and WALLSTE_ALLOW_BATTERY_ENTRIES contradicted each other: the gate
+     * demanded a durable entry-pause sentinel on battery, and the flag makes the poller
+     * deliberately not publish one. On 2026-09-04, with a real position open, the agent
+     * booted, resumed it, reported its fill, proved execution readiness, and was then
+     * SIGTERMed and persistently disabled by its own supervisor — on every attempt. It
+     * had gone unnoticed because the host had always been on AC before.
+     *
+     * The power fact is still checked either way; only the durable ANSWER differs. */
+    const envLines = fs.readFileSync(envFile, "utf8").trimEnd().split("\n");
+    writeEnvironment([...envLines, "WALLSTE_ALLOW_BATTERY_ENTRIES=1"]);
+    const armedBattery = invoke(["ready", "--env", envFile, "--poller", poller,
+      "--pid", String(holder.pid)]);
+    check("...unless the operator has armed battery entries deliberately",
+      armedBattery.status === 0 && armedBattery.stdout.includes("entries deliberately armed"),
+      (armedBattery.stderr || armedBattery.stdout).trim());
+    writeEnvironment(envLines);
   }
   const wrongReady = invoke(["ready", "--env", envFile, "--poller", poller,
     "--pid", String(process.pid)]);

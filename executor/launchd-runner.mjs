@@ -806,8 +806,8 @@ if (command === "render-plist") {
   if (owner !== expectedPid) abort("LaunchAgent pid does not own the canonical executor lock", 4);
   if (process.platform === "darwin") {
     const {
-      batteryPowerIsOperational, inspectOwnerControlFile, sleepAssertionFaultPath,
-      verifyMacSleepAssertion,
+      batteryEntriesAllowed, batteryPowerIsOperational, inspectOwnerControlFile,
+      sleepAssertionFaultPath, verifyMacSleepAssertion,
     } = await import(
       pathToFileURL(path.join(workdir, "sleep-assertion.mjs")).href);
     const fault = inspectOwnerControlFile(
@@ -824,9 +824,31 @@ if (command === "render-plist") {
       const pause = inspectOwnerControlFile(resolvePauseEntries(environment.values, workdir), {
         label: "entry-pause sentinel",
       });
-      if (!batteryPowerIsOperational(assertion) || !pause.present || !pause.valid)
+      /* TWO RULES THAT CONTRADICTED EACH OTHER ON BATTERY.
+       *
+       * This accepted battery operation only while entries were DURABLY PAUSED, which
+       * was right when battery always meant paused. WALLSTE_ALLOW_BATTERY_ENTRIES then
+       * made the poller deliberately NOT publish that pause — the operator's own way of
+       * saying "keep trading on battery" — and the two rules met: the sentinel this gate
+       * demands is exactly the one the flag suppresses, so the agent could never prove
+       * readiness on battery and was unloaded and disabled every time it started.
+       *
+       * Found the hard way on 2026-09-04, with a real position open: the bot booted,
+       * resumed its TOAD position, reported the fill, proved execution readiness, and
+       * was then SIGTERMed by its own supervisor fifteen seconds later.
+       *
+       * The power fact is unchanged and still checked — battery must be OPERATIONAL,
+       * meaning a real battery on a machine that reports its power state — and an
+       * unexplained missing assertion on AC still fails. What changes is that the
+       * operator's explicit flag is accepted as the durable answer in place of the
+       * sentinel it suppresses. */
+      const allowBatteryEntries = batteryEntriesAllowed(environment.values);
+      if (!batteryPowerIsOperational(assertion) ||
+          (!allowBatteryEntries && (!pause.present || !pause.valid)))
         abort(`LaunchAgent sleep assertion is not ready (${assertion.reason})`, 5);
-      console.log("LaunchAgent is operational on battery with entries durably paused");
+      console.log(allowBatteryEntries
+        ? "LaunchAgent is operational on battery with entries deliberately armed (WALLSTE_ALLOW_BATTERY_ENTRIES=1)"
+        : "LaunchAgent is operational on battery with entries durably paused");
     }
   }
   console.log("LaunchAgent process owns the canonical executor lock");
