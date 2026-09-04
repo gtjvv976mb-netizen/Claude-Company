@@ -112,22 +112,55 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
    * against a holder, and can the position be left. Reputation research is expensive
    * and only matters once that answer is yes, so the paid X read happens HERE rather
    * than inside gather(), where it was costing 107 reads against 235 screen kills. */
-  /* THE MOST EXPENSIVE OPINION ON THE DESK IS NO LONGER THE FIRST ONE BOUGHT.
+  /* GROK GOES SECOND, RIGHT BEHIND THE SAFETY SCREEN (owner, 2026-09-04).
    *
-   * Measured over the trailing 24 hours: XRead $84.87 of a $190.39 bill — 44.6% of
-   * everything the desk spends, 573 calls at $0.148 each — against $26.81 for the four
-   * analyst seats put together. It was bought for every coin that cleared the free
-   * screen, before a single cheap seat had looked at the chart, the pool or the tape.
+   * The reputation read is the desk's only look outside the chain — who launched this,
+   * what the story is, whether the account has rugged before. Bought LAST it was a
+   * footnote on a decision already made; bought SECOND it is context every later seat
+   * reasons with, which is what the owner meant by using it to front-run a narrative
+   * rather than to confirm one.
    *
-   * Any analyst returning kill ends the workup (see below), so a coin the cheap seats
-   * condemn never needed a reputation read at all. The order is now: the three seats
-   * that do not consult ev.xRead run first and in parallel; the X read, forensics and
-   * narrative are bought only if the coin is still alive. Nothing is skipped for a coin
-   * that survives, so no call this desk would have published is lost — the saving is
-   * entirely in reads the desk was buying about coins it was about to reject anyway.
+   * I had moved it last, on cost: it was 44.6% of the bill, $84.87 of $190.39 over a
+   * day, and buying the most expensive opinion before the cheap ones is backwards on
+   * price alone. That reasoning was right about money and wrong about the job. The
+   * answer is not to buy it late but to let it DECIDE early: a read that names a serial
+   * rugger or a manufactured story ends the workup here, before forensics, flow,
+   * technical, narrative, the red team, risk and the PM are ever paid for. On the
+   * measured seat prices that is $0.63 of analysis saved per coin it condemns, against
+   * $0.13 spent to ask — so putting it second is cheaper than putting it last whenever
+   * it kills more than a fifth of what it sees.
    *
-   * The cost of the reorder is one extra round trip on surviving coins. The screen
-   * still runs first, so the desk still never researches a honeypot. */
+   * The free deterministic screen still runs FIRST and is unchanged. Nothing here is
+   * bought for a coin that could not be exited, and the kill below is deliberately
+   * narrow: only what Grok states as fact about the deployer or the story, never a
+   * lukewarm verdict, because an expensive seat killing on a hunch is how a desk stops
+   * publishing anything at all. */
+  emit("stage", { stage: "reputation", mint, symbol: ev.symbol });
+  await enrichWithXRead(ev, hook).catch(() => {});
+
+  /* WHAT THE READ IS ALLOWED TO END A WORKUP FOR. Facts it claims to have sourced —
+     a deployer whose prior coins rugged, or a story it can show is fabricated — not a
+     tepid opinion. `serial_rugger` is the seat's own word for "this ACCOUNT has done
+     this before, more than once", which is the single strongest signal available about
+     a coin nobody has traded yet. */
+  const read = ev.xRead && !ev.xRead.error ? ev.xRead : null;
+  const grokKill = read?.serial_rugger === true
+    ? `the deployer's own account has rugged before: ${String(read.rug_evidence || "").slice(0, 180) || "stated by the reputation read"}`
+    : (read?.verdict === "manufactured" && read?.paid_or_botted_signs === true)
+      ? "the story is manufactured and the attention behind it is paid or botted"
+      : null;
+  if (grokKill) {
+    emit("seat:verdict", { seat: "XRead", mint, symbol: ev.symbol, kill: true, detail: grokKill });
+    store.recordVerdict(cycle, mint, ev.symbol, "XRead", { verdict: "FAIL", kill: true, kill_reason: grokKill });
+    const rec = { mint, symbol: ev.symbol, outcome: "killed", killedBy: "xread",
+      reason: grokKill, ev, analysts: {}, finalDecision: "killed" };
+    rec.reportFile = writeReport(cycle, rec);
+    emit("token:end", { mint, symbol: ev.symbol, outcome: "killed",
+      detail: `xread: ${grokKill}`, report: rec.reportFile });
+    recordEvaluation(rec);
+    return rec;
+  }
+
   emit("stage", { stage: "analysis", mint, symbol: ev.symbol });
   const cheapKeys = ["liquidity", "flow", "technical"];
   const analysts = {};
@@ -167,13 +200,10 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
      deployer's public record and narrative reads the story, so both wait on it; nothing
      else does. A failed read must not take the workup down — enrichWithXRead degrades
      to "no read", and the seats say so themselves when ev.xRead is missing. */
-  const xRead = enrichWithXRead(ev, hook);
+  /* The read is already on the bundle, so forensics and narrative no longer wait on it
+     — and neither does anything else. Every seat from here reasons with it. */
   const deepKeys = ["forensics", "narrative"];
-  const deep = await Promise.allSettled([
-    xRead.then(() => runAnalyst("forensics", ev)),
-    xRead.then(() => runNarrative(ev)),
-  ]);
-  await xRead.catch(() => {});
+  const deep = await Promise.allSettled([runAnalyst("forensics", ev), runNarrative(ev)]);
   deep.forEach((r, i) => collect(deepKeys[i], r));
 
   // A desk missing half its analysts is not a desk. Refuse to decide on a thin book.
