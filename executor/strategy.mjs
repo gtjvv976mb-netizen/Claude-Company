@@ -101,9 +101,10 @@ export const DEFAULTS = {
    * Live conviction runs 20-51 out of 100, so an unfloored scale would put almost
    * every trade at a fifth of size and the fees would eat the book. */
   convictionFloor: 0.35,
-  /* The most of a trade the round trip's network fees may be. Conviction cannot shrink
-     a position below the size where fees exceed this — see planEntry. */
-  maxFeeShareOfTrade: 0.025,
+  /* The most of the STOP DISTANCE the round trip's network fees may be. Judged against
+     the risk taken rather than the position, so a wide stop may carry more fee in
+     absolute terms and still be worth taking — see the note in planEntry. */
+  maxFeeShareOfStop: 0.25,
   /* The smallest position worth opening at all: below this the round trip is mostly
    * fees, so the trade is refused rather than sized into noise. */
   minSolPerTrade: 0.005,
@@ -191,6 +192,39 @@ export function planEntry({ call, cfg = DEFAULTS, state }) {
    * scale would put nearly every trade at a fifth of size, where the round trip is
    * mostly fees. A call with no conviction stated is not scaled at all — the desk's
    * silence is not evidence, and the rails below still bound it. */
+  /* THE SMALLEST POSITION WORTH OPENING, in SOL rather than as a fraction.
+   *
+   * Network fees are fixed per trade, so below this size the round trip costs more than
+   * maxFeeShareOfTrade of the position and the trade is mostly fees. It is hoisted here
+   * because it must bound EVERY sizing path, not only the conviction haircut: the risk
+   * rails could still clamp a position under it, and then the fee share exceeded what
+   * the desk assumes when it decides whether to publish a call at all. That gap broke
+   * the contract the desk and the executor are supposed to keep — the desk published a
+   * 16% stop on a rough coin and the bot refused it, because the rails had sized to
+   * 0.0309 SOL where fees are 3.2% rather than the 2.5% the desk had assumed.
+   *
+   * With the floor applied everywhere, a trade the executor takes ALWAYS costs at most
+   * maxFeeShareOfTrade in fees, which is exactly what the desk assumes. What remains is
+   * not a disagreement but a money fact: a wallet too small to fund a viable position
+   * gets a refusal, and no cost model can wish that away. */
+  /* FEES ARE JUDGED AGAINST THE RISK BEING TAKEN, NOT AGAINST THE TRADE.
+   *
+   * A flat share of the position was wrong in both directions. It let a 5% stop pay 2.5%
+   * in fees — half the whole stop — while refusing a 30% stop that could comfortably
+   * carry more, because the per-name risk cap correctly sizes a wide-stop position
+   * SMALLER and that pushed it under a fixed floor. Measured at the live 0.3366 SOL
+   * wallet: 20%, 30% and 38% stops all refused at 0.0337, 0.0232 and 0.0185 SOL — the
+   * exact calls the desk had just been fixed to publish.
+   *
+   * So the cap is a share of the STOP. Fees may be at most maxFeeShareOfStop of the
+   * distance being risked, which is the ratio that actually decides whether costs eat
+   * the trade: a quarter of a 10% stop is 2.5%, a quarter of a 30% stop is 7.5%, and
+   * the minimum viable size falls as the stop widens instead of rising. */
+  const stopForFees = Math.max(effectiveStopFrac, 0.01);
+  const feeFloorSol = feeReserve > 0 && c.maxFeeShareOfStop > 0
+    ? (2 * feeReserve) / (c.maxFeeShareOfStop * stopForFees)
+    : 0;
+
   const conviction = Number(call.conviction);
   const convictionScale = Number.isFinite(conviction) && conviction > 0
     ? Math.max(c.convictionFloor, Math.min(1, conviction / 100))
@@ -218,9 +252,6 @@ export function planEntry({ call, cfg = DEFAULTS, state }) {
      * same lamports of fee against less upside. This does not overrule the owner's
      * "more risk, less size" — it stops that rule running past the point where it
      * inverts. */
-    const feeFloorSol = feeReserve > 0 && c.maxFeeShareOfTrade > 0
-      ? (2 * feeReserve) / c.maxFeeShareOfTrade
-      : 0;
     const scaled = want * convictionScale;
     if (scaled >= feeFloorSol) {
       want = scaled;
@@ -256,11 +287,15 @@ export function planEntry({ call, cfg = DEFAULTS, state }) {
     `rolling 24h deploy cap (${state.deployedTodaySol.toFixed(3)}/${c.dailySolCap} SOL)`);
   if (state.spendableSol != null) bind(state.spendableSol - feeReserve, "spendable balance after the fee reserve");
 
-  const minSize = Math.max(0.0005, Number(c.minSolPerTrade) || 0);
+  /* The floor is the LARGER of the configured minimum and the size at which fees stop
+     dominating. A position under it is not a smaller bet, it is the same fees against
+     less upside — and it is the case the desk cannot see when it publishes. */
+  const minSize = Math.max(0.0005, Number(c.minSolPerTrade) || 0, feeFloorSol);
   if (!(want >= minSize))
     return { action: "skip",
       reason: boundBy
-        ? `${boundBy} leaves ${Math.max(0, want).toFixed(4)} SOL, under the ${minSize} SOL minimum`
+        ? `${boundBy} leaves ${Math.max(0, want).toFixed(4)} SOL, under the ${minSize.toFixed(4)} SOL minimum ` +
+          `(below it the round trip is mostly fees)`
         : "the sized position rounds to nothing" };
 
   const actualF = (want * effectiveStopFrac + 2 * feeReserve) / Number(equity);

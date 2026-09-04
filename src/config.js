@@ -107,11 +107,19 @@ minLiquidityUsd: num("DESK_MIN_LIQUIDITY_USD", 12000),
        real floor is derived per coin in compliance.js from the executor's own guard. */
     minStopDistancePct: num("DESK_MIN_STOP_DISTANCE_PCT", 12),
     /* Mirrors of the executor's cost model, so the desk refuses exactly what the bot
-       would refuse. executorWorstFeeRatio is the fee as a share of the position the bot
-       ACTUALLY sizes — conviction shrinks a 0.05 SOL trade to about 0.0175, where a
-       fixed 0.0005 SOL fee each way is 5.7% rather than 2%. */
+       would refuse — no more and no less.
+       executorWorstFeeRatio was 0.057, the fee share of a conviction-shrunk 0.0175 SOL
+       position. That is no longer reachable: the executor's fee floor holds a position
+       at or above the size where the round trip costs maxFeeShareOfTrade, so 2.5% IS
+       the worst case now. Leaving it at 5.7% made the desk refuse calls its own bot
+       would have taken — a sweep found 8.5% to 9.5% stops on clean coins blocked at
+       publish time and tradeable in the executor. Refusing a call the bot wanted is the
+       same waste as publishing one it will not take, pointed the other way. */
     executorSlippageBps: num("EXECUTOR_SLIPPAGE_BPS", 300),
-    executorWorstFeeRatio: Number(process.env.EXECUTOR_WORST_FEE_RATIO || 0.057),
+    /* The executor caps the round trip's fees at this share of the STOP DISTANCE, not
+       of the position — a wide stop can carry more fee in absolute terms and still be
+       worth taking. The desk assumes the same shape so the two never disagree. */
+    executorMaxFeeShareOfStop: Number(process.env.EXECUTOR_MAX_FEE_SHARE_OF_STOP || 0.25),
 
   /* REWEIGHTED FOR THE MARKET THIS DESK IS ACTUALLY IN.
    *

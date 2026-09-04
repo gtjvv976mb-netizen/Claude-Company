@@ -113,13 +113,23 @@ export function complianceCheck({ pm, risk, redteam, ticket, ev }) {
       const distPct = (1 - ticket.stop_price / ticket.entry_zone_low) * 100;
       const rtPct = Number(ev?.exitProbe?.roundTripLossPct);
       const haircut = (1 - (Number(cfg.executorSlippageBps) || 300) / 10_000) ** 2;
-      const feeRatio = Number(cfg.executorWorstFeeRatio) || 0.057;
+      /* Fees scale with the stop, matching the executor — and with the EFFECTIVE stop it
+         actually uses, which is the authored distance plus the measured round-trip
+         friction. Using the raw stop here left the desk a third of a percent optimistic
+         and it published calls the bot then refused. */
+      const proposedStopFrac = 1 - ticket.stop_price / ticket.entry_zone_low;
+      const effectiveStopFrac = Math.max(proposedStopFrac, 0.01) +
+        (Number.isFinite(rtPct) ? rtPct / 100 : 0);
+      const feeRatio = (Number(cfg.executorMaxFeeShareOfStop) || 0.25) * effectiveStopFrac;
       /* Derived only when the round trip was actually measured. An unmeasured coin
          falls back to the flat floor rather than to a number invented from nothing. */
       const derivedPct = Number.isFinite(rtPct)
         ? (1 - ((1 - rtPct / 100) * haircut - feeRatio)) * 100
         : null;
-      const requiredPct = Math.max(floorPct, derivedPct ?? 0);
+      /* The derived figure REPLACES the flat one when it exists; the flat floor is the
+         fallback for an unmeasured coin, not a second opinion to be maxed against a
+         real measurement. */
+      const requiredPct = derivedPct ?? floorPct;
       v(distPct < requiredPct, "stop_inside_costs",
         `stop is ${distPct.toFixed(1)}% below entry, but this coin needs at least ` +
         `${requiredPct.toFixed(1)}%` +

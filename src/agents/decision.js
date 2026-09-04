@@ -280,8 +280,18 @@ export function stopFloorForCoin(ev, cfg) {
   const rtPct = Number(ev?.exitProbe?.roundTripLossPct);
   if (!Number.isFinite(rtPct)) return flat;
   const haircut = (1 - (Number(cfg?.executorSlippageBps) || 300) / 10_000) ** 2;
-  const feeRatio = Number(cfg?.executorWorstFeeRatio) || 0.057;
-  return Math.max(flat, (1 - ((1 - rtPct / 100) * haircut - feeRatio)) * 100);
+  /* Fees are capped at a share of the stop, so the floor is the stop distance that
+     satisfies  (1-rt)*haircut - share*stop > 1-stop  — solved directly below. */
+  const share = Number(cfg?.executorMaxFeeShareOfStop) || 0.25;
+  /* Solve for the stop distance d, with fees charged on the EFFECTIVE stop (d plus the
+     round-trip friction), exactly as the executor sizes it:
+       (1-rt)*h - share*(d + rt)  >  1 - d
+       =>  d * (1 - share)  >  1 - (1-rt)*h + share*rt
+       =>  d  >  (1 - (1-rt)*h + share*rt) / (1 - share)
+     The measurement replaces the flat fallback rather than being maxed against it. */
+  const rt = rtPct / 100;
+  const reach = (1 - rt) * haircut;
+  return (((1 - reach) + share * rt) / (1 - share)) * 100;
 }
 
 export async function runPM(ev, analysts, redteam, risk, weightedScore, opts = {}) {

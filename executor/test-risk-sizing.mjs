@@ -28,9 +28,15 @@ const plan = (c = {}, s = {}, k = {}) => planEntry({ call: call(c), cfg: { ...cf
 
 console.log("\nA WIDER STOP IS MORE RISK, SO IT BUYS LESS");
 {
-  const tight = plan({ stop: 0.95 });            // 5% stop
+  /* 5% is no longer a tradeable stop and the desk no longer publishes one: fees are
+     capped at a quarter of the stop, so a 5% stop would need a 0.08 SOL position to
+     carry them — above the operator's whole per-trade ceiling. 12% is the tight end of
+     what actually reaches the bot now. */
+  const tight = plan({ stop: 0.88 });            // 12% stop
   const wide = plan({ stop: 0.70 });             // 30% stop
   ok("a tight stop trades", tight.action === "buy", `${tight.sol?.toFixed(4)} SOL — ${tight.reason}`);
+  ok("...and a 5% stop is refused, because it cannot carry its own fees",
+    plan({ stop: 0.95 }).action === "skip", plan({ stop: 0.95 }).reason?.slice(0, 60));
   ok("a wide stop still trades, smaller", wide.action === "buy", `${wide.sol?.toFixed(4)} SOL`);
   ok("...and is strictly smaller than the tight one", wide.sol < tight.sol,
     `${wide.sol.toFixed(4)} < ${tight.sol.toFixed(4)}`);
@@ -67,9 +73,14 @@ console.log("\nTHE TEAM'S CONFIDENCE IS PRICED IN");
   ok("...and at the live 0.05 ceiling the band is only down to the fee floor",
     unsure.sol >= 0.0399 && unsure.sol < sure.sol,
     `${sure.sol.toFixed(4)} -> ${unsure.sol.toFixed(4)} SOL, a ${((1 - unsure.sol / sure.sol) * 100).toFixed(0)}% band`);
+  const feeFloorFor = (stopFrac) =>
+    (2 * cfg.networkFeeReserveSol) / (DEFAULTS.maxFeeShareOfStop * (stopFrac + cfg.measuredRoundTripLossPct / 100));
   ok("a position is never shrunk into its own fees",
-    unsure.sol >= (2 * cfg.networkFeeReserveSol) / DEFAULTS.maxFeeShareOfTrade - 1e-9,
-    `${unsure.sol.toFixed(4)} SOL, floor ${((2 * cfg.networkFeeReserveSol) / DEFAULTS.maxFeeShareOfTrade).toFixed(4)}`);
+    unsure.sol >= feeFloorFor(0.15) - 1e-9,
+    `${unsure.sol.toFixed(4)} SOL, floor ${feeFloorFor(0.15).toFixed(4)} at a 15% stop`);
+  ok("...and that floor FALLS as the stop widens, so a wide stop may run smaller",
+    feeFloorFor(0.30) < feeFloorFor(0.10),
+    `${feeFloorFor(0.10).toFixed(4)} at 10% vs ${feeFloorFor(0.30).toFixed(4)} at 30%`);
   ok("the haircut is floored, not proportional all the way down",
     unsure.convictionScale === DEFAULTS.convictionFloor, `${unsure.convictionScale}`);
   ok("conviction 50 sizes to half", plan({ conviction: 50 }).convictionScale === 0.5);
@@ -79,13 +90,18 @@ console.log("\nTHE TEAM'S CONFIDENCE IS PRICED IN");
 
 console.log("\nEVERY RAIL SIZES DOWN, NONE SIZES UP");
 {
-  const ceiling = plan({ stop: 0.99, conviction: 100 }).sol;   // the least-constrained trade
+  const ceiling = plan({ stop: 0.88, conviction: 100 }).sol;   // the least-constrained TRADEABLE trade
   ok("nothing exceeds the operator's per-trade ceiling", ceiling <= cfg.fixedSol + 1e-9,
     `${ceiling.toFixed(4)} <= ${cfg.fixedSol}`);
-  const nearlyDeployed = plan({}, { deployedTodaySol: 0.48 });
+  const nearlyDeployed = plan({}, { deployedTodaySol: 0.45 });
   ok("the daily deploy cap sizes down instead of refusing",
     nearlyDeployed.action === "buy" && nearlyDeployed.sol < cfg.fixedSol,
     `${nearlyDeployed.sol?.toFixed(4)} SOL — ${nearlyDeployed.reason}`);
+  /* ...but only while the room left is still a viable position. Past that it refuses
+     rather than spending the last of the day's budget on fees. */
+  const capExhausted = plan({}, { deployedTodaySol: 0.48 });
+  ok("...and refuses once the room left cannot carry its own fees",
+    capExhausted.action === "skip", capExhausted.reason?.slice(0, 62));
   const hotBook = plan({}, { bookHeat: DEFAULTS.bookHeatMax - 0.016 });
   ok("a hot book sizes down instead of refusing", hotBook.action === "buy" && hotBook.sol < cfg.fixedSol,
     `${hotBook.sol?.toFixed(4)} SOL`);
@@ -99,7 +115,13 @@ console.log("\nEVERY RAIL SIZES DOWN, NONE SIZES UP");
   ok("a thin wallet sizes to what it actually has",
     thin.action !== "buy" || thin.sol <= 0.02 - cfg.networkFeeReserveSol + 1e-9,
     `${thin.action} ${thin.sol?.toFixed(4) ?? ""}`);
-  ok("a call's own size_sol still caps it", plan({ size_sol: 0.01 }).sol <= 0.01 + 1e-9);
+  /* A call asking for less than a viable position is refused, not traded tiny — the
+     fees would be a quarter of the stop before the coin moved. A call asking for a
+     viable-but-smaller size is honoured. */
+  ok("a call asking for less than the fee floor is refused", plan({ size_sol: 0.01 }).action === "skip");
+  const capped = plan({ size_sol: 0.042 });
+  ok("...and a call's own size_sol still caps it when it is viable",
+    capped.action === "buy" && capped.sol <= 0.042 + 1e-9, `${capped.sol?.toFixed(4)} SOL`);
 }
 
 console.log("\nWHEN NO SIZE FITS, IT IS STILL REFUSED");
