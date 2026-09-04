@@ -192,7 +192,8 @@ for (const [key, value] of Object.entries({
   maxSolPerTrade: 0.005,
   dailySolCap: 0.01,
   dailyLossLimitSol: 0.01,
-  maxOpenPositions: 4,
+  // A sentinel now, not a policy: risk decides how many memecoins run at once.
+  maxOpenPositions: 24,
 })) {
   assert.match(pollerSource, new RegExp(`${key}:\\s*${String(value).replace(".", "\\.")}`),
     `dashboard canary default ${key} must stay pinned to the executor's default`);

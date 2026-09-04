@@ -12,8 +12,13 @@ const call={ mint:"m", symbol:"T", size_sol:0.05, stop:0.62, target:1.9, ts:0 };
 t("executor and server share snipe-v3", POLICY_VERSION === "snipe-v3", POLICY_VERSION);
 
 // caps
-let st=freshState(0); st.openCount=4;
-t("max open positions blocks entry", planEntry({call,cfg:DEFAULTS,state:st}).action==="skip");
+/* The count is a sentinel now, not a policy — risk decides how many memecoins may run
+   at once (owner's rule: several pump together, so a fixed count makes the desk late).
+   What must stay true is that the sentinel, wherever it sits, still stops entry. */
+let st=freshState(0); st.openCount=DEFAULTS.maxOpenPositions;
+t("the open-position sentinel still blocks entry when reached", planEntry({call,cfg:DEFAULTS,state:st}).action==="skip");
+st=freshState(0); st.openCount=DEFAULTS.maxOpenPositions-1;
+t("...and one below it does not", planEntry({call,cfg:DEFAULTS,state:st}).action!=="skip");
 st=freshState(0); st.realizedTodaySol=-0.2;
 t("rolling 24h realized-loss brake blocks a later entry", planEntry({call,cfg:DEFAULTS,state:st}).action==="skip");
 st=freshState(0); st.deployedTodaySol=0.4999;

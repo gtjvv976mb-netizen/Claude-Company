@@ -39,11 +39,13 @@ const p4 = planEntry({ call: wide, cfg: KELLY, state: st({wins:3, losses:29}) })
 t("hit rate under W_min is refused", p4.action==="skip" && /under the/.test(p4.reason), p4.reason);
 
 // book heat
-const p5 = planEntry({ call: wide, cfg: KELLY, state: st({bookHeat: 0.079}) });
+// Derived from the cap so the fixture cannot drift away from the thing it describes:
+// a book with 0.1 percentage points of heat left, whatever the cap happens to be.
+const p5 = planEntry({ call: wide, cfg: KELLY, state: st({bookHeat: KELLY.bookHeatMax - 0.001}) });
 t("a nearly full book caps the next entry at the room left, and says so",
   p5.action === "skip"
     ? /book heat/.test(p5.reason)
-    : /book heat/.test(p5.reason) && 0.079 + p5.f <= KELLY.bookHeatMax + 1e-9, p5.reason);
+    : /book heat/.test(p5.reason) && (KELLY.bookHeatMax - 0.001) + p5.f <= KELLY.bookHeatMax + 1e-9, p5.reason);
 
 // f is risk-at-stop — but the flat per-trade cap may legitimately bind first
 const eq=5, sf=0.40;

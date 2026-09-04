@@ -104,11 +104,11 @@ ok("every explicit money cap must meet the live minimum", () => {
     }
   }
 });
-ok("live max-open positions must be an integer from one through four", () => {
-  for (const value of ["", "0", "1.5", "4.0", "4.0000000000000001", "5"]) {
+ok("live max-open positions must be a whole number inside the sentinel", () => {
+  for (const value of ["", "0", "1.5", "24.0", "24.0000000000000001", "25"]) {
     const result = run({ MAX_OPEN_POSITIONS: value });
     assert.notEqual(result.status, 0, `MAX_OPEN_POSITIONS=${JSON.stringify(value)} was accepted`);
-    assert.match(result.stderr, /MAX_OPEN_POSITIONS must be an integer between 1 and 4/);
+    assert.match(result.stderr, /MAX_OPEN_POSITIONS must be an integer between 1 and 24/);
   }
 });
 ok("the daily deploy cap cannot sit below one allowed trade", () => {

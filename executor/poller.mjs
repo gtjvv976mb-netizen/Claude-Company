@@ -80,7 +80,7 @@ const LIVE_LIMITS = Object.freeze({
   maxSolPerTrade: 0.005,
   dailySolCap: 0.01,
   dailyLossLimitSol: 0.01,
-  maxOpenPositions: 4,
+  maxOpenPositions: 24,
   slippageBps: 300,
   maxPriceImpactPct: 5,
   maxExitPriceImpactPct: 50,
@@ -179,10 +179,19 @@ const solCap = (name, value, { min, max }) => {
     fatal(`${name} must be between ${min} and ${max}`);
   return Object.freeze({ raw, units, value: Number(units) / 1_000_000_000 });
 };
+/* NO ARBITRARY CAP ON HOW MANY MEMECOINS MAY RUN AT ONCE.
+ *
+ * Owner's rule: several memes pump together, so a fixed count makes the desk late on
+ * the ones it was right about. Measured, the count was never the real limit anyway —
+ * removing it alone took the book from 4 positions to 5, because bookHeatMax bound
+ * next. So the count is now a sentinel rather than a policy, and RISK decides: total
+ * book heat, the rolling daily deploy cap, the per-name stop risk and the wallet.
+ * At the live 0.3366 SOL balance the wallet itself saturates at 14 positions, which is
+ * the honest meaning of "let the money decide". */
 const openPositions = (value) => {
   const raw = String(value);
-  if (!/^[1-4]$/.test(raw))
-    fatal("MAX_OPEN_POSITIONS must be an integer between 1 and 4");
+  if (!/^([1-9]|1[0-9]|2[0-4])$/.test(raw))
+    fatal("MAX_OPEN_POSITIONS must be an integer between 1 and 24");
   return Number(raw);
 };
 

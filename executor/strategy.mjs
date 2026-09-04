@@ -37,7 +37,7 @@ export const DEFAULTS = {
   maxSolPerTrade: 0.05,      // hard ceiling; Kelly may size well under it
   dailySolCap: 0.5,          // total SOL deployed per rolling day
   dailyLossLimitSol: 0.15,   // realized losses that stop new entries for the day
-  maxOpenPositions: 4,
+  maxOpenPositions: 24,      // a sentinel; risk decides, not a count (see poller LIVE_LIMITS)
 
   /* ── SIZING: risk-at-stop, not notional ──────────────────────────────────
      Adopted from the GROKSTREET operating thesis. f is the fraction of equity
@@ -64,7 +64,24 @@ export const DEFAULTS = {
   fNameMax: 0.025,           // most equity one name may risk at its stop
   fDefault: 0.02,            // what to risk while the sample is too small to trust
   nMin: 12,                  // closed trades before an estimated W is usable at all
-  bookHeatMax: 0.08,         // sum of f across open positions — correlated names share it
+  /* TOTAL RISK ACROSS THE BOOK — and the number that actually decided how many
+     memecoins could run at once. With the position count removed, this bound the book
+     at 5. Measured at the live 0.3366 SOL wallet: 8% allows 5 positions, 16% allows 10,
+     and 24% allows 14 — at which point the WALLET saturates and raising it further
+     changes nothing, which is what makes 24% the landing point rather than a taste.
+     Worst case if every position stopped out at once is 0.071 SOL, under half the
+     0.15 SOL rolling realized-loss brake the owner already runs. Note memecoins are
+     correlated: this is the control for all of them dumping together, which is the
+     other half of "they all pump together". */
+  /* Matched to the loss brake below, deliberately. A book allowed to carry MORE risk
+     than the day is allowed to lose is incoherent: it would guarantee tripping the
+     brake if the book stopped out together, which for correlated memecoins is the
+     normal case rather than the tail. At 20% the live 0.3366 SOL wallet supports about
+     twelve simultaneous positions, against four before. */
+  bookHeatMax: 0.20,         // sum of f across open positions — correlated names share it
+  /* Stop for the day after losing this share of the bankroll. Applied as the TIGHTER of
+     this and dailyLossLimitSol, so it can only ever brake sooner. */
+  dailyLossPctOfEquity: 0.20,
   maxAgeHours: POLICY_DEFAULTS.maxAgeHours,
   // Kept as a compatibility field for old env/config files. Snipe-v2 never emits
   // sell_part: the authored target and configured multiple both close in full.
@@ -94,8 +111,24 @@ export function planEntry({ call, cfg = DEFAULTS, state }) {
   const c = { ...DEFAULTS, ...cfg };
   if (state.openCount >= c.maxOpenPositions)
     return { action: "skip", reason: `already holding ${state.openCount} of max ${c.maxOpenPositions}` };
-  if (state.realizedTodaySol <= -Math.abs(c.dailyLossLimitSol))
-    return { action: "skip", reason: `rolling 24h realized-loss entry brake hit (${state.realizedTodaySol.toFixed(3)} SOL)` };
+  /* THE BRAKE IS A SHARE OF THE BANKROLL, NOT ONLY A NUMBER OF SOL.
+   *
+   * Owner's rule: stop for the day after losing 20% of the original SOL. An absolute
+   * figure goes stale the moment the wallet changes — 0.15 SOL was 45% of the live
+   * 0.3366 SOL balance, which is a far looser brake than intended — so the effective
+   * brake is whichever is TIGHTER: the operator's absolute cap, or the percentage.
+   * Taking the minimum means this can only ever stop trading sooner, never later, and
+   * an operator lowering the absolute cap still wins. */
+  const equityBrake = Number(c.dailyLossPctOfEquity) > 0 && Number(state.equitySol) > 0
+    ? Number(c.dailyLossPctOfEquity) * Number(state.equitySol)
+    : Infinity;
+  const lossBrake = Math.min(Math.abs(c.dailyLossLimitSol), equityBrake);
+  if (state.realizedTodaySol <= -lossBrake)
+    return { action: "skip",
+      reason: `rolling 24h realized-loss entry brake hit (${state.realizedTodaySol.toFixed(3)} of ` +
+        `${lossBrake.toFixed(4)} SOL — ${equityBrake < Math.abs(c.dailyLossLimitSol)
+          ? `${(Number(c.dailyLossPctOfEquity) * 100).toFixed(0)}% of a ${Number(state.equitySol).toFixed(4)} SOL bankroll`
+          : "the operator's absolute cap"})` };
 
   // A call with no stop cannot be risk-managed; refuse it rather than hold
   // something with no floor under it.
