@@ -79,6 +79,11 @@ const SITE_URL = (process.env.SITE_URL || "https://claudedotcompany.com").replac
 // Where the API lives. Empty means "same origin", which is right for local dev and wrong
 // for a static host — Pages cannot run the scanner or the database.
 const API_BASE = (process.env.API_BASE || "").replace(/\/$/, "");
+// The Robinhood desk is a SEPARATE service on a separate host, so the gateway's
+// "two chains" panel needs its own base. Empty means "do not ask": the homepage
+// skips the fetch entirely rather than firing a cross-origin request at a host
+// that does not exist yet and painting a CORS error on every load.
+const RH_API_BASE = (process.env.RH_API_BASE || "").replace(/\/$/, "");
 const SOURCE_COMMIT = /^[0-9a-f]{40}$/i.test(String(
   process.env.SOURCE_COMMIT || process.env.GITHUB_SHA || process.env.RENDER_GIT_COMMIT || "",
 )) ? String(process.env.SOURCE_COMMIT || process.env.GITHUB_SHA || process.env.RENDER_GIT_COMMIT).toLowerCase()
@@ -198,6 +203,10 @@ for (const { src: name, out } of PAGES) {
   if (API_BASE) {
     html = html.replace(/<style>/, () =>
       `<script>window.__API_BASE__=${JSON.stringify(API_BASE)};</script>\n<style>`);
+  }
+  if (RH_API_BASE) {
+    html = html.replace(/<style>/, () =>
+      `<script>window.__RH_API_BASE__=${JSON.stringify(RH_API_BASE)};</script>\n<style>`);
   }
 
   // the dev server's routes become relative links
