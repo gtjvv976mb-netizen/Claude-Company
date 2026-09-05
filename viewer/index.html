@@ -308,6 +308,10 @@ a.inl:hover{text-decoration-color:var(--amber)}
 .step::before{counter-increment:step;content:counter(step,decimal-leading-zero);font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.1em;color:var(--ink-faint);padding-top:3px}
 .step.lit{opacity:1;border-color:var(--floor-rule);background:rgba(255,255,255,.03)}
 .step.lit::before{color:var(--amber)}
+/* The counter is ::before in column 1. Without pinning the CONTENT to column 2, grid
+   auto-placement drops the <p> into column 1 of the next row — 28px wide — and the
+   paragraph renders one word per line. Seen live on claudedotcompany.com. */
+.step h4,.step p{grid-column:2}
 .step h4{margin:0 0 3px;font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:18px;line-height:1.05}
 .step p{margin:0;font-size:13.5px;line-height:1.45;color:var(--ink-soft)}
 .keybox{display:flex;align-items:center;gap:12px;margin-top:14px;padding:12px 14px;border-radius:10px;border:1px dashed rgba(233,177,88,.5);color:var(--ink)}
