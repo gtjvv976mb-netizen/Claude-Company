@@ -1331,6 +1331,7 @@ async function manageOpen() {
           });
           mark = executableExitMark(pos, observation.actualOutputRaw, currentSolUsd);
           clearExitMarkFailureWitness(pos);
+          delete pos.exitMarkOutageSince;
           delete pos.riskDataUnavailable;
           delete pos.riskDataUnavailableReason;
           delete pos.riskDataUnavailableAt;
@@ -1340,19 +1341,58 @@ async function manageOpen() {
           pos.riskDataUnavailable = true;
           pos.riskDataUnavailableReason = `independent executable exit mark unavailable: ${error.message}`;
           pos.riskDataUnavailableAt = Date.now();
-          const witness = confirmExitMarkFailureWitness(pos, {
-            observedAt: pos.riskDataUnavailableAt, reason: pos.riskDataUnavailableReason,
-          }, { maxGapMs: Math.max(60_000, POLL_MS * 4) });
-          save();
-          if (!witness.confirmed) {
-            log(`mark ${pos.symbol}: ${error.message} — new entries blocked; ` +
-              "waiting for one independent next-tick failure witness before risk reduction");
+          /* A DROPPED PACKET IS NOT A HIDDEN STOP.
+           *
+           * The threat this latch defends against is real: an order service that answers
+           * every exit quote with an error could hide a stop-out for as long as it liked,
+           * so two failed marks in a row used to sell the position. But it counted ANY
+           * failure, and on 2026-09-04 that sold TOAD — a very_high coin the desk meant to
+           * hold five to twenty-four hours — thirty-two minutes in, at a 1.2% loss, on two
+           * "Jupiter /order 400: Failed to get quotes" responses FOUR SECONDS apart. That
+           * is Jupiter's transient "no route right now", already on the transport
+           * allowlist this file uses for entries, and it is what a hostile service hiding
+           * a stop looks like only if you refuse to tell the two apart.
+           *
+           * So the failure is classified. A TRANSPORT failure (timeout, 5xx, no route,
+           * RPC slot lag) does not feed the two-tick witness; it starts or continues a
+           * sustained-outage clock instead, and only an outage longer than
+           * EXIT_MARK_OUTAGE_LATCH_MS latches the risk exit — because by then we genuinely
+           * cannot see the price and the threat model applies. Any failure that is NOT
+           * transport — Jupiter answered and the answer was rejected, or an error nobody
+           * recognises — keeps the original two-witness latch exactly as it was. Either
+           * way new entries stay blocked while the mark is unreadable. */
+          if (isTransientEntryFailure(error)) {
+            const outageSince = Number(pos.exitMarkOutageSince) || pos.riskDataUnavailableAt;
+            pos.exitMarkOutageSince = outageSince;
+            const outageMs = pos.riskDataUnavailableAt - outageSince;
+            save();
+            if (outageMs < EXIT_MARK_OUTAGE_LATCH_MS) {
+              log(`mark ${pos.symbol}: ${error.message} — transient; new entries blocked, ` +
+                `exit mark unreadable for ${Math.round(outageMs / 1000)}s of the ` +
+                `${Math.round(EXIT_MARK_OUTAGE_LATCH_MS / 60_000)}m outage allowance`);
+            } else {
+              log(`mark ${pos.symbol}: exit mark unreadable for ${Math.round(outageMs / 60_000)}m — ` +
+                "sustained outage; latching a risk-reducing exit because the price can no longer be seen");
+              await sellAll(pos, `independent executable exit mark unavailable for ${Math.round(outageMs / 60_000)}m`,
+                1, null, { kind: "risk-data", reason: "sustained executable exit mark outage",
+                  firstObservedAt: outageSince, observedAt: pos.riskDataUnavailableAt, witnesses: 0 });
+              continue;
+            }
           } else {
-            log(`mark ${pos.symbol}: executable mark failed on two consecutive ticks — ` +
-              "latching a risk-reducing exit so the order service cannot suppress a stop");
-            await sellAll(pos, "independent executable exit mark unavailable on two consecutive ticks",
-              1, null, witness.trigger);
-            continue;
+            const witness = confirmExitMarkFailureWitness(pos, {
+              observedAt: pos.riskDataUnavailableAt, reason: pos.riskDataUnavailableReason,
+            }, { maxGapMs: Math.max(60_000, POLL_MS * 4) });
+            save();
+            if (!witness.confirmed) {
+              log(`mark ${pos.symbol}: ${error.message} — new entries blocked; ` +
+                "waiting for one independent next-tick failure witness before risk reduction");
+            } else {
+              log(`mark ${pos.symbol}: executable mark failed on two consecutive ticks — ` +
+                "latching a risk-reducing exit so the order service cannot suppress a stop");
+              await sellAll(pos, "independent executable exit mark unavailable on two consecutive ticks",
+                1, null, witness.trigger);
+              continue;
+            }
           }
         }
       }
@@ -1543,6 +1583,14 @@ const TRANSIENT_ENTRY_FAILURE = [
   /failed to get quotes/i, /HTTP 5\d\d/i, /\b(?:429|502|503|504)\b/,
   /rate limit/i, /blockhash not found/i,
 ];
+/* How long the executable exit mark may stay unreadable for TRANSPORT reasons before
+ * the bot treats it as not being able to see the price at all. Five minutes outlasts every
+ * RPC and Jupiter wobble in the log by a wide margin; a stop that a hostile order service
+ * could hide for five minutes is one it could hide for two ticks, which is what the
+ * original latch still catches for non-transport failures. */
+const EXIT_MARK_OUTAGE_LATCH_MS = Math.max(60_000,
+  Math.min(30 * 60_000, Number(process.env.EXIT_MARK_OUTAGE_LATCH_MS) || 5 * 60_000));
+
 const isTransientEntryFailure = (error) => {
   const message = String(error?.message || error);
   return TRANSIENT_ENTRY_FAILURE.some((re) => re.test(message));

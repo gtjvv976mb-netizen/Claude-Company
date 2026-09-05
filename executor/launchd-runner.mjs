@@ -39,6 +39,10 @@ const ALLOWED_ENV = new Set([
      acknowledged. Bounded so a failing entry can never head-of-line block a later
      exit; a deterministic refusal is never retried at all. */
   "MAX_ENTRY_RETRIES",
+  /* How long the executable exit mark may stay unreadable for TRANSPORT reasons
+     before a risk exit latches. A two-tick latch on any failure sold a position on
+     two transient Jupiter errors four seconds apart. Floored at 60s, capped at 30m. */
+  "EXIT_MARK_OUTAGE_LATCH_MS",
   "EXPECTED_NETWORK_FEE_LAMPORTS", "DAILY_SOL_CAP", "EXECUTE", "EXECUTOR_SOURCE_COMMIT",
   "FEE_RESERVE_SOL", "FINALITY_TIMEOUT_MS", "F_DEFAULT", "F_NAME_MAX", "HARD_STOP_FILE",
   "INIT_ONLY", "JUPITER_API_BASE", "JUPITER_API_KEY", "KEYPAIR", "LIVE_CAPS_ACK",
