@@ -1,6 +1,9 @@
 node_modules/
 burner.json
 .cc-executor.env
+# ...and every backup/rotation variant. A `.cc-executor.env.bak-battery` copy was
+# sitting untracked beside it, which one `git add -A` would have published.
+.cc-executor.env.*
 .cc-executor.sqlite*
 .cc-executor.lock
 PAUSE_ENTRIES
