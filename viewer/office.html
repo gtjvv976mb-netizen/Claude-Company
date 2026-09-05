@@ -4,49 +4,110 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 
 <style>
+/* SOLANA TOWER THEME. Night-first, exactly like the Robinhood floor: the bare :root
+   IS the theme, the media-query and [data-theme] blocks only RESTATE it, and
+   [data-theme="light"] (the DAWN SHIFT) moves surfaces only. Every colour has a
+   definition on the BARE :root.
+
+   THE SHAPE, borrowed from the reference floor: the CHROME is night and the ROOM
+   STAYS LIT. The masthead and the rail are violet-black; the floor plan keeps its
+   daylight, Solana-tinted. That is why the ink printed on the room is --on-paper*
+   (dark, both themes) while the ink in the rail is --ink* (light, both themes).
+
+   Mint (--sol-green) is EMITTED LIGHT and never becomes paint. Violet (--teal /
+   --sol-violet) is the one brand colour allowed to be a surface. Brass (--amber) is
+   the COMPANY and is byte-identical to the Robinhood floor's. Claude's coral, the
+   house timber/stone/clay and the alert colours are shared-world tokens, untouched. */
 :root{
-  --ink:#2A2622; --ink-soft:#6B6155; --ink-faint:#9A8F80;
-  --floor:#E8DCC8; --floor-alt:#DFD1B8; --floor-edge:#CDBB9C;
-  --wall:#3D3630; --wall-soft:#574C42;
-  --felt:#2F5D50; --felt-soft:#43786A;
-  --brass:#B8863B; --brass-lite:#D7AE6A;
-  --paper:#FBF7EF; --paper-edge:#E0D6C4;
-  --glass:rgba(210,232,236,.30); --glass-line:#8FA9A6;
-  --good:#3F7D5C; --warn:#C08A2E; --bad:#A8433A;
-  --panel:#F4EDE0; --panel-line:#D3C6AE;
-  --shadow:rgba(42,38,34,.20);
+  --cream:#e6ddf5;      /* the light foreground that sits ON a violet ground */
+  --path-stone:#cfc7ad; /* house stone. UNCHANGED. */
+  --timber:#a96934;     /* house timber. UNCHANGED. */
+  --timber-dark:#5f3e29;/* house timber shadow. UNCHANGED. */
+  --teal:#9945ff;       /* THE IDENTITY SURFACE. Solana violet. Selected tab, .memo .place. */
+  --solar-navy:#4a5fd8; /* secondary structural blue, pulled into the violet family */
+  --amber:#d1a84f;      /* AGED BRASS. Focus rings, numerals. UNCHANGED. */
+  --glass-aqua:#5ee9b5; /* mint glass — translucent partitions, glazing tint */
+  --metal:#7a7f9a;      /* brushed steel, violet-cooled */
+  --terracotta:#bf623c; /* house clay. UNCHANGED. */
+  --coral:#e06b57;      /* UNCHANGED. */
+  --leaf:#3fd39a;       /* mint-leaf — planting */
+  --charcoal:#2a2440;   /* violet charcoal — the deepest structural body */
+  --water:#14f195;      /* mint water. Collapses onto --sol-green. */
+  --claude:#d97757;     /* Claude's own coral — NEVER re-themed, in either tower. */
+
+  /* THE EMITTED LIGHT: the building's own mint, never a surface colour.
+     --sol-violet is the paint-legal brand mark; --sol-green is the light. */
+  --sol-green:#14f195; --sol-soft:#5ef0b4; --sol-pale:#a9ffd8; --sol-violet:#9945ff;
+  /* Name parity with the Robinhood floor: aliases, never renames. */
+  --rh-green:var(--sol-green); --rh-soft:var(--sol-soft); --rh-pale:var(--sol-pale);
+
+  --ink:#efeaff;        /* rail body text. Violet-tinted white. */
+  --ink-soft:#b0a4cf;   /* secondary prose */
+  --ink-faint:#7a6d9c;  /* eyebrows, keys, timestamps, .empty */
+  --panel:#120c1f;      /* the rail's ground */
+  --panel-line:#241a3a; /* the rail's hairline, dotted row rules */
+  --card:#171029; --card-line:#2e2148;
+  --good:#3ee6a8;       /* mint status — one step softer than the emitted light */
+  --warn:#e0ad3d;       /* brass status. UNCHANGED. */
+  --bad:#ff6b5a;        /* loss. UNCHANGED. */
+  --on-dark:#efeaff;
+  /* the shell: masthead bar and ground */
+  --bar:#08050f; --bar-ink:#efeaff; --bar-soft:rgba(239,234,255,.62);
+  --dock-bg:rgba(12,8,22,.86); --shadow:rgba(20,10,40,.22); --hint-bg:rgba(12,8,22,.9);
+
+  /* ---- THE ROOM. Daylight, Solana-tinted, and it does NOT go dark with the chrome.
+     Darkening the room to match the night chrome is the recorded failure this
+     comment exists to prevent. ---- */
+  --floor:#e4dcf0; --floor-alt:#d7cde8; --floor-edge:#c6bade;
+  --wall:#2a1f45; --wall-soft:#3f3068;
+  --felt:#1f7a5c; --felt-soft:#2f9d78;
+  --brass:#B8863B; --brass-lite:#D7AE6A;      /* brass stays brass: UNCHANGED */
+  --paper:#FBF7EF; --paper-edge:#E0D6C4;      /* printed paper is paper: UNCHANGED */
+  --glass:rgba(94,233,181,.24); --glass-line:#7fbfa8;
   --lamp:rgba(255,214,140,0);
-  /* Ink for things printed on paper. Deliberately NOT redefined per theme:
-     paper is light in both themes, so its ink must stay dark in both. */
+  --panel-bright:#F4EDE0;                      /* kept: the old daylight panel value */
+  /* Ink for things printed on paper AND drawn on the lit floor. Deliberately NOT
+     redefined per theme: the room is light in both themes, so its ink stays dark. */
   --on-paper:#2A2622; --on-paper-soft:#5F564A; --on-paper-faint:#6E6558;
 }
 :root:not([data-theme="light"]){
   @media (prefers-color-scheme: dark){
-    --ink:#F0E7D8; --ink-soft:#B3A692; --ink-faint:#7D7263;
-    --floor:#2B2621; --floor-alt:#332D26; --floor-edge:#1D1915;
-    --wall:#15120F; --wall-soft:#241F1A;
-    --felt:#1E4038; --felt-soft:#2C5C50;
-    --brass:#D7AE6A; --brass-lite:#F0D19A;
-    --paper:#EFE6D6; --paper-edge:#C9BDA8;
-    --glass:rgba(120,168,172,.16); --glass-line:#4E6B69;
-    --good:#5FA57C; --warn:#DBA746; --bad:#C9645A;
-    --panel:#221D19; --panel-line:#3A322A;
-    --shadow:rgba(0,0,0,.55);
-    --lamp:rgba(255,206,122,.30);
+    --ink:#efeaff; --ink-soft:#b0a4cf; --ink-faint:#7a6d9c;
+    --panel:#120c1f; --panel-line:#241a3a; --card:#171029; --card-line:#2e2148;
+    --good:#3ee6a8; --warn:#e0ad3d; --bad:#ff6b5a;
+    --bar:#08050f; --bar-ink:#efeaff; --bar-soft:rgba(239,234,255,.62);
+    --dock-bg:rgba(12,8,22,.86); --shadow:rgba(20,10,40,.22); --hint-bg:rgba(12,8,22,.9);
+    /* the room does not follow the chrome into the dark */
+    --floor:#e4dcf0; --floor-alt:#d7cde8; --floor-edge:#c6bade;
+    --wall:#2a1f45; --wall-soft:#3f3068;
+    --felt:#1f7a5c; --felt-soft:#2f9d78;
+    --brass:#B8863B; --brass-lite:#D7AE6A;
+    --paper:#FBF7EF; --paper-edge:#E0D6C4;
+    --glass:rgba(94,233,181,.24); --glass-line:#7fbfa8;
+    --lamp:rgba(255,214,140,0);
   }
 }
 :root[data-theme="dark"]{
-  --ink:#F0E7D8; --ink-soft:#B3A692; --ink-faint:#7D7263;
-  --floor:#2B2621; --floor-alt:#332D26; --floor-edge:#1D1915;
-  --wall:#15120F; --wall-soft:#241F1A;
-  --felt:#1E4038; --felt-soft:#2C5C50;
-  --brass:#D7AE6A; --brass-lite:#F0D19A;
-  --paper:#EFE6D6; --paper-edge:#C9BDA8;
-  --glass:rgba(120,168,172,.16); --glass-line:#4E6B69;
-  --good:#5FA57C; --warn:#DBA746; --bad:#C9645A;
-  --panel:#221D19; --panel-line:#3A322A;
-  --shadow:rgba(0,0,0,.55);
-  --lamp:rgba(255,206,122,.30);
+  --ink:#efeaff; --ink-soft:#b0a4cf; --ink-faint:#7a6d9c;
+  --panel:#120c1f; --panel-line:#241a3a; --card:#171029; --card-line:#2e2148;
+  --good:#3ee6a8; --warn:#e0ad3d; --bad:#ff6b5a;
+  --bar:#08050f; --bar-ink:#efeaff; --bar-soft:rgba(239,234,255,.62);
+  --dock-bg:rgba(12,8,22,.86); --shadow:rgba(20,10,40,.22); --hint-bg:rgba(12,8,22,.9);
+  --floor:#e4dcf0; --floor-alt:#d7cde8; --floor-edge:#c6bade;
+  --wall:#2a1f45; --wall-soft:#3f3068;
+  --felt:#1f7a5c; --felt-soft:#2f9d78;
+  --brass:#B8863B; --brass-lite:#D7AE6A;
+  --paper:#FBF7EF; --paper-edge:#E0D6C4;
+  --glass:rgba(94,233,181,.24); --glass-line:#7fbfa8;
+  --lamp:rgba(255,214,140,0);
+}
+/* THE DAWN SHIFT. Same tower, first light through the glazing: the chrome surfaces
+   lift to indigo. Ink, good/warn/bad, every brass, violet and mint token — and the
+   whole lit room — inherit from the bare :root above. Only the surfaces move. */
+:root[data-theme="light"]{
+  --panel:#1d1436; --panel-line:#31245a; --card:#241a44; --card-line:#3c2d6b;
+  --bar:#1d1436; --dock-bg:rgba(29,20,54,.86); --hint-bg:rgba(29,20,54,.92);
+  --shadow:rgba(20,10,40,.20);
 }
 
 *{box-sizing:border-box}
@@ -59,22 +120,25 @@ body{
 /* ---------- chrome ---------- */
 .topbar{
   display:flex; align-items:baseline; gap:16px; flex-wrap:wrap;
-  padding:14px 20px; background:var(--wall); color:var(--paper);
-  border-bottom:3px solid var(--brass);
+  padding:14px 20px; background:var(--bar); color:var(--bar-ink);
+  /* the building's light line, not a brass bar — the Solana spectrum */
+  border-bottom:1px solid var(--sol-green);
+  border-image:linear-gradient(90deg,var(--sol-violet) 0%,var(--sol-green) 100%) 1;
+  box-shadow:0 1px 14px rgba(20,241,149,.22), 0 1px 26px rgba(153,69,255,.18);
 }
 .firm{font-family:"Instrument Serif",Georgia,serif; font-size:26px; letter-spacing:.2px; line-height:1}
-.firm em{font-style:italic; color:var(--brass-lite)}
+.firm em{font-style:italic; color:var(--sol-soft)}
 .tag{
   font-size:11px; text-transform:uppercase; letter-spacing:.14em;
-  color:rgba(251,247,239,.62); font-weight:600;
+  color:var(--bar-soft); font-weight:600;
 }
 .topbar .spacer{margin-left:auto}
-.stat{display:flex; gap:6px; align-items:baseline; font-size:12px; color:rgba(251,247,239,.72)}
-.stat b{font-family:"JetBrains Mono",ui-monospace,monospace; font-size:13px; color:var(--brass-lite); font-variant-numeric:tabular-nums}
+.stat{display:flex; gap:6px; align-items:baseline; font-size:12px; color:var(--bar-soft)}
+.stat b{font-family:"JetBrains Mono",ui-monospace,monospace; font-size:13px; color:var(--amber); font-variant-numeric:tabular-nums}
 .live{display:inline-flex; align-items:center; gap:7px; font-size:11px; letter-spacing:.12em; text-transform:uppercase; font-weight:600}
-.live .dot{width:8px;height:8px;border-radius:50%;background:var(--good); box-shadow:0 0 0 0 var(--good); animation:pulse 2.4s infinite}
-.live.sim .dot{background:var(--warn); animation:none}
-@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(63,125,92,.6)}70%{box-shadow:0 0 0 9px rgba(63,125,92,0)}100%{box-shadow:0 0 0 0 rgba(63,125,92,0)}}
+.live .dot{width:8px;height:8px;border-radius:50%;background:var(--sol-green); box-shadow:0 0 0 0 var(--sol-green); animation:pulse 2.4s infinite}
+.live.sim .dot{background:var(--amber); animation:none}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(20,241,149,.7)}70%{box-shadow:0 0 0 9px rgba(20,241,149,0)}100%{box-shadow:0 0 0 0 rgba(20,241,149,0)}}
 
 .wrap{display:grid; grid-template-columns:minmax(0,1fr) 336px; gap:0; height:calc(100vh - 62px); min-height:520px}
 @media (max-width:1080px){ .wrap{grid-template-columns:1fr; height:auto} }
@@ -117,8 +181,8 @@ body{
   transform:rotate(-8deg); transition:opacity .18s; box-shadow:0 1px 2px var(--shadow);
 }
 .person.carrying .doc{opacity:1}
-.person .doc.red{background:#E8C4BF; border-color:var(--bad)}
-.person .doc.green{background:#C9E0D2; border-color:var(--good)}
+.person .doc.red{background:#F3C9C2; border-color:var(--bad)}
+.person .doc.green{background:#C9E8DC; border-color:var(--good)}
 .person .bubble{
   position:absolute; left:50%; bottom:58px; transform:translateX(-50%) scale(.9);
   background:var(--paper); color:var(--on-paper); border:1.5px solid var(--wall);
@@ -152,8 +216,8 @@ body{
   padding:5px 10px; border-radius:5px; border:1px solid var(--panel-line);
   background:transparent; color:var(--ink-soft); cursor:pointer;
 }
-.tab[aria-selected="true"]{background:var(--wall); color:var(--paper); border-color:var(--wall)}
-.tab:focus-visible{outline:2px solid var(--brass); outline-offset:2px}
+.tab[aria-selected="true"]{background:var(--teal); color:var(--cream); border-color:var(--teal)}
+.tab:focus-visible{outline:2px solid var(--amber); outline-offset:2px}
 .tape{
   flex:1; min-height:0; overflow-y:auto; padding:10px 14px;
   font-family:"JetBrains Mono",ui-monospace,monospace; font-size:11.5px; line-height:1.65;
@@ -171,26 +235,29 @@ body{
 .memo header{display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin-bottom:6px}
 .memo .sym{font-family:"Instrument Serif",Georgia,serif; font-size:20px; color:var(--on-paper)}
 .memo .verdict{font-size:10px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; padding:3px 7px; border-radius:4px}
-.v-PROPOSE,.v-APPROVED{background:var(--good); color:#fff}
-.v-WATCH,.v-HELD{background:var(--warn); color:#2A2622}
-.v-DECLINED{background:var(--bad); color:#fff}
-.v-PASS{background:var(--ink-faint); color:#fff} .v-VETOED,.v-killed,.v-screened_out{background:var(--bad); color:#fff}
+.v-PROPOSE,.v-APPROVED{background:var(--good); color:#04160e}
+.v-WATCH,.v-HELD{background:var(--warn); color:#26201a}
+.v-DECLINED{background:var(--bad); color:#2a0e09}
+.v-PASS{background:var(--ink-faint); color:#fff} .v-VETOED,.v-killed,.v-screened_out{background:var(--bad); color:#2a0e09}
 .memo p{margin:0 0 6px; font-size:12.5px; line-height:1.5; color:var(--on-paper-soft)}
 .memo .kv{display:flex; gap:12px; font-family:"JetBrains Mono",monospace; font-size:11px; color:var(--on-paper-faint); flex-wrap:wrap}
 .memo .kv b{color:var(--on-paper); font-variant-numeric:tabular-nums}
 .memo .place{
   display:inline-flex; align-items:center; gap:6px; margin-top:9px; padding:6px 11px;
-  background:var(--wall); color:var(--paper); border-radius:5px; text-decoration:none;
+  background:var(--teal); color:var(--cream); border-radius:5px; text-decoration:none;
   font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
 }
-.memo .place:hover{background:var(--brass); color:#2A2622}
-.memo .place:focus-visible{outline:2px solid var(--brass); outline-offset:2px}
+.memo .place:hover{background:var(--claude); color:#2a1a14}
+.memo .place:focus-visible{outline:2px solid var(--amber); outline-offset:2px}
 .memo .unsigned{margin-top:7px; font-size:10.5px; color:var(--on-paper-faint); line-height:1.45}
 .empty{color:var(--ink-faint); font-size:12.5px; text-align:center; padding:28px 12px; line-height:1.6}
 
 .legend{padding:10px 14px; border-top:1px solid var(--panel-line); display:flex; flex-wrap:wrap; gap:6px 10px}
 .legend span{display:flex; align-items:center; gap:5px; font-size:10.5px; color:var(--ink-soft)}
-.legend i{width:9px;height:9px;border-radius:50%; display:block}
+.legend i{width:9px;height:9px;border-radius:50%; display:block;
+  /* the staff swatches are each agent's own colour and several are dark; on the
+     night rail they need a hairline to read as a disc at 9px */
+  box-shadow:0 0 0 1px rgba(239,234,255,.28)}
 
 .note{padding:9px 14px; font-size:10.5px; color:var(--ink-faint); border-top:1px solid var(--panel-line); line-height:1.5}
 
@@ -293,7 +360,7 @@ function text(p, x, y, s, o = {}) {
     x, y, "text-anchor": o.anchor || "middle",
     "font-family": o.serif ? "Instrument Serif, Georgia, serif" : "Archivo, sans-serif",
     "font-size": o.size || 12, "font-weight": o.weight || 600,
-    fill: o.fill || "var(--ink-soft)", "letter-spacing": o.ls || "0.08em",
+    fill: o.fill || "var(--on-paper-soft)", "letter-spacing": o.ls || "0.08em",
   });
   n.textContent = s;
   return n;
@@ -329,7 +396,7 @@ function buildRoom() {
   add(room, "circle", { cx:770, cy:S.y+S.h+1, r:4, fill:"var(--brass-lite)" });
   add(room, "line", { x1:660, y1:S.y+S.h+22, x2:780, y2:S.y+S.h+22,
     stroke:"var(--brass)", "stroke-width":2, "stroke-dasharray":"6 6", opacity:.55 });
-  text(room, 720, S.y+S.h+40, "SLIP IT UNDER THE DOOR", { size:8.5, fill:"var(--ink-faint)", ls:"0.2em" });
+  text(room, 720, S.y+S.h+40, "SLIP IT UNDER THE DOOR", { size:8.5, fill:"var(--on-paper-faint)", ls:"0.2em" });
   // nameplate
   add(room, "rect", { x:S.x+120, y:S.y+8, width:160, height:30, rx:3, fill:"var(--wall)", opacity:.92 });
   add(room, "rect", { x:S.x+120, y:S.y+8, width:160, height:30, rx:3, fill:"none", stroke:"var(--brass)", "stroke-width":1.5 });
@@ -357,7 +424,7 @@ function buildRoom() {
   // --- rugs ---
   add(room, "ellipse", { cx:660, cy:706, rx:145, ry:74, fill:"var(--felt)", opacity:.20 });
   add(room, "ellipse", { cx:660, cy:706, rx:145, ry:74, fill:"none", stroke:"var(--felt)", "stroke-width":3, opacity:.45 });
-  text(room, 660, 656, "THE FLOOR", { size:9.5, fill:"var(--ink-faint)", ls:"0.24em" });
+  text(room, 660, 656, "THE FLOOR", { size:9.5, fill:"var(--on-paper-faint)", ls:"0.24em" });
 
   // --- desks ---
   for (const s of STAFF) {
@@ -373,32 +440,32 @@ function buildRoom() {
     // paper tray + mug
     add(room, "rect", { x:x + 14, y:y + h - 26, width:26, height:16, rx:2, fill:"var(--paper)", stroke:"var(--paper-edge)" });
     add(room, "circle", { cx:x + w - 24, cy:y + h - 18, r:7, fill:"var(--brass)", opacity:.75 });
-    text(room, x + w/2, y + h + 17, s.name.toUpperCase(), { size:10, fill:"var(--ink)", ls:"0.14em", weight:700 });
-    text(room, x + w/2, y + h + 30, s.role, { size:9.5, fill:"var(--ink-faint)", ls:"0.04em", weight:500 });
+    text(room, x + w/2, y + h + 17, s.name.toUpperCase(), { size:10, fill:"var(--on-paper)", ls:"0.14em", weight:700 });
+    text(room, x + w/2, y + h + 30, s.role, { size:9.5, fill:"var(--on-paper-faint)", ls:"0.04em", weight:500 });
   }
 
   // --- printer ---
   add(room, "rect", { x:310, y:680, width:84, height:52, rx:5, fill:"var(--wall-soft)" });
   add(room, "rect", { x:322, y:670, width:60, height:14, rx:3, fill:"var(--paper)", stroke:"var(--paper-edge)" });
   add(room, "rect", { x:320, y:706, width:64, height:8, rx:2, fill:"var(--wall)" });
-  text(room, 352, 750, "PRINTER", { size:9, fill:"var(--ink-faint)", ls:"0.18em" });
+  text(room, 352, 750, "PRINTER", { size:9, fill:"var(--on-paper-faint)", ls:"0.18em" });
 
   // --- shredder (where the screener's rejects go) ---
   add(room, "rect", { x:262, y:532, width:60, height:46, rx:4, fill:"var(--wall)" });
   add(room, "rect", { x:272, y:540, width:40, height:5, rx:2.5, fill:"var(--bad)" });
-  text(room, 292, 596, "SHREDDER", { size:9, fill:"var(--ink-faint)", ls:"0.16em" });
+  text(room, 292, 596, "SHREDDER", { size:9, fill:"var(--on-paper-faint)", ls:"0.16em" });
 
   // --- water cooler ---
   add(room, "rect", { x:942, y:674, width:40, height:56, rx:5, fill:"var(--glass-line)", opacity:.5 });
   add(room, "rect", { x:948, y:660, width:28, height:22, rx:8, fill:"var(--glass)", stroke:"var(--glass-line)", "stroke-width":2 });
-  text(room, 962, 750, "COOLER", { size:9, fill:"var(--ink-faint)", ls:"0.18em" });
+  text(room, 962, 750, "COOLER", { size:9, fill:"var(--on-paper-faint)", ls:"0.18em" });
 
   // --- archive shelving (the journal) ---
   add(room, "rect", { x:310, y:742, width:200, height:34, rx:4, fill:"var(--wall-soft)" });
   for (let i = 0; i < 11; i++)
     add(room, "rect", { x:318 + i*17, y:748, width:12, height:22, rx:1.5,
       fill:i % 3 ? "var(--paper)" : "var(--brass)", opacity:.9 });
-  text(room, 410, 734, "THE JOURNAL", { size:9, fill:"var(--ink-faint)", ls:"0.18em" });
+  text(room, 410, 734, "THE JOURNAL", { size:9, fill:"var(--on-paper-faint)", ls:"0.18em" });
 
   // --- plants ---
   for (const [px, py] of [[60,930],[1390,930],[60,110],[1010,930],[1390,110]]) {
