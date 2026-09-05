@@ -7,6 +7,13 @@
  * three analysts returned", a research verdict that was really a billing verdict.
  * A blocker that dresses as a judgement is the worst kind, so it gets named. */
 const CREDIT_ERROR_PATTERNS = [
+  /* xAI's shapes, so a dead Grok account counts the same as a dead Anthropic one. The
+     status is what xai() prefixes; the phrasing is what its error bodies use. A 429 or
+     5xx is deliberately NOT here — those are transient and retry on their own. */
+  /\bxai 402\b/,
+  /\bxai 403\b.*(?:credit|billing|balance)/i,
+  /insufficient (?:credit|credits|balance|funds)/i,
+  /credits?\b.{0,12}\b(?:exhausted|depleted)/i,
   /credit balance is too low/i,
   /(?:the\s+)?anthropic balance is empty/i,
   /insufficient (?:api )?credits?/i,
@@ -79,11 +86,15 @@ export function providerCreditHealth(events, {
 
   const recovered = lastFailureTs != null && lastSuccessTs != null &&
     lastSuccessTs - lastFailureTs >= recoveryGraceMs;
+  // Which provider refused, from xai()'s prefix; everything else is Anthropic. The
+  // operator has two accounts to top up and the wrong one was topped up once already.
+  const lastFailureProvider = lastFailureError ? (/^xai\b/i.test(lastFailureError) ? "xai" : "anthropic") : null;
   return {
     blocked: lastFailureTs != null && !recovered,
     failures,
     lastFailureTs,
     lastFailureError,
+    lastFailureProvider,
     lastSuccessTs,
     recoveryGraceMs,
   };

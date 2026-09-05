@@ -376,9 +376,21 @@ export async function enrichWithXRead(ev, hook = "") {
   const handle = handleFromUrl(pfCoin?.twitter) ?? pfCoin?.creatorUsername ?? null;
   const xr = await grokXRead({ symbol: ev.pair?.baseSymbol ?? ev.mint.slice(0, 6), mint: ev.mint, hook,
     handle, lore: pfCoin?.description ?? null })
-    .catch(() => null);
+    .catch((e) => ({ ok: false, error: `x-read threw: ${String(e?.message || e).slice(0, 200)}` }));
   if (xr?.ok) ev.xRead = { ...xr.read, citations: xr.citations };
-  else if (xr) ev.xRead = { error: xr.error };
+  else if (xr) {
+    ev.xRead = { error: xr.error };
+    /* A FAILED READ USED TO BE INVISIBLE. xai() returns the provider's own status and
+       error body, and this line threw it away: no event, no spend row (a refused call
+       has no usage to meter), no log the operator could reach. On 2026-09-05 Grok ran 92
+       times and then zero for an hour while every Anthropic seat kept working on the same
+       coins, and nothing anywhere said so — the desk quietly degraded to "no reputation
+       read" on every coin. The likeliest cause was xAI credit, a separate account from
+       Anthropic, and the operator had just refilled the wrong one.
+       Announced as seat:failed, the same event every other seat raises, so the chronicle
+       shows it and provider-health can count it. */
+    emit("seat:failed", { seat: "XRead", mint: ev.mint, symbol: ev.pair?.baseSymbol ?? null, error: xr.error });
+  }
 
   /* THE LEDGER. A rugger rotates wallets between launches, so on-chain forensics meets
    * a first-time deployer every time; the X handle is the identity they cannot abandon,

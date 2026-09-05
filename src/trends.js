@@ -190,8 +190,14 @@ export function raceWinner(coins) {
 export async function scanTrends({ maxThemes = 10, maxAgeHours = 120 } = {}) {
   if (!hasGrok()) return { ok: false, error: "no grok key", candidates: [] };
 
-  const scan = await grokTrendScan({ limit: maxThemes + 4 }).catch(() => null);
-  if (!scan?.ok) return { ok: false, error: scan?.error ?? "trend scan failed", candidates: [] };
+  const scan = await grokTrendScan({ limit: maxThemes + 4 })
+    .catch((e) => ({ ok: false, error: `trend scan threw: ${String(e?.message || e).slice(0, 200)}` }));
+  if (!scan?.ok) {
+    const error = scan?.error ?? "trend scan failed";
+    // Same reason as the X read: a Grok failure must be visible, not a quiet "no themes".
+    if (error !== "no key") emit("seat:failed", { seat: "TrendScan", error });
+    return { ok: false, error, candidates: [] };
+  }
 
   const now = Date.now();
   const fresh = (scan.themes ?? []).filter((t) => {
