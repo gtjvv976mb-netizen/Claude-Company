@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Claude Company</title>
-<meta name="description" content="Two towers, one desk. Claude Tower works pump.fun on Solana; Claude Tower on Robinhood Chain works PONS. Connect a wallet — Phantom or an EVM wallet — and enter the one you trade on.">
+<meta name="description" content="Two towers, one desk. Sixteen agents research a memecoin, five of them blind to each other, one paid to refute; a compliance program can veto; only the CEO makes a call — and what leaves is an unsigned ticket a bot you run yourself trades from your own wallet. On Solana and on Robinhood Chain.">
 <meta property="og:title" content="Claude Company — two towers, one desk">
 <meta property="og:description" content="Sixteen agents research a memecoin, a red team tries to refute it, and a self-hosted bot trades from your own wallet. Now on two chains.">
 <meta property="og:image" content="assets/banner-1200x630.png">
@@ -200,28 +200,175 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--amber);outline-offs
   .gate.entering .curtain{opacity:1}
 }
 
-/* ── below the fold: the same company, twice ─────────────────────────── */
-.sheet{background:var(--paper);color:var(--ink);padding:clamp(56px,9vw,120px) 0}
-.wrap{max-width:1120px;margin:0 auto;padding:0 clamp(18px,4.5vw,56px)}
-.lede{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:clamp(24px,5vw,72px);align-items:start}
-.lede h2{font-size:clamp(34px,4.6vw,58px);line-height:1;letter-spacing:-.015em;text-wrap:balance}
-.lede h2 em{font-style:italic;color:var(--ink-soft)}
-.lede p{color:var(--ink-soft);font-size:clamp(16px,1.35vw,18px)}
-.lede .tag{display:block;margin-bottom:14px;font-size:10px;letter-spacing:.24em;color:var(--amber)}
-.cmp{margin-top:clamp(40px,6vw,72px);border-top:1px solid rgba(244,236,216,.14)}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE DESCENT — everything below the skyline is a walk down the building.
+   Floor numbers are real structure: the house works the crown, the record sits
+   just under it, the machinery below, the lease and the small print at street.
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root{
+  --floor-rule:rgba(244,236,216,.12);
+  --ink-2:#e6dcc4;
+  --sol:#e9b158; --sol-2:#ffd987; --rh:#00c805; --rh-2:#3ee063;
+  --ash:#6a6470; --danger:#e2634f;
+}
+main{position:relative;background:var(--paper);color:var(--ink)}
+.floor{position:relative;padding:clamp(64px,9vw,128px) 0;border-top:1px solid var(--floor-rule)}
+.floor .wrap{max-width:1180px;margin:0 auto;padding:0 clamp(18px,4.5vw,56px)}
+.floorhead{display:grid;grid-template-columns:auto 1fr;gap:clamp(14px,3vw,40px);align-items:end;margin-bottom:clamp(26px,4vw,52px)}
+.floorno{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10.5px;letter-spacing:.26em;text-transform:uppercase;color:var(--ink-faint);
+  padding-bottom:6px;border-bottom:1px solid var(--floor-rule);white-space:nowrap}
+.floorno b{display:block;font-family:"Instrument Serif",Georgia,serif;font-size:clamp(34px,4.6vw,58px);line-height:.9;letter-spacing:-.02em;color:var(--ink);font-weight:400;text-transform:none;letter-spacing:-.02em;margin-bottom:6px}
+.floor h2{font-size:clamp(32px,4.4vw,56px);line-height:.98;letter-spacing:-.015em;text-wrap:balance;max-width:20ch}
+.floor h2 em{font-style:italic;color:var(--ink-soft)}
+.lede{max-width:64ch;color:var(--ink-soft);font-size:clamp(16px,1.35vw,18.5px);line-height:1.6;text-wrap:pretty}
+.lede b{color:var(--ink);font-weight:600}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:clamp(18px,3vw,40px)}
+.cols p{color:var(--ink-soft);font-size:16px;line-height:1.62}
+.note{border:1px solid var(--floor-rule);border-radius:12px;padding:18px 20px;background:rgba(255,255,255,.02)}
+.note h3{font-size:22px;line-height:1.1;margin-bottom:8px}
+.note p{margin:0;font-size:15px;color:var(--ink-soft)}
+.kicker{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.24em;text-transform:uppercase;color:var(--ink-faint);display:block;margin-bottom:10px}
+.chip{display:inline-block;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;padding:4px 9px;border-radius:999px;border:1px solid var(--floor-rule);color:var(--ink-soft);vertical-align:middle}
+.chip.sol{color:var(--sol-2);border-color:rgba(233,177,88,.4)}
+.chip.rh{color:var(--rh-2);border-color:rgba(0,200,5,.4)}
+.chip.code{color:#9fd8de;border-color:rgba(115,201,210,.35)}
+.chip.model{color:var(--ink);border-color:rgba(244,236,216,.3)}
+a.inl{color:var(--ink);text-decoration:underline;text-decoration-color:rgba(244,236,216,.35);text-underline-offset:3px}
+a.inl:hover{text-decoration-color:var(--amber)}
+
+/* ── reveals: content arrives as you reach its floor ─────────────────── */
+.reveal{opacity:0;transform:translateY(18px);transition:opacity .7s ease,transform .7s cubic-bezier(.2,.7,.2,1)}
+.reveal.in{opacity:1;transform:none}
+.reveal[data-delay="1"]{transition-delay:.08s}.reveal[data-delay="2"]{transition-delay:.16s}.reveal[data-delay="3"]{transition-delay:.24s}.reveal[data-delay="4"]{transition-delay:.32s}
+@media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}}
+
+/* ── the elevator: which floor you are on ────────────────────────────── */
+.lift{position:fixed;right:clamp(8px,1.4vw,22px);top:50%;transform:translateY(-50%);z-index:50;display:flex;flex-direction:column;gap:6px;
+  padding:10px 6px;border:1px solid var(--floor-rule);border-radius:999px;background:rgba(11,10,20,.55);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  opacity:0;transition:opacity .4s ease;pointer-events:none}
+.lift.show{opacity:1;pointer-events:auto}
+.lift a{display:block;width:26px;height:26px;border-radius:50%;text-decoration:none;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:8.5px;letter-spacing:.02em;
+  color:var(--ink-faint);display:grid;place-items:center;border:1px solid transparent;transition:color .2s,border-color .2s,background .2s}
+.lift a:hover{color:var(--ink)}
+.lift a.on{color:#231a12;background:var(--amber);border-color:var(--amber)}
+@media (max-width:900px){.lift{display:none}}
+
+/* ── Floor 49 · the pulse ────────────────────────────────────────────── */
+.pulse{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:clamp(12px,2vw,24px)}
+.stat{border:1px solid var(--floor-rule);border-radius:14px;padding:18px 18px 14px;background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,0))}
+.stat b{display:block;font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:clamp(34px,4vw,52px);line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--ink)}
+.stat b.sol{color:var(--sol-2)}.stat b.rh{color:var(--rh-2)}
+.stat span{display:block;margin-top:8px;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);line-height:1.5}
+.record{margin-top:clamp(22px,3vw,36px);display:grid;grid-template-columns:1fr 1fr;gap:clamp(14px,2.5vw,28px)}
+.record .note{position:relative;overflow:hidden}
+.record .note::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--acc,var(--sol))}
+.record .note.rh{--acc:var(--rh)}
+.record dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:10px 0 0;font-size:14px}
+.record dt{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);padding-top:3px}
+.record dd{margin:0;color:var(--ink);font-variant-numeric:tabular-nums}
+.record .honest{margin-top:12px;font-size:13.5px;color:var(--ink-soft);border-top:1px dashed var(--floor-rule);padding-top:10px}
+@media (max-width:760px){.record{grid-template-columns:1fr}}
+
+/* ── Floor 48 · the funnel ───────────────────────────────────────────── */
+.funnelwrap{position:relative;border:1px solid var(--floor-rule);border-radius:16px;overflow:hidden;background:
+  radial-gradient(80% 60% at 50% 0%, rgba(233,177,88,.06), transparent 60%),
+  linear-gradient(180deg,#0e0d1a,#0b0a14)}
+.funnelwrap canvas{display:block;width:100%;height:auto}
+.fgates{display:grid;grid-template-columns:repeat(6,1fr);gap:0;border-top:1px solid var(--floor-rule)}
+.fgate{padding:14px 12px 16px;border-right:1px solid var(--floor-rule);min-width:0}
+.fgate:last-child{border-right:0}
+.fgate .kicker{margin-bottom:6px}
+.fgate h4{font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:18px;line-height:1.05;margin:0 0 6px}
+.fgate p{margin:0;font-size:12.5px;line-height:1.45;color:var(--ink-soft)}
+.fgate.red h4{color:#f2a08f}.fgate.code .kicker{color:#9fd8de}
+@media (max-width:860px){.fgates{grid-template-columns:repeat(3,1fr)}.fgate:nth-child(3){border-right:0}.fgate:nth-child(-n+3){border-bottom:1px solid var(--floor-rule)}}
+@media (max-width:520px){.fgates{grid-template-columns:repeat(2,1fr)}.fgate:nth-child(3){border-right:1px solid var(--floor-rule)}.fgate:nth-child(2n){border-right:0}.fgate:nth-child(-n+4){border-bottom:1px solid var(--floor-rule)}}
+.funnelnote{margin-top:14px;font-size:13.5px;color:var(--ink-faint);font-family:"JetBrains Mono",ui-monospace,monospace;letter-spacing:.04em}
+
+/* ── Floor 47 · the seats ────────────────────────────────────────────── */
+.principles{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin-bottom:clamp(22px,3vw,36px)}
+.seats{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.seat{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:start;border:1px solid var(--floor-rule);border-radius:12px;padding:12px 14px 12px 10px;background:rgba(255,255,255,.02);position:relative}
+.seat.red{border-color:rgba(226,99,79,.45);background:rgba(226,99,79,.05)}
+.seat .seatno{position:absolute;right:12px;top:10px;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:9.5px;letter-spacing:.2em;color:var(--ink-faint)}
+.seatfig{width:58px;height:84px;display:block;border-radius:8px;background:radial-gradient(60% 50% at 50% 100%, rgba(255,255,255,.06), transparent 70%)}
+.seatname{margin:2px 0 4px;font-family:"Instrument Serif",Georgia,serif;font-size:19px;line-height:1.05;color:var(--ink)}
+.seatrole{display:block;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-faint);margin:4px 0 6px}
+.seatq{margin:0;font-size:13.5px;line-height:1.45;color:var(--ink-soft)}
+.seatq em{font-style:italic;color:var(--ink)}
+
+/* ── Floor 46 · the bot ──────────────────────────────────────────────── */
+.vault{display:grid;grid-template-columns:1.05fr 1fr;gap:clamp(18px,3vw,40px);align-items:start}
+.frame{border:1px solid var(--floor-rule);border-radius:16px;padding:18px 20px 20px;position:relative;background:rgba(255,255,255,.02)}
+.frame .kicker{margin-bottom:12px}
+.frame.mine{border-color:rgba(233,177,88,.4);box-shadow:inset 0 0 0 1px rgba(233,177,88,.08)}
+.steps{list-style:none;margin:0;padding:0;display:grid;gap:8px;counter-reset:step}
+.step{display:grid;grid-template-columns:28px 1fr;gap:12px;align-items:start;padding:10px 12px;border-radius:10px;border:1px solid transparent;opacity:.45;transition:opacity .5s ease,border-color .5s ease,background .5s ease}
+.step::before{counter-increment:step;content:counter(step,decimal-leading-zero);font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.1em;color:var(--ink-faint);padding-top:3px}
+.step.lit{opacity:1;border-color:var(--floor-rule);background:rgba(255,255,255,.03)}
+.step.lit::before{color:var(--amber)}
+.step h4{margin:0 0 3px;font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:18px;line-height:1.05}
+.step p{margin:0;font-size:13.5px;line-height:1.45;color:var(--ink-soft)}
+.keybox{display:flex;align-items:center;gap:12px;margin-top:14px;padding:12px 14px;border-radius:10px;border:1px dashed rgba(233,177,88,.5);color:var(--ink)}
+.keybox svg{flex:none}
+.keybox p{margin:0;font-size:13.5px;color:var(--ink-soft)}
+.keybox b{color:var(--ink)}
+.chaindiff{margin-top:clamp(22px,3vw,36px);display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.chaindiff .note h3{display:flex;align-items:center;gap:10px;font-size:20px}
+.chaindiff ul{margin:8px 0 0;padding-left:18px;color:var(--ink-soft);font-size:14px;line-height:1.55}
+@media (max-width:860px){.vault,.chaindiff{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){.step{opacity:1;border-color:var(--floor-rule)}}
+
+/* ── Floor 45 · two chains ───────────────────────────────────────────── */
+.cmp{border:1px solid var(--floor-rule);border-radius:14px;overflow:hidden}
 .cmp table{width:100%;border-collapse:collapse;font-size:15px}
-.cmp th,.cmp td{text-align:left;padding:14px 12px 14px 0;border-bottom:1px solid rgba(244,236,216,.1);vertical-align:top}
-.cmp th{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.2em;text-transform:uppercase;font-weight:500;color:var(--ink-faint)}
-.cmp td:first-child{color:var(--ink-faint);font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;width:18%}
-.cmp td.sol{color:var(--sol-window-2)}.cmp td.rh{color:var(--rh-window-2)}
+.cmp th,.cmp td{text-align:left;padding:13px 14px;border-bottom:1px solid var(--floor-rule);vertical-align:top}
+.cmp thead th{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.2em;text-transform:uppercase;font-weight:500;color:var(--ink-faint);background:rgba(255,255,255,.03)}
+.cmp td:first-child{color:var(--ink-faint);font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;width:18%}
+.cmp td.sol{color:var(--sol-2)}.cmp td.rh{color:var(--rh-2)}
 .cmp td b{font-weight:600;color:var(--ink)}
 .cmp .same{color:var(--ink-soft)}
-@media (max-width:860px){.lede{grid-template-columns:1fr}}
-@media (max-width:600px){.cmp{overflow-x:auto}.cmp table{min-width:560px}}
+.cmp tr:last-child td{border-bottom:0}
+@media (max-width:640px){.cmp{overflow-x:auto}.cmp table{min-width:600px}}
 
-footer{padding:clamp(30px,5vw,56px) 0 clamp(40px,6vw,70px);border-top:1px solid rgba(244,236,216,.12);color:var(--ink-faint);font-size:12.5px;line-height:1.6}
-footer .wrap{display:grid;gap:14px}
-footer .fine{max-width:96ch}
+/* ── Floor 44 · the lease ────────────────────────────────────────────── */
+.lease{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:clamp(18px,3vw,30px)}
+.tok{border:1px solid var(--floor-rule);border-radius:14px;padding:18px 18px 16px;display:grid;grid-template-columns:64px 1fr;gap:14px;align-items:start;background:rgba(255,255,255,.02)}
+.tok.sol{border-color:rgba(233,177,88,.35)}.tok.rh{border-color:rgba(0,200,5,.35)}
+.tok img{width:64px;height:64px;border-radius:14px;display:block}
+.tok h3{font-size:22px;line-height:1.05;margin:0 0 4px}
+.tok .ticker{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint);display:block;margin-bottom:8px}
+.ca{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}
+.ca code{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;color:var(--ink);word-break:break-all;background:rgba(255,255,255,.04);padding:5px 8px;border-radius:6px;border:1px solid var(--floor-rule)}
+.cacopy{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;border:1px solid var(--floor-rule);background:transparent;color:var(--ink-soft);border-radius:999px;padding:6px 11px;cursor:pointer}
+.cacopy:hover{color:var(--ink);border-color:var(--ink-soft)}
+.cacopy.done{color:#231a12;background:var(--amber);border-color:var(--amber)}
+.tok .links{margin-top:10px;display:flex;gap:12px;flex-wrap:wrap;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase}
+.tok .links a{color:var(--ink-soft);text-decoration:none;border-bottom:1px solid var(--floor-rule)}
+.tok .links a:hover{color:var(--ink);border-bottom-color:var(--amber)}
+.tok p{margin:8px 0 0;font-size:13.5px;color:var(--ink-soft);line-height:1.5}
+.pricegrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+@media (max-width:760px){.lease{grid-template-columns:1fr}}
+
+/* ── Floor 43 · straight answers ─────────────────────────────────────── */
+.faq{display:grid;gap:8px;max-width:820px}
+.faq details{border:1px solid var(--floor-rule);border-radius:12px;background:rgba(255,255,255,.02)}
+.faq summary{cursor:pointer;list-style:none;padding:14px 18px;font-family:"Instrument Serif",Georgia,serif;font-size:21px;line-height:1.15;display:flex;justify-content:space-between;gap:14px;align-items:center}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{content:"+";font-family:"JetBrains Mono",ui-monospace,monospace;color:var(--ink-faint);font-size:16px;transition:transform .2s ease}
+.faq details[open] summary::after{transform:rotate(45deg)}
+.faq .a{padding:0 18px 16px;color:var(--ink-soft);font-size:15px;line-height:1.6}
+.faq .a p{margin:0 0 .7em}
+
+/* ── the lobby ───────────────────────────────────────────────────────── */
+footer.lobby{padding:clamp(34px,5vw,60px) 0 clamp(44px,6vw,80px);border-top:1px solid var(--floor-rule);color:var(--ink-faint);font-size:12.5px;line-height:1.6}
+footer.lobby .wrap{display:grid;gap:16px}
+footer.lobby .repos{display:flex;gap:16px;flex-wrap:wrap;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase}
+footer.lobby .repos a{color:var(--ink-soft);text-decoration:none;border-bottom:1px solid var(--floor-rule)}
+footer.lobby .repos a:hover{color:var(--ink)}
+footer.lobby .fine{max-width:100ch}
+
 </style>
 </head>
 <body>
@@ -243,10 +390,14 @@ footer .fine{max-width:96ch}
         <span>Claude <em>Company</em></span>
       </a>
       <nav class="nlinks" aria-label="Site">
-        <a href="#more">Two towers</a>
+        <a href="#funnel">The floor</a>
+        <a href="#seats">Seats</a>
+        <a href="#bot">The bot</a>
+        <a href="#chains">Chains</a>
+        <a href="#lease">Lease</a>
+        <a href="#answers">Answers</a>
         <a href="/solana">Solana</a>
         <a href="https://gtjvv976mb-netizen.github.io/Claude-Company-Robinhood/" data-rh-world>Robinhood</a>
-        <a href="/solana#token">Token</a>
       </nav>
     </div>
   </header>
@@ -264,7 +415,7 @@ footer .fine{max-width:96ch}
   <div class="copy">
     <p class="eyebrow">Claude Company · two chains, one desk</p>
     <h1>Two towers. <em>One desk.</em></h1>
-    <p class="stand">Sixteen agents research a coin, a red team tries to refute it, and a bot you run yourself trades from your own wallet. Choose the chain you trade on, and the door opens.</p>
+    <p class="stand">Sixteen agents research a coin, a red team tries to refute it, and a bot you run yourself trades from your own wallet. Choose the chain you trade on, and the door opens — or take the stairs: forty-nine floors below explain everything.</p>
   </div>
 
   <div class="doors" id="doors">
@@ -297,40 +448,257 @@ footer .fine{max-width:96ch}
   <div class="curtain" aria-hidden="true"></div>
 </section>
 
+<nav class="lift" id="lift" aria-label="Floors">
+  <a href="#top" title="Floor 50 — the house desk">50</a>
+  <a href="#pulse" title="Floor 49 — the pulse">49</a>
+  <a href="#funnel" title="Floor 48 — how a call is made">48</a>
+  <a href="#seats" title="Floor 47 — the sixteen seats">47</a>
+  <a href="#bot" title="Floor 46 — the bot">46</a>
+  <a href="#chains" title="Floor 45 — two chains">45</a>
+  <a href="#lease" title="Floor 44 — the lease">44</a>
+  <a href="#answers" title="Floor 43 — straight answers">43</a>
+  <a href="#lobby" title="Lobby">L</a>
+</nav>
+
 <main id="main">
-  <section class="sheet" id="more">
+
+  <!-- ═══ Floor 49 · the pulse ═══ -->
+  <section class="floor" id="pulse" data-floor="49">
     <div class="wrap">
-      <div class="lede">
-        <div>
-          <span class="tag">The same company, twice</span>
-          <h2>One architecture, <em>two skylines.</em></h2>
+      <div class="floorhead reveal">
+        <p class="floorno"><b>49</b>The pulse</p>
+        <h2>What the desks did, <em>counted by the desks.</em></h2>
+      </div>
+      <p class="lede reveal" data-delay="1">These numbers come from the building's own ledger, live, every time this page loads. They are not a performance claim — they are a count of work. Where the Robinhood desk's API is not yet answering, it says so instead of guessing.</p>
+      <div class="pulse reveal" data-delay="2" id="pulseGrid">
+        <div class="stat"><b class="sol" data-count="research.coinsSeen">—</b><span>Coins read<br>Solana desk</span></div>
+        <div class="stat"><b class="sol" data-count="research.workups">—</b><span>Full workups</span></div>
+        <div class="stat"><b class="sol" data-count="research.seatVerdicts">—</b><span>Seat verdicts written</span></div>
+        <div class="stat"><b class="sol" data-count="research.killsByCode">—</b><span>Killed by free code</span></div>
+        <div class="stat"><b class="sol" data-count="research.xReads">—</b><span>Reads of X, by Grok</span></div>
+        <div class="stat"><b class="sol" data-count="building.floorsLeased" data-suffix="/50">—</b><span>Floors leased</span></div>
+      </div>
+      <div class="record">
+        <div class="note reveal" data-delay="3">
+          <span class="kicker">Claude Tower · Solana · the record</span>
+          <h3>The desk keeps score against itself.</h3>
+          <dl>
+            <dt>House calls</dt><dd id="recCalls">—</dd>
+            <dt>Closed up / down</dt><dd id="recUpDown">—</dd>
+            <dt>Settled trades</dt><dd id="recSettled">—</dd>
+            <dt>Realised P&amp;L</dt><dd id="recPnl">—</dd>
+            <dt>Red team</dt><dd>Nine proposals attacked, nine refuted. Nothing has survived AGENT 48.</dd>
+          </dl>
+          <p class="honest" id="recNote">Loading the record…</p>
         </div>
-        <div>
-          <p>Claude Tower was built for pump.fun: fifty floors, one desk each, the house at the crown. The Robinhood tower is that building with the same bones and different glass — the same sixteen seats, the same blind analysts, the same red team that has refuted every proposal put to it, retargeted at a chain where a block lands every 100 milliseconds and there is no priority fee to bid.</p>
-          <p>Nothing in either building holds a key. Every ticket leaves unsigned. The only thing that changes when you walk through a door is which chain your wallet is on.</p>
+        <div class="note rh reveal" data-delay="4">
+          <span class="kicker">Claude Tower · Robinhood Chain · the record</span>
+          <h3>A fresh cohort, from the first call.</h3>
+          <dl>
+            <dt>Chain</dt><dd>Robinhood Chain · id 4663 · a block every ~100 ms</dd>
+            <dt>Launchpad</dt><dd>PONS — roughly twenty new pools a minute</dd>
+            <dt>Graduates</dt><dd>About 1.5% of launches leave the curve; half inside four minutes <span class="chip">Bitquery, Aug–Sep 2026</span></dd>
+            <dt>Status</dt><dd id="rhStatus">Reaching the Robinhood desk…</dd>
+          </dl>
+          <p class="honest">Every seat on this tower starts with no record. The scoreboard is public the moment there is one to show; nothing is carried over on faith.</p>
         </div>
       </div>
-      <div class="cmp">
+    </div>
+  </section>
+
+  <!-- ═══ Floor 48 · how a call is made ═══ -->
+  <section class="floor" id="funnel" data-floor="48">
+    <div class="wrap">
+      <div class="floorhead reveal">
+        <p class="floorno"><b>48</b>The floor</p>
+        <h2>One trade, <em>sixteen specialists.</em> Most coins die before anyone expensive sees them.</h2>
+      </div>
+      <p class="lede reveal" data-delay="1">Every sweep starts wide — a few hundred coins, some minutes old — and gets narrower at every gate. The cheapest gate does most of the killing, and it is code, not a model. What survives is worked up by five analysts who <b>cannot read each other</b>, then attacked by a seat whose only job is to refute. Watch a sweep run.</p>
+      <div class="funnelwrap reveal" data-delay="2">
+        <canvas id="funnelCanvas" width="1200" height="520" aria-label="An animated sweep: hundreds of coins enter, most are killed at the free screen, the survivors pass five blind analysts, the red team, a compliance veto and the CEO, and one unsigned ticket leaves for the bot." role="img"></canvas>
+        <div class="fgates">
+          <div class="fgate"><span class="kicker">01 · Scout</span><h4>Wide, and only on the launchpad</h4><p>The launch feed and the minute candles behind it, read from the block a coin appears in. Roughly 380 a sweep on Solana; ~20 new PONS pools a minute on Robinhood.</p></div>
+          <div class="fgate code"><span class="kicker">02 · Screener · code</span><h4>About 79% die here, for free</h4><p>Liquidity, age, wash ratio, a real buy-then-sell probe that proves an exit exists. No model, no mood, no bill.</p></div>
+          <div class="fgate"><span class="kicker">03–06 · Five analysts · blind</span><h4>Forensics, liquidity, flow, narrative, technical</h4><p>Each works the same candidate without seeing the others' notes, and they are expected to disagree. Agreement is only evidence when it wasn't arranged. $1.29–$1.44 of model time per workup.</p></div>
+          <div class="fgate red"><span class="kicker">07 · Red Team</span><h4>Paid to refute</h4><p>AGENT 48 attacks every survivor, and the PM may not propose until it states, in writing, how the attack was answered. Nine attacked; nine refuted.</p></div>
+          <div class="fgate code"><span class="kicker">11 · Compliance · code</span><h4>A veto, not advice</h4><p>House rules are a program, not a persuadable model. A veto ends the workup — the CEO never sees the proposal.</p></div>
+          <div class="fgate"><span class="kicker">12 · CEO → ticket</span><h4>The only seat that makes a call</h4><p>What leaves the building is an unsigned ticket: route, size, stop, targets, the band's clock. Always unsigned. A whole cycle lands around $4.</p></div>
+        </div>
+      </div>
+      <p class="funnelnote reveal" data-delay="3" id="funnelNote">Dots are coins. Grey ones died at a gate. The one that reaches the right edge is a ticket.</p>
+    </div>
+  </section>
+
+  <!-- ═══ Floor 47 · the sixteen seats ═══ -->
+  <section class="floor" id="seats" data-floor="47">
+    <div class="wrap">
+      <div class="floorhead reveal">
+        <p class="floorno"><b>47</b>The Aye-Team</p>
+        <h2>Sixteen seats, <em>one question each.</em></h2>
+      </div>
+      <div class="principles">
+        <div class="note reveal" data-delay="1"><span class="kicker">Independence</span><h3>Five analysts, blind</h3><p>Seats 02–06 never see one another's notes. Their disagreement is the instrument.</p></div>
+        <div class="note reveal" data-delay="2"><span class="kicker">Adversarial</span><h3>One seat paid to refute</h3><p>Every surviving idea meets AGENT 48. The PM answers the attack in writing or does not propose.</p></div>
+        <div class="note reveal" data-delay="3"><span class="kicker">Veto</span><h3>Compliance is code</h3><p>A rule enforced by a program cannot be talked out of it. A veto ends the workup before the CEO reads it.</p></div>
+      </div>
+      <ul class="seats" id="seatList">
+        <li class="seat reveal"><span class="seatno">00</span><canvas class="seatfig" data-seat="Scout" width="116" height="168" aria-hidden="true"></canvas><div><p class="seatname">Austin Powerz</p><span class="seatrole">Scout · <span class="chip model">model</span></span><p class="seatq">What deserves attention <em>today</em>, and why now?</p></div></li>
+        <li class="seat reveal"><span class="seatno">01</span><canvas class="seatfig" data-seat="Screener" width="116" height="168" aria-hidden="true"></canvas><div><p class="seatname">Maxwell Smort</p><span class="seatrole">Screener · <span class="chip code">code</span></span><p class="seatq">Does this clear the floor at all? <em>Kills most candidates, costs nothing.</em></p></div></li>
+        <li class="seat reveal"><span class="seatno">02</span><canvas class="seatfig" data-seat="Forensics" width="116" height="168" aria-hidden="true"></canvas><div><p class="seatname">Sterling Archor</p><span class="seatrole">Forensics · <span class="chip model">model</span></span><p class="seatq">Can this token be used against a holder, by design?</p></div></li>
+        <li class="seat reveal"><span class="seatno">03</span><canvas class="seatfig" data-seat="Liquidity" width="116" height="168" aria-hidden="true"></canvas><div><p class="seatname">Ethan Hunted</p><span class="seatrole">Liquidity · <span class="chip model">model</span></span><p class="seatq">Can I get out — at size, at a price I would accept?</p></div></li>
+        <li class="seat reveal"><span class="seatno">04</span><canvas class="seatfig" data-seat="Flow" width="116" height="168" aria-hidden="true"></canvas><div><p class="seatname">Sam Fishy</p><span class="seatrole">Flow · <span class="chip model">model</span></span><p class="seatq">Is the demand real, or is it manufactured?</p></div></li>
+        <li class="seat reveal"><span class="seatno">05</span><canvas class="seatfig" data-seat="Narrative" width="116" height="168" aria-hidden="true"></canvas><div><p class="seatname">Black Widower</p><span class="seatrole">Narrative · <span class="chip model">model</span></span><p class="seatq">Is there a story, is it true, and am I early?</p></div></li>
+        <li class="seat reveal"><span class="seatno">06</span><canvas class="seatfig" data-seat="Technical" width="116" height="168" aria-hidden="true"></canvas><div><p class="seatname">Jason Burn</p><span class="seatrole">Technical · <span class="chip model">model</span></span><p class="seatq">Is this a location worth entering?</p></div></li>
+        <li class="seat red reveal"><span class="seatno">07</span><canvas class="seatfig" data-seat="Red Team" width="116" height="168" aria-hidden="true"></canvas><div><p class="seatname">Agent 48</p><span class="seatrole">Red Team · <span class="chip model">model</span></span><p class="seatq"><em>Why does this trade lose money?</em></p></div></li>
+        <li class="seat reveal"><span class="seatno">08</span><canvas class="seatfig" data-seat="Risk" width="116" height="168" aria-hidden="true"></canvas><div><p class="seatname">Mini-Meh</p><span class="seatrole">Risk · <span class="chip model">model</span></span><p class="seatq">How much, and where is it mechanically wrong?</p></div></li>
+        <li class="seat reveal"><span class="seatno">09</span><canvas class="seatfig" data-seat="PM" width="116" height="168" aria-hidden="true"></canvas><div><p class="seatname">James Bound</p><span class="seatrole">PM · <span class="chip model">model</span></span><p class="seatq">Propose, watch, or pass — on what thesis?</p></div></li>
+        <li class="seat reveal"><span class="seatno">10</span><canvas class="seatfig" data-seat="Execution" width="116" height="168" aria-hidden="true"></canvas><div><p class="seatname">John Quick</p><span class="seatrole">Execution · <span class="chip model">model</span></span><p class="seatq">The unsigned ticket: route, slicing, stop, targets.</p></div></li>
+        <li class="seat reveal"><span class="seatno">11</span><canvas class="seatfig" data-seat="Compliance" width="116" height="168" aria-hidden="true"></canvas><div><p class="seatname">Judge Dread</p><span class="seatrole">Compliance · <span class="chip code">code</span></span><p class="seatq">Does this break a house rule? A veto, not advice.</p></div></li>
+        <li class="seat reveal"><span class="seatno">12</span><canvas class="seatfig" data-seat="CEO" width="116" height="168" aria-hidden="true"></canvas><div><p class="seatname">Big C</p><span class="seatrole">CEO · <span class="chip model">Claude</span></span><p class="seatq">Do I authorise this? The only seat that turns research into a call.</p></div></li>
+        <li class="seat reveal"><span class="seatno">13</span><canvas class="seatfig" data-seat="Scribe" width="116" height="168" aria-hidden="true"></canvas><div><p class="seatname">Agent P</p><span class="seatrole">Scribe · <span class="chip code">code</span></span><p class="seatq">Write it down so the desk can be graded later.</p></div></li>
+        <li class="seat reveal"><span class="seatno">14</span><canvas class="seatfig" data-seat="Regime" width="116" height="168" aria-hidden="true"></canvas><div><p class="seatname">Murdock</p><span class="seatrole">Regime · <span class="chip code">code</span></span><p class="seatq">Is it flying weather? The majors decide, not hope.</p></div></li>
+        <li class="seat reveal"><span class="seatno">15</span><canvas class="seatfig" data-seat="Review" width="116" height="168" aria-hidden="true"></canvas><div><p class="seatname">Colonel Debrief</p><span class="seatrole">Review · <span class="chip model">model</span></span><p class="seatq">What did the last landing teach us?</p></div></li>
+      </ul>
+      <p class="lede reveal" style="margin-top:22px;font-size:14.5px">Off the trading floor, a read-only <b>Codex Improvement Engineer</b> audits the scorecards, the prompts' provenance and the regression suite, and returns a proposal for human review. It never votes, orders, patches or deploys, and it cannot touch wallets or the live decision path. A separate coach, <b>Codex Banks</b>, rewrites a seat's standing orders only when that seat's own graded record earns it.</p>
+    </div>
+  </section>
+
+  <!-- ═══ Floor 46 · the bot ═══ -->
+  <section class="floor" id="bot" data-floor="46">
+    <div class="wrap">
+      <div class="floorhead reveal">
+        <p class="floorno"><b>46</b>WALL-ST-E</p>
+        <h2>The bot is yours. <em>The desk never holds a key.</em></h2>
+      </div>
+      <p class="lede reveal" data-delay="1">The building publishes tickets. A bot you install on your own machine reads them and trades from your own wallet, inside caps you set. The two halves are separated by construction, not by promise: there is no server-side signing, no custody, no browser RPC relay anywhere in the code — only an unsigned ticket, and a program on your side that proves the exact bytes before it signs anything.</p>
+      <div class="vault">
+        <div class="frame reveal" data-delay="2">
+          <span class="kicker">The building · a server on Render</span>
+          <ol class="steps" id="deskSteps">
+            <li class="step"><h4>Publishes the call</h4><p>Symbol, entry reference, stop, targets, the band's hold window, and the evidence it was made on. Unsigned. Nothing else leaves.</p></li>
+            <li class="step"><h4>Sizes it to your floor</h4><p>Your appetite, your categories, your launchpads, your bankroll — set in the tower, applied to every delivery, never seen by the house as money.</p></li>
+            <li class="step"><h4>Watches the exit</h4><p>Every open call is re-marked on its band's clock, key or no key, and the exit is published the same way the entry was.</p></li>
+          </ol>
+        </div>
+        <div class="frame mine reveal" data-delay="3">
+          <span class="kicker">Your machine · WALL-ST-E, one command to install</span>
+          <ol class="steps" id="botSteps">
+            <li class="step"><h4>Quotes, then proves the bytes</h4><p>The route is quoted, built, and then <em>simulated exactly</em> against the chain — the floor the calldata carries is read back out of the bytes and checked against what the chain would return. Bytes it cannot read, it will not sign.</p></li>
+            <li class="step"><h4>Journals before it discloses</h4><p>Every attempt is written to a local ledger before a signature exists, and marked "submitted" before the network can know. If the process dies mid-trade, the ledger says exactly what may have happened.</p></li>
+            <li class="step"><h4>Signs with a key that never leaves</h4><p>A key file on your disk, mode 600, read in-process. It is not in a repo, not in a response, not in a chat. The site cannot ask for it and would refuse it.</p></li>
+            <li class="step"><h4>Sends, and reconciles on two providers</h4><p>A receipt must be seen on both RPC providers before a fill is believed. No receipt after the deadline is <em>unknown</em>, not failed — reconciled by nonce, never blindly re-sent.</p></li>
+            <li class="step"><h4>Exits on the band's clock</h4><p>Nano and micro coins are flipped inside a session; medium and high are held longer. The stop, the target and the clock are the ticket's, enforced locally.</p></li>
+          </ol>
+          <div class="keybox">
+            <svg width="26" height="30" viewBox="0 0 26 30" aria-hidden="true"><rect x="2" y="12" width="22" height="16" rx="3" fill="none" stroke="#e9b158" stroke-width="1.6"/><path d="M7 12V8a6 6 0 0 1 12 0v4" fill="none" stroke="#e9b158" stroke-width="1.6"/><circle cx="13" cy="20" r="2.2" fill="#e9b158"/></svg>
+            <p><b>Custody never enters the building.</b> Not the house's keys, not a tenant's. Every ticket, on every floor, leaves unsigned — and every trade is your own wallet's, entirely at your own discretion.</p>
+          </div>
+        </div>
+      </div>
+      <div class="chaindiff">
+        <div class="note reveal" data-delay="2"><h3><span class="chip sol">Solana</span> What the bot does there</h3>
+          <ul><li>Routes through Jupiter; a stale transaction dies on its own after ~150 blocks, so a failed send can be rebuilt safely.</li><li>Pays a priority fee to get ahead; the network-fee ceiling is a hard refusal, not a hope.</li><li>Refuses Token-2022 mints with hazardous extensions before the quote is even asked.</li></ul></div>
+        <div class="note reveal" data-delay="3"><h3><span class="chip rh">Robinhood Chain</span> What changes on an EVM chain</h3>
+          <ul><li>Routes through the KyberSwap aggregator; the slippage floor is read out of the calldata and checked against the chain's own answer, never the aggregator's.</li><li>A transaction never expires — it sits at a nonce. The bot owns its nonce sequence, cancels a dropped send with a 0-value self-transfer at the same nonce, and only then rebuilds. A nonce advanced for bytes never sent is handed back.</li><li>No priority fee exists to buy ordering; a block every ~100 ms, first come first served. A voided transaction (status 0x0, no logs) is never retried.</li><li>Every Robinhood Stock Token is refused as a position — by its proxy's beacon and by its name — and allowed only as the other side of a pool, in and out inside one trade.</li></ul></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Floor 45 · two chains ═══ -->
+  <section class="floor" id="chains" data-floor="45">
+    <div class="wrap">
+      <div class="floorhead reveal">
+        <p class="floorno"><b>45</b>Two chains</p>
+        <h2>One architecture, <em>two skylines.</em></h2>
+      </div>
+      <p class="lede reveal" data-delay="1">Claude Tower was built for pump.fun. The Robinhood tower is that building with the same bones and different glass: the same sixteen seats, the same blind analysts, the same red team — retargeted at a chain where the fee is a flat toll of gas, launches are PONS bonding curves that graduate into locked Uniswap V4 pools, and the pair asset can be a tokenised stock.</p>
+      <div class="cmp reveal" data-delay="2">
         <table>
           <thead><tr><th scope="col"></th><th scope="col">Claude Tower · Solana</th><th scope="col">Claude Tower · Robinhood</th></tr></thead>
           <tbody>
-            <tr><td>Chain</td><td class="sol"><b>Solana</b></td><td class="rh"><b>Robinhood Chain</b> · EVM 4663</td></tr>
-            <tr><td>Launchpad</td><td class="sol">pump.fun</td><td class="rh">PONS</td></tr>
-            <tr><td>You trade in</td><td class="sol">SOL, from Phantom</td><td class="rh">ETH, from any EVM wallet</td></tr>
-            <tr><td>Blocks</td><td class="sol">~400 ms, priority fees</td><td class="rh">~100 ms, first come first served</td></tr>
+            <tr><td>Chain</td><td class="sol"><b>Solana</b></td><td class="rh"><b>Robinhood Chain</b> · EVM 4663, an Arbitrum Nitro L2</td></tr>
+            <tr><td>Launchpad</td><td class="sol">pump.fun</td><td class="rh">PONS V2 — bonding curve → locked Uniswap V4 pool</td></tr>
+            <tr><td>You trade in</td><td class="sol">SOL, from Phantom</td><td class="rh">ETH, from any EVM wallet (Phantom, Rabby, MetaMask)</td></tr>
+            <tr><td>Blocks</td><td class="sol">~400 ms · priority-fee auction</td><td class="rh">~100 ms · first come, first served · no fee auction</td></tr>
+            <tr><td>Costs</td><td class="sol">~1.25% a side plus slippage — a percentage of size</td><td class="rh">A flat ~661,000 gas a round trip plus the pool's 1% — small clips pay more</td></tr>
             <tr><td>The desk</td><td class="same" colspan="2">Sixteen seats · five analysts who cannot read each other · one seat paid to refute · compliance is code</td></tr>
-            <tr><td>The bot</td><td class="same" colspan="2">WALL-ST-E · self-hosted · simulates the exact bytes before anything is signed · your keys never leave your machine</td></tr>
-            <tr><td>Access token</td><td class="sol">$CLAUDECO · leases a floor</td><td class="rh">the Robinhood edition · same socials, same crest</td></tr>
+            <tr><td>The bot</td><td class="same" colspan="2">WALL-ST-E · self-hosted · proves the exact bytes before signing · journal before disclosure · your keys never leave your machine</td></tr>
+            <tr><td>Access token</td><td class="sol">$CLAUDECO · an SPL token · leases a floor</td><td class="rh">$CLAUDECO · an ERC-20 on PONS V2, paired to NVDA · leases a floor</td></tr>
           </tbody>
         </table>
       </div>
     </div>
   </section>
+
+  <!-- ═══ Floor 44 · the lease ═══ -->
+  <section class="floor" id="lease" data-floor="44">
+    <div class="wrap">
+      <div class="floorhead reveal">
+        <p class="floorno"><b>44</b>The lease</p>
+        <h2>Fifty floors. <em>One desk each.</em></h2>
+      </div>
+      <p class="lede reveal" data-delay="1">The house works the crown. Everything beneath it leases. A leased floor copies the house desk's calls through its own mandate — appetite, categories, launchpads, bankroll — and the tenant's own bot trades them. The lease is paid in the access token; the trading, if you trade at all, happens in the chain's native coin from your own wallet. <b>The two never mix, and the access token is never a position.</b></p>
+      <div class="pricegrid reveal" data-delay="2">
+        <div class="stat"><b>1M</b><span>$CLAUDECO leases one floor</span></div>
+        <div class="stat"><b>250k</b><span>rent, per period, same token</span></div>
+        <div class="stat"><b>49</b><span>floors lease · floor 50 is the house</span></div>
+        <div class="stat"><b>0</b><span>keys held by the building</span></div>
+      </div>
+      <div class="lease">
+        <div class="tok sol reveal" data-delay="2">
+          <img src="assets/claudeco-256.png" width="64" height="64" alt="The $CLAUDECO mark" loading="lazy">
+          <div>
+            <h3>$CLAUDECO <span class="chip sol">Solana</span></h3>
+            <span class="ticker">SPL · pump.fun · access token, never a position</span>
+            <div class="ca"><code id="caSol">HRkkxgaFDDmZ3qZX8xP5SiMRBNvFNVUUv4FJUjPCpump</code><button class="cacopy" type="button" data-copy="caSol">Copy</button></div>
+            <div class="links"><a href="https://dexscreener.com/solana/HRkkxgaFDDmZ3qZX8xP5SiMRBNvFNVUUv4FJUjPCpump" target="_blank" rel="noopener">Chart</a><a href="/solana#token">The Solana edition</a><a href="/tower">Lease a floor</a></div>
+          </div>
+        </div>
+        <div class="tok rh reveal" data-delay="3">
+          <img src="assets/claudeco-256.png" width="64" height="64" alt="The $CLAUDECO mark" loading="lazy">
+          <div>
+            <h3>$CLAUDECO <span class="chip rh">Robinhood</span></h3>
+            <span class="ticker">ERC-20 · PONS V2 · paired to NVDA · launched 4 Sep 2026</span>
+            <div class="ca"><code id="caRh">0x7039986CaC6C7885b53f10c7492E653055470ab9</code><button class="cacopy" type="button" data-copy="caRh">Copy</button></div>
+            <div class="links"><a href="https://www.ponsfamily.com/launchpad/0x7039986CaC6C7885b53f10c7492E653055470ab9" target="_blank" rel="noopener">PONS</a><a href="https://www.geckoterminal.com/robinhood/pools/0x595aa54d2a32d9c6ced42e88355dae507aaf6fa5" target="_blank" rel="noopener">Chart</a><a href="https://robinhoodchain.blockscout.com/token/0x7039986CaC6C7885b53f10c7492E653055470ab9" target="_blank" rel="noopener">Explorer</a><a href="https://gtjvv976mb-netizen.github.io/Claude-Company-Robinhood/" data-rh-world>The Robinhood edition</a></div>
+            <p>Paired to the one Robinhood Stock Token with real depth, with no insider exempt list — the structure this desk's own Forensics seat kills in other tokens.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Floor 43 · straight answers ═══ -->
+  <section class="floor" id="answers" data-floor="43">
+    <div class="wrap">
+      <div class="floorhead reveal">
+        <p class="floorno"><b>43</b>Straight answers</p>
+        <h2>The questions people <em>actually ask.</em></h2>
+      </div>
+      <div class="faq reveal" data-delay="1">
+        <details><summary>Is this financial advice, or a promise of profit?</summary><div class="a"><p>No. The desk is a research tool that publishes unsigned tickets and keeps a public record of how they did. The record on the Solana tower is shown above, live, and it currently says no edge is claimable. Nothing here states or implies performance.</p></div></details>
+        <details><summary>Does the site ever hold my money or my keys?</summary><div class="a"><p>No, by construction. There is no hosted signing, custody, or browser RPC relay in the code. A tenant trades from their own wallet; the optional bot runs on the tenant's own machine with a key file the site never sees. Connecting a wallet on this page signs a plain-text nonce to prove ownership — it is not a transaction and moves no funds.</p></div></details>
+        <details><summary>What does the token do?</summary><div class="a"><p>It opens a floor and pays rent. One million $CLAUDECO leases a floor of the tower; rent settles in the same token. The desk's research concerns <em>other</em> tokens — it does not cover, rate, price or trade this one, and the bot refuses it as a position by address. It is an access token, never the thing you trade.</p></div></details>
+        <details><summary>How is a call actually made?</summary><div class="a"><p>A sweep reads the launchpad's own feed. A free code screen kills most of it. Five analysts — forensics, liquidity, flow, narrative, technical — work the survivors blind to one another. A red-team seat attacks the proposal; the PM must answer the attack in writing; a compliance program can veto; only the CEO seat turns research into a call. What leaves is an unsigned ticket with a route, size, stop, targets and its band's hold window. Floor 48 above animates it.</p></div></details>
+        <details><summary>What is the bot, and what will it never do?</summary><div class="a"><p>WALL-ST-E is a self-hosted program that reads the building's tickets and trades them from your wallet inside caps you set. It quotes, builds and then simulates the exact bytes before signing; journals every attempt before the network can see it; reconciles receipts on two providers; and exits on the ticket's clock. It will never sign bytes whose floor it cannot read, never exceed a cap by rounding, never retry a voided transaction, and never take a position in a tokenised stock or the access token.</p></div></details>
+        <details><summary>Which wallets work?</summary><div class="a"><p>On Solana: Phantom and any Wallet-Standard wallet. On Robinhood Chain: any EIP-1193 wallet — Phantom's EVM provider, Rabby and Trust Wallet know chain 4663 already; MetaMask adds it on first connect (chain id 0x1237, RPC rpc.mainnet.chain.robinhood.com, explorer robinhoodchain.blockscout.com). The Robinhood Wallet app reaches the site through its in-app browser.</p></div></details>
+        <details><summary>What do Grok and Codex do here?</summary><div class="a"><p>Grok reads X — the one evidence source the desk could never reach on its own — once per shortlisted coin, and can be hired by a floor as that floor's managing director. Codex works outside the trading room as a read-only improvement engineer: it audits scorecards and prompt provenance and returns a proposal for human review. Neither can sign, size, order, or touch a wallet.</p></div></details>
+        <details><summary>What is different about trading on Robinhood Chain?</summary><div class="a"><p>Blocks land every ~100 ms in arrival order with no priority-fee auction, so speed cannot be bought; the sequencer can drop a transaction with no receipt, so the bot reconciles by nonce; the cost is a flat gas toll rather than a percentage of size, which punishes tiny clips; launches are PONS bonding curves with a 99%→0% tax over the first five seconds that makes block-0 sniping pointless by design. The edge on this chain is selection among the ~1.5% that graduate, not speed — which is exactly what a research desk is for.</p></div></details>
+        <details><summary>Where is the code?</summary><div class="a"><p>Both towers are public on GitHub: the Solana original and the Robinhood fork, linked in the lobby below. The executor, the seats' charters, the evidence contract, the deployment runbook and the ledger of lessons are all in the open.</p></div></details>
+      </div>
+    </div>
+  </section>
 </main>
 
-<footer>
+<footer class="lobby" id="lobby">
   <div class="wrap">
-    <p class="fine">An independent project. Not affiliated with, endorsed by, or connected to Anthropic, Robinhood, or Solana. The sixteen bylines are parodies, and every joke name is the job description. Research-only by construction: no hosted keys, signing, custody, or browser RPC relay — output is always an unsigned ticket. Nothing here is financial advice, and nothing here states or implies performance. Access tokens lease a floor and pay rent; they are never the thing you trade. © 2026 Claude Company.</p>
+    <div class="repos">
+      <a href="https://github.com/gtjvv976mb-netizen/Claude-Company" target="_blank" rel="noopener">Claude Company · Solana · source</a>
+      <a href="https://github.com/gtjvv976mb-netizen/Claude-Company-Robinhood" target="_blank" rel="noopener">Claude Company for Robinhood · source</a>
+      <a href="/solana">The Solana tower</a>
+      <a href="https://gtjvv976mb-netizen.github.io/Claude-Company-Robinhood/" data-rh-world>The Robinhood tower</a>
+    </div>
+    <p class="fine">An independent project. Not affiliated with, endorsed by, or connected to Anthropic, Robinhood, Solana Foundation, PONS, or any exchange. The sixteen bylines are parodies, and every joke name is the job description. Research-only by construction: no hosted keys, signing, custody, or browser RPC relay — output is always an unsigned ticket. Nothing here is financial advice, and nothing here states or implies performance; the live record above says what it says. $CLAUDECO, on either chain, is an access token: it leases a floor and pays rent, and it is never the thing you trade. Tokenised stocks are securities in most jurisdictions and are refused as positions by the desk's own code. You trade from your own wallet, or not at all. © 2026 Claude Company · Floor 50, Claude Tower.</p>
   </div>
 </footer>
 
@@ -575,6 +943,284 @@ document.getElementById("goRh").addEventListener("click",async function(){
 });
 
 /* keyboard: the doors are reachable, the towers are labelled; nothing here traps focus */
+})();
+</script>
+<script>
+/* ── The Aye-Team, in the round ────────────────────────────────────────────────
+   Every figure on the trading floor is axis-aligned boxes, so the homepage does
+   not need a 3D library to show them: an isometric box is three parallelograms.
+   The floor's exact box data is baked in; each seat card gets a slow turntable.
+   Painter's algorithm, three shades per box, stops off-screen and goes still
+   under prefers-reduced-motion. */
+(function () {
+  var FIG = {"CEO":{"n":"BIG C","r":"Signs off on the op","sc":1,"b":[[0.14,0.06,0.14,0,1.42,0,14251863],[0.24,0.26,0.42,0,1.28,0,2302759],[0.24,0.2,0.4,0,1.06,0,2302759],[0.24,0.14,0.38,0,0.9,0,2828592],[0.12,0.24,0.12,0,0.98,0.26,14251863],[0.12,0.24,0.12,0,0.98,-0.26,14251863],[0.16,0.4,0.16,0,0.64,0.1,2828592],[0.15,0.34,0.15,0,0.27,0.1,2828592],[0.2,0.09,0.17,0.02,0.05,0.1,14251863],[0.16,0.4,0.16,0,0.64,-0.1,2828592],[0.15,0.34,0.15,0,0.27,-0.1,2828592],[0.2,0.09,0.17,0.02,0.05,-0.1,14251863],[0.32,0.42,0.58,0,1.68,0,14251863],[0.038,0.12,0.12,0.166,1.73,0.155,1184274],[0.038,0.12,0.12,0.166,1.73,-0.155,1184274],[0.26,0.34,0.44,0,0.99,0,2302759],[0.15,0.21,0.15,0,1.21,0.275,14251863],[0.15,0.21,0.15,0,1.21,-0.275,14251863],[0.03,0.23,0.21,0.137,1.295,0,16184559],[0.034,0.06,0.08,0.14,1.4,0.078,16184559],[0.034,0.06,0.08,0.14,1.4,-0.078,16184559],[0.03,0.17,0.056,0.156,1.285,0,11549230],[0.03,0.13,0.048,0.15,1.13,0,11549230],[0.034,0.042,0.068,0.158,1.388,0,12862767]]},"Scout":{"n":"AUSTIN POWERZ","r":"Sweeps the field, baby","sc":1,"b":[[0.3,0.3,0.3,0,1.62,0,14264703],[0.14,0.06,0.14,0,1.42,0,14264703],[0.24,0.26,0.42,0,1.28,0,8015779],[0.24,0.2,0.4,0,1.06,0,8015779],[0.24,0.14,0.38,0,0.9,0,6964114],[0.13,0.22,0.13,0,1.22,0.26,8015779],[0.12,0.24,0.12,0,0.98,0.26,14264703],[0.13,0.22,0.13,0,1.22,-0.26,8015779],[0.12,0.24,0.12,0,0.98,-0.26,14264703],[0.16,0.4,0.16,0,0.64,0.1,6964114],[0.15,0.34,0.15,0,0.27,0.1,6964114],[0.2,0.09,0.17,0.02,0.05,0.1,3352122],[0.16,0.4,0.16,0,0.64,-0.1,6964114],[0.15,0.34,0.15,0,0.27,-0.1,6964114],[0.2,0.09,0.17,0.02,0.05,-0.1,3352122],[0.48,0.26,0.68,-0.02,1.89,0,9396016],[0.1,0.32,0.42,-0.19,1.64,0,9396016],[0.34,0.28,0.19,-0.04,1.65,0.23,9396016],[0.34,0.28,0.19,-0.04,1.65,-0.23,9396016],[0.07,0.13,0.28,0.155,1.325,0,15260864],[0.07,0.12,0.24,0.162,1.215,0,15260864],[0.07,0.2,0.18,0.152,1.1,0,15260864],[0.05,0.22,0.12,0.148,1.29,0.17,5519992],[0.05,0.22,0.12,0.148,1.29,-0.17,5519992],[0.135,0.07,0.135,0,1.075,0.26,15260864],[0.135,0.07,0.135,0,1.075,-0.26,15260864],[0.05,0.12,0.34,0.17,1.65,0,1315862],[0.02,0.06,0.09,0.175,1.65,0.075,9345702],[0.02,0.06,0.09,0.175,1.65,-0.075,9345702]]},"Screener":{"n":"MAXWELL SMORT","r":"Missed it by that much","sc":1,"b":[[0.3,0.3,0.3,0,1.62,0,14133378],[0.32,0.09,0.32,0,1.79,0,3090982],[0.04,0.05,0.3,-0.15,1.7,0,3090982],[0.02,0.05,0.05,0.155,1.65,0.07,2301724],[0.02,0.05,0.05,0.155,1.65,-0.07,2301724],[0.14,0.06,0.14,0,1.42,0,14133378],[0.24,0.26,0.42,0,1.28,0,9409178],[0.24,0.2,0.4,0,1.06,0,9409178],[0.03,0.3,0.28,0.13,1.06,0,14736595],[0.03,0.16,0.2,0.13,1.3,0,14736595],[0.24,0.14,0.38,0,0.9,0,6579822],[0.13,0.22,0.13,0,1.22,0.26,9409178],[0.12,0.24,0.12,0,0.98,0.26,14133378],[0.13,0.22,0.13,0,1.22,-0.26,9409178],[0.12,0.24,0.12,0,0.98,-0.26,14133378],[0.16,0.4,0.16,0,0.64,0.1,6579822],[0.15,0.34,0.15,0,0.27,0.1,6579822],[0.16,0.4,0.16,0,0.64,-0.1,6579822],[0.15,0.34,0.15,0,0.27,-0.1,6579822],[0.3,0.1,0.32,-0.01,1.735,0,3090982],[0.07,0.07,0.28,0.125,1.395,0,14736595],[0.035,0.36,0.07,0.158,1.175,0,2831168],[0.27,0.15,0.42,0,0.945,0,9409178],[0.14,0.14,0.14,0,1.03,0.26,9409178],[0.14,0.14,0.14,0,1.03,-0.26,9409178],[0.2,0.09,0.17,0.02,0.05,0.1,15131093],[0.2,0.09,0.17,0.02,0.05,-0.1,2236447],[0.34,0.14,0.14,0.09,1.6,0.21,1841689],[0.34,0.14,0.03,0.09,1.6,0.295,15525593],[0.11,0.14,0.05,-0.02,1.6,0.335,1841689],[0.14,0.05,0.44,0.02,1.855,0.06,8020560],[0.14,0.22,0.05,0.02,1.74,0.255,8020560],[0.14,0.2,0.05,0.02,1.73,-0.175,8020560]]},"Compliance":{"n":"JUDGE DREAD","r":"I am the law","sc":1.06,"b":[[0.3,0.3,0.3,0,1.62,0,4871521],[0.14,0.06,0.14,0,1.42,0,4871521],[0.24,0.26,0.42,0,1.28,0,2830914],[0.24,0.2,0.4,0,1.06,0,2830914],[0.24,0.14,0.38,0,0.9,0,2567480],[0.13,0.22,0.13,0,1.22,0.26,2830914],[0.12,0.24,0.12,0,0.98,0.26,4871521],[0.13,0.22,0.13,0,1.22,-0.26,2830914],[0.12,0.24,0.12,0,0.98,-0.26,4871521],[0.16,0.4,0.16,0,0.64,0.1,2567480],[0.15,0.34,0.15,0,0.27,0.1,2567480],[0.16,0.4,0.16,0,0.64,-0.1,2567480],[0.15,0.34,0.15,0,0.27,-0.1,2567480],[0.33,0.08,0.34,0,1.635,0,15780202],[0.38,0.17,0.38,0,1.835,0,4871521],[0.12,0.12,0.34,-0.17,1.53,0,4871521],[0.26,0.16,0.32,0,1.36,0.31,4871521],[0.26,0.16,0.32,0,1.36,-0.31,4871521],[0.32,0.28,0.46,0.01,1.28,0,3555674],[0.05,0.12,0.11,0.19,1.3,0.09,13938005],[0.3,0.22,0.44,0.01,1.06,0,3555674],[0.36,0.12,0.48,0.01,0.95,0,2238511],[0.2,0.11,0.18,0.04,0.395,0.1,4871521],[0.2,0.11,0.18,0.04,0.395,-0.1,4871521],[0.3,0.15,0.18,0.05,0.075,0.1,1975339],[0.3,0.15,0.18,0.05,0.075,-0.1,1975339]]},"Forensics":{"n":"STERLING ARCHOR","r":"Reads the contract. Loudly.","sc":1.14,"b":[[0.3,0.3,0.3,0,1.62,0,14132868],[0.02,0.05,0.05,0.155,1.65,0.07,1709842],[0.02,0.05,0.05,0.155,1.65,-0.07,1709842],[0.14,0.06,0.14,0,1.42,0,14132868],[0.24,0.26,0.42,0,1.28,0,3355708],[0.24,0.2,0.4,0,1.06,0,3355708],[0.24,0.14,0.38,0,0.9,0,1974052],[0.13,0.22,0.13,0,1.22,0.26,3355708],[0.12,0.24,0.12,0,0.98,0.26,14132868],[0.13,0.22,0.13,0,1.22,-0.26,3355708],[0.12,0.24,0.12,0,0.98,-0.26,14132868],[0.16,0.4,0.16,0,0.64,0.1,1974052],[0.15,0.34,0.15,0,0.27,0.1,1974052],[0.2,0.09,0.17,0.02,0.05,0.1,2763569],[0.16,0.4,0.16,0,0.64,-0.1,1974052],[0.15,0.34,0.15,0,0.27,-0.1,1974052],[0.2,0.09,0.17,0.02,0.05,-0.1,2763569],[0.34,0.11,0.44,0,1.425,0,5132636],[0.22,0.11,0.28,0.13,1.565,0,14132868],[0.34,0.14,0.44,0.01,1.83,0,3682602],[0.32,0.14,0.42,-0.04,1.695,0,3682602],[0.16,0.12,0.32,0.19,1.735,0,3682602],[0.26,0.12,0.68,0,1.385,0,3355708],[0.3,0.13,0.13,0,1.405,-0.29,9071170],[0.06,0.21,0.11,0.14,1.265,-0.16,9071170],[0.06,0.09,0.34,0.145,1.2,0.02,9071170],[0.14,0.17,0.14,0,1.03,0.265,3355708],[0.14,0.17,0.14,0,1.03,-0.265,3355708],[0.12,0.08,0.12,0.115,0.875,-0.28,12487237],[0.12,0.09,0.12,0.115,0.955,-0.28,12174025]]},"Liquidity":{"n":"ETHAN HUNTED","r":"The exit is the mission","sc":1.04,"b":[[0.3,0.3,0.3,0,1.62,0,12884598],[0.32,0.09,0.32,0,1.79,0,2760985],[0.04,0.05,0.3,-0.15,1.7,0,2760985],[0.02,0.05,0.05,0.155,1.65,0.07,1907223],[0.02,0.05,0.05,0.155,1.65,-0.07,1907223],[0.14,0.06,0.14,0,1.42,0,12884598],[0.24,0.26,0.42,0,1.28,0,2830392],[0.24,0.2,0.4,0,1.06,0,2830392],[0.24,0.14,0.38,0,0.9,0,2369324],[0.13,0.22,0.13,0,1.22,0.26,2830392],[0.12,0.24,0.12,0,0.98,0.26,12884598],[0.13,0.22,0.13,0,1.22,-0.26,2830392],[0.12,0.24,0.12,0,0.98,-0.26,12884598],[0.16,0.4,0.16,0,0.64,0.1,2369324],[0.15,0.34,0.15,0,0.27,0.1,2369324],[0.2,0.09,0.17,0.02,0.05,0.1,1711136],[0.16,0.4,0.16,0,0.64,-0.1,2369324],[0.15,0.34,0.15,0,0.27,-0.1,2369324],[0.2,0.09,0.17,0.02,0.05,-0.1,1711136],[0.26,0.06,0.09,0,1.42,0.15,9076067],[0.26,0.06,0.09,0,1.42,-0.15,9076067],[0.05,0.26,0.07,0.14,1.28,0.11,9076067],[0.05,0.26,0.07,0.14,1.28,-0.11,9076067],[0.05,0.05,0.4,0.135,1.3,0,9076067],[0.06,0.12,0.19,0.155,1.3,0,13027789],[0.27,0.08,0.4,0,0.95,0,9076067],[0.12,0.22,0.28,-0.17,1.2,0.04,11048543],[0.06,0.16,0.17,0.1,0.34,0.1,7239037],[0.06,0.16,0.17,0.1,0.34,-0.1,7239037],[0.09,0.1,0.07,0,1.65,0.165,3093562],[0.16,0.05,0.05,0.1,1.6,0.155,3093562]]},"Flow":{"n":"SAM FISHY","r":"Watches the real traffic, in the dark","sc":1,"b":[[0.3,0.3,0.3,0,1.62,0,1777180],[0.14,0.06,0.14,0,1.42,0,1777180],[0.24,0.26,0.42,0,1.28,0,1974816],[0.24,0.2,0.4,0,1.06,0,1974816],[0.24,0.14,0.38,0,0.9,0,1711644],[0.13,0.22,0.13,0,1.22,0.26,1974816],[0.12,0.24,0.12,0,0.98,0.26,1777180],[0.13,0.22,0.13,0,1.22,-0.26,1974816],[0.12,0.24,0.12,0,0.98,-0.26,1777180],[0.16,0.4,0.16,0,0.64,0.1,1711644],[0.15,0.34,0.15,0,0.27,0.1,1711644],[0.2,0.09,0.17,0.02,0.05,0.1,1316372],[0.16,0.4,0.16,0,0.64,-0.1,1711644],[0.15,0.34,0.15,0,0.27,-0.1,1711644],[0.2,0.09,0.17,0.02,0.05,-0.1,1316372],[0.22,0.1,0.22,0,1.42,0,2238500],[0.11,0.22,0.18,-0.165,1.3,0,2896430],[0.28,0.07,0.4,0,0.925,0,1185300],[0.1,0.16,0.06,0,0.72,0.2,2435879],[0.1,0.16,0.06,0,0.72,-0.2,2435879],[0.36,0.1,0.38,0,1.72,0,2435879],[0.05,0.18,0.24,0.165,1.665,0,2238500],[0.05,0.07,0.07,0.195,1.712,0,8251532],[0.05,0.07,0.07,0.195,1.628,0.07,8251532],[0.05,0.07,0.07,0.195,1.628,-0.07,8251532],[0.09,0.12,0.16,-0.215,1.7,0,2435879],[0.04,0.07,0.07,-0.27,1.7,0,8251532]]},"Technical":{"n":"JASON BURN","r":"Reads the ground before he moves","sc":0.94,"b":[[0.3,0.3,0.3,0,1.62,0,12359030],[0.02,0.05,0.05,0.155,1.65,0.07,3748138],[0.02,0.05,0.05,0.155,1.65,-0.07,3748138],[0.14,0.06,0.14,0,1.42,0,12359030],[0.24,0.26,0.42,0,1.28,0,7434602],[0.24,0.2,0.4,0,1.06,0,7434602],[0.24,0.14,0.38,0,0.9,0,5131590],[0.13,0.22,0.13,0,1.22,0.26,7434602],[0.12,0.24,0.12,0,0.98,0.26,12359030],[0.13,0.22,0.13,0,1.22,-0.26,7434602],[0.12,0.24,0.12,0,0.98,-0.26,12359030],[0.16,0.4,0.16,0,0.64,0.1,5131590],[0.15,0.34,0.15,0,0.27,0.1,5131590],[0.2,0.09,0.17,0.02,0.05,0.1,3880495],[0.16,0.4,0.16,0,0.64,-0.1,5131590],[0.15,0.34,0.15,0,0.27,-0.1,5131590],[0.2,0.09,0.17,0.02,0.05,-0.1,3880495],[0.31,0.05,0.31,0,1.785,0,3090208],[0.02,0.08,0.28,0.152,1.525,0,9269846],[0.26,0.08,0.5,0,1.37,0,7434602],[0.24,0.09,0.38,0,1.42,0,9408390],[0.05,0.16,0.17,0.135,1.06,0.105,4605504],[0.05,0.16,0.17,0.135,1.06,-0.105,4605504],[0.28,0.12,0.38,0,0.92,0,6513501],[0.13,0.16,0.13,0,1.03,0.26,7434602],[0.13,0.16,0.13,0,1.03,-0.26,7434602],[0.28,0.09,0.09,0.08,1.23,0.25,14474450],[0.12,0.09,0.09,-0.12,1.23,0.25,10130568]]},"Narrative":{"n":"BLACK WIDOWER","r":"Gets the truth out of it","sc":0.93,"b":[[0.3,0.3,0.3,0,1.62,0,14202010],[0.32,0.09,0.32,0,1.79,0,11552556],[0.04,0.05,0.3,-0.15,1.7,0,11552556],[0.02,0.05,0.05,0.155,1.65,0.07,1973279],[0.02,0.05,0.05,0.155,1.65,-0.07,1973279],[0.14,0.06,0.14,0,1.42,0,14202010],[0.24,0.26,0.42,0,1.28,0,1973797],[0.24,0.2,0.4,0,1.06,0,1973797],[0.24,0.14,0.38,0,0.9,0,1513248],[0.13,0.22,0.13,0,1.22,0.26,1973797],[0.12,0.24,0.12,0,0.98,0.26,14202010],[0.13,0.22,0.13,0,1.22,-0.26,1973797],[0.12,0.24,0.12,0,0.98,-0.26,14202010],[0.16,0.4,0.16,0,0.64,0.1,1513248],[0.15,0.34,0.15,0,0.27,0.1,1513248],[0.2,0.09,0.17,0.02,0.05,0.1,855312],[0.16,0.4,0.16,0,0.64,-0.1,1513248],[0.15,0.34,0.15,0,0.27,-0.1,1513248],[0.2,0.09,0.17,0.02,0.05,-0.1,855312],[0.36,0.06,0.5,-0.03,1.8,0,11552556],[0.12,0.31,0.36,-0.17,1.625,0,11552556],[0.3,0.31,0.1,-0.02,1.625,0.2,11552556],[0.3,0.31,0.1,-0.02,1.625,-0.2,11552556],[0.3,0.08,0.46,-0.08,1.43,0,11552556],[0.05,0.25,0.1,0.14,1.285,0.11,3421246],[0.05,0.12,0.1,0.14,1.1,0.02,3421246],[0.27,0.07,0.38,0,1.005,0,4142375],[0.05,0.1,0.14,0.155,1.005,0,12755797],[0.36,0.08,0.36,0,0.91,0,3421246],[0.13,0.16,0.07,0.02,0.62,-0.195,3421246],[0.16,0.16,0.14,0,1.02,0.26,3421246],[0.16,0.16,0.14,0,1.02,-0.26,3421246]]},"PM":{"n":"JAMES BOUND","r":"Licensed to call it","sc":1,"b":[[0.3,0.3,0.3,0,1.62,0,12622460],[0.32,0.09,0.32,0,1.79,0,2827295],[0.04,0.05,0.3,-0.15,1.7,0,2827295],[0.02,0.05,0.05,0.155,1.65,0.07,3813929],[0.02,0.05,0.05,0.155,1.65,-0.07,3813929],[0.14,0.06,0.14,0,1.42,0,12622460],[0.24,0.26,0.42,0,1.28,0,2436418],[0.24,0.2,0.4,0,1.06,0,2436418],[0.24,0.14,0.38,0,0.9,0,1843763],[0.13,0.22,0.13,0,1.22,0.26,2436418],[0.12,0.24,0.12,0,0.98,0.26,12622460],[0.13,0.22,0.13,0,1.22,-0.26,2436418],[0.12,0.24,0.12,0,0.98,-0.26,12622460],[0.16,0.4,0.16,0,0.64,0.1,1843763],[0.15,0.34,0.15,0,0.27,0.1,1843763],[0.2,0.09,0.17,0.02,0.05,0.1,1447967],[0.16,0.4,0.16,0,0.64,-0.1,1843763],[0.15,0.34,0.15,0,0.27,-0.1,1843763],[0.2,0.09,0.17,0.02,0.05,-0.1,1447967],[0.05,0.22,0.24,0.15,1.31,0,14933970],[0.05,0.16,0.18,0.145,1.16,0,14933970],[0.2,0.08,0.3,0.02,1.435,0,14933970],[0.07,0.1,0.18,0.165,1.425,0,1316384],[0.06,0.22,0.09,0.165,1.3,0.165,3884386],[0.06,0.22,0.09,0.165,1.3,-0.165,3884386],[0.22,0.1,0.2,0,1.355,0.28,2436418],[0.22,0.1,0.2,0,1.355,-0.28,2436418],[0.07,0.11,0.34,0.15,1.055,0,1316384],[0.3,0.17,0.46,0,0.935,0,2436418],[0.14,0.18,0.14,0,1.05,0.26,2436418],[0.14,0.18,0.14,0,1.05,-0.26,2436418],[0.14,0.09,0.14,0.11,1.015,-0.26,14080978],[0.07,0.09,0.06,0.085,0.935,-0.26,13028546]]},"Red Team":{"n":"AGENT 48","r":"Fulfils the contract","sc":1.07,"b":[[0.3,0.3,0.3,0,1.62,0,13809564],[0.02,0.05,0.05,0.155,1.65,0.07,2763310],[0.02,0.05,0.05,0.155,1.65,-0.07,2763310],[0.14,0.06,0.14,0,1.42,0,13809564],[0.24,0.26,0.42,0,1.28,0,1316122],[0.24,0.2,0.4,0,1.06,0,1316122],[0.24,0.14,0.38,0,0.9,0,1316122],[0.13,0.22,0.13,0,1.22,0.26,1316122],[0.12,0.24,0.12,0,0.98,0.26,13809564],[0.13,0.22,0.13,0,1.22,-0.26,1316122],[0.12,0.24,0.12,0,0.98,-0.26,13809564],[0.16,0.4,0.16,0,0.64,0.1,1316122],[0.15,0.34,0.15,0,0.27,0.1,1316122],[0.2,0.09,0.17,0.02,0.05,0.1,2829620],[0.16,0.4,0.16,0,0.64,-0.1,1316122],[0.15,0.34,0.15,0,0.27,-0.1,1316122],[0.2,0.09,0.17,0.02,0.05,-0.1,2829620],[0.3,0.1,0.62,0,1.385,0,3290172],[0.03,0.25,0.24,0.133,1.275,0,14276044],[0.05,0.06,0.075,0.16,1.372,0,10366767],[0.03,0.22,0.055,0.157,1.27,0,10366767],[0.055,0.17,0.045,0.145,1.105,0,10366767],[0.03,0.12,0.04,-0.165,1.635,0.08,10366767],[0.03,0.12,0.04,-0.165,1.635,0,10366767],[0.03,0.12,0.04,-0.165,1.635,-0.08,10366767],[0.13,0.185,0.13,0,1.022,0.26,1316122],[0.13,0.185,0.13,0,1.022,-0.26,1316122],[0.14,0.11,0.13,0,0.905,0.26,10366767],[0.14,0.11,0.13,0,0.905,-0.26,10366767]]},"Risk":{"n":"MINI-MEH","r":"Makes your size smaller","sc":0.6,"b":[[0.3,0.3,0.3,0,1.62,0,13872008],[0.14,0.06,0.14,0,1.42,0,13872008],[0.24,0.26,0.42,0,1.28,0,9080202],[0.24,0.2,0.4,0,1.06,0,9080202],[0.03,0.3,0.28,0.13,1.06,0,7698547],[0.03,0.16,0.2,0.13,1.3,0,7698547],[0.13,0.22,0.13,0,1.22,0.26,9080202],[0.12,0.24,0.12,0,0.98,0.26,13872008],[0.13,0.22,0.13,0,1.22,-0.26,9080202],[0.12,0.24,0.12,0,0.98,-0.26,13872008],[0.2,0.09,0.17,0.02,0.05,0.1,4539967],[0.2,0.09,0.17,0.02,0.05,-0.1,4539967],[0.42,0.42,0.42,0.01,1.7,0,13872008],[0.03,0.06,0.06,0.215,1.69,0.09,2762274],[0.03,0.06,0.06,0.215,1.69,-0.09,2762274],[0.03,0.035,0.15,0.215,1.575,0,10255456],[0.27,0.05,0.45,0,1.395,0,10132888],[0.3,0.22,0.44,0,0.9,0,9080202],[0.31,0.05,0.45,0,0.975,0,6251102],[0.2,0.42,0.2,0,0.63,0.11,7237997],[0.19,0.36,0.18,0,0.26,0.11,7237997],[0.24,0.16,0.22,0.02,0.08,0.11,4539967],[0.2,0.42,0.2,0,0.63,-0.11,7237997],[0.19,0.36,0.18,0,0.26,-0.11,7237997],[0.24,0.16,0.22,0.02,0.08,-0.11,4539967]]},"Execution":{"n":"JOHN QUICK","r":"Executes. Fast.","sc":1.09,"b":[[0.3,0.3,0.3,0,1.62,0,11569776],[0.32,0.09,0.32,0,1.79,0,2761246],[0.04,0.05,0.3,-0.15,1.7,0,2761246],[0.02,0.05,0.05,0.155,1.65,0.07,3024930],[0.02,0.05,0.05,0.155,1.65,-0.07,3024930],[0.14,0.06,0.14,0,1.42,0,11569776],[0.24,0.26,0.42,0,1.28,0,3815748],[0.24,0.2,0.4,0,1.06,0,3815748],[0.03,0.3,0.28,0.13,1.06,0,1513244],[0.03,0.16,0.2,0.13,1.3,0,1513244],[0.24,0.14,0.38,0,0.9,0,1776416],[0.13,0.22,0.13,0,1.22,0.26,3815748],[0.12,0.24,0.12,0,0.98,0.26,11569776],[0.13,0.22,0.13,0,1.22,-0.26,3815748],[0.12,0.24,0.12,0,0.98,-0.26,11569776],[0.16,0.4,0.16,0,0.64,0.1,1776416],[0.15,0.34,0.15,0,0.27,0.1,1776416],[0.2,0.09,0.17,0.02,0.05,0.1,2892573],[0.16,0.4,0.16,0,0.64,-0.1,1776416],[0.15,0.34,0.15,0,0.27,-0.1,1776416],[0.2,0.09,0.17,0.02,0.05,-0.1,2892573],[0.3,0.32,0.11,-0.01,1.6,0.195,2761246],[0.3,0.32,0.11,-0.01,1.6,-0.195,2761246],[0.08,0.3,0.32,-0.18,1.62,0,2761246],[0.11,0.33,0.28,-0.165,1.335,0,2761246],[0.14,0.15,0.32,0.155,1.535,0,2761246],[0.04,0.045,0.26,0.155,1.705,0,2761246],[0.15,0.1,0.2,0,1.42,0,1513244],[0.22,0.1,0.21,0,1.365,0.295,3815748],[0.22,0.1,0.21,0,1.365,-0.295,3815748],[0.31,0.24,0.44,0,0.86,0,3815748],[0.14,0.17,0.14,0,1.035,0.26,3815748],[0.14,0.17,0.14,0,1.035,-0.26,3815748],[0.06,0.18,0.06,0.045,0.875,-0.335,12096591]]},"Regime":{"n":"MURDOCK","r":"Reads the weather","sc":1,"b":[[0.3,0.3,0.3,0,1.62,0,11104586],[0.32,0.09,0.32,0,1.79,0,3024418],[0.04,0.05,0.3,-0.15,1.7,0,3024418],[0.02,0.05,0.05,0.155,1.65,0.07,2761504],[0.02,0.05,0.05,0.155,1.65,-0.07,2761504],[0.14,0.06,0.14,0,1.42,0,11104586],[0.24,0.26,0.42,0,1.28,0,14997951],[0.24,0.2,0.4,0,1.06,0,14997951],[0.03,0.3,0.28,0.13,1.06,0,6726472],[0.03,0.16,0.2,0.13,1.3,0,6726472],[0.24,0.14,0.38,0,0.9,0,2839904],[0.13,0.22,0.13,0,1.22,0.26,14997951],[0.12,0.24,0.12,0,0.98,0.26,11104586],[0.13,0.22,0.13,0,1.22,-0.26,14997951],[0.12,0.24,0.12,0,0.98,-0.26,11104586],[0.16,0.4,0.16,0,0.64,0.1,2839904],[0.15,0.34,0.15,0,0.27,0.1,2839904],[0.2,0.09,0.17,0.02,0.05,0.1,4535849],[0.16,0.4,0.16,0,0.64,-0.1,2839904],[0.15,0.34,0.15,0,0.27,-0.1,2839904],[0.2,0.09,0.17,0.02,0.05,-0.1,4535849]]},"Review":{"n":"COLONEL DEBRIEF","r":"Grades every landing","sc":1,"b":[[0.3,0.3,0.3,0,1.62,0,14924175],[0.32,0.09,0.32,0,1.79,0,6960672],[0.04,0.05,0.3,-0.15,1.7,0,6960672],[0.02,0.05,0.05,0.155,1.65,0.07,2761504],[0.02,0.05,0.05,0.155,1.65,-0.07,2761504],[0.14,0.06,0.14,0,1.42,0,14924175],[0.24,0.26,0.42,0,1.28,0,15919830],[0.24,0.2,0.4,0,1.06,0,15919830],[0.03,0.3,0.28,0.13,1.06,0,6726472],[0.03,0.16,0.2,0.13,1.3,0,6726472],[0.24,0.14,0.38,0,0.9,0,3100506],[0.13,0.22,0.13,0,1.22,0.26,15919830],[0.12,0.24,0.12,0,0.98,0.26,14924175],[0.13,0.22,0.13,0,1.22,-0.26,15919830],[0.12,0.24,0.12,0,0.98,-0.26,14924175],[0.16,0.4,0.16,0,0.64,0.1,3100506],[0.15,0.34,0.15,0,0.27,0.1,3100506],[0.2,0.09,0.17,0.02,0.05,0.1,4142122],[0.16,0.4,0.16,0,0.64,-0.1,3100506],[0.15,0.34,0.15,0,0.27,-0.1,3100506],[0.2,0.09,0.17,0.02,0.05,-0.1,4142122]]},"Scribe":{"n":"AGENT P","r":"Says nothing. Files everything.","sc":0.8,"b":[[0.3,0.3,0.3,0,1.62,0,4628619],[0.14,0.06,0.14,0,1.42,0,4628619],[0.24,0.26,0.42,0,1.28,0,4628619],[0.24,0.2,0.4,0,1.06,0,4628619],[0.24,0.14,0.38,0,0.9,0,4628619],[0.13,0.22,0.13,0,1.22,0.26,4628619],[0.12,0.24,0.12,0,0.98,0.26,4628619],[0.13,0.22,0.13,0,1.22,-0.26,4628619],[0.12,0.24,0.12,0,0.98,-0.26,4628619],[0.16,0.4,0.16,0,0.64,0.1,4628619],[0.15,0.34,0.15,0,0.27,0.1,4628619],[0.2,0.09,0.17,0.02,0.05,0.1,13666884],[0.16,0.4,0.16,0,0.64,-0.1,4628619],[0.15,0.34,0.15,0,0.27,-0.1,4628619],[0.2,0.09,0.17,0.02,0.05,-0.1,13666884],[0.3,0.26,0.46,0.01,1.35,0,4628619],[0.3,0.3,0.44,0.01,0.83,0,4628619],[0.08,0.42,0.34,0.15,1.16,0,13615258],[0.38,0.11,0.5,0.32,1.575,0,15239467],[0.11,0.035,0.18,0.44,1.645,0,10506006],[0.05,0.07,0.08,0.165,1.69,0.085,1778464],[0.05,0.07,0.08,0.165,1.69,-0.085,1778464],[0.5,0.09,0.56,-0.38,0.795,0,3112299],[0.22,0.06,0.24,0.03,0.845,0.31,15239467],[0.22,0.06,0.24,0.03,0.845,-0.31,15239467],[0.26,0.06,0.24,0.06,0.035,0.12,15239467],[0.26,0.06,0.24,0.06,0.035,-0.12,15239467],[0.36,0.06,0.42,-0.06,1.785,0,6111012],[0.26,0.17,0.28,-0.06,1.9,0,3811096]]}};
+  var canvases = Array.prototype.slice.call(document.querySelectorAll(".seatfig"));
+  if (!canvases.length) return;
+  var reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var ELEV = 0.55;
+
+  function shade(rgb, f) {
+    return "rgb(" + ((rgb >> 16 & 255) * f | 0) + "," + ((rgb >> 8 & 255) * f | 0) + "," + ((rgb & 255) * f | 0) + ")";
+  }
+  function draw(cv, seat, yaw) {
+    var d = FIG[seat]; if (!d) return;
+    var ctx = cv.getContext("2d");
+    var W = cv.width, H = cv.height;
+    ctx.clearRect(0, 0, W, H);
+    var sc = 0.92 * d.sc, unit = H / 2.75;
+    var cos = Math.cos(yaw), sin = Math.sin(yaw);
+    var boxes = d.b.map(function (bx) {
+      return { w: bx[0] * sc, h: bx[1] * sc, dp: bx[2] * sc,
+               x: bx[3] * sc, y: bx[4] * sc, z: bx[5] * sc, c: bx[6],
+               depth: (bx[3] * sc) * cos + (bx[5] * sc) * sin };
+    }).sort(function (a, b) { return a.depth - b.depth; });
+    ctx.save();
+    ctx.translate(W / 2, H - 6);
+    for (var i = 0; i < boxes.length; i++) {
+      var o = boxes[i], pts = [];
+      for (var k = 0; k < 8; k++) {
+        var cx = (k & 4) ? 1 : -1, cy = (k & 2) ? 1 : -1, cz = (k & 1) ? 1 : -1;
+        var qx = o.x + cx * o.w / 2, qy = o.y + cy * o.h / 2, qz = o.z + cz * o.dp / 2;
+        var rx = qx * cos - qz * sin, rz = qx * sin + qz * cos;
+        pts.push([rx * unit, -(qy * unit) + rz * unit * ELEV * 0.5]);
+      }
+      function quad(a, b2, c2, e) {
+        ctx.beginPath();
+        ctx.moveTo(pts[a][0], pts[a][1]); ctx.lineTo(pts[b2][0], pts[b2][1]);
+        ctx.lineTo(pts[c2][0], pts[c2][1]); ctx.lineTo(pts[e][0], pts[e][1]);
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.fillStyle = shade(o.c, 1.0); quad(2, 3, 7, 6);                       // top
+      ctx.fillStyle = shade(o.c, 0.8);                                         // the x face looking at us
+      if (cos >= 0) quad(4, 5, 7, 6); else quad(0, 1, 3, 2);
+      ctx.fillStyle = shade(o.c, 0.62);                                        // the z face looking at us
+      if (sin >= 0) quad(1, 3, 7, 5); else quad(0, 2, 6, 4);
+    }
+    ctx.restore();
+  }
+
+  var live = new Set();
+  var io = new IntersectionObserver(function (es) {
+    es.forEach(function (e) { e.isIntersecting ? live.add(e.target) : live.delete(e.target); });
+  }, { rootMargin: "80px" });
+  canvases.forEach(function (cv) { io.observe(cv); });
+
+  var t0 = performance.now();
+  function frame(t) {
+    canvases.forEach(function (cv, i) {
+      if (!live.has(cv)) return;
+      draw(cv, cv.dataset.seat, ((t - t0) / 4200 + i * 0.45) % (Math.PI * 2));
+    });
+    requestAnimationFrame(frame);
+  }
+  if (reduced) { canvases.forEach(function (cv) { draw(cv, cv.dataset.seat, Math.PI / 4); }); io.disconnect(); }
+  else requestAnimationFrame(frame);
+})();
+</script>
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE DESCENT — reveals, the elevator, the pulse, the funnel, the vault.
+   Everything here degrades: no API → honest placeholders; reduced motion →
+   final frames, no loops; no IntersectionObserver → everything visible.
+   ═══════════════════════════════════════════════════════════════════════════ */
+(function(){
+"use strict";
+var reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+var hasIO = "IntersectionObserver" in window;
+
+/* ── reveals ─────────────────────────────────────────────────────────── */
+var reveals = Array.prototype.slice.call(document.querySelectorAll(".reveal"));
+if (!hasIO || reduced) reveals.forEach(function(el){ el.classList.add("in"); });
+else {
+  var rio = new IntersectionObserver(function(es){
+    es.forEach(function(e){ if (e.isIntersecting) { e.target.classList.add("in"); rio.unobserve(e.target); } });
+  }, { rootMargin: "0px 0px -8% 0px", threshold: 0.08 });
+  reveals.forEach(function(el){ rio.observe(el); });
+}
+
+/* ── the elevator ────────────────────────────────────────────────────── */
+var lift = document.getElementById("lift");
+var floors = Array.prototype.slice.call(document.querySelectorAll("[data-floor], #top, #lobby"));
+if (lift && hasIO) {
+  var links = Array.prototype.slice.call(lift.querySelectorAll("a"));
+  var byId = {}; links.forEach(function(a){ byId[a.getAttribute("href").slice(1)] = a; });
+  var current = null;
+  var fio = new IntersectionObserver(function(es){
+    es.forEach(function(e){ if (e.isIntersecting) current = e.target.id; });
+    links.forEach(function(a){ a.classList.toggle("on", a.getAttribute("href") === "#" + current); });
+  }, { rootMargin: "-45% 0px -45% 0px", threshold: 0 });
+  floors.forEach(function(f){ fio.observe(f); });
+  var hero = document.getElementById("top");
+  new IntersectionObserver(function(es){ lift.classList.toggle("show", !es[0].isIntersecting); },
+    { rootMargin: "-30% 0px 0px 0px", threshold: 0 }).observe(hero);
+}
+
+/* ── the pulse: the building's own ledger ────────────────────────────── */
+var API = (window.__API_BASE__ || "").replace(/\/$/, "");
+/* The Robinhood desk's API is injected by the build once the Render service exists
+   (window.__RH_API_BASE__); until then there is nothing to ask and asking only
+   produces a CORS error in the console. */
+var RH_API = (window.__RH_API_BASE__ || "").replace(/\/$/, "");
+function fmt(n){ n = Number(n); if (!isFinite(n)) return "—"; return n >= 1e6 ? (n/1e6).toFixed(1)+"M" : n >= 10000 ? Math.round(n/1000)+"k" : n.toLocaleString("en-US"); }
+function countUp(el, target, suffix){
+  var final = fmt(target) + (suffix || "");
+  if (reduced || !(target > 0)) { el.textContent = final; return; }
+  var t0 = performance.now(), dur = 1100 + Math.min(900, target / 8);
+  (function tick(t){ var k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+    el.textContent = fmt(Math.round(target * e)) + (suffix || "");
+    if (k < 1) requestAnimationFrame(tick); else el.textContent = final; })(t0);
+}
+function get(o, path){ return path.split(".").reduce(function(a, k){ return a == null ? a : a[k]; }, o); }
+function withTimeout(p, ms){ return Promise.race([p, new Promise(function(_, rej){ setTimeout(function(){ rej(new Error("timeout")); }, ms); })]); }
+function loadPulse(){
+  var grid = document.getElementById("pulseGrid"); if (!grid) return;
+  var cells = Array.prototype.slice.call(grid.querySelectorAll("[data-count]"));
+  if (!API) { cells.forEach(function(c){ c.textContent = "—"; }); return; }
+  withTimeout(fetch(API + "/api/stats/overview").then(function(r){ return r.json(); }), 9000).then(function(d){
+    var run = function(){ cells.forEach(function(c){ countUp(c, get(d, c.dataset.count), c.dataset.suffix); }); };
+    if (hasIO && !reduced) { var once = new IntersectionObserver(function(es){ if (es[0].isIntersecting) { run(); once.disconnect(); } }, { threshold: 0.3 }); once.observe(grid); }
+    else run();
+    var b = d.building || {};
+    var el = function(id){ return document.getElementById(id); };
+    if (el("recCalls")) el("recCalls").textContent = fmt(b.houseCalls) + (b.houseLive ? " · " + b.houseLive + " live" : "");
+    if (el("recUpDown")) el("recUpDown").textContent = fmt(b.houseClosedUp) + " up · " + fmt(b.houseClosedDown) + " down";
+    if (el("recSettled")) el("recSettled").textContent = fmt(b.settledTrades);
+    if (el("recPnl")) el("recPnl").textContent = (b.realisedPnlUsd < 0 ? "−" : "") + "$" + Math.abs(Number(b.realisedPnlUsd) || 0).toFixed(2);
+  }).catch(function(){ cells.forEach(function(c){ c.textContent = "—"; }); var n = document.getElementById("recNote"); if (n) n.textContent = "The ledger did not answer just now. The record is public at /api/record when it does."; });
+  withTimeout(fetch(API + "/api/record").then(function(r){ return r.json(); }), 9000).then(function(r){
+    var n = document.getElementById("recNote"); if (!n) return;
+    n.textContent = r.edgeNote ? "In the desk's own words: " + r.edgeNote + "." : "Expectancy " + (Number(r.expectancyPct) || 0).toFixed(1) + "% at 24 hours.";
+  }).catch(function(){});
+  var rh = document.getElementById("rhStatus");
+  if (rh && !RH_API) rh.textContent = "The Robinhood desk's ledger goes live with its first deployment — the site, the seats and the bot are ready; the count starts at zero.";
+  if (rh && RH_API) withTimeout(fetch(RH_API + "/api/stats/overview").then(function(r){ return r.json(); }), 7000)
+    .then(function(d){ var r = d.research || {}; rh.textContent = "Live — " + fmt(r.coinsSeen) + " coins read, " + fmt(r.workups) + " workups, " + fmt(r.seatVerdicts) + " seat verdicts."; })
+    .catch(function(){ rh.textContent = "The Robinhood desk's ledger is not answering yet — its API goes live with the first deployment. The site, the seats and the bot are ready; the count starts at zero."; });
+}
+loadPulse();
+
+/* ── copy buttons ────────────────────────────────────────────────────── */
+Array.prototype.forEach.call(document.querySelectorAll(".cacopy[data-copy]"), function(btn){
+  btn.addEventListener("click", function(){
+    var val = document.getElementById(btn.dataset.copy); if (!val) return;
+    var text = val.textContent.trim();
+    function done(){ btn.textContent = "Copied"; btn.classList.add("done"); setTimeout(function(){ btn.textContent = "Copy"; btn.classList.remove("done"); }, 1600); }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, done); else done();
+  });
+});
+
+/* ── the vault: steps light in order when the frame is reached ───────── */
+Array.prototype.forEach.call(document.querySelectorAll(".steps"), function(list){
+  var steps = Array.prototype.slice.call(list.querySelectorAll(".step"));
+  var light = function(){ steps.forEach(function(s, i){ setTimeout(function(){ s.classList.add("lit"); }, reduced ? 0 : 260 + i * 420); }); };
+  if (!hasIO || reduced) light();
+  else { var io = new IntersectionObserver(function(es){ if (es[0].isIntersecting) { light(); io.disconnect(); } }, { threshold: 0.35 }); io.observe(list); }
+});
+
+/* ── THE FUNNEL — a sweep, drawn ───────────────────────────────────────
+   Hundreds of coins enter at the left. At each gate a share dies (turns to ash
+   and settles); the survivors continue. The five analyst lanes are separate
+   channels with walls: nothing crosses. The red team gate strikes; compliance
+   is a bar; the CEO's is a narrow door; one ticket leaves right. The shares are
+   the desk's own published rates (79% at the screen, ~1 in 4 through the
+   analysts, "nine attacked, nine refuted" for the red team is dramatised as a
+   near-total kill), so the picture is honest about how little survives. */
+var cv = document.getElementById("funnelCanvas");
+if (cv && cv.getContext) {
+  var ctx = cv.getContext("2d");
+  var W = cv.width, H = cv.height;
+  var GATES = [
+    { x: 250,  name: "screen",     kill: 0.79, color: "#9fd8de" },
+    { x: 470,  name: "analysts",   kill: 0.55, color: "#e9b158", lanes: 5 },
+    { x: 700,  name: "redteam",    kill: 0.80, color: "#e2634f" },
+    { x: 880,  name: "compliance", kill: 0.35, color: "#9fd8de" },
+    { x: 1040, name: "ceo",        kill: 0.40, color: "#ffd987" },
+  ];
+  var TICKET_X = 1160;
+  var particles = [], ash = [], t0 = null, cycleMs = 14000, running = false, seed = 7;
+  function rnd(){ seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
+  function spawn(){
+    particles = []; ash = []; seed = 7;
+    for (var i = 0; i < 380; i++) {
+      particles.push({ x: 40 + rnd() * 120, y: 60 + rnd() * (H - 120), vy: 0, lane: -1,
+        delay: rnd() * 2600, alive: true, gate: 0, color: rnd() < 0.5 ? "#e9b158" : "#3ee063", r: 1.6 + rnd() * 1.4 });
+    }
+  }
+  function draw(now){
+    if (!t0) t0 = now;
+    var el = (now - t0) % cycleMs;
+    if (el < 30 && particles.length && particles.every(function(p){ return !p.alive || p.x >= TICKET_X; })) spawn();
+    ctx.clearRect(0, 0, W, H);
+    // lanes for the analysts: five channels, walls between
+    var laneTop = 70, laneH = (H - 140) / 5;
+    ctx.save();
+    for (var l = 0; l < 5; l++) {
+      var y = laneTop + l * laneH;
+      ctx.fillStyle = "rgba(233,177,88,0.05)"; ctx.fillRect(GATES[1].x - 60, y + 4, 140, laneH - 8);
+      ctx.fillStyle = "rgba(244,236,216,0.14)"; ctx.fillRect(GATES[1].x - 60, y, 140, 1);
+    }
+    ctx.fillStyle = "rgba(244,236,216,0.14)"; ctx.fillRect(GATES[1].x - 60, laneTop + 5 * laneH, 140, 1);
+    ctx.restore();
+    // gates
+    GATES.forEach(function(g){
+      ctx.save();
+      ctx.strokeStyle = g.color; ctx.globalAlpha = 0.55; ctx.lineWidth = 2;
+      ctx.setLineDash(g.name === "compliance" ? [] : [6, 6]);
+      ctx.beginPath(); ctx.moveTo(g.x, 40); ctx.lineTo(g.x, H - 40); ctx.stroke();
+      ctx.restore();
+    });
+    // the ticket slot
+    ctx.save(); ctx.fillStyle = "rgba(255,217,135,0.12)"; ctx.fillRect(TICKET_X - 6, H / 2 - 40, 12, 80);
+    ctx.strokeStyle = "#ffd987"; ctx.globalAlpha = 0.7; ctx.strokeRect(TICKET_X - 6, H / 2 - 40, 12, 80); ctx.restore();
+    // particles
+    var speed = W / 9000; // px per ms across the width in ~9s
+    particles.forEach(function(p){
+      if (!p.alive) return;
+      var age = el - p.delay; if (age < 0) { drawDot(p, 0.15); return; }
+      var dt = 16;
+      p.x += speed * dt * (1 + (p.gate >= 2 ? 0.35 : 0));
+      // lanes: after the screen, particles settle into one of five channels
+      if (p.gate === 1 && p.lane < 0) p.lane = Math.floor(rnd() * 5);
+      if (p.lane >= 0 && p.x < GATES[2].x) { var ty = laneTop + p.lane * laneH + laneH / 2; p.y += (ty - p.y) * 0.08; }
+      if (p.x >= GATES[2].x) { p.y += (H / 2 - p.y) * 0.05; }
+      var g = GATES[p.gate];
+      if (g && p.x >= g.x) {
+        if (rnd() < g.kill) { p.alive = false; ash.push({ x: p.x, y: p.y, vy: 0.4 + rnd(), a: 0.9, r: p.r, red: g.name === "redteam" }); }
+        else p.gate++;
+      }
+      if (p.x >= TICKET_X) { p.x = TICKET_X; }
+      drawDot(p, 1);
+    });
+    ash.forEach(function(a){ a.y += a.vy; a.a *= 0.985; ctx.globalAlpha = Math.max(0, a.a); ctx.fillStyle = a.red ? "#e2634f" : "#6a6470"; ctx.beginPath(); ctx.arc(a.x, Math.min(H - 12, a.y), a.r, 0, 6.283); ctx.fill(); ctx.globalAlpha = 1; });
+    ash = ash.filter(function(a){ return a.a > 0.03; });
+    // the survivor at the slot glows
+    var arrived = particles.filter(function(p){ return p.alive && p.x >= TICKET_X; }).length;
+    if (arrived) { ctx.save(); ctx.shadowColor = "#ffd987"; ctx.shadowBlur = 18; ctx.fillStyle = "#ffd987"; ctx.beginPath(); ctx.arc(TICKET_X, H / 2, 5, 0, 6.283); ctx.fill(); ctx.restore(); }
+    // labels
+    ctx.save(); ctx.fillStyle = "rgba(244,236,216,0.55)"; ctx.font = "500 11px JetBrains Mono, ui-monospace, monospace"; ctx.textAlign = "center";
+    var labels = ["SCREEN · CODE", "FIVE BLIND ANALYSTS", "RED TEAM", "COMPLIANCE · CODE", "CEO"];
+    GATES.forEach(function(g, i){ ctx.fillText(labels[i], g.x + (i === 1 ? 10 : 0), 26); });
+    ctx.fillText("TICKET", TICKET_X, 26);
+    var alive = particles.filter(function(p){ return p.alive && el > p.delay; }).length;
+    ctx.textAlign = "left"; ctx.fillText("IN SWEEP: " + particles.length + "   ALIVE: " + alive + "   DEAD: " + (particles.length - alive - particles.filter(function(p){ return el <= p.delay; }).length), 40, H - 18);
+    ctx.restore();
+    if (running) requestAnimationFrame(draw);
+  }
+  function drawDot(p, alpha){ ctx.globalAlpha = alpha; ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 6.283); ctx.fill(); ctx.globalAlpha = 1; }
+  spawn();
+  if (reduced) {
+    // one static frame, far into the sweep: most dead, a few alive, one at the slot
+    t0 = 0; for (var k = 0; k < 600; k++) draw(k * 16);
+    running = false;
+  } else if (hasIO) {
+    var vio = new IntersectionObserver(function(es){
+      var on = es[0].isIntersecting;
+      if (on && !running) { running = true; t0 = null; requestAnimationFrame(draw); }
+      if (!on) running = false;
+    }, { threshold: 0.2 });
+    vio.observe(cv);
+  } else { running = true; requestAnimationFrame(draw); }
+}
 })();
 </script>
 </body>
