@@ -4122,7 +4122,11 @@ window.__grokBoardUpdate = (feed = []) => {
    * a wall of positions nobody owns. A call is only on his board once the bot took it
    * (owner, 2026-09-03). The offered count still appears in the flat-book panel below,
    * where it is labelled as what it is. */
-  const held = open.filter((c) => c.taken === true);
+  /* THE WIRE SAYS 1, NOT true. `taken` is SQLite's INTEGER 0/1 (copy.js) and /feed serves
+     it raw, so `=== true` held nothing — through the first real fill (Shrek, call 55,
+     2026-09-05) the fill was reported, the feed said taken:1, and this wall said nothing
+     was held. Every other reader of `taken` in this file is truthy; so is this one now. */
+  const held = open.filter((c) => c.taken === true || Number(c.taken) === 1);
   grokBook.record = window.__floorRecord || grokBook.record;
   grokBook.positions = held.map((c) => {
     const entry = c.entry_ref ?? null, target = c.target ?? null;

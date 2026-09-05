@@ -5,7 +5,8 @@
  * tokens sitting in the wallet, 0.021322 SOL gone — and the site showed nothing. The
  * owner's reasonable conclusion was that it had not traded.
  *
- * The site shows a position on the floor's board only where `taken === true`, and
+ * The site shows a position on the floor's board only where the feed says it is taken
+ * (SQLite's 1 on the wire, or a literal true — `=== true` alone held nothing), and
  * nothing in the executor ever set that. A `take` route existed but was guarded by a
  * wallet session, so only a human clicking in the UI could reach it. The bot had no way
  * to say what it had done.
@@ -65,7 +66,7 @@ console.log("\nBUT IT IS NEVER SILENTLY DROPPED EITHER");
 console.log("\nAND THE SITE READS EXACTLY THAT FLAG");
 {
   ok("the board shows only what the floor actually holds",
-    /const held = open\.filter\(\(c\) => c\.taken === true\)/.test(viewer));
+    /const held = open\.filter\(\(c\) => c\.taken === true \|\| Number\(c\.taken\) === 1\)/.test(viewer));
   ok("...which is why an unreported fill rendered as nothing at all", true,
     "the bug this closes");
 }

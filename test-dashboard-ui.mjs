@@ -180,7 +180,7 @@ try {
  * (owner, 2026-09-03). */
 {
   const view = html;
-  assert.match(view, /const held = open\.filter\(\(c\) => c\.taken === true\)/,
+  assert.match(view, /const held = open\.filter\(\(c\) => c\.taken === true \|\| Number\(c\.taken\) === 1\)/,
     "only taken positions reach the board");
   assert.match(view, /grokBook\.positions = held\.map/,
     "...and the board is built from those, not from every offer");
