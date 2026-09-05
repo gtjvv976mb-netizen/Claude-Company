@@ -1,8 +1,17 @@
+/**
+ * desk-led-v4 (2026-09-05): the price-exit witness and the mark-failure witness are pure
+ * classifiers now — they FLAG, they never sell. The poller no longer imports the selling
+ * half at all (asserted at the bottom against the source). The helpers stay tested
+ * because a legacy risk_exit latch persisted by an older journal can still carry a price
+ * trigger, and validateExecutableExitOrder must keep refusing a stale one while letting
+ * desk_exit and mirror_exit — the desk's determinations — through untouched.
+ */
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import {
-  ExitTriggerNotMetError, clearExitMarkFailureWitness, clearPriceExitWitness,
-  confirmExitMarkFailureWitness, confirmPriceExitWitness, executableExitMark, priceExitTrigger,
-  validateExecutableExitOrder,
+  ExitTriggerNotMetError, clearExitMarkFailureWitness, clearMarkUnavailable, clearPriceExitWitness,
+  confirmExitMarkFailureWitness, confirmPriceExitWitness, executableExitMark, noteMarkUnavailable,
+  priceExitTrigger, validateExecutableExitOrder,
 } from "./exit-trigger.mjs";
 
 const position = { mint: "Mint", stop: 0.8, entry: 1, target: 1.9, takeProfitX: 2,
@@ -69,5 +78,31 @@ assert.throws(() => validateExecutableExitOrder(stopIntent,
   { outAmount: "3900000", otherAmountThreshold: "3800000" }, { nowMs: 100_000 }),
   /trigger is stale/);
 assert.equal(validateExecutableExitOrder({ kind: "desk_exit", context: { position } }, {}, {}), null);
+// A mirror exit is the desk's determination evaluated by the bot: exempt the same way,
+// even when a caller attaches a price trigger to it by mistake.
+const mirrorVerdict = validateExecutableExitOrder(
+  { kind: "mirror_exit", amountRaw: "1000", context: { position, trigger: confirmed.trigger } },
+  { outAmount: "4500000", otherAmountThreshold: "4300000" }, { nowMs: 20_000 });
+assert.equal(mirrorVerdict, null, `mirror_exit re-validation returned ${JSON.stringify(mirrorVerdict)}`);
+console.log(`  mirror_exit exempt from trigger re-validation: ${mirrorVerdict}`);
 
-console.log("\nprice exits need two witnesses and a still-breached final order\n");
+// The mark-unavailable HEALTH flag: anchored on the first failure, cleared by a good mark.
+const blind = {};
+const firstOutage = noteMarkUnavailable(blind, { observedAt: 1_000, reason: "fetch failed", transient: true });
+const laterOutage = noteMarkUnavailable(blind, { observedAt: 61_000, reason: "fetch failed", transient: true });
+assert.equal(firstOutage, 0, `first outage age ${firstOutage}`);
+assert.equal(laterOutage, 60_000, `outage age after 60s ${laterOutage}`);
+assert.equal(blind.markUnavailableSince, 1_000, `markUnavailableSince ${blind.markUnavailableSince}`);
+assert.equal(blind.markUnavailableTransient, true);
+clearMarkUnavailable(blind);
+assert.equal(blind.markUnavailableSince, undefined);
+console.log(`  markUnavailableSince anchors on the first failure (age ${laterOutage}ms at t=61s) and clears on a good mark`);
+
+// And the poller does not import the selling half any more.
+const poller = fs.readFileSync(new URL("./poller.mjs", import.meta.url), "utf8");
+for (const name of ["confirmPriceExitWitness", "priceExitTrigger", "confirmExitMarkFailureWitness"]) {
+  assert.ok(!poller.includes(`${name}(`), `poller.mjs still calls ${name}`);
+  console.log(`  poller.mjs never calls ${name}()`);
+}
+
+console.log("\nwitnesses flag and never sell; desk and mirror exits are executed without re-validation\n");

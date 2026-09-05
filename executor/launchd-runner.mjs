@@ -27,26 +27,49 @@ const RUNTIME_FILES = Object.freeze([
   "sleep-assertion.mjs",
   "strategy.mjs",
   "trade-policy.mjs",
+  /* desk-led-v4: the desk's ruler and the mirror evaluator are loaded by the trading
+     process, so an install that lacks them is an install that cannot exit while the
+     desk is unreachable. Validated like every other runtime file. */
+  "dexscreener-consensus.mjs",
+  "desk-mirror.mjs",
   "package.json",
   "package-lock.json",
 ]);
 const ALLOWED_ENV = new Set([
   "BLOCK_HEIGHT_WINDOW", "BOOK_HEAT_MAX", "CC_API", "CC_FLOOR", "CC_SECRET",
   "DAILY_LOSS_LIMIT_SOL",
+  /* desk-led-v4 (2026-09-05). How long the desk may be consecutively unreachable before
+     the bot mirrors the desk's own levels with the desk's ruler. Bounded in poller.mjs
+     (live 2 min to 1 h). */
+  "DESK_UNREACHABLE_MS",
+  /* wave 2 (2026-09-05). How long a call may be LIVE at the desk with no fresh mark
+     before the bot stops reading that silence as a decision to hold and mirrors the desk
+     for THAT position. A wedged penthouse loop still answers 200. Bounded in poller.mjs
+     (live 2 min to 1 h). */
+  "DESK_SILENT_MS",
+  /* TEST SEAM, honoured by the mirror's DexScreener lane exactly as the desk's own
+     dexscreener.js honours it: with DS_OFFLINE=1 the consensus price DECLINES and mirror
+     mode runs its clock lane only. It is allowlisted because the runtime references it
+     and this allowlist must name every referenced setting; it has no business in a
+     production env file — an operator who sets it blinds the mirror's price lane. */
+  "DS_OFFLINE",
   /* What a healthy transaction is expected to cost, as opposed to the fee above which
      an entry is REFUSED. See LIVE_LIMITS in poller.mjs. */
   /* How many times a TRANSIENT entry failure is retried before the call is
      acknowledged. Bounded so a failing entry can never head-of-line block a later
      exit; a deterministic refusal is never retried at all. */
   "MAX_ENTRY_RETRIES",
-  /* How long the executable exit mark may stay unreadable for TRANSPORT reasons
-     before a risk exit latches. A two-tick latch on any failure sold a position on
-     two transient Jupiter errors four seconds apart. Floored at 60s, capped at 30m. */
+  /* Retired by desk-led-v4 — the sustained-outage sell it bounded was a bot-originated
+     exit. Still accepted so an existing env file validates; the poller ignores it. */
   "EXIT_MARK_OUTAGE_LATCH_MS",
   "EXPECTED_NETWORK_FEE_LAMPORTS", "DAILY_SOL_CAP", "EXECUTE", "EXECUTOR_SOURCE_COMMIT",
   "FEE_RESERVE_SOL", "FINALITY_TIMEOUT_MS", "F_DEFAULT", "F_NAME_MAX", "HARD_STOP_FILE",
   "INIT_ONLY", "JUPITER_API_BASE", "JUPITER_API_KEY", "KEYPAIR", "LIVE_CAPS_ACK",
-  "LIVE_STATE_INIT_ACK", "LIVE_TRADING_ACK", "LOCK_FILE", "MAX_AGE_HOURS",
+  "LIVE_STATE_INIT_ACK", "LIVE_TRADING_ACK", "LOCK_FILE",
+  /* Cadence of the valuation/custody pass (manageOpen) — the feed is read every POLL_MS
+     regardless. Live 5 s to 5 min. */
+  "MARK_MS",
+  "MAX_AGE_HOURS",
   "MAX_CALL_AGE_MIN", "MAX_ENTRY_DEVIATION_PCT", "MAX_ENTRY_MARK_AGE_MIN",
   "MAX_ENTRY_PREFLIGHT_AGE_MS", "MAX_ENTRY_QUOTE_DRIFT_PCT",
   "MAX_ENTRY_ROUND_TRIP_LOSS_PCT", "MAX_EXIT_PRICE_IMPACT_PCT",
@@ -60,6 +83,11 @@ const ALLOWED_ENV = new Set([
      probe that never settles used to latch the in-flight flag and silently end all
      rehearsals, so the deadline is what releases it. Floored at 30s in the poller. */
   "READINESS_TIMEOUT_MS",
+  /* wave 2 (2026-09-05). How often the bot asks the desk about the calls it is actually
+     holding — the floor under the feed, for the exit event that is delivered once and
+     missed. The feed remains the fast path at POLL_MS. Bounded in poller.mjs
+     (live 15 s to 10 min); the pass runs only under EXECUTE. */
+  "RECONCILE_MS",
   "SLIPPAGE_BPS", "SOLANA_RPC", "SOLANA_RPC_SECONDARY",
   "SOL_USD_CACHE_MAX_AGE_MS", "STATE_DB", "STATE_FILE", "TRAIL_PCT",
   // Keeps entries armed while the host is on battery. Everything else about the power

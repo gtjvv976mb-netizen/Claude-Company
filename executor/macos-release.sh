@@ -100,6 +100,7 @@ RUNTIME_PATHS=(
   executor/exit-trigger.mjs executor/feed-drain.mjs executor/sol-usd-oracle.mjs
   executor/heartbeat-health.mjs executor/sleep-assertion.mjs
   executor/strategy.mjs executor/trade-policy.mjs
+  executor/dexscreener-consensus.mjs executor/desk-mirror.mjs
   executor/monitor.mjs executor/launchd-runner.mjs executor/macos-launchagent.sh
   executor/macos-release.sh executor/package.json executor/package-lock.json
 )

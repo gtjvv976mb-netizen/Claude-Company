@@ -78,10 +78,19 @@ export function clearPriceExitWitness(position) {
 }
 
 /**
- * Missing executable marks are themselves a risk signal. A malicious or broken
- * order service must not be able to suppress a breached stop indefinitely simply
- * by returning an inflated minimum-output floor that fails simulation. One failure
- * freezes new exposure; two distinct consecutive ticks latch a risk-reducing exit.
+ * Missing executable marks are a HEALTH signal, no longer a sell.
+ *
+ * Until desk-led-v4 this witness latched a risk-reducing exit on two consecutive
+ * non-transport mark failures, and a sustained transport outage latched one too — the
+ * threat being an order service that hides a breached stop by refusing every exit
+ * quote. Under desk-led-v4 the bot has no stop of its own to hide: the desk determines
+ * the exit on its own ruler and the bot sells what it hears, so an unreadable
+ * executable mark cannot delay a desk exit (desk_exit intents never consult the mark)
+ * and must not manufacture one either (Shrek, call 55, 2026-09-05 — a bot-originated
+ * sell nine minutes before the desk's determination). The classification survives
+ * because it is still useful: it tells the operator whether the mark is unreadable for
+ * transport reasons (weather) or because the order service answered and was refused
+ * (worth a look). Both now flag `markUnavailableSince` on the position and nothing else.
  */
 export function confirmExitMarkFailureWitness(position, failure, {
   minGapMs = 1, maxGapMs = 60_000,
@@ -110,11 +119,49 @@ export function clearExitMarkFailureWitness(position) {
     delete position.pendingExitMarkFailure;
 }
 
+/**
+ * Record that the executable exit mark could not be read this tick. Health only:
+ * the first failure timestamps `markUnavailableSince` and later failures leave the
+ * anchor where it is, so the age reported is the age of the OUTAGE, not of the last
+ * error. Returns the outage age in ms. Never a sell — see the note above.
+ */
+export function noteMarkUnavailable(position, { observedAt, reason, transient = true } = {}) {
+  const at = Number(observedAt);
+  if (!Number.isSafeInteger(at) || at <= 0) throw new Error("mark-unavailable observation time is invalid");
+  const since = Number(position.markUnavailableSince) > 0 && Number(position.markUnavailableSince) <= at
+    ? Number(position.markUnavailableSince) : at;
+  position.markUnavailableSince = since;
+  position.markUnavailableAt = at;
+  position.markUnavailableReason = String(reason || "executable exit mark unavailable");
+  position.markUnavailableTransient = Boolean(transient);
+  return at - since;
+}
+
+export function clearMarkUnavailable(position) {
+  if (!position) return;
+  for (const key of ["markUnavailableSince", "markUnavailableAt", "markUnavailableReason",
+    "markUnavailableTransient", "exitMarkOutageSince", "pendingExitMarkFailure", "pendingPriceExit"])
+    if (Object.hasOwn(position, key)) delete position[key];
+}
+
 /** Re-price a latched price exit using the exact final order before signing. */
 export function validateExecutableExitOrder(intent, order, {
   nowMs = Date.now(), maxExitTriggerAgeMs = 60_000,
 } = {}) {
   if (intent?.kind === "entry") return null;
+  /* A DETERMINED exit is executed, never re-litigated. A desk_exit carries the desk's
+   * decision and a mirror_exit carries the desk's decision evaluated by the mirror on the
+   * desk's own levels; re-validating either against a chain-simulated price threshold
+   * would be the bot second-guessing the desk — the exact behaviour desk-led-v4 removes.
+   * Only a legacy risk_exit that still carries a price trigger (a latch persisted by a
+   * pre-v4 journal) is re-priced below, and only so it cannot fire on a stale trigger.
+   *
+   * A mirror_exit can still be CANCELLED, but never here and never on a price: the bot's
+   * stand-in determination expires upstream, in manageOpen, when the desk it stood in for
+   * is reachable and marking that call again (desk-mirror.mjs mirrorLatchExpiry). By the
+   * time an order exists the determination has already been re-checked; re-pricing it
+   * against a chain-simulated threshold would be the second-guessing v4 removed. */
+  if (intent?.kind === "desk_exit" || intent?.kind === "mirror_exit") return null;
   const trigger = intent?.context?.trigger;
   if (!trigger || trigger.kind !== "price") return null;
   const age = Number(nowMs) - Number(trigger.observedAt);

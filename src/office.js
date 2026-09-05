@@ -18,7 +18,7 @@ import { spend, spendSince, spendBySeat } from "./lib/llm.js";
 import { cfg } from "./config.js";
 import * as store from "./lib/store.js";
 import db from "./lib/store.js";
-import { reconcileMissingEntryAlerts } from "./alerts.js";
+import { reconcileMissingEntryAlerts, reconcileMissingExitAlerts } from "./alerts.js";
 import crypto from "node:crypto";
 function cryptoTimingEqual(a, b) {
   const ab = Buffer.from(String(a)), bb = Buffer.from(String(b));
@@ -75,6 +75,12 @@ export function executorFeedPayload(floorNo, rawAfter = 0) {
      own poll fixes the gap on its next tick. Idempotent, bounded, and it never
      resurrects a call the desk has already closed. */
   try { reconcileMissingEntryAlerts(floorNo); } catch { /* never fail a poll to repair one */ }
+  /* AND THE OTHER SILENT DROP. Under desk-led exits the exit alert is the bot's ONLY
+     sell instruction (Shrek call 55, 2026-09-05: the bot must sell exactly what the
+     desk determined, when it hears it), and announceExit is fired without being
+     awaited from every close path. A closed call with no exit row on this floor is a
+     position the bot will hold for ever; the same poll that heals entries heals it. */
+  try { reconcileMissingExitAlerts(floorNo); } catch { /* never fail a poll to repair one */ }
 
   // A malformed cursor must not bind as NaN — SQLite compares everything to NULL as
   // false, so the bot would poll a permanently empty feed at HTTP 200 and never trade.
@@ -84,6 +90,7 @@ export function executorFeedPayload(floorNo, rawAfter = 0) {
     SELECT a.id, a.call_id, a.kind, a.mint, a.urgency, a.created_at,
            c.symbol, c.category, c.launchpad, c.conviction,
            c.entry_ref, c.entry_lo, c.entry_hi, c.stop, c.target, c.close_reason, c.status, c.opened_at,
+           c.close_mark, c.closed_at,
            c.liq_at_call, c.rt_loss_at_call, c.mcap_at_call, c.policy_version,
            c.hold_band, c.hold_min_ms, c.hold_max_ms,
            COALESCE((SELECT e.mark FROM call_events e
@@ -145,6 +152,14 @@ export function executorFeedPayload(floorNo, rawAfter = 0) {
       take_profit_x: floorSettings.take_profit_x ?? 0,
       fixed_sol: floorSettings.fixed_sol ?? 0,
       code: r.close_reason ?? null, urgency: r.urgency, ts: r.created_at,
+      /* THE DESK'S OWN CLOCK RIDES WITH THE EVENT. `ts` is when the ALERT row was
+         written, not when the call opened or closed. The bot mirrors the desk's levels
+         from opened_at when the desk is unreachable, and its exit report names the
+         desk's close print and moment — so an entry carries opened_at, and an exit
+         carries close_mark and closed_at, straight from the calls row. */
+      opened_at: r.opened_at ?? null,
+      close_mark: r.kind === "exit" ? (r.close_mark ?? null) : null,
+      closed_at: r.kind === "exit" ? (r.closed_at ?? null) : null,
     })) };
 }
 
@@ -501,6 +516,45 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           return json(200, executorFeedPayload(floorNo, url.searchParams.get("after") || 0));
         }
 
+        /* ── THE STATE READ UNDER THE FEED — "what do you currently think of these?" ──
+           The feed is an event stream, and an event is delivered ONCE: alerts has
+           UNIQUE(floor_no, call_id, kind), the feed serves strictly after a durable
+           cursor, and the cursor advances per event. Since wave 1 removed the bot's own
+           stop, target and clock (Shrek call 55, 2026-09-05 — it sold at 03:01:42Z on
+           its own normalised stop at -13.5%, ahead of the desk's stop_hit at 03:10:24Z,
+           which is what the owner asked us to stop doing), a bot that restarts or throws
+           on that one exit row has no exit path left at all. And a desk whose penthouse
+           loop is wedged still answers this feed 200 with no events — indistinguishable
+           from "looked, decided to hold". So the bot asks about the calls it is actually
+           holding, and can act on a determination the desk RECORDED but never delivered.
+
+           READ-ONLY, and deliberately so: unlike the feed it does NOT run the alert
+           reconcilers, and it writes nothing at all. A monitoring read with side effects
+           would be a second, unaudited author of exits, and the entire design turns on
+           there being exactly one. Same constant-time bearer as the feed and take; the
+           join is bounded by an 'offered' delivery on THIS floor, exactly as
+           /executor/fill is, so one floor's secret cannot read another floor's calls.
+           Unknown or other-floor ids come back ABSENT rather than as an error — the bot
+           holds on an absence — while a malformed `ids` is a 400, because a garbage id
+           silently dropped would read as that same benign absence. */
+        const callStateMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/executor\/calls$/);
+        if (callStateMatch) {
+          const floorNo = Number(callStateMatch[1]);
+          const secret = db.prepare("SELECT executor_secret FROM copy_settings WHERE floor_no=?").get(floorNo)?.executor_secret;
+          const auth = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+          const okAuth = secret && auth && (() => {
+            try { return cryptoTimingEqual(auth, secret); } catch { return false; }
+          })();
+          if (!okAuth) return json(401, { error: "bad or missing executor secret" });
+          if (req.method !== "GET") return json(405, { error: "method not allowed" });
+          const parsed = copy.parseCallStateIds(url.searchParams.get("ids"));
+          if (!parsed.ok) return json(400, { error: `bad ids: ${parsed.error}` });
+          // no-store: staleness is the entire signal this route carries, so a cached
+          // copy of it is worse than no answer — it would report a silent desk as fresh.
+          res.setHeader("cache-control", "no-store");
+          return json(200, copy.callStateFor(floorNo, parsed.ids));
+        }
+
         /* ── EXECUTOR HEARTBEAT — outbound-only, self-reported liveness ──────
            The bot card refuses to claim WALL-ST-E is live without telemetry,
            which was honest and blind. This gives it eyes without giving the
@@ -581,6 +635,49 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           const ok = copy.markTaken(floorNo, callId, body?.taken !== false);
           return json(ok ? 200 : 404, { ok: Boolean(ok), callId,
             error: ok ? undefined : "no offered delivery for this call on this floor" });
+        }
+
+        /* ── THE BOT'S FILL AND EXIT REPORT, WITH REAL NUMBERS ────────────────
+           The take flag said "in"; it could not say how much, at what, or that
+           the bot had since sold. Shrek call 55 (2026-09-05): the desk's board
+           showed its paper 0.4 SOL for a real 0.0175 SOL fill, and when the bot
+           sold at 03:01:42Z the site never learned it — the desk's own stop_hit
+           came at 03:10:24Z and the card kept calling the position held. Under
+           desk-led exits the bot sells exactly what the desk determined, and
+           this is how it reports both legs: side, signature, SOL in or out,
+           realized, reason, the desk code it acted on. Same read-only secret,
+           constant-time compared; the server learns a fact and gains no hands.
+           400 for a body the validator refuses, 404 when this floor was never
+           offered the call (a false 200 would end the bot's retry, as the take
+           route learned), 200 with the stored row — idempotent by signature. */
+        const fillMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/executor\/fill$/);
+        if (fillMatch) {
+          const floorNo = Number(fillMatch[1]);
+          const secret = db.prepare("SELECT executor_secret FROM copy_settings WHERE floor_no=?").get(floorNo)?.executor_secret;
+          const auth = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+          const okAuth = secret && auth && (() => {
+            try { return cryptoTimingEqual(auth, secret); } catch { return false; }
+          })();
+          if (!okAuth) return json(401, { error: "bad or missing executor secret" });
+          if (req.method !== "POST") return json(405, { error: "method not allowed" });
+          const body = await readBody();
+          const valid = copy.validateExecutorFill(body);
+          if (!valid.ok) return json(400, { error: `malformed fill report: ${valid.error}` });
+          const fill = copy.recordExecutorFill(floorNo, body);
+          if (!fill) return json(404, { ok: false, callId: valid.fill.call_id,
+            error: "no offered delivery for this call on this floor" });
+          /* 409 WHEN THE SIGNATURE IS ALREADY SOMEBODY ELSE'S. executor_fills.signature
+             is globally UNIQUE, so a floor reporting a signature another floor already
+             claimed inserted nothing — and the old read-back handed that other floor's
+             whole row back, wallet included, over an authenticated 200. The scoped
+             read-back now finds nothing, and the honest answer is that the write did
+             not happen: 409, not a 200 carrying a stranger's row and not a 404 that
+             would blame the delivery. It keeps the bot's retry queue truthful for the
+             same reason the take route learned to 404 — a false success ends the retry
+             that would have surfaced the problem. */
+          if (fill.conflict) return json(409, { ok: false, callId: valid.fill.call_id,
+            error: "that signature is already recorded against a different floor, call or side" });
+          return json(200, { ok: true, fill });
         }
 
         const executorStatusMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/executor\/status$/);

@@ -215,6 +215,11 @@ await ok("entry and emergency-exit impact caps are distinct", async () => {
     maxExitPriceImpactPct: 50 }), 5);
   assert.equal(priceImpactCapForIntent("risk_exit", { maxPriceImpactPct: 5,
     maxExitPriceImpactPct: 50 }), 50);
+  // desk-led-v4: the desk's determinations take the exit cap, whichever party evaluated them.
+  for (const kind of ["desk_exit", "mirror_exit"]) {
+    const cap = priceImpactCapForIntent(kind, { maxPriceImpactPct: 5, maxExitPriceImpactPct: 50 });
+    assert.equal(cap, 50, `${kind} price-impact cap ${cap}`);
+  }
   const stressed = { ...orderBase, priceImpact: 25 };
   const expected = { inputMint: WSOL, outputMint: mint, amountRaw: "5000000",
     wallet: wallet.publicKey.toBase58() };

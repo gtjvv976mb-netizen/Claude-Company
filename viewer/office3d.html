@@ -2968,6 +2968,8 @@ function drawBossBoard() {
       `${st.taken} held`,
       st.memecoins ? `${st.memecoins} memecoin` : null,
       st.exposureSol ? `${st.exposureSol.toFixed(2)} SOL out` : null,
+      // the bot's own day, from its sell reports \u2014 the desk's paper never carried it
+      st.realizedTodaySol ? `net today ${fmtSignedSol(st.realizedTodaySol)}` : null,
     ].filter(Boolean).join("  \u00b7  ");
     chalkText(x, bits, W - 32, 372, 30, chalk, "right", 500);
   }
@@ -3957,6 +3959,13 @@ window.__setGrokPresent = (on) => {
 
 /* His board is a TRADING SCREEN, not a chalkboard — the boss writes in chalk, Grok
    prints. Monospace, hairline rules, P&L in the only two colours that matter. */
+/** Realised SOL with its sign always printed: "+0.0012 SOL", "-0.0024 SOL", "+0.0000 SOL"
+ *  for a day with nothing booked. A P&L without a sign is a number a reader has to
+ *  guess at. */
+const fmtSignedSol = (v) => {
+  const n = Number(v) || 0;
+  return (n < 0 ? "-" : "+") + Math.abs(n).toFixed(4) + " SOL";
+};
 let grokBook = { positions: [], settled: null, record: null, stats: null };
 function drawGrokBoard() {
   const x = grokBoard.c.getContext("2d");
@@ -4007,6 +4016,10 @@ function drawGrokBoard() {
       ["POSITIONS HELD", st.taken != null ? String(st.taken) : "\u2014"],
       ["OF WHICH MEMECOIN", st.memecoins != null ? String(st.memecoins) : "\u2014"],
       ["EXPOSURE", st.exposureSol != null ? st.exposureSol.toFixed(3) + " SOL" : "\u2014"],
+      /* The bot's own day, from its sell reports. A flat book that booked a loss this
+         morning and a flat book that never traded used to print the same wall; the
+         bot's 03:01:42Z Shrek exit (call 55, 2026-09-05) was invisible here. */
+      ["REALIZED TODAY", st.realizedTodaySol != null ? fmtSignedSol(st.realizedTodaySol) : "\u2014"],
       ["BOT WALLET", (() => {
         const bb = window.__botBalance;
         if (!bb) return "\u2014";
@@ -4015,24 +4028,27 @@ function drawGrokBoard() {
       })()],
     ];
     x.font = '500 18px "JetBrains Mono", ui-monospace, monospace';
-    let ry = 178;
+    let ry = 172;                       // seven rows now: 30px pitch keeps the quote clear
     for (const [k, v] of rows) {
       x.textAlign = "left";  x.fillStyle = "#8a9095"; x.fillText(k, 52, ry);
-      x.textAlign = "right"; x.fillStyle = "#e8eaec"; x.fillText(v, W - 52, ry);
+      x.textAlign = "right";
+      x.fillStyle = k === "REALIZED TODAY" && st.realizedTodaySol
+        ? (st.realizedTodaySol >= 0 ? "#4ec9a5" : "#e0685c") : "#e8eaec";
+      x.fillText(v, W - 52, ry);
       x.strokeStyle = "#1c1e21"; x.lineWidth = 1;
       x.beginPath(); x.moveTo(52, ry + 13); x.lineTo(W - 52, ry + 13); x.stroke();
-      ry += 34;
+      ry += 30;
     }
     x.textAlign = "center";
     x.font = 'italic 500 18px "JetBrains Mono", ui-monospace, monospace';
     x.fillStyle = grokOnDuty ? "#c9ccd1" : "#6b7075";
     x.fillText(grokOnDuty ? "\u201cThe truth is in the order flow.\u201d"
-                          : "\u201cWake me when you hire me.\u201d  \ud83d\udca4", W / 2, 372);
+                          : "\u201cWake me when you hire me.\u201d  \ud83d\udca4", W / 2, 392);
     x.font = '500 15px "JetBrains Mono", ui-monospace, monospace';
     x.fillStyle = "#5f6469";
     const rec = grokBook.record;
     x.fillText(rec ? `floor record  ${rec.wins}\u2013${rec.losses}   \u00b7   ${rec.settled} settled`
-      : "no call published on this floor yet", W / 2, 404);
+      : "no call published on this floor yet", W / 2, 422);
     grokBoard.tex.needsUpdate = true;
     return;
   }
@@ -4041,7 +4057,7 @@ function drawGrokBoard() {
   x.font = '500 17px "JetBrains Mono", ui-monospace, monospace';
   x.fillStyle = "#6b7075"; x.textAlign = "left";
   x.fillText("TICKER", 26, 100);
-  x.fillText("SIZE", 300, 100);
+  x.fillText("SIZE", 280, 100);      // 280: leaves the "(paper)" marker clear of ENTRY MC
   x.fillText("ENTRY MC", 420, 100);
   x.fillText("TARGET MC", 560, 100);
   x.textAlign = "right"; x.fillText("P&L", W - 26, 100);
@@ -4056,7 +4072,19 @@ function drawGrokBoard() {
     x.fillText(String(p.symbol || "?").slice(0, 12), 26, y);
     x.font = '500 20px "JetBrains Mono", ui-monospace, monospace';
     x.fillStyle = "#c8ccd0";
-    x.fillText(p.size != null ? p.size.toFixed(3) : "\u2014", 300, y);
+    const sizeText = p.size != null ? p.size.toFixed(p.real ? 4 : 3) : "\u2014";
+    x.fillText(sizeText, 280, y);
+    /* A size the bot did not report is the DESK's sizing, and the wall says so. The
+       real fill on Shrek was 0.0175 SOL; the board printed 0.400 with nothing to tell a
+       reader which book it came from. */
+    if (p.size != null && !p.real) {
+      const w = x.measureText(sizeText).width;
+      x.font = '500 12px "JetBrains Mono", ui-monospace, monospace';
+      x.fillStyle = "#6b7075";
+      x.fillText("(paper)", 280 + w + 6, y + 1);
+      x.font = '500 20px "JetBrains Mono", ui-monospace, monospace';
+      x.fillStyle = "#c8ccd0";
+    }
     x.fillText(p.entryCap != null ? fmtCap(p.entryCap) : "\u2014", 420, y);
     x.fillText(p.targetCap != null ? fmtCap(p.targetCap) : "\u2014", 560, y);
     x.textAlign = "right";
@@ -4071,6 +4099,16 @@ function drawGrokBoard() {
     x.textAlign = "left"; x.fillStyle = "#6b7075";
     x.font = '500 17px "JetBrains Mono", ui-monospace, monospace';
     x.fillText("+" + (pos.length - 8) + " more", 26, y + 4);
+  }
+  // the bot's day so far, bottom-left, so a held book still shows what it already booked
+  {
+    const st = window.__liveBook || {};
+    if (st.realizedTodaySol != null) {
+      x.textAlign = "left";
+      x.font = '500 15px "JetBrains Mono", ui-monospace, monospace';
+      x.fillStyle = !st.realizedTodaySol ? "#5f6469" : st.realizedTodaySol >= 0 ? "#4ec9a5" : "#e0685c";
+      x.fillText("REALIZED TODAY " + fmtSignedSol(st.realizedTodaySol), 26, H - 18);
+    }
   }
   // his signature under the book, so the board reads as a person's work
   x.textAlign = "right"; x.fillStyle = "#5f6469";
@@ -4113,42 +4151,85 @@ function drawGrokTickets() {
 
 /** Fed from the tenant's own authenticated call sheet, so the book on his wall is
  *  the same book the Calls tab shows. */
+/** A bot timestamp as milliseconds. The fill route carries ms (`at` = openedAtMs /
+ *  confirmedAt), but every other clock on this page has at some point arrived in
+ *  seconds, so accept both rather than trust one. */
+const botMs = (ts) => {
+  const n = Number(ts);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n < 1e11 ? n * 1000 : n;
+};
+/* THE BOT IS IN IT, OR IT IS NOT. One predicate decides what this wall calls "held",
+   and it reads the bot's own report first.
+   `bot_status` is joined into the feed from executor_fills (copy.js feedFor): 'open'
+   once the bot's buy report landed and no sell has, 'closed' once its sell report has,
+   null when the bot has never reported on the call. Rows the bot has never spoken to
+   fall back to the old reading — live on the desk and taken on the delivery row — so a
+   floor whose bot predates fill reporting keeps its board. The order matters: a bot
+   that is OPEN on a call the desk has already closed is still holding real tokens
+   until its exit report lands, and a bot that is CLOSED on a call the desk still calls
+   live is out, whatever `taken` says. Shrek (call 55, 2026-09-05): the bot sold at
+   03:01:42Z, the desk's stop_hit landed 03:10:24Z, and for those nine minutes this
+   wall showed the desk's paper 0.4 SOL as a live position of a bot that was flat.
+   THE WIRE SAYS 1, NOT true: `taken` is SQLite's INTEGER 0/1 (copy.js) and /feed serves
+   it raw, so `=== true` alone held nothing through the first real fill. */
+const botOpen = (c) => c.bot_status === "open" || (c.bot_status == null && c.status === "live" && (c.taken === true || Number(c.taken) === 1));
 window.__grokBoardUpdate = (feed = []) => {
   const live = feed.filter((c) => c.status === "live");
-  const open = live.filter((c) => c.verdict === "offered");
+  /* NOT pre-filtered by the desk's status: a bot-open position on a desk-closed call
+     is still held until the bot's own exit report lands (see botOpen). */
+  const open = feed.filter((c) => c.verdict === "offered");
+  const liveOpen = open.filter((c) => c.status === "live");
   /* HIS BOOK IS WHAT THIS FLOOR ACTUALLY HOLDS.
    *
    * It used to show every call OFFERED to the floor, which is the team's paper book —
    * a wall of positions nobody owns. A call is only on his board once the bot took it
    * (owner, 2026-09-03). The offered count still appears in the flat-book panel below,
    * where it is labelled as what it is. */
-  /* THE WIRE SAYS 1, NOT true. `taken` is SQLite's INTEGER 0/1 (copy.js) and /feed serves
-     it raw, so `=== true` held nothing — through the first real fill (Shrek, call 55,
-     2026-09-05) the fill was reported, the feed said taken:1, and this wall said nothing
-     was held. Every other reader of `taken` in this file is truthy; so is this one now. */
-  const held = open.filter((c) => c.taken === true || Number(c.taken) === 1);
+  const held = open.filter(botOpen);
   grokBook.record = window.__floorRecord || grokBook.record;
   grokBook.positions = held.map((c) => {
     const entry = c.entry_ref ?? null, target = c.target ?? null;
     /* IN MARKET CAP, NOT IN DECIMALS. A memecoin price is a string of zeros that tells
        a reader nothing; the cap is the number people actually trade on. Cap scales with
-       price at constant supply, so the call's own cap at entry converts both. */
+       price at constant supply, so the call's own cap at entry converts both. The cap
+       columns stay on the DESK's entry_ref because mcap_at_call was measured there. */
     const capAtCall = Number(c.mcap_at_call) > 0 ? Number(c.mcap_at_call) : null;
     const capOf = (px) => (capAtCall && entry > 0 && px > 0) ? capAtCall * (px / entry) : null;
     const mark = c.last_mark ?? null;
-    return { symbol: c.symbol, size: c.size_sol ?? null,
+    /* THE BOT'S SIZE, THE BOT'S ENTRY. The board printed the desk's sizing (size_sol,
+       0.4 SOL) for a real fill of 0.0175 SOL — the paper book wearing the bot's name.
+       bot_size_sol is what the bot actually paid; bot_entry_mark is the market mark at
+       its fill, so P&L is measured from where the money went in, not from where the
+       desk drew its reference. A row without a bot report keeps the desk's number and
+       says so on the wall: '(paper)'. */
+    const real = c.bot_size_sol != null;
+    const size = c.bot_size_sol ?? c.size_sol;
+    const basis = c.bot_entry_mark ?? entry;
+    return { symbol: c.symbol, size: size != null ? Number(size) : null, real,
              entryCap: capAtCall, targetCap: capOf(target),
              category: c.category || null, taken: true,
-             pnlPct: (entry && mark) ? ((mark - entry) / entry) * 100 : null };
+             pnlPct: (basis && mark) ? ((mark - basis) / basis) * 100 : null };
   });
+  /* WHAT THE BOT BOOKED TODAY. Realised SOL from every sell report whose close landed
+     since UTC midnight — the number the desk's paper book could never carry, because
+     the desk never knew the bot sold. */
+  const now = new Date();
+  const utcMidnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const realizedTodaySol = open.reduce((a, c) => {
+    const closed = botMs(c.bot_closed_at);
+    const realized = Number(c.bot_realized_sol);
+    return (closed != null && closed >= utcMidnight && Number.isFinite(realized)) ? a + realized : a;
+  }, 0);
   // The counts he keeps on the wall: what is live, what is actually held, and
   // how much of it is memecoin — the number that decides how hard to breathe.
   window.__liveBook = {
     liveCalls: live.length,
-    open: open.length,
-    taken: open.filter((c) => c.taken).length,
-    memecoins: open.filter((c) => (c.category || "").toLowerCase() === "memecoin").length,
-    exposureSol: open.reduce((a, c) => a + (c.size_sol || 0), 0),
+    open: liveOpen.length,
+    taken: held.length,
+    memecoins: liveOpen.filter((c) => (c.category || "").toLowerCase() === "memecoin").length,
+    exposureSol: grokBook.positions.reduce((a, p) => a + (p.size || 0), 0),
+    realizedTodaySol,
     closedToday: feed.filter((c) => c.status === "closed").length,
   };
   drawGrokBoard();
@@ -7314,6 +7395,12 @@ async function loadCalls({ liveOnly = false, hudOnly = false } = {}) {
     })();
     updateBotHb?.(body.settings);
     if (hudOnly) {
+      /* GROK'S WALL REDRAWS FROM EVERY PATH. It was fed only by the full Calls render,
+         so a tenant parked on any other pane watched a board that froze at tab-open:
+         through Shrek (call 55, 2026-09-05) the header pill refreshed every minute while
+         the wall behind Grok kept showing a position the bot had already sold. The feed
+         is already in hand here; the board costs one canvas repaint. */
+      window.__grokBoardUpdate?.(body.feed || []);
       paintHud({ feed: body.feed, settings: body.settings, budget: BUDGET, rent: body.rent });
       return;
     }
@@ -7569,7 +7656,25 @@ function paintFeedInto(wrap, feed, settings) {
     const line = document.createElement("div");
     line.className = "dp-note";
     line.style.fontSize = "10px";
-    if (!bs?.exists) {
+    /* THE BOT'S OWN REPORT COMES FIRST. bot_status is joined into the feed from the
+       fill reports the bot posts on every buy and every sell (copy.js feedFor), so it
+       carries what the heartbeat never did: the real size, when it went in, what it
+       realised and why it got out. The heartbeat line below is kept for floors whose
+       bot has never reported on this call. On Shrek (call 55, 2026-09-05) this card
+       read "YOUR BOT IS IN THIS: 0.0175 SOL" for nine minutes after the bot had sold. */
+    // Local on purpose: this pane is its own <script type="module">, so Grok's board
+    // helpers in the scene module are out of reach here. dashWhen already reads s or ms.
+    const solStr = (v) => { const n = Number(v); return Number.isFinite(n) ? String(+n.toFixed(4)) : "?"; };
+    const signedSol = (n) => (n < 0 ? "-" : "+") + Math.abs(n).toFixed(4) + " SOL";
+    if (c.bot_status === "open") {
+      line.textContent = `WALL-ST-E is in for ${solStr(c.bot_size_sol)} SOL since ${dashWhen(Number(c.bot_opened_at)) || "—"}`;
+      line.style.color = "var(--good,#4f8f52)";
+    } else if (c.bot_status === "closed") {
+      const realized = Number(c.bot_realized_sol);
+      line.textContent = `WALL-ST-E exited · realized ${Number.isFinite(realized) ? signedSol(realized) : "? SOL"}` +
+        ` · ${c.bot_exit_reason || c.bot_exit_code || c.bot_exit_kind || "no reason reported"}`;
+      if (Number.isFinite(realized) && realized !== 0) line.style.color = realized > 0 ? "var(--good,#4f8f52)" : "var(--bad,#b5473b)";
+    } else if (!bs?.exists) {
       line.textContent = "Desk position (paper) · WALL-ST-E not linked — no bot has reported to this floor";
     } else if (!bs.running) {
       line.textContent = "Desk position (paper) · WALL-ST-E is not running — it is not in this trade";

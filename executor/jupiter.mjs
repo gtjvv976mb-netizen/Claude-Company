@@ -1273,7 +1273,9 @@ export class JupiterV2Executor {
   headers(extra = {}) { return { "x-api-key": this.apiKey, ...extra }; }
 
   _isSafetyExit(intent) {
-    return (intent.kind === "risk_exit" || intent.kind === "desk_exit") &&
+    // mirror_exit (desk-led-v4): the desk's determination evaluated by the bot while the
+    // desk is unreachable — a safety exit in every rule here, same route and snapshot proof.
+    return (intent.kind === "risk_exit" || intent.kind === "desk_exit" || intent.kind === "mirror_exit") &&
       intent.inputMint === intent.mint && intent.outputMint === WSOL &&
       intent.context?.position?.mint === intent.mint;
   }

@@ -16,7 +16,12 @@ const INTENT_STATES = new Set([
   "planned", "signed", "submitted", "confirmed", "accounted",
   "failed", "expired", "ambiguous",
 ]);
-const INTENT_KINDS = new Set(["entry", "risk_exit", "desk_exit"]);
+/* mirror_exit (desk-led-v4, 2026-09-05): the desk's determination evaluated by the bot
+ * itself while the desk is unreachable — same levels, same ruler, same code. It is an
+ * exit in every rule below: a safety exit for the conflict lock, a realized event for the
+ * risk ledger, exempt from trigger re-validation like desk_exit. */
+const INTENT_KINDS = new Set(["entry", "risk_exit", "desk_exit", "mirror_exit"]);
+export const EXIT_INTENT_KINDS = Object.freeze(["desk_exit", "risk_exit", "mirror_exit"]);
 const WRAPPED_SOL_MINT = "So11111111111111111111111111111111111111112";
 export const LEGACY_CALL_IDENTITY_POLICY = "liquidate-on-next-valid-same-mint-desk-exit";
 // Bump only when the rules that authorize construction/disclosure of signed bytes
@@ -616,6 +621,34 @@ export class ExecutionJournal {
       .all().map((row) => this._intent(row));
   }
 
+  /**
+   * Every ACCOUNTED intent confirmed within the window, oldest first, with the call it
+   * belongs to (entry: context.event.call_id; exit: context.position.callId) and the
+   * fill facts the desk's /executor/fill route wants. Boot rebuilds the fill-report
+   * queue from this: a position is deleted at exit accounting, so a queue rebuilt from
+   * S.positions (the take-flag queue) could never re-report an exit that failed to
+   * post — which is exactly how the desk never learned the bot sold Shrek (call 55).
+   * Intents with no provable callId are skipped: the desk cannot key a fill it cannot
+   * attribute, and legacy quarantined positions are never fill-reported either.
+   */
+  accountedIntentsWithCallId({ sinceMs, now = this.now() } = {}) {
+    const floor = Number.isFinite(Number(sinceMs)) ? Number(sinceMs) : Number(now) - 7 * 24 * 3600e3;
+    const rows = this.db.prepare(`SELECT * FROM intents
+      WHERE state='accounted' AND COALESCE(confirmed_at, updated_at) >= ?
+      ORDER BY COALESCE(confirmed_at, updated_at), id`).all(floor);
+    const out = [];
+    for (const row of rows) {
+      let intent;
+      try { intent = this._intent(row); } catch { continue; }
+      const callId = intent.kind === "entry"
+        ? Number(intent.context?.event?.call_id)
+        : Number(intent.context?.position?.callId);
+      if (!Number.isSafeInteger(callId) || callId <= 0) continue;
+      out.push({ ...intent, callId });
+    }
+    return out;
+  }
+
   hasBlockingIntent(exceptId = null) {
     const row = this.db.prepare(`SELECT id FROM intents
       WHERE state IN ('signed','submitted','confirmed','ambiguous') AND (? IS NULL OR id<>?) LIMIT 1`)
@@ -641,14 +674,14 @@ export class ExecutionJournal {
     // Kind alone is not authority to bypass the global exposure lock. The route
     // and immutable position snapshot must prove this is actually reducing the
     // named position into wrapped SOL.
-    const isSafetyExit = (kind === "risk_exit" || kind === "desk_exit") &&
+    const isSafetyExit = EXIT_INTENT_KINDS.includes(kind) &&
       String(candidate.inputMint || "") === mint &&
       String(candidate.outputMint || "") === WRAPPED_SOL_MINT &&
       String(candidate.context?.position?.mint || "") === mint;
     const row = this.db.prepare(`SELECT id FROM intents
       WHERE state IN ('signed','submitted','confirmed','ambiguous')
         AND (? IS NULL OR id<>?)
-        AND (?=0 OR mint=? OR kind NOT IN ('entry','risk_exit','desk_exit'))
+        AND (?=0 OR mint=? OR kind NOT IN ('entry','risk_exit','desk_exit','mirror_exit'))
       ORDER BY created_at,id LIMIT 1`)
       .get(exceptId, exceptId, isSafetyExit ? 1 : 0, mint);
     return row?.id || null;
@@ -873,7 +906,7 @@ export class ExecutionJournal {
       return { kind: "deployment", deployedLamports: Number(deployed), realizedLamports: 0,
         networkFeeLamports: Number(fee), occurredAt };
     }
-    if (!["desk_exit", "risk_exit"].includes(intent.kind))
+    if (!EXIT_INTENT_KINDS.includes(intent.kind))
       throw new Error(`intent ${intent.id} has no risk-ledger accounting rule`);
     const before = intent.context?.position;
     const beforeRaw = BigInt(String(before?.qtyRaw || "0"));

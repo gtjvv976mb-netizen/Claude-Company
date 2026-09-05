@@ -48,7 +48,7 @@ console.log("\nEXPIRY FOLLOWS THE MARKET CAP, THROUGH THE BAND'S OWN CLOCK");
 
 console.log("\nAND IT NEVER RETIRES A CALL THE BOT COULD NOT HAVE SEEN");
 {
-  ok("there is a floor, because the poll is 15 seconds", MIN >= 60_000, `${MIN / 1000}s`);
+  ok("there is a floor, because a poll is seconds apart and a call must survive several", MIN >= 60_000, `${MIN / 1000}s`);
   ok("...so even a one-second hold window gives the bot four polls", expiry(1_000) === MIN);
   ok("a call with no band falls back to the flat setting", expiry(null) === MAX && expiry(0) === MAX);
   ok("an absurd hold window is capped", expiry(999 * 3_600_000) === MAX * 8);
@@ -76,6 +76,38 @@ console.log("\nA CALL THAT LOSES ITS ALERT IS REPAIRED, NOT LOST");
     /try \{ reconcileMissingEntryAlerts\(floorNo\); \} catch/.test(office));
   ok("repairs are announced, so a silent drop stops being silent",
     /alert:repaired/.test(alerts));
+}
+
+/* THE SAME HOLE ON THE WAY OUT. Under desk-led exits (Shrek call 55, 2026-09-05: the
+   bot sells exactly what the desk determined, when it hears it, and runs no stop of
+   its own) the exit alert is the bot's ONLY sell instruction, raised once per (floor,
+   call) and fired without being awaited from every close path. Entries were repaired
+   since 2026-09-03; exits were not, and a lost exit alert is a position held for ever. */
+console.log("\nA CALL THAT LOSES ITS EXIT ALERT IS REPAIRED TOO");
+{
+  const alerts = fs.readFileSync(new URL("./src/alerts.js", import.meta.url), "utf8");
+  const office = fs.readFileSync(new URL("./src/office.js", import.meta.url), "utf8");
+  ok("the exit reconciler exists", /export function reconcileMissingExitAlerts/.test(alerts));
+  const body = alerts.slice(alerts.indexOf("export function reconcileMissingExitAlerts"));
+  ok("it finds offered deliveries on CLOSED calls with no exit alert",
+    /a\.kind = 'exit'[\s\S]{0,200}a\.id IS NULL[\s\S]{0,120}c\.status = 'closed'/.test(body));
+  ok("...only recently closed ones, so it cannot walk the whole history",
+    /c\.closed_at > \?/.test(body) && /withinMs = 6 \* 3600e3/.test(body));
+  ok("it is bounded", /LIMIT \?/.test(body) && /Math\.min\(100, limit\)/.test(body));
+  ok("the words and urgency come from the SAME helper announceExit uses",
+    /export function exitAlertText/.test(alerts) &&
+    (alerts.match(/exitAlertText\(call, exit\)/g) || []).length >= 2,
+    `${(alerts.match(/exitAlertText\(call, exit\)/g) || []).length} call sites`);
+  ok("urgency follows the close code: chain facts unconditional, went_dark urgent",
+    /authority_appeared: "unconditional", cannot_exit: "unconditional", liq_collapse: "unconditional"/.test(alerts) &&
+    /went_dark: "urgent"/.test(alerts));
+  ok("the bot's own poll runs it, right after the entry repair",
+    /reconcileMissingEntryAlerts\(floorNo\); \} catch[\s\S]{0,700}try \{ reconcileMissingExitAlerts\(floorNo\); \} catch/.test(office));
+  ok("repairs are announced with kind 'exit'", /emit\("alert:repaired", \{ floorNo, callId: call\.id, kind: "exit"/.test(body));
+  ok("the exit event now carries the desk's print and moment",
+    /close_mark: r\.kind === "exit" \? \(r\.close_mark \?\? null\) : null/.test(office) &&
+    /closed_at: r\.kind === "exit" \? \(r\.closed_at \?\? null\) : null/.test(office));
+  ok("...and every event carries opened_at, for the mirror's clock", /opened_at: r\.opened_at \?\? null/.test(office));
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

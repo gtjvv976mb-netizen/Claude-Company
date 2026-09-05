@@ -7,7 +7,10 @@ import { CAP_BANDS } from "./categories.js";
 
 /** The pads a floor can choose between. `other` covers established coins with no pad. */
 export const LAUNCHPADS = ["pump.fun", "letsbonk.fun", "bags.fm", "moonshot", "boop.fun", "meteora-dbc", "trix", "other"];
-import { liveCalls, getCall } from "./calls.js";
+import { liveCalls, getCall, highWaterMark } from "./calls.js";
+/* The same policy defaults evaluateExit overrides with the DESK_* env dials, so the
+   call-state route can hand the bot the desk it is standing in for, not a generic one. */
+import { POLICY_DEFAULTS } from "../executor/trade-policy.mjs";
 import { inArrears } from "./leasing.js";
 
 /**
@@ -59,6 +62,36 @@ CREATE TABLE IF NOT EXISTS deliveries (
   UNIQUE (call_id, floor_no)
 );
 CREATE INDEX IF NOT EXISTS idx_deliveries_floor ON deliveries(floor_no, id DESC);
+
+-- THE BOT'S REAL BOOK, one row per confirmed chain fill it reports. The site showed
+-- the desk's paper 0.4 SOL for a real 0.0175 SOL fill and never learned the bot had
+-- sold (Shrek call 55, 2026-09-05): the only executor fact the desk ever stored was
+-- the taken flag, a bit with no size, no price, no exit and no reason. Every buy and
+-- every sell now lands here with the chain's own numbers, keyed by the transaction
+-- signature so a retried report is an upsert and never a second fill.
+CREATE TABLE IF NOT EXISTS executor_fills (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  floor_no     INTEGER NOT NULL,
+  call_id      INTEGER NOT NULL,
+  side         TEXT NOT NULL CHECK (side IN ('buy','sell')),
+  signature    TEXT NOT NULL UNIQUE,
+  wallet       TEXT,
+  at           INTEGER NOT NULL,     -- the chain confirmation time the bot recorded (ms)
+  sol          REAL,                 -- buy: SOL paid; sell: SOL proceeds
+  lamports_in  INTEGER,
+  qty_raw      TEXT,                 -- raw token units, as a string (may exceed 2^53)
+  entry_mark   REAL,
+  sol_usd      REAL,
+  realized_sol REAL,                 -- sell only: net of the entry
+  fraction     REAL,
+  reason       TEXT,
+  kind         TEXT,                 -- desk_exit | mirror_exit | risk_exit | ...
+  desk_code    TEXT,                 -- the desk's close code when the bot knew it
+  event_id     TEXT,                 -- the desk alert event_id when the bot knew it
+  intent_id    TEXT,
+  received_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_executor_fills_call ON executor_fills(floor_no, call_id, side);
 `);
 
 /**
@@ -450,7 +483,59 @@ export function broadcast(callId, leasedFloors) {
   return { ok: true, offered, skipped };
 }
 
-export const feedFor = (floorNo, limit = 25) => db.prepare(`
+/* THE BOT'S BOOK RIDES ON EVERY FEED ROW AS bot_* FIELDS — and the wallet does not.
+ * The floor feed is what the site's board renders, and the HQ feed is public, so the
+ * burner's address stays out of it: every other executor surface already masks it
+ * for non-owners, and a public feed row is read by everyone. The numbers are the
+ * bot's own (SOL in, SOL out, realized, reason) so the board can say what is
+ * actually held instead of what the desk sized on paper.
+ *
+ * AND NEITHER DO THE CHAIN IDENTIFIERS. Withholding the wallet while publishing the
+ * transaction signatures withheld nothing at all: a signature pasted into any explorer
+ * names the signing wallet in one click, so bot_entry_sig / bot_exit_sig handed the
+ * burner's address to every anonymous reader of an unauthenticated feed — and
+ * bot_qty_raw handed them its exact token holding on top of it. This is the operator's
+ * self-hosted burner; the whole architecture exists so the server never learns or
+ * controls it, and a public route that de-anonymises it undoes that in one field.
+ * Nothing in viewer/office3d.html ever rendered the three (grepped 2026-09-05: it
+ * reads bot_status, bot_size_sol, bot_entry_mark, bot_realized_sol, bot_closed_at and
+ * the exit reason), so they are gone rather than masked. */
+const BOT_FIELDS = Object.freeze({
+  bot_status: null, bot_size_sol: null, bot_opened_at: null, bot_entry_mark: null,
+  bot_sold_sol: null, bot_realized_sol: null,
+  bot_exit_reason: null, bot_exit_kind: null, bot_exit_code: null, bot_closed_at: null,
+});
+
+function botFieldsFor(fills) {
+  const out = { ...BOT_FIELDS };
+  if (!fills?.length) return out;
+  const buys = fills.filter((f) => f.side === "buy").sort((a, b) => a.at - b.at || a.id - b.id);
+  const sells = fills.filter((f) => f.side === "sell").sort((a, b) => a.at - b.at || a.id - b.id);
+  if (buys.length) {
+    const first = buys[0];
+    // Size is summed across every buy on the call, so a second clip on the same
+    // call is not silently under-reported; the entry facts come from the first.
+    out.bot_size_sol = buys.reduce((s, f) => s + (Number(f.sol) || 0), 0);
+    out.bot_opened_at = first.at;
+    out.bot_entry_mark = first.entry_mark;
+  }
+  if (sells.length) {
+    const last = sells[sells.length - 1];
+    out.bot_sold_sol = sells.reduce((s, f) => s + (Number(f.sol) || 0), 0);
+    out.bot_realized_sol = sells.reduce((s, f) => s + (Number(f.realized_sol) || 0), 0);
+    out.bot_exit_reason = last.reason;
+    out.bot_exit_kind = last.kind;
+    out.bot_exit_code = last.desk_code;
+    out.bot_closed_at = last.at;
+  }
+  // 'closed' the moment a sell lands, even if the desk's own call is still live —
+  // the site drops the position from the board on the bot's word, not the desk's.
+  out.bot_status = sells.length ? "closed" : buys.length ? "open" : null;
+  return out;
+}
+
+export function feedFor(floorNo, limit = 25) {
+  const rows = db.prepare(`
   SELECT d.*, c.mint, c.symbol, c.category, c.launchpad, c.conviction, c.status,
          c.entry_ref, c.entry_lo, c.entry_hi, c.stop, c.target, c.opened_at, c.closed_at,
          c.thesis, c.invalidation, c.close_reason, c.close_mark, c.image_url,
@@ -460,6 +545,27 @@ export const feedFor = (floorNo, limit = 25) => db.prepare(`
          (SELECT MAX(e.ts) FROM call_events e WHERE e.call_id = c.id AND e.mark IS NOT NULL) AS last_mark_ts
   FROM deliveries d JOIN calls c ON c.id=d.call_id
   WHERE d.floor_no=? ORDER BY d.id DESC LIMIT ?`).all(floorNo, limit);
+  if (!rows.length) return rows;
+  const byCall = new Map();
+  try {
+    const ids = rows.map((r) => r.call_id);
+    // The wallet column is deliberately NOT selected: it never reaches a feed row.
+    // Neither are `signature` and `qty_raw`, for the same reason and by the same rule:
+    // a signature resolves to the signing wallet on any explorer, so publishing one on
+    // an unauthenticated feed leaks the burner's address as surely as the column we
+    // withheld — plus its exact holding. Select only what the board actually draws.
+    const fills = db.prepare(`
+      SELECT id, call_id, side, at, sol, entry_mark, realized_sol,
+             reason, kind, desk_code
+      FROM executor_fills WHERE floor_no=? AND call_id IN (${ids.map(() => "?").join(",")})
+      ORDER BY id`).all(floorNo, ...ids);
+    for (const f of fills) {
+      if (!byCall.has(f.call_id)) byCall.set(f.call_id, []);
+      byCall.get(f.call_id).push(f);
+    }
+  } catch { /* a feed must never fail because the fill join did */ }
+  return rows.map((r) => ({ ...r, ...botFieldsFor(byCall.get(r.call_id)) }));
+}
 
 /** The tenant says they took it. Bookkeeping over a number they declared — never a balance we hold. */
 export function markTaken(floorNo, callId, taken = true) {
@@ -468,4 +574,271 @@ export function markTaken(floorNo, callId, taken = true) {
   const r = db.prepare("UPDATE deliveries SET taken=?, taken_at=? WHERE floor_no=? AND call_id=? AND verdict='offered'")
     .run(taken ? 1 : 0, taken ? Date.now() : null, floorNo, callId);
   return r.changes === 1;
+}
+
+/* ── THE STATE READ: WHAT THE DESK CURRENTLY BELIEVES ABOUT THE CALLS THE BOT HOLDS ──
+ *
+ * Wave 1 made the desk the SOLE author of exits: the bot has no stop, no target, no
+ * clock and no take-profit of its own (Shrek call 55, 2026-09-05 — it sold at
+ * 03:01:42Z on its own normalised stop at -13.5%, nine minutes before the desk's own
+ * stop_hit at 03:10:24Z, and that is exactly what the owner asked us to remove). The
+ * consequence is the thing this function exists for: with the bot's own exit policy
+ * gone, a desk exit that is never DELIVERED is not merely late, it is never taken.
+ *
+ * Two ways the single `type:"exit"` row on the feed fails to arrive, neither of which
+ * wave 1 covers:
+ *   1. It is delivered once, ever. alerts has UNIQUE(floor_no, call_id, kind), the feed
+ *      serves strictly after a durable cursor, and the cursor advances per event. A bot
+ *      that restarts, throws on that row, or advances past it never sees it again;
+ *      reconcileMissingExitAlerts repairs a missing alert ROW, not a missed DELIVERY.
+ *   2. A desk that answers 200 while it is not deciding. A wedged penthouse loop or a
+ *      dead price source serves a perfectly healthy feed with no exit events, which is
+ *      byte-for-byte identical to "the desk looked and decided to hold". Mirror mode
+ *      engages only when the feed is UNREACHABLE, so this reads as normal for ever.
+ *
+ * So the bot asks, about the calls it is ACTUALLY holding, what the desk currently
+ * thinks. A state read, not a bigger event stream. Three rules make it safe:
+ *   - It is READ-ONLY. It must never close a call, never write an alert, never touch a
+ *     delivery. A monitoring read with side effects is a second, unaudited exit path,
+ *     and the whole design turns on there being exactly one author of exits.
+ *   - It is bounded by an OFFERED delivery on THIS floor, exactly like recordExecutorFill,
+ *     so one floor's secret can never read another floor's calls.
+ *   - It carries no wallet and no secret. The bot already knows its own wallet; nothing
+ *     else on this route needs one.
+ */
+
+/** The exact wire shape. Named once so the route, the tests and the bot agree, and so a
+ *  column added to `calls` later cannot silently join a public payload. */
+export const CALL_STATE_FIELDS = Object.freeze([
+  "call_id", "status", "close_reason", "close_mark", "closed_at", "opened_at",
+  "entry_ref", "stop", "target", "hold_band", "hold_min_ms", "hold_max_ms",
+  "last_mark", "last_mark_ts", "mint", "high_water",
+  "take_profit_x", "max_age_hours", "trail_pct",
+]);
+
+/* WHY mint AND high_water WERE ADDED, AFTER THE ORIGINAL FOURTEEN.
+ *
+ * mint — a call id is a desk-side integer, and the bot sells a TOKEN. Under desk-led
+ * exits the bot has no stop and no clock of its own: whatever this row says about
+ * call 55 is what it sells. If the row it matched to a position is about a different
+ * coin — an id reused after a database restore, a mis-keyed position, a bug in the
+ * bot's own map — nothing on the old wire could tell it, and it would sell the wrong
+ * bag on a stranger's stop. The mint lets the bot PROVE the row is about the thing it
+ * is holding before acting on it. It is not a secret: it is on the public feed row,
+ * on the board, and on every explorer already.
+ *
+ * high_water — the desk arms its trail and its breakeven stop off the confirmed high,
+ * not off entry, so a bot that only ever sees `stop` cannot reproduce the level the
+ * desk is actually watching, and reads a trail exit as a desk that fired for no
+ * reason. It is the SAME number the desk's own evaluateExit uses: highWaterMark(id)
+ * from calls.js, the two-witness confirmed high — never a second definition, because
+ * two definitions of the high is exactly how the bot and the desk came to disagree by
+ * nine minutes and 13.5% on Shrek call 55. Note the desk's policy then seeds its high
+ * at max(high_water, entry_ref); this field is the raw history side of that max, so a
+ * call the monitor has never marked reports null rather than a fabricated level. */
+
+/** At most this many ids per read. The bot holds a handful of positions; a route that
+ *  will answer about a thousand ids is a scan someone will eventually point at us. */
+export const CALL_STATE_MAX_IDS = 25;
+
+/**
+ * Parse the `ids=1,2,3` query argument. Strict on purpose: a silently-dropped garbage
+ * id would answer 200 with the call simply ABSENT, and absence is defined to mean "the
+ * desk has never heard of it — hold". A malformed request that reads as a hold is the
+ * failure mode this whole route was built to remove, so it is a 400 instead.
+ */
+export function parseCallStateIds(raw) {
+  const s = raw == null ? "" : String(raw).trim();
+  if (!s) return { ok: false, error: "ids is required: up to 25 comma-separated call ids" };
+  const parts = s.split(",").map((p) => p.trim());
+  if (parts.length > CALL_STATE_MAX_IDS) {
+    return { ok: false, error: `at most ${CALL_STATE_MAX_IDS} ids (got ${parts.length})` };
+  }
+  const ids = [];
+  for (const p of parts) {
+    // /^\d+$/ and not Number(): Number(" ")===0, Number("1e3")===1000 and Number("0x2")===2
+    // all parse, and every one of them would be a call id the caller did not write.
+    if (!/^\d+$/.test(p)) return { ok: false, error: `'${p}' is not a call id` };
+    const n = Number(p);
+    if (!Number.isSafeInteger(n) || n <= 0) return { ok: false, error: `'${p}' is not a positive call id` };
+    if (!ids.includes(n)) ids.push(n);
+  }
+  return { ok: true, ids };
+}
+
+/**
+ * What the desk believes about these calls, for the floor that asked. Returns
+ * `{calls, now}`; `now` is the DESK'S clock so the bot measures the desk's silence
+ * against the desk's own time rather than against a laptop whose clock has drifted.
+ *
+ * Unknown ids, ids belonging to another floor and ids this floor was only ever offered
+ * as 'skipped' are simply absent — never an error and never another floor's row.
+ *
+ * last_mark_ts falls back to opened_at when the desk has never recorded a mark for the
+ * call, mirroring executorFeedPayload's current_mark_at. That fallback IS the second
+ * failure mode's signal: a call the monitor has never once marked must read as stale
+ * from the moment it opened, not as null — a null would compare false against every
+ * staleness threshold and the bot would hold through a desk that never looked.
+ */
+export function callStateFor(floorNo, ids, { now = Date.now() } = {}) {
+  const floor = Number(floorNo);
+  const wanted = (Array.isArray(ids) ? ids : [])
+    .map((n) => Number(n))
+    .filter((n) => Number.isSafeInteger(n) && n > 0)
+    .slice(0, CALL_STATE_MAX_IDS);
+  if (!Number.isFinite(floor) || !wanted.length) return { calls: [], now };
+  const rows = db.prepare(`
+    SELECT c.id AS call_id, c.status, c.close_reason, c.close_mark, c.closed_at, c.opened_at,
+           c.entry_ref, c.stop, c.target, c.hold_band, c.hold_min_ms, c.hold_max_ms, c.mint,
+           (SELECT e.mark FROM call_events e
+             WHERE e.call_id=c.id AND e.mark IS NOT NULL
+             ORDER BY e.id DESC LIMIT 1) AS event_mark,
+           (SELECT MAX(e.ts) FROM call_events e
+             WHERE e.call_id=c.id AND e.mark IS NOT NULL) AS event_mark_ts
+    FROM deliveries d JOIN calls c ON c.id=d.call_id
+    WHERE d.floor_no=? AND d.verdict='offered' AND d.call_id IN (${wanted.map(() => "?").join(",")})
+    ORDER BY c.id`).all(floor, ...wanted);
+  const calls = rows.map((r) => ({
+    call_id: r.call_id, status: r.status,
+    close_reason: r.close_reason ?? null, close_mark: r.close_mark ?? null,
+    closed_at: r.closed_at ?? null, opened_at: r.opened_at ?? null,
+    entry_ref: r.entry_ref ?? null, stop: r.stop ?? null, target: r.target ?? null,
+    hold_band: r.hold_band ?? null, hold_min_ms: r.hold_min_ms ?? null, hold_max_ms: r.hold_max_ms ?? null,
+    last_mark: r.event_mark ?? r.entry_ref ?? null,
+    last_mark_ts: r.event_mark_ts ?? r.opened_at ?? null,
+    mint: r.mint ?? null,
+    // highWaterMark is a pure SELECT over call_events, so the read stays read-only —
+    // the one property this route may never lose. At most CALL_STATE_MAX_IDS of them.
+    high_water: highWaterMark(r.call_id) ?? null,
+    /* THE DESK'S OWN DIALS, SO THE MIRROR CANNOT DRIFT FROM THE DESK THAT TUNED THEM.
+     * evaluateExit runs pricePolicy with POLICY_DEFAULTS overridden by these three env
+     * values (src/calls.js). A mirror running the bare defaults against a desk tuned to
+     * DESK_TAKE_PROFIT_X=3 sells a full multiple early — a determination the desk never
+     * made, which is the whole failure this change exists to remove. Built from the same
+     * expressions, so tuning the desk retunes its stand-in on the next reconcile. */
+    take_profit_x: Number(process.env.DESK_TAKE_PROFIT_X || POLICY_DEFAULTS.takeProfitX),
+    max_age_hours: Number(process.env.DESK_MAX_AGE_HOURS || POLICY_DEFAULTS.maxAgeHours),
+    trail_pct: Number(process.env.DESK_TRAIL_PCT || POLICY_DEFAULTS.trailPct),
+  }));
+  return { calls, now };
+}
+
+/* ── THE BOT REPORTING WHAT IT ACTUALLY DID, WITH NUMBERS ──────────────────────
+ *
+ * /executor/take carried one bit. On Shrek call 55 (2026-09-05) the bot filled
+ * 0.0175 SOL, the board showed the desk's paper 0.4, the bot sold at 03:01:42Z on
+ * its own normalised stop at -13.5% and the site never heard about it — the desk's
+ * own stop_hit landed at 03:10:24Z and the card kept calling the position held.
+ * A fill report is a fact about the chain: side, signature, SOL in or out, the
+ * realized figure, the reason. The validator is strict because these rows drive
+ * the public board; a NaN here would render as a held position of size NaN. */
+const BASE58_SIG = /^[1-9A-HJ-NP-Za-km-z]{60,100}$/;
+
+/** A finite number, or null when absent; `undefined` (not null) means "unusable". */
+function finiteOrNull(v) {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+export function validateExecutorFill(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return { ok: false, error: "body must be a JSON object" };
+  const callId = Number(body.callId);
+  if (!Number.isInteger(callId) || callId <= 0) return { ok: false, error: "callId must be a positive integer" };
+  const side = String(body.side ?? "");
+  if (side !== "buy" && side !== "sell") return { ok: false, error: "side must be 'buy' or 'sell'" };
+  const signature = String(body.signature ?? "");
+  if (!BASE58_SIG.test(signature)) return { ok: false, error: "signature must be 60-100 base58 characters" };
+  const at = Number(body.at);
+  if (!Number.isFinite(at) || at <= 0) return { ok: false, error: "at must be a positive millisecond timestamp" };
+  const nums = {};
+  const numericKeys = side === "buy"
+    ? { sol: "sizeSol", lamports_in: "lamportsIn", entry_mark: "entryMark", sol_usd: "solUsd" }
+    : { sol: "sol", realized_sol: "realizedSol", fraction: "fraction" };
+  for (const [col, key] of Object.entries(numericKeys)) {
+    const n = finiteOrNull(body[key]);
+    if (n === undefined) return { ok: false, error: `${key} must be a finite number` };
+    nums[col] = n;
+  }
+  const text = (v, max) => (v == null ? null : String(v).slice(0, max));
+  // qtyRaw is a string on purpose: raw token units routinely exceed 2^53.
+  const qtyRaw = body.qtyRaw == null ? null : String(body.qtyRaw);
+  if (qtyRaw != null && !/^\d{1,40}$/.test(qtyRaw)) return { ok: false, error: "qtyRaw must be a string of digits" };
+  return { ok: true, fill: {
+    call_id: callId, side, signature, at: Math.floor(at),
+    wallet: text(body.wallet, 64),
+    sol: nums.sol ?? null, lamports_in: nums.lamports_in == null ? null : Math.floor(nums.lamports_in),
+    qty_raw: qtyRaw, entry_mark: nums.entry_mark ?? null, sol_usd: nums.sol_usd ?? null,
+    realized_sol: nums.realized_sol ?? null, fraction: nums.fraction ?? null,
+    reason: text(body.reason, 400), kind: text(body.kind, 40), desk_code: text(body.deskCode, 40),
+    event_id: text(body.eventId, 120), intent_id: text(body.intentId, 120),
+  } };
+}
+
+/**
+ * Store one reported fill. Returns null when this floor was never OFFERED the call —
+ * the same refusal markTaken makes, because a fill on a call the desk did not hand
+ * this floor is either a mistake or a forgery and must not appear on its board.
+ * Throws on a malformed body (the route answers 400 before ever getting here).
+ * Upsert by signature: INSERT OR IGNORE, then refresh the mutable figures, so the
+ * bot's durable retry queue can re-post after a lost 2xx without a second row.
+ * Returns `{conflict:"signature_claimed"}` — never a row — when that signature already
+ * belongs to a different floor, call or side; the route turns that into a 409. A fill
+ * row and a conflict are told apart by the `conflict` key, which no column carries.
+ */
+export function recordExecutorFill(floorNo, body, { now = Date.now() } = {}) {
+  const v = validateExecutorFill(body);
+  if (!v.ok) { const e = new Error(v.error); e.code = "malformed"; throw e; }
+  const f = v.fill;
+  const offered = db.prepare("SELECT 1 FROM deliveries WHERE floor_no=? AND call_id=? AND verdict='offered'")
+    .get(floorNo, f.call_id);
+  if (!offered) return null;
+  const ins = db.prepare(`INSERT OR IGNORE INTO executor_fills
+      (floor_no, call_id, side, signature, wallet, at, sol, lamports_in, qty_raw, entry_mark, sol_usd,
+       realized_sol, fraction, reason, kind, desk_code, event_id, intent_id, received_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(floorNo, f.call_id, f.side, f.signature, f.wallet, f.at, f.sol, f.lamports_in, f.qty_raw,
+      f.entry_mark, f.sol_usd, f.realized_sol, f.fraction, f.reason, f.kind, f.desk_code,
+      f.event_id, f.intent_id, now);
+  const fresh = ins.changes === 1;
+  if (!fresh) {
+    // A re-post refreshes the figures but never rebinds the row to another floor,
+    // call or side: those are the identity of the fill, and COALESCE keeps a value a
+    // later, thinner retry did not carry.
+    db.prepare(`UPDATE executor_fills SET
+        sol=COALESCE(?, sol), lamports_in=COALESCE(?, lamports_in), qty_raw=COALESCE(?, qty_raw),
+        entry_mark=COALESCE(?, entry_mark), sol_usd=COALESCE(?, sol_usd),
+        realized_sol=COALESCE(?, realized_sol), fraction=COALESCE(?, fraction),
+        reason=COALESCE(?, reason), kind=COALESCE(?, kind), desk_code=COALESCE(?, desk_code),
+        event_id=COALESCE(?, event_id), intent_id=COALESCE(?, intent_id)
+      WHERE signature=? AND floor_no=? AND call_id=? AND side=?`)
+      .run(f.sol, f.lamports_in, f.qty_raw, f.entry_mark, f.sol_usd, f.realized_sol, f.fraction,
+        f.reason, f.kind, f.desk_code, f.event_id, f.intent_id, f.signature, floorNo, f.call_id, f.side);
+  }
+  /* THE READ-BACK IS SCOPED TO THE CALLER, OR IT HANDS BACK SOMEBODY ELSE'S ROW.
+     `signature` is globally UNIQUE, so INSERT OR IGNORE silently does nothing when
+     another floor has already claimed that signature — and the old read-back,
+     "WHERE signature=?", then returned THAT floor's entire row, wallet column and
+     all, over an authenticated 200 to a floor that never wrote it. One forged (or
+     merely copied) signature was a cross-floor read of the burner's address. So the
+     read-back carries the caller's own identity: signature AND floor AND call AND
+     side, which are exactly the four columns the upsert refuses to rebind. */
+  const row = db.prepare("SELECT * FROM executor_fills WHERE signature=? AND floor_no=? AND call_id=? AND side=?")
+    .get(f.signature, floorNo, f.call_id, f.side);
+  /* Nothing matching means the row belongs to somebody else: the write genuinely did
+     not happen, and 200 would be the same false success the take route already taught
+     us about — it ends the bot's retry on a report the desk never stored. The route
+     answers 409 (see office.js), and the conflict is decided BEFORE markTaken and
+     before the bus emit so a stranger's signature cannot flip a delivery to taken or
+     announce a fill that has no row behind it. */
+  if (!row) return { conflict: "signature_claimed", callId: f.call_id, side: f.side };
+  // A buy IS the take. The flag stays the site's compatibility bit for old rows; the
+  // bot no longer needs a second report to set it.
+  if (f.side === "buy") markTaken(floorNo, f.call_id, true);
+  if (fresh) {
+    const call = getCall(f.call_id);
+    emit("executor:fill", { floorNo, callId: f.call_id, side: f.side, symbol: call?.symbol ?? null,
+      sol: f.sol, realizedSol: f.realized_sol, reason: f.reason, kind: f.kind, deskCode: f.desk_code });
+  }
+  return row;
 }

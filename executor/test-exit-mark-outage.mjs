@@ -1,62 +1,55 @@
 /**
- * A DROPPED PACKET IS NOT A HIDDEN STOP.
+ * AN UNREADABLE MARK IS A HEALTH FLAG, NEVER A SELL.
  *
  * On 2026-09-04 the bot's first autonomous position, TOAD — a very_high coin the desk
  * meant to hold five to twenty-four hours — was sold thirty-two minutes in at a 1.2%
- * loss. Not on the stop, not on the target, not on the band's clock. On this:
+ * loss on two transient "Failed to get quotes" answers four seconds apart. The first fix
+ * classified the failure: transport errors started an outage clock and sold only after a
+ * sustained outage; every other failure kept a two-tick latch. Both branches were still
+ * BOT-ORIGINATED EXITS, and desk-led-v4 (2026-09-05) removed the category: Shrek, call
+ * 55 — the bot sold 03:01:42Z on its own normalised stop at -13.5%, the desk's determined
+ * stop_hit came 03:10:24Z, and the owner's rule is that exits are followed "not after or
+ * before, but as exactly as it was determined". A bot with no stop of its own has no stop
+ * for a hostile order service to hide; a desk_exit intent never consults this mark.
  *
- *   15:57:57  mark TOAD: Jupiter /order 400: Failed to get quotes — waiting for one
- *             independent next-tick failure witness before risk reduction
- *   15:58:01  mark TOAD: executable mark failed on two consecutive ticks — latching a
- *             risk-reducing exit so the order service cannot suppress a stop
- *
- * Two transient "no route right now" answers, four seconds apart. The latch existed for
- * a real threat — an order service that answers every exit quote with an error could
- * hide a stop-out indefinitely — but it counted ANY failure, and a 4-second hiccup looks
- * identical to a hostile service only if you refuse to tell the two apart.
- *
- * The fix classifies the failure. Transport errors start an outage clock and latch only
- * after a sustained outage; every other failure keeps the original two-tick latch.
+ * What survives is the classification (weather vs refusal — still worth an operator's
+ * eye) and the entry block. What a failed mark now does: riskDataUnavailable (new entries
+ * blocked, as before) and markUnavailableSince anchored on the FIRST failure, for the
+ * heartbeat and the monitor. What it never does: sell.
  */
 import fs from "node:fs";
+import { clearMarkUnavailable, noteMarkUnavailable } from "./exit-trigger.mjs";
 
 let pass = 0, fail = 0;
 const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  — " + d : ""}`))
                                  : (fail++, console.log(`  FAIL ${n}${d ? "  — " + d : ""}`)); };
 const src = fs.readFileSync(new URL("./poller.mjs", import.meta.url), "utf8");
 
-/* The classifier and the allowance, lifted from the source so this cannot drift. */
+/* The classifier, lifted from the source so this cannot drift. */
 const block = src.slice(src.indexOf("const TRANSIENT_ENTRY_FAILURE = ["), src.indexOf("const isTransientEntryFailure"));
 const patterns = [...block.matchAll(/\/((?:[^/\\\n]|\\.)+)\/([gimsuy]*)/g)].map((m) => new RegExp(m[1], m[2]));
 const isTransient = (msg) => patterns.some((re) => re.test(msg));
-const LATCH_MS = Number((src.match(/\|\| (\d+) \* 60_000\)\);\s*\n\s*const isTransientEntryFailure/) || [])[1]) * 60_000;
 
-/** The caller's decision, reproduced: what happens on each failed exit mark. */
-function decide(pos, error, nowMs, { latchMs = LATCH_MS, gapMs = 60_000 } = {}) {
-  if (isTransient(error)) {
-    const since = pos.exitMarkOutageSince ?? nowMs;
-    pos.exitMarkOutageSince = since;
-    return (nowMs - since) >= latchMs ? "SELL:sustained-outage" : "hold:transient";
-  }
-  const prior = pos.pendingExitMarkFailure;
-  if (prior && nowMs - prior.observedAt <= gapMs) { delete pos.pendingExitMarkFailure; return "SELL:two-witness"; }
-  pos.pendingExitMarkFailure = { observedAt: nowMs };
-  return "hold:first-witness";
+/** The caller's decision, reproduced from manageOpen: what happens on each failed mark. */
+function decide(pos, error, nowMs) {
+  const transient = isTransient(error);
+  const outageMs = noteMarkUnavailable(pos, { observedAt: nowMs, reason: error, transient });
+  return { verdict: "hold", transient, outageMs };
 }
-const markOk = (pos) => { delete pos.exitMarkOutageSince; delete pos.pendingExitMarkFailure; };
 const T = 1_700_000_000_000;
 
-console.log("\nTHE TOAD SALE, REPLAYED");
+console.log("\nTHE TOAD SALE, REPLAYED — AND THE SHREK SALE IT WOULD HAVE BECOME");
 {
   const pos = {};
   const a = decide(pos, "Jupiter /order 400: Failed to get quotes", T);
   const b = decide(pos, "Jupiter /order 400: Failed to get quotes", T + 4_000);
-  ok("the first transient failure holds", a === "hold:transient", a);
-  ok("the second, four seconds later, STILL holds — it no longer sells", b === "hold:transient", b);
-  ok("...because it is transport, not a hidden stop", isTransient("Jupiter /order 400: Failed to get quotes"));
+  ok("the first transient failure holds", a.verdict === "hold", `${a.verdict}, transient=${a.transient}`);
+  ok("the second, four seconds later, holds", b.verdict === "hold", `${b.verdict}, outage ${b.outageMs}ms`);
+  ok("...and it is classified as transport", a.transient === true && b.transient === true);
+  ok("the outage clock is anchored on the FIRST failure", pos.markUnavailableSince === T, `${pos.markUnavailableSince} vs ${T}`);
 }
 
-console.log("\nEVERY TRANSIENT THE LOG HAS ACTUALLY SHOWN HOLDS");
+console.log("\nEVERY TRANSIENT THE LOG HAS ACTUALLY SHOWN IS CLASSIFIED AS WEATHER");
 {
   for (const msg of [
     "RPC could not produce one coherent exact-slot account snapshot after 3 attempts",
@@ -65,28 +58,26 @@ console.log("\nEVERY TRANSIENT THE LOG HAS ACTUALLY SHOWN HOLDS");
     "fetch failed", "feed HTTP 502", "socket hang up",
   ]) {
     const pos = {};
-    decide(pos, msg, T);
-    ok(`holds through: ${msg.slice(0, 52)}`, decide(pos, msg, T + 15_000) === "hold:transient");
+    const d = decide(pos, msg, T);
+    ok(`transport: ${msg.slice(0, 52)}`, d.transient === true && d.verdict === "hold", `transient=${d.transient}`);
   }
 }
 
-console.log("\nBUT A SUSTAINED OUTAGE STILL SELLS — THE THREAT MODEL SURVIVES");
+console.log("\nA SUSTAINED OUTAGE NO LONGER SELLS — IT AGES THE FLAG");
 {
-  ok("the allowance is a real number", LATCH_MS >= 60_000 && LATCH_MS <= 30 * 60_000, `${LATCH_MS / 60_000}m`);
   const pos = {};
-  let verdict = "";
-  for (let t = 0; t <= LATCH_MS + 15_000; t += 15_000) verdict = decide(pos, "fetch failed", T + t);
-  ok("Jupiter unreachable for the whole allowance latches a risk exit", verdict === "SELL:sustained-outage", verdict);
-  const pos2 = {};
-  decide(pos2, "fetch failed", T);
-  ok("...but not one tick before it", decide(pos2, "fetch failed", T + LATCH_MS - 15_000) === "hold:transient");
-  ok("the clock is anchored on the FIRST failure, not the latest", pos2.exitMarkOutageSince === T);
+  let last = null;
+  for (let t = 0; t <= 30 * 60_000; t += 15_000) last = decide(pos, "fetch failed", T + t);
+  ok("thirty minutes of an unreadable mark is still a hold", last.verdict === "hold", last.verdict);
+  ok("...with the outage age reported honestly", last.outageMs === 30 * 60_000, `${last.outageMs / 60_000}m`);
+  ok("...and the flag still anchored on the first failure", pos.markUnavailableSince === T, String(pos.markUnavailableSince));
+  ok("the transient classification rides on the position", pos.markUnavailableTransient === true, String(pos.markUnavailableTransient));
 }
 
-console.log("\nA NON-TRANSPORT FAILURE KEEPS THE ORIGINAL TWO-TICK LATCH, UNCHANGED");
+console.log("\nA NON-TRANSPORT FAILURE IS CLASSIFIED AS A REFUSAL — AND STILL NEVER SELLS");
 {
   /* Jupiter ANSWERED and the answer was rejected. That is the shape a hostile order
-     service produces, and two of those in a row still sell immediately. */
+     service produces; it is flagged as such, and the desk still owns the exit. */
   for (const msg of [
     "simulation SOL proceeds are below the signed minimum after capped fees",
     "exit price impact 61.2% exceeds 50% cap",
@@ -95,45 +86,48 @@ console.log("\nA NON-TRANSPORT FAILURE KEEPS THE ORIGINAL TWO-TICK LATCH, UNCHAN
   ]) {
     const pos = {};
     const a = decide(pos, msg, T), b = decide(pos, msg, T + 15_000);
-    ok(`two of "${msg.slice(0, 40)}" still sell in two ticks`, a === "hold:first-witness" && b === "SELL:two-witness", `${a} -> ${b}`);
+    ok(`two of "${msg.slice(0, 40)}" hold in two ticks`, a.verdict === "hold" && b.verdict === "hold" && a.transient === false,
+      `${a.verdict} -> ${b.verdict}, transient=${a.transient}`);
+    ok("...and are flagged as not-transport on the position", pos.markUnavailableTransient === false, String(pos.markUnavailableTransient));
   }
-  const pos = {};
-  decide(pos, "something nobody has seen before", T);
-  ok("...and a second witness OUTSIDE the 60s gap does not confirm",
-    decide(pos, "something nobody has seen before", T + 61_000) === "hold:first-witness");
 }
 
-console.log("\nA GOOD MARK CLEARS BOTH CLOCKS");
+console.log("\nA GOOD MARK CLEARS THE FLAG");
 {
   const pos = {};
   decide(pos, "fetch failed", T); decide(pos, "unknown", T + 1_000);
-  markOk(pos);
-  ok("the outage clock is gone", pos.exitMarkOutageSince === undefined);
-  ok("the witness is gone", pos.pendingExitMarkFailure === undefined);
-  ok("a fresh transient after recovery starts over, not from the old outage",
-    decide(pos, "fetch failed", T + 10 * 60_000) === "hold:transient" && pos.exitMarkOutageSince === T + 10 * 60_000);
+  clearMarkUnavailable(pos);
+  ok("the outage clock is gone", pos.markUnavailableSince === undefined);
+  ok("the reason is gone", pos.markUnavailableReason === undefined);
+  const again = decide(pos, "fetch failed", T + 10 * 60_000);
+  ok("a fresh failure after recovery starts over, not from the old outage",
+    again.outageMs === 0 && pos.markUnavailableSince === T + 10 * 60_000, `age ${again.outageMs}, since ${pos.markUnavailableSince}`);
+  const stale = { markUnavailableSince: T, exitMarkOutageSince: T, pendingExitMarkFailure: { observedAt: T }, pendingPriceExit: { kind: "price" } };
+  clearMarkUnavailable(stale);
+  ok("pre-v4 witness state left on a position is cleared with it",
+    stale.exitMarkOutageSince === undefined && stale.pendingExitMarkFailure === undefined && stale.pendingPriceExit === undefined,
+    JSON.stringify(stale));
 }
 
 console.log("\nTHE SOURCE DOES WHAT THIS MODEL SAYS");
 {
-  // The whole exit-mark catch: from its first line, which sets the entry block, to the
-  // policy step that follows it.
-  const catchStart = src.lastIndexOf("catch (error) {", src.indexOf("A DROPPED PACKET IS NOT A HIDDEN STOP."));
-  const catchBlock = src.slice(catchStart, src.indexOf("const decision = stepPosition("));
-  // The transient branch alone: everything before the else that holds the old witness.
-  const transientBranch = catchBlock.slice(catchBlock.indexOf("if (isTransientEntryFailure(error)) {"),
-    catchBlock.indexOf("const witness = confirmExitMarkFailureWitness"));
-  ok("transport failures are classified before the witness is consulted",
-    transientBranch.length > 0 && /if \(isTransientEntryFailure\(error\)\) \{/.test(catchBlock));
-  ok("the transient branch never calls the two-tick witness",
-    !transientBranch.includes("confirmExitMarkFailureWitness("));
-  ok("the sustained outage sells with its own stated reason",
-    /sellAll\(pos, `independent executable exit mark unavailable for \$\{Math\.round\(outageMs \/ 60_000\)\}m`/.test(catchBlock));
-  ok("the original latch and its wording survive for non-transport failures",
-    /independent executable exit mark unavailable on two consecutive ticks/.test(catchBlock));
-  ok("new entries stay blocked during a transient outage", /pos\.riskDataUnavailable = true;/.test(catchBlock));
-  ok("a successful mark clears the outage clock", /clearExitMarkFailureWitness\(pos\);\s*\n\s*delete pos\.exitMarkOutageSince;/.test(src));
-  ok("the allowance is bounded both ways", /Math\.max\(60_000,\s*\n?\s*Math\.min\(30 \* 60_000/.test(src));
+  const manage = src.slice(src.indexOf("async function manageOpen"), src.indexOf("function recordPositionFailure"));
+  const catchStart = manage.lastIndexOf("catch (error) {", manage.indexOf("AN UNREADABLE MARK IS A HEALTH FLAG, NEVER A SELL."));
+  const catchBlock = manage.slice(catchStart, manage.indexOf("const decision = stepPosition("));
+  ok("the exit-mark catch exists and is the health-flag version", catchBlock.length > 0 && /noteMarkUnavailable\(pos, \{/.test(catchBlock),
+    `${catchBlock.length} chars`);
+  ok("the catch never sells", !/sellAll\(/.test(catchBlock), `${(catchBlock.match(/sellAll\(/g) || []).length} sellAll calls in the catch`);
+  ok("the catch still classifies transport vs refusal", /isTransientEntryFailure\(error\)/.test(catchBlock));
+  ok("new entries stay blocked while the mark is unreadable", /pos\.riskDataUnavailable = true;/.test(catchBlock));
+  ok("the old two-tick latch is gone from the valuation pass",
+    !/confirmExitMarkFailureWitness/.test(manage) && !/on two consecutive ticks/.test(manage));
+  ok("the old sustained-outage sell is gone from the valuation pass",
+    !/sustained outage; latching/.test(manage) && !/outageMs < EXIT_MARK_OUTAGE_LATCH_MS/.test(manage),
+    "the constant survives only in a comment and on the launchd allowlist");
+  ok("a successful mark clears the flag", /executableExitMark\(pos, observation\.actualOutputRaw, currentSolUsd\);[\s\S]{0,200}clearMarkUnavailable\(pos\);/.test(manage));
+  ok("the only sell in the valuation pass is the retry of an already-latched exit",
+    (manage.match(/await sellAll\(/g) || []).length === 1 && /if \(pos\.exitExecutionRequired\) \{\s*\n\s*await sellAll\(/.test(manage),
+    `${(manage.match(/await sellAll\(/g) || []).length} sellAll call(s)`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

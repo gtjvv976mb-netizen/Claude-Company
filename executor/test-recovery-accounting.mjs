@@ -16,9 +16,24 @@ let passed = 0;
 
 const pollerSource = fs.readFileSync(POLLER, "utf8");
 const tickSource = pollerSource.slice(pollerSource.indexOf("async function tick()"));
-assert.ok(tickSource.indexOf("await manageOpen();") <
-  tickSource.indexOf("/executor/feed?after=${S.cursor}"),
-"existing positions must be managed before new feed entries in every tick");
+/* desk-led-v4 (2026-09-05): the FEED is read BEFORE the book is valued. The feed is the
+ * only place an exit comes from, so reading it after manageOpen meant every desk exit was
+ * seen one local pass after the bot had already judged the position on its own ruler —
+ * Shrek, call 55. The valuation pass sells nothing of its own any more, so the old reason
+ * for its precedence ("a stop must update the book before an entry passes sizing") no
+ * longer applies; a LATCHED exit still runs in it un-throttled. */
+const feedCallAt = tickSource.indexOf("await consumeFeed();");
+const manageCallAt = tickSource.indexOf("await manageOpen();");
+const mirrorCallAt = tickSource.indexOf("await mirrorTick();");
+assert.ok(feedCallAt > 0 && manageCallAt > feedCallAt && mirrorCallAt > manageCallAt,
+  `tick order must be feed → manageOpen → mirrorTick (feed@${feedCallAt} manage@${manageCallAt} mirror@${mirrorCallAt})`);
+const consumeFeedSource = pollerSource.slice(pollerSource.indexOf("async function consumeFeed()"),
+  pollerSource.indexOf("let lastManageOpenAt"));
+assert.ok(consumeFeedSource.includes("/executor/feed?after=${S.cursor}"),
+  "consumeFeed must be the function that reads the authenticated feed");
+assert.ok(/accountConfirmedIntents\(\);[\s\S]*await consumeFeed\(\);/.test(tickSource),
+  "confirmed intents are accounted before the feed is read");
+console.log(`  ok   tick order: feed@${feedCallAt} < manageOpen@${manageCallAt} < mirrorTick@${mirrorCallAt}`);
 
 function recordConfirmed(journal, spec, { input, output, signature }) {
   journal.ensureIntent(spec);
@@ -39,7 +54,7 @@ function recordConfirmed(journal, spec, { input, output, signature }) {
   }, { status: "Success", code: 0, signature });
 }
 
-async function runUntil({ dir, wallet, stateFile, marker, api = "https://127.0.0.1:1" }) {
+async function runUntil({ dir, wallet, stateFile, marker, api = "https://127.0.0.1:1", env = {} }) {
   const keypairFile = path.join(dir, "burner.json");
   const pauseFile = path.join(dir, "pause-entries");
   const hardStopFile = path.join(dir, "hard-stop");
@@ -63,7 +78,10 @@ async function runUntil({ dir, wallet, stateFile, marker, api = "https://127.0.0
       POLL_MS: "60000",
       MAX_CALL_AGE_MIN: "1",
       JUPITER_API_KEY: "",
+      // Mirror mode's price lane must never reach the public DexScreener API from a test.
+      DS_OFFLINE: "1",
       NODE_NO_WARNINGS: "1",
+      ...env,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -359,13 +377,26 @@ await check("one malformed confirmed intent cannot starve unrelated exits or the
   }, { input: "5000000", output: "999", signature: "malformed-confirmed-signature" });
   journal.close();
 
-  const output = await runUntil({ dir, wallet, stateFile, marker: "poll error:" });
+  /* desk-led-v4: the bot has no age exit of its own, so this 24h-old position is closed
+   * by the MIRROR's clock — the dead CC_API makes the desk unreachable from the first
+   * poll, DESK_UNREACHABLE_MS=0 (legal in paper) engages the mirror on that same tick,
+   * and pricePolicy's clock branch fires with the DexScreener lane declined (DS_OFFLINE)
+   * — proving the window closes with no price at all. The ordering invariant is kept:
+   * the malformed intent is quarantined first and the unrelated exit still happens. */
+  const output = await runUntil({ dir, wallet, stateFile, marker: "PAPER EXIT SURVIVOR",
+    env: { DESK_UNREACHABLE_MS: "0" } });
   assert.match(output, /ACCOUNTING QUARANTINE entry:malformed-confirmed/);
-  assert.match(output, /PAPER EXIT SURVIVOR/,
-    "the unrelated age exit must still be evaluated after the accounting failure");
-  assert.ok(output.indexOf("ACCOUNTING QUARANTINE") < output.indexOf("PAPER EXIT SURVIVOR"));
-  assert.ok(output.indexOf("PAPER EXIT SURVIVOR") < output.indexOf("poll error:"),
-    "the authenticated feed phase must still be reached after managing the position");
+  assert.match(output, /PAPER EXIT SURVIVOR — mirror exit \(thesis_expired\)/,
+    "the unrelated exit must still be evaluated after the accounting failure — by the mirror's clock, with the desk's code");
+  assert.ok(output.indexOf("ACCOUNTING QUARANTINE") < output.indexOf("PAPER EXIT SURVIVOR"),
+    "quarantine first, then the unrelated exit");
+  assert.match(output, /poll error:/, "the authenticated feed phase must still be reached");
+  assert.ok(output.indexOf("poll error:") < output.indexOf("PAPER EXIT SURVIVOR"),
+    "desk-led-v4: the feed is read BEFORE positions are valued or mirrored");
+  assert.match(output, /MIRROR MODE: desk unreachable/, "the mirror announces itself before selling");
+  assert.ok(output.indexOf("MIRROR MODE") < output.indexOf("PAPER EXIT SURVIVOR"));
+  assert.match(output, /consensus mark declined \(DS_OFFLINE test mode\)|clock lane only/,
+    "the price lane declined or was unpriceable — the clock alone closed the window");
   const recovered = new ExecutionJournal(stateFile, { wallet: wallet.publicKey.toBase58() });
   assert.equal(recovered.getIntent("entry:malformed-confirmed").state, "confirmed",
     "malformed accounting remains visible and blocks new exposure");
@@ -407,14 +438,22 @@ await check("authenticated feed rollback freezes entries without starving local 
   let output;
   try {
     output = await runUntil({ dir, wallet, stateFile,
-      marker: "CRITICAL FEED ROLLBACK", api: `http://127.0.0.1:${port}` });
+      marker: "PAPER EXIT ROLLBACK-SURVIVOR", api: `http://127.0.0.1:${port}`,
+      env: { DESK_UNREACHABLE_MS: "0" } });
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
-  assert.match(output, /PAPER EXIT ROLLBACK-SURVIVOR/);
-  assert.ok(output.indexOf("PAPER EXIT ROLLBACK-SURVIVOR") <
-    output.indexOf("CRITICAL FEED ROLLBACK"),
-  "local risk evaluation must complete before rejecting the rolled-back feed");
+  assert.match(output, /PAPER EXIT ROLLBACK-SURVIVOR/,
+    "a latched REQUIRED exit executes even while the feed is untrusted");
+  /* desk-led-v4: the feed is read first, so the rollback alarm now precedes the latched
+   * exit within the tick. The invariant is unchanged — a rollback freezes entries and
+   * never starves a required exit — and it is asserted the other way round: the exit
+   * still runs AFTER the alarm, in the same tick, because consumeFeed's early return
+   * is a feed verdict, not a tick verdict. */
+  assert.ok(output.indexOf("CRITICAL FEED ROLLBACK") < output.indexOf("PAPER EXIT ROLLBACK-SURVIVOR"),
+    "the latched exit runs after the rolled-back feed is rejected, in the same tick");
+  assert.ok(!/MIRROR MODE/.test(output),
+    "a rollback is a feed-integrity alarm, not unreachability — the mirror must not engage");
   const reopened = new ExecutionJournal(stateFile, { wallet: wallet.publicKey.toBase58() });
   const alarm = reopened.getMeta("feed_rollback");
   assert.equal(alarm.active, true);

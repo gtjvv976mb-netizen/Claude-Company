@@ -446,7 +446,8 @@ export async function inspectExecutor({
   const pauseFile = resolveAt(cfg.PAUSE_ENTRIES_FILE, `${stateDb}.pause-entries`);
   const hardStopFile = resolveAt(cfg.HARD_STOP_FILE, `${stateDb}.hard-stop`);
   const sleepFaultFile = sleepAssertionFaultPath(lockFile);
-  const pollMs = positiveInteger(cfg.POLL_MS, 15_000);
+  // desk-led-v4: the poller's default poll is 5 s (the feed is the only exit channel).
+  const pollMs = positiveInteger(cfg.POLL_MS, 5_000);
   const issues = [];
   const mode = cfg.EXECUTE === "1" ? "live" : "paper";
   const expectedRuntimeCommit = /^[0-9a-f]{40}$/i.test(String(cfg.EXECUTOR_SOURCE_COMMIT || ""))

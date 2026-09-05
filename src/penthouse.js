@@ -1370,15 +1370,28 @@ export function writeWitnessMark(callId, mark) {
  * The price is already in hand: the sub-tick fetches it for every live call every 45
  * seconds to write witness marks. Only the DECISION was waiting for the slow timer.
  *
- * The rule is a ratio rather than a list of band names, so it stays true if either
- * clock is retuned: a call is on the fast lane when its own hold window gives it fewer
- * than twelve chances to act on the slow timer. Today that is nano (30m) and micro
- * (1h); low, medium and high get 30 passes over 5h and very_high 144 over a day.
+ * The rule WAS a ratio: a call rode the fast lane when its own hold window gave it
+ * fewer than twelve chances on the slow timer — nano (30m) and micro (1h) — and low,
+ * medium and high waited for the ten-minute pass. That was fine while the bot ran its
+ * own stop. It is not fine now that the DESK determines every exit and the bot sells
+ * exactly what the desk determined, when it hears it (owner, 2026-09-05): on Shrek
+ * call 55 the bot sold at 03:01:42Z on its own normalised stop at -13.5% and the
+ * desk's stop_hit came at 03:10:24Z — nine minutes of slow-timer resolution on a
+ * low-band call. With the bot's own bracket gone, that gap is the whole exit latency,
+ * so every band now rides the 45-second price lane by default. The ten-minute full
+ * pass still runs for every call — the chain-fact exits live there and nowhere else.
+ *
+ * PENTHOUSE_FAST_ALL_BANDS: '1' (default) — every live call with a finite hold window
+ * is fast-laned; '0' restores the ratio rule above. Read at call time so a running
+ * process — and a test — can flip it without a restart. A call with no clock at all
+ * is never fast-laned under either rule, rather than defaulting into one.
  */
 export const FAST_LANE_MIN_PASSES = 12;
-export function needsFastExitLane(call, { monitorMs = null } = {}) {
+export function needsFastExitLane(call, { monitorMs = null, fastAllBands = null } = {}) {
   const holdMax = Number(call?.hold_max_ms);
   if (!Number.isFinite(holdMax) || holdMax <= 0) return false;      // no clock, no fast lane
+  const allBands = String(fastAllBands ?? process.env.PENTHOUSE_FAST_ALL_BANDS ?? "1") !== "0";
+  if (allBands) return true;
   const slow = Number(monitorMs) > 0 ? Number(monitorMs)
     : Math.max(1, Number(process.env.PENTHOUSE_MONITOR_MINS || 10)) * 60_000;
   return holdMax / slow < FAST_LANE_MIN_PASSES;

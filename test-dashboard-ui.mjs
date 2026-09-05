@@ -180,10 +180,35 @@ try {
  * (owner, 2026-09-03). */
 {
   const view = html;
-  assert.match(view, /const held = open\.filter\(\(c\) => c\.taken === true \|\| Number\(c\.taken\) === 1\)/,
-    "only taken positions reach the board");
+  /* THE BOT'S OWN REPORT DECIDES (2026-09-05). Shrek, call 55: the bot filled 0.0175 SOL,
+     the board printed the desk's 0.4, the bot sold 03:01:42Z and the wall held the
+     position until the desk's stop_hit at 03:10:24Z. One predicate now reads bot_status
+     first and falls back to live+taken(1|true) only when the bot never reported. The
+     predicate itself is exercised in test-grok-board-wire-shape.mjs; this pins its shape. */
+  assert.match(view, /const botOpen = \(c\) => c\.bot_status === "open" \|\| \(c\.bot_status == null && c\.status === "live" && \(c\.taken === true \|\| Number\(c\.taken\) === 1\)\);/,
+    "only positions the bot is open in (or, unreported, live and taken on the wire) reach the board");
+  assert.match(view, /const open = feed\.filter\(\(c\) => c\.verdict === "offered"\);/,
+    "the offered set is not pre-filtered by the desk's status — a bot-open position on a desk-closed call is still held");
+  assert.match(view, /const held = open\.filter\(botOpen\);/, "held is that one predicate over the offered set");
   assert.match(view, /grokBook\.positions = held\.map/,
     "...and the board is built from those, not from every offer");
+  assert.match(view, /const real = c\.bot_size_sol != null;\n\s*const size = c\.bot_size_sol \?\? c\.size_sol;/,
+    "SIZE is the bot's real SOL, falling back to the desk's sizing only when the bot never reported");
+  assert.match(view, /const basis = c\.bot_entry_mark \?\? entry;/,
+    "P&L is measured from the bot's own entry mark, falling back to the desk's entry_ref");
+  assert.match(view, /x\.fillText\("\(paper\)", 280 \+ w \+ 6, y \+ 1\)/,
+    "a desk-sized row is marked (paper) on the wall");
+  assert.match(view, /\["REALIZED TODAY", st\.realizedTodaySol != null \? fmtSignedSol\(st\.realizedTodaySol\) : "\\u2014"\]/,
+    "the flat-book rows carry REALIZED TODAY ±x SOL from the bot's sell reports");
+  assert.match(view, /taken: held\.length,/, "the held count is the bot-open set");
+  assert.match(view, /exposureSol: grokBook\.positions\.reduce\(\(a, p\) => a \+ \(p\.size \|\| 0\), 0\)/,
+    "exposure sums the sizes actually on the board");
+  assert.match(view, /if \(hudOnly\) \{[\s\S]{0,700}?window\.__grokBoardUpdate\?\.\(body\.feed \|\| \[\]\);[\s\S]{0,200}?return;/,
+    "the hudOnly loadCalls path feeds the board before it returns, so the wall never freezes on another pane");
+  assert.match(view, /if \(c\.bot_status === "open"\) \{\n\s*line\.textContent = `WALL-ST-E is in for \$\{solStr\(c\.bot_size_sol\)\} SOL since /,
+    "the call card reads the bot's own open report first");
+  assert.match(view, /\} else if \(c\.bot_status === "closed"\) \{[\s\S]{0,200}?`WALL-ST-E exited \u00b7 realized /,
+    "...and its exit report with the realised SOL and the reason");
   assert.match(view, /x\.fillText\("ENTRY MC"/, "the entry column is a market cap");
   assert.match(view, /x\.fillText\("TARGET MC"/, "the second column is the target, not the mark");
   assert.ok(!/x\.fillText\("MARK", \d+, 100\)/.test(view), "the MARK column is gone");
@@ -195,8 +220,8 @@ try {
   assert.ok(!/p\.mark != null \? fmtPx\(p\.mark\)/.test(view),
     "the board no longer prints a decimal mark");
   // P&L still needs the live mark, which is why it is still carried on the row.
-  assert.match(view, /pnlPct: \(entry && mark\) \? \(\(mark - entry\) \/ entry\) \* 100 : null/,
-    "P&L is still computed from the live mark");
+  assert.match(view, /pnlPct: \(basis && mark\) \? \(\(mark - basis\) \/ basis\) \* 100 : null/,
+    "P&L is still computed from the live mark, against the bot's basis");
 }
 
 /* ── THE BOT'S BALANCE IS ON HIS WALL ──────────────────────────────────────────

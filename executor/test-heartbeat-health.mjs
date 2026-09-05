@@ -61,4 +61,21 @@ assert.equal(bounded.runtimeCommit, "a".repeat(40));
 assert.equal(bounded.runtimeFingerprint, "b".repeat(32));
 assert.ok(!JSON.stringify(bounded).includes("secret"));
 
+/* desk-led-v4: the desk-unreachability clock, the mirror flag and the count of positions
+ * whose valuation is blind ride on the heartbeat as FACTS. None of them is a rein. */
+const mirrored = executorHeartbeatHealth({ lastTickCompletedAt: 1, lastFeedSuccessAt: 1,
+  deskUnreachableSince: 1_700_000_000_000, mirrorActive: true,
+  positions: [{ markUnavailableSince: 5 }, {}] });
+assert.equal(mirrored.deskUnreachableSince, 1_700_000_000_000, `deskUnreachableSince ${mirrored.deskUnreachableSince}`);
+assert.equal(mirrored.mirrorActive, true, `mirrorActive ${mirrored.mirrorActive}`);
+assert.equal(mirrored.markUnavailable, 1, `markUnavailable ${mirrored.markUnavailable}`);
+assert.equal(mirrored.state, "degraded", `state while mirroring: ${mirrored.state}`);
+const quiet = executorHeartbeatHealth({ lastTickCompletedAt: 1, lastFeedSuccessAt: 1 });
+assert.equal(quiet.deskUnreachableSince, 0, `deskUnreachableSince when reachable: ${quiet.deskUnreachableSince}`);
+assert.equal(quiet.mirrorActive, false);
+assert.equal(quiet.markUnavailable, 0);
+assert.equal(executorHeartbeatHealth({ deskUnreachableSince: "soon" }).deskUnreachableSince, 0,
+  "a non-numeric clock is reported as 0, never as garbage");
+console.log(`  mirror heartbeat: state=${mirrored.state} deskUnreachableSince=${mirrored.deskUnreachableSince} markUnavailable=${mirrored.markUnavailable}`);
+
 console.log("\npost-tick heartbeat distinguishes liveness from trading health\n");

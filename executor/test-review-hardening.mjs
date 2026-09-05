@@ -50,8 +50,8 @@ console.log("\nTHE RATCHET NEEDS TWO WITNESSES");
     `stop=${r2.position.stop}`);
   const r3 = pricePolicy({ position: r2.position, mark: 1.15, config: cfg, nowMs: 3 });
   ok("...and the ratcheted stop still fires on a genuine giveback", r3.action === "sell", r3.reason);
-  ok("the policy version says so", POLICY_VERSION === "snipe-v3",
-    "behavior changed; recorded decisions must not claim the old policy");
+  ok("the policy version says so", POLICY_VERSION === "desk-led-v4",
+    `${POLICY_VERSION} — behavior changed twice (v3 witnesses, v4 desk-led); recorded decisions must not claim an old policy`);
 }
 
 /* ── F1: the quote must agree with the chain ─────────────────────────────────── */
@@ -167,25 +167,33 @@ console.log("\nSTATE-HANDLING CONTRACTS IN THE POLLER");
     /openList\(\)\.find\(\(p\) => p\.mint === posKey\)/.test(manage),
     "an exit mid-pass swaps S for a clone; writes to the old array were silently dropped");
   /* Index the LAST catch, not a counted one — the first version picked the quote catch
-   * and read code that was never the outer handler. */
+   * and read code that was never the outer handler. desk-led-v4 moved the handler body
+   * into recordPositionFailure so the mirror pass records a failed exit identically. */
   const afterLastCatch = manage.split("catch (error)").at(-1) ?? "";
+  const recorder = src.slice(src.indexOf("function recordPositionFailure"), src.indexOf("let ticking = false"));
   ok("F4: the outer catch writes to the live object too",
-    afterLastCatch.includes("openList().find((p) => p.mint === posKey)"),
+    /recordPositionFailure\(posKey, error, "manage"\)/.test(afterLastCatch) &&
+      recorder.includes("openList().find((p) => p.mint === posKey)"),
     "a failure flag on a detached object never reaches the entry gate that reads it");
-  ok("F7: a SOL/USD outage falls back to the cached rate instead of disarming stops",
-    /solUsdCache/.test(manage) && /stops stay armed/.test(manage),
-    "stops care about 20%+ token moves; SOL/USD drifts single digits in hours");
+  ok("F7: a SOL/USD outage falls back to the cached rate instead of blinding valuation",
+    /solUsdCache/.test(manage) && /valuation stays readable/.test(manage),
+    "desk-led-v4: the cached rate keeps the heartbeat and board readable; it arms no stop (there is none)");
   ok("F7: the fallback is bounded by age",
     /SOL_USD_CACHE_MAX_AGE_MS/.test(manage),
     "past 24h the old fail-closed hold applies — a cache is not a licence");
-  ok("exit policy consumes the chain-simulated executable mark, never Jupiter's display quote",
+  ok("valuation consumes the chain-simulated executable mark, never Jupiter's display quote",
     /preflightExitMark/.test(manage) && /observation\.actualOutputRaw/.test(manage) &&
       !/jupiter\.quote\(pos\.mint/.test(manage),
-    "an inflated aggregator quote cannot keep a breached stop looking green");
-  ok("two consecutive unusable executable marks latch a risk-reducing exit",
-    /confirmExitMarkFailureWitness/.test(manage) &&
-      /independent executable exit mark unavailable on two consecutive ticks/.test(manage),
-    "refusing or poisoning the mark freezes exposure and escalates to risk reduction, never silent hold");
+    "an inflated aggregator quote cannot flatter the board's P&L");
+  ok("desk-led-v4: an unusable executable mark FLAGS health and never sells",
+    /noteMarkUnavailable\(pos/.test(manage) && !/confirmExitMarkFailureWitness/.test(manage) &&
+      !/independent executable exit mark unavailable on two consecutive ticks/.test(manage) &&
+      !/sustained outage; latching a risk-reducing exit/.test(manage),
+    "the two-witness latch and the outage latch were bot-originated exits (TOAD 2026-09-04; Shrek call 55)");
+  ok("desk-led-v4: the only sellAll in the valuation pass is the retry of an already-latched exit",
+    (manage.match(/await sellAll\(/g) || []).length === 1 &&
+      /if \(pos\.exitExecutionRequired\) \{\s*\n\s*await sellAll\(/.test(manage),
+    `${(manage.match(/await sellAll\(/g) || []).length} sellAll call(s) in manageOpen`);
   const limits = src.slice(src.indexOf("const LIVE_LIMITS"), src.indexOf("const log ="));
   ok("the new bounds are FROZEN live ceilings like every other cap",
     /blockHeightWindow: 600/.test(limits) && /maxQuoteShortfallPct: 15/.test(limits) && /maxExitAttempts: 12/.test(limits),

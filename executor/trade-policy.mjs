@@ -1,5 +1,10 @@
 // v3: the high-water mark requires two consecutive witnesses before it ratchets a stop.
-export const POLICY_VERSION = "snipe-v3";
+// v4 (desk-led, 2026-09-05): the executor no longer runs this policy on its own inputs.
+// The DESK determines every exit and the bot sells what it hears; the bot evaluates this
+// function only in MIRROR mode, on the desk's absolute levels with the desk's ruler.
+// Shrek, call 55: bot sold 03:01:42Z on its own normalised stop at -13.5%; the desk's
+// determined stop_hit came 03:10:24Z. The function is unchanged; who runs it is not.
+export const POLICY_VERSION = "desk-led-v4";
 
 export const POLICY_DEFAULTS = Object.freeze({
   takeProfitX: 2,

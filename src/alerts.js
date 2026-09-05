@@ -216,6 +216,27 @@ export async function announceEntry(call) {
   return { floors: rows.length, alerted: sent };
 }
 
+/* THE ONE PLACE AN EXIT ALERT'S WORDS AND URGENCY ARE DECIDED. announceExit and the
+ * repair sweep below both go through here, so a repaired alert is byte-for-byte what
+ * the live one would have been — the bot reads urgency and title off this row. */
+export function exitAlertText(call, exit) {
+  const sym = call.symbol || String(call.mint).slice(0, 6);
+  return {
+    title: exit.urgency === "unconditional" ? `EXIT NOW — ${sym}` : `Exit called — ${sym}`,
+    body: `${exit.detail}\nThis is a research call. Sell in your own wallet; the desk cannot and does not.`,
+    urgency: exit.urgency === "unconditional" ? "urgent" : "normal",
+  };
+}
+
+/* The urgency each close code was announced with when it fired live: the chain-fact
+ * exits are unconditional (calls.evaluateExit), went_dark is urgent (penthouse), and
+ * every price exit and thesis_stale is a level. A repaired alert must carry the same
+ * urgency the original would have, or the bot would treat a rug like a target. */
+const EXIT_URGENCY_BY_CODE = Object.freeze({
+  authority_appeared: "unconditional", cannot_exit: "unconditional", liq_collapse: "unconditional",
+  went_dark: "urgent",
+});
+
 /**
  * Fan an exit out to every floor that was offered the call. Deliberately not filtered by
  * arrears, unpaid fees, or whether the tenant said they took it — someone who quietly
@@ -225,16 +246,12 @@ export async function announceExit(call, exit) {
   const rows = db.prepare(`SELECT d.floor_no, c.webhook_url
                            FROM deliveries d LEFT JOIN copy_settings c ON c.floor_no = d.floor_no
                            WHERE d.call_id=? AND d.verdict='offered'`).all(call.id);
-  const sym = call.symbol || call.mint.slice(0, 6);
-  const title = exit.urgency === "unconditional"
-    ? `EXIT NOW — ${sym}`
-    : `Exit called — ${sym}`;
-  const body = `${exit.detail}\nThis is a research call. Sell in your own wallet; the desk cannot and does not.`;
+  const { title, body, urgency } = exitAlertText(call, exit);
 
   let sent = 0;
   for (const r of rows) {
     const fresh = raise({ floorNo: r.floor_no, callId: call.id, kind: "exit",
-      urgency: exit.urgency === "unconditional" ? "urgent" : "normal", title, body, mint: call.mint });
+      urgency, title, body, mint: call.mint });
     // Fire and forget. Awaiting here let ONE hung webhook burn its full timeout and
     // hold up every later floor's exit alert — and the executor feed row that tells
     // a bot to sell. Nobody's exit may wait on someone else's Discord.
@@ -245,4 +262,58 @@ export async function announceExit(call, exit) {
     if (fresh) sent++;
   }
   return { floors: rows.length, alerted: sent };
+}
+
+/**
+ * THE EXIT THAT WENT MISSING IS THE ONE THE BOT COULD NEVER RECOVER FROM.
+ *
+ * An exit alert is the desk's only outbound sell signal to a bot, and it is raised
+ * exactly once per (floor, call) — UNIQUE(floor_no, call_id, kind). announceExit is
+ * fired without being awaited from fireExit, went_dark and thesis_stale alike, so a
+ * write that fails in flight leaves a CLOSED call with no exit row on the floor: the
+ * bot polls, sees nothing, and holds a coin the desk has already left. Entries had a
+ * repair sweep since 2026-09-03; exits had none, and under desk-led exits (Shrek call
+ * 55, 2026-09-05 — the bot must sell exactly what the desk determined, when it hears
+ * it) a lost exit alert is a position with no exit at all.
+ *
+ * Same shape as the entry repair: durable side, bounded, idempotent through the
+ * UNIQUE index, run by the bot's own feed poll. The words and urgency come from the
+ * same helper announceExit uses, keyed off the close code the call was closed with,
+ * so the repaired row is what the live one would have been.
+ */
+export function reconcileMissingExitAlerts(floorNo, { withinMs = 6 * 3600e3, limit = 20, now = Date.now() } = {}) {
+  let rows;
+  try {
+    rows = db.prepare(`
+      SELECT c.*, cs.webhook_url
+        FROM deliveries d
+        JOIN calls c ON c.id = d.call_id
+        LEFT JOIN copy_settings cs ON cs.floor_no = d.floor_no
+        LEFT JOIN alerts a
+          ON a.floor_no = d.floor_no AND a.call_id = d.call_id AND a.kind = 'exit'
+       WHERE d.floor_no = ? AND d.verdict = 'offered' AND a.id IS NULL
+         AND c.status = 'closed' AND c.closed_at > ?
+       ORDER BY c.closed_at DESC LIMIT ?`)
+      .all(floorNo, now - withinMs, Math.max(1, Math.min(100, limit)));
+  } catch { return 0; }
+
+  let repaired = 0;
+  for (const call of rows) {
+    const code = call.close_reason || "closed";
+    const exit = { code, urgency: EXIT_URGENCY_BY_CODE[code] ?? "level",
+      detail: `${code.replace(/_/g, " ")}` +
+        (call.close_mark != null ? ` at $${call.close_mark}` : "") +
+        ` — the desk closed this call at ${new Date(call.closed_at).toISOString()}; ` +
+        `this alert is a repair, the original never landed` };
+    const { title, body, urgency } = exitAlertText(call, exit);
+    const fresh = raise({ floorNo, callId: call.id, kind: "exit", urgency, title, body, mint: call.mint });
+    if (!fresh) continue;
+    repaired++;
+    if (call.webhook_url) push(call.webhook_url, title, body).catch(() => {});
+    pushExecutor(floorNo, { type: "exit", call: { id: call.id, mint: call.mint, symbol: call.symbol,
+      side: "sell", code, urgency: exit.urgency, detail: exit.detail } }).catch(() => {});
+    emit("alert:repaired", { floorNo, callId: call.id, kind: "exit", symbol: call.symbol || String(call.mint).slice(0, 6),
+      code, note: "a closed call had no exit alert on this floor; the bot could never have heard the exit" });
+  }
+  return repaired;
 }

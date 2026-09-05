@@ -143,6 +143,13 @@ fs.mkdirSync(path.join(OUT, "executor"), { recursive: true });
 const EXECUTOR_FILES = [
   "poller.mjs", "journal.mjs", "jupiter.mjs", "balance-verification.mjs", "entry-quote-guard.mjs", "exit-trigger.mjs", "feed-drain.mjs", "sol-usd-oracle.mjs", "heartbeat-health.mjs", "sleep-assertion.mjs", "monitor.mjs", "install.sh", "macos-launchagent.sh", "macos-release.sh", "launchd-runner.mjs", "executor.mjs",
   "README.md", "strategy.mjs", "trade-policy.mjs", "simulate.mjs",
+  /* Desk-led exits (2026-09-05). The bot no longer carries an exit policy of its own —
+     Shrek, call 55: it sold 03:01:42Z on its own normalised stop at -13.5% while the
+     desk's determined stop_hit landed 03:10:24Z. When the desk is unreachable the bot
+     MIRRORS the desk with the desk's own ruler, and the ruler ships with it: the
+     DexScreener consensus port and the mirror evaluator are runtime imports of
+     poller.mjs, so an install that fetches this list without them dies at boot. */
+  "dexscreener-consensus.mjs", "desk-mirror.mjs",
   "package.json", "package-lock.json",
 ];
 for (const f of EXECUTOR_FILES) {

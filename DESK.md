@@ -49,6 +49,15 @@ constraints, not documentation.
    desk when Anthropic credits are exhausted. `/api/heartbeat` exposes it as `BLOCKED`
    until a successful paid seat at least five minutes after the last credit failure proves
    the shared provider account has recovered.
+6. **The desk determines every exit; the executor follows it exactly.** Stop, target,
+   take-profit, the band's hold window and the chain-fact exits are decided here, on the
+   45-second price lane for every band, and published once per floor as the exit alert
+   (repaired on the bot's next poll if it ever goes missing). The local executor keeps no
+   exit policy of its own and sells the whole position when it hears the desk's exit;
+   only when the desk has been unreachable for ten minutes does it mirror the desk's own
+   levels with the desk's own ruler. It reports every buy and every sell back with the
+   chain's numbers (`/executor/fill`), and the floor's board renders that real book —
+   never the desk's paper size, and never the executor's wallet address.
 
 ## The pipeline
 

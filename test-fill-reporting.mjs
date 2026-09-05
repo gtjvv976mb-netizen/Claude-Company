@@ -63,10 +63,50 @@ console.log("\nBUT IT IS NEVER SILENTLY DROPPED EITHER");
   ok("the request cannot hang forever", /AbortSignal\.timeout\(10_000\)[\s\S]{0,80}\}\);\s*\n\s*if \(!response\.ok\)/.test(poller));
 }
 
+/* THE FLAG WAS ONE BIT, AND ONE BIT CANNOT SAY 0.0175 SOL OR "SOLD". Shrek call 55,
+   2026-09-05: the board showed the desk's paper 0.4 SOL for a real 0.0175 SOL fill; the
+   bot sold at 03:01:42Z on its own normalised stop at -13.5% and the site never heard
+   it, so when the desk's stop_hit came at 03:10:24Z the card still called the position
+   held. Both legs now report with the chain's numbers to one route, and the desk keeps
+   them in executor_fills, keyed by signature. The behaviour is exercised against the
+   real route in test-executor-fill-report.mjs; these are the contract pins. */
+console.log("\nAND NOW IT SAYS WHAT IT DID, WITH NUMBERS — BOTH LEGS");
+{
+  const copySrc = fs.readFileSync(new URL("./src/copy.js", import.meta.url), "utf8");
+  ok("there is a fill route", office.includes("executor\\/fill$"), "POST /api/floor/{n}/executor/fill");
+  ok("...behind the same constant-time secret as take, feed and heartbeat",
+    /fillMatch[\s\S]{0,700}cryptoTimingEqual\(auth, secret\)[\s\S]{0,200}bad or missing executor secret/.test(office));
+  ok("a malformed body is 400, so a NaN never reaches the public board",
+    /const valid = copy\.validateExecutorFill\(body\);\s*\n\s*if \(!valid\.ok\) return json\(400/.test(office));
+  ok("no offered delivery is 404, never a false success that ends the retry",
+    /const fill = copy\.recordExecutorFill\(floorNo, body\);\s*\n\s*if \(!fill\) return json\(404/.test(office));
+  ok("a stored fill is 200 with the row", /return json\(200, \{ ok: true, fill \}\)/.test(office));
+  ok("the table exists, keyed by the chain signature",
+    /CREATE TABLE IF NOT EXISTS executor_fills/.test(copySrc) && /signature\s+TEXT NOT NULL UNIQUE/.test(copySrc));
+  ok("...and only ever holds a buy or a sell", /CHECK \(side IN \('buy','sell'\)\)/.test(copySrc));
+  ok("a re-post by signature is an upsert, not a second fill",
+    /INSERT OR IGNORE INTO executor_fills/.test(copySrc) && /UPDATE executor_fills SET[\s\S]{0,600}WHERE signature=\?/.test(copySrc));
+  ok("a buy marks the delivery taken — the flag is derived, not a second report",
+    /if \(f\.side === "buy"\) markTaken\(floorNo, f\.call_id, true\)/.test(copySrc));
+  ok("a fill on a call this floor was never offered is refused, as take is",
+    /SELECT 1 FROM deliveries WHERE floor_no=\? AND call_id=\? AND verdict='offered'[\s\S]{0,80}if \(!offered\) return null/.test(copySrc));
+  ok("every feed row carries the bot's book", /bot_status: null, bot_size_sol: null/.test(copySrc) &&
+    /out\.bot_status = sells\.length \? "closed" : buys\.length \? "open" : null/.test(copySrc));
+  ok("...and never the wallet", /The wallet column is deliberately NOT selected/.test(copySrc));
+  // The bot's half of the contract (executor owner): both legs queued durably, acked by
+  // a journal meta key, rebuilt at boot.
+  ok("the bot posts both legs to the fill route", /\/api\/floor\/\$\{FLOOR\}\/executor\/fill/.test(poller));
+  ok("...from a durable queue of intent ids", /unreportedFillDetails/.test(poller));
+  ok("...flushed every tick", /flushFillReports\(/.test(poller));
+  ok("...and a 2xx is remembered in the journal so a restart does not re-post for ever",
+    /fill_reported:/.test(poller));
+}
+
 console.log("\nAND THE SITE READS EXACTLY THAT FLAG");
 {
-  ok("the board shows only what the floor actually holds",
-    /const held = open\.filter\(\(c\) => c\.taken === true \|\| Number\(c\.taken\) === 1\)/.test(viewer));
+  ok("the board shows only what the bot is actually in — its own report first, the take flag only when it never reported",
+    /const botOpen = \(c\) => c\.bot_status === "open" \|\| \(c\.bot_status == null && c\.status === "live" && \(c\.taken === true \|\| Number\(c\.taken\) === 1\)\);/.test(viewer) &&
+    /const held = open\.filter\(botOpen\);/.test(viewer));
   ok("...which is why an unreported fill rendered as nothing at all", true,
     "the bug this closes");
 }

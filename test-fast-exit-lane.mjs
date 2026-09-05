@@ -15,6 +15,14 @@
  * policy. The chain-failure exits — an authority appearing, a round trip gone roachy,
  * liquidity collapsing — are facts about the token that this tick does not observe, and
  * a tick that closed a call on evidence it never read would be worse than a late exit.
+ *
+ * AND THEN EVERY BAND (2026-09-05). Once the DESK determines every exit and the bot
+ * sells exactly what the desk determined, when it hears it, the slow timer's resolution
+ * IS the exit latency for whatever it covers. Shrek call 55 was a low-band call: the
+ * bot sold at 03:01:42Z on its own normalised stop at -13.5%, and the desk's stop_hit
+ * came at 03:10:24Z — nine minutes the ten-minute pass took to notice. With the bot's
+ * own bracket gone, every live call with a hold window rides the 45-second lane by
+ * default; PENTHOUSE_FAST_ALL_BANDS=0 restores the ratio rule.
  */
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -27,28 +35,59 @@ const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  —
                                  : (fail++, console.log(`  FAIL ${n}${d ? "  — " + d : ""}`)); };
 const MIN = 60_000, HOUR = 60 * MIN;
 
-console.log("\nWHICH CALLS CANNOT WAIT FOR THE SLOW TIMER");
+console.log("\nEVERY BAND RIDES THE FAST LANE BY DEFAULT");
+{
+  delete process.env.PENTHOUSE_FAST_ALL_BANDS;
+  const slow = 10 * MIN;
+  for (const [key, b] of Object.entries(CAP_BANDS)) {
+    const call = { hold_band: key, hold_max_ms: b.holdMaxMs };
+    ok(`${key} (holds up to ${Math.round(b.holdMaxMs / MIN)}m) -> fast lane`,
+      needsFastExitLane(call, { monitorMs: slow }) === true,
+      `${(b.holdMaxMs / slow).toFixed(0)} chances on the slow timer was the old rule; the desk now decides on 45 s`);
+  }
+  ok("very_high, which held for a day, is fast too",
+    needsFastExitLane({ hold_max_ms: CAP_BANDS.very_high.holdMaxMs }, { monitorMs: slow }) === true);
+  ok("an explicit '1' means the same as the default",
+    needsFastExitLane({ hold_max_ms: 5 * HOUR }, { monitorMs: slow, fastAllBands: "1" }) === true);
+  process.env.PENTHOUSE_FAST_ALL_BANDS = "1";
+  ok("...and so does the env var set to '1'",
+    needsFastExitLane({ hold_max_ms: 5 * HOUR }, { monitorMs: slow }) === true);
+  delete process.env.PENTHOUSE_FAST_ALL_BANDS;
+  ok("a call with no clock is never fast-laned, rather than defaulting into one",
+    !needsFastExitLane({ hold_max_ms: null }) && !needsFastExitLane({ hold_max_ms: 0 }) &&
+    !needsFastExitLane({}) && !needsFastExitLane(null) && !needsFastExitLane({ hold_max_ms: "abc" }));
+  const src = fs.readFileSync(new URL("./src/penthouse.js", import.meta.url), "utf8");
+  ok("the default is '1' in the source, not only in this test",
+    /process\.env\.PENTHOUSE_FAST_ALL_BANDS \?\? "1"\) !== "0"/.test(src));
+}
+
+console.log("\nPENTHOUSE_FAST_ALL_BANDS=0 RESTORES THE RATIO RULE");
 {
   const slow = 10 * MIN;
+  const off = { monitorMs: slow, fastAllBands: "0" };
   for (const [key, b] of Object.entries(CAP_BANDS)) {
     const call = { hold_band: key, hold_max_ms: b.holdMaxMs };
     const fastWanted = b.holdMaxMs / slow < FAST_LANE_MIN_PASSES;
     ok(`${key} (holds up to ${Math.round(b.holdMaxMs / MIN)}m) -> ${fastWanted ? "fast lane" : "slow pass"}`,
-      needsFastExitLane(call, { monitorMs: slow }) === fastWanted,
+      needsFastExitLane(call, off) === fastWanted,
       `${(b.holdMaxMs / slow).toFixed(0)} chances on the slow timer`);
   }
-  ok("nano and micro are the fast ones today",
-    needsFastExitLane({ hold_max_ms: CAP_BANDS.nano.holdMaxMs }, { monitorMs: slow }) &&
-    needsFastExitLane({ hold_max_ms: CAP_BANDS.micro.holdMaxMs }, { monitorMs: slow }) &&
-    !needsFastExitLane({ hold_max_ms: CAP_BANDS.very_high.holdMaxMs }, { monitorMs: slow }));
-  ok("a call with no clock is never fast-laned, rather than defaulting into one",
-    !needsFastExitLane({ hold_max_ms: null }) && !needsFastExitLane({ hold_max_ms: 0 }) &&
-    !needsFastExitLane({}) && !needsFastExitLane(null));
+  ok("nano and micro are the fast ones under the ratio rule",
+    needsFastExitLane({ hold_max_ms: CAP_BANDS.nano.holdMaxMs }, off) &&
+    needsFastExitLane({ hold_max_ms: CAP_BANDS.micro.holdMaxMs }, off) &&
+    !needsFastExitLane({ hold_max_ms: CAP_BANDS.very_high.holdMaxMs }, off));
+  process.env.PENTHOUSE_FAST_ALL_BANDS = "0";
+  ok("the env var alone restores it too",
+    !needsFastExitLane({ hold_max_ms: CAP_BANDS.very_high.holdMaxMs }, { monitorMs: slow }) &&
+    needsFastExitLane({ hold_max_ms: CAP_BANDS.nano.holdMaxMs }, { monitorMs: slow }));
   // The rule is a ratio, so retuning either clock retunes the lane rather than lying.
   ok("slowing the monitor pulls more bands onto the fast lane",
     needsFastExitLane({ hold_max_ms: 5 * HOUR }, { monitorMs: 60 * MIN }), "5h hold vs a 1h timer");
   ok("...and speeding it up pushes them off",
     !needsFastExitLane({ hold_max_ms: 30 * MIN }, { monitorMs: MIN }), "30m hold vs a 1m timer");
+  delete process.env.PENTHOUSE_FAST_ALL_BANDS;
+  ok("a call with no clock is still never fast-laned",
+    !needsFastExitLane({ hold_max_ms: null }, off) && !needsFastExitLane({}, off));
 }
 
 console.log("\nA PRICE-ONLY READ MAY FIRE ON PRICE, AND ON NOTHING ELSE");

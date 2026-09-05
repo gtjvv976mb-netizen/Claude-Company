@@ -74,6 +74,16 @@ if (typeof alerts.announceExit === "function") {
   const after = executorFeedPayload(FLOOR, ev?.id ?? 0);
   const exit = (after.events || []).find((e) => e.call_id === call.id && e.type === "exit");
   ok("the tenant's feed serves the EXIT for a call it was offered", !!exit, exit ? `id=${exit.id}` : "no exit event");
+  /* Desk-led exits (2026-09-05): the bot sells exactly what the desk determined, and
+     reports the desk's print and moment back — so the exit event must carry them. */
+  ok("...with the desk's close print and moment", exit?.close_mark === 0.0021 && Number(exit?.closed_at) > 0,
+    `close_mark=${exit?.close_mark} closed_at=${exit?.closed_at}`);
+  ok("...and the entry carried opened_at for the mirror's clock", Number(ev?.opened_at) > 0, `opened_at=${ev?.opened_at}`);
+  const { feedFor } = await import("./src/copy.js");
+  const row = feedFor(FLOOR, 5).find((r) => r.call_id === call.id);
+  ok("the floor feed row carries the bot fields, null until the bot reports", row && "bot_status" in row && row.bot_status === null,
+    `bot_status=${row?.bot_status}`);
+  ok("...and no wallet", row && !("wallet" in row));
 } else {
   ok("exit announcer is exported", false, "announceExit not found on alerts.js");
 }

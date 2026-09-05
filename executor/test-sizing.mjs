@@ -12,9 +12,9 @@ const t=(n,c,got)=>{ c?pass++:fail++; console.log(`${c?"PASS":"FAIL"}  ${n}${c?"
 const st=(o={})=>({ ...freshState(0), equitySol: 5, ...o });
 // the V1 bracket from the thesis: stop -2.8%, target +3.5%  => gross R = 1.25
 const call = { mint:"m", symbol:"T", entry_ref: 1.0, stop: 0.972, target: 1.035, size_sol: 5 };
-// v3: two-witness high-water ratchet (2026-09-01). The pin is the tripwire that
-// fired when the behavior changed - keep pinning the literal.
-t("sizing uses the shared snipe-v3 strategy", POLICY_VERSION === "snipe-v3", POLICY_VERSION);
+// v3: two-witness high-water ratchet (2026-09-01). v4: desk-led exits (2026-09-05). The
+// pin is the tripwire that fired when the behavior changed - keep pinning the literal.
+t("sizing uses the shared desk-led-v4 strategy", POLICY_VERSION === "desk-led-v4", POLICY_VERSION);
 
 // R_net with 6% costs should be far below the 1.25 gross figure
 const p1 = planEntry({ call, cfg: KELLY, state: st() });
@@ -76,12 +76,18 @@ const frictionSized = planEntry({ call: wide, cfg: { ...KELLY, measuredRoundTrip
 t("measured round-trip friction is included in actual stop risk",
   frictionSized.action==="buy" && frictionSized.sol <= p2.sol && frictionSized.f >= 0, frictionSized);
 
-// the age exit
+// the age exit — desk-led-v4: the DESK's thesis_expired backstop closes a call at
+// maxAgeHours (test-policy-parity proves the same clock on both sides); the bot itself
+// holds at the boundary and past it. It hears the exit on the feed, or mirrors the
+// desk's clock when the desk is unreachable (executor/test-desk-led-exits.mjs).
 const pos = openPosition({ call: {...wide, openedAtMs: 0}, sol: 0.05, fillPrice: 1, cfg: DEFAULTS });
 const ageBoundary = DEFAULTS.maxAgeHours*3600e3;
 const aged = stepPosition({ pos, mark: 1.01, cfg: DEFAULTS, nowMs: ageBoundary });
-t("age exit fires at maxAgeHours", aged.action==="sell" && /age exit/.test(aged.reason), aged);
+t("the bot holds at maxAgeHours without a desk exit (no local age exit)", aged.action==="hold", aged);
+const wellPast = stepPosition({ pos, mark: 1.01, cfg: DEFAULTS, nowMs: ageBoundary*3 });
+t("...and well past it", wellPast.action==="hold", wellPast);
 const young = stepPosition({ pos, mark: 1.01, cfg: DEFAULTS, nowMs: ageBoundary-1 });
-t("and not before", young.action==="hold", young);
+t("and before it", young.action==="hold", young);
+t("the backstop itself is unchanged for the desk and the mirror", DEFAULTS.maxAgeHours===24, DEFAULTS.maxAgeHours);
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail?1:0);

@@ -13,6 +13,8 @@ const TRADING_RUNTIME_FILES = Object.freeze([
   "poller.mjs", "journal.mjs", "jupiter.mjs", "balance-verification.mjs",
   "entry-quote-guard.mjs", "exit-trigger.mjs", "feed-drain.mjs", "sol-usd-oracle.mjs",
   "heartbeat-health.mjs", "sleep-assertion.mjs", "strategy.mjs", "trade-policy.mjs",
+  // desk-led-v4: both are loaded by the trading process, so both are part of its identity.
+  "dexscreener-consensus.mjs", "desk-mirror.mjs",
 ]);
 
 /** A byte identity for exactly the modules loaded by the trading process. */
@@ -35,17 +37,24 @@ export function executorHeartbeatHealth({
   lastTickCompletedAt = 0, lastFeedSuccessAt = 0, consecutiveFeedFailures = 0,
   consecutiveTickFailures = 0, feedRollback = false, executionReadiness = null,
   caps = null, runtimeCommit = null, runtimeFingerprint = null,
+  deskUnreachableSince = null, mirrorActive = false,
 } = {}) {
   const list = Array.isArray(positions) ? positions : [];
   const blockedPositions = list.filter((position) =>
     POSITION_FLAGS.some((flag) => position?.[flag] === true)).length;
   const manualAction = list.some((position) => position?.manualExitRequired === true);
   const exitBlocked = list.some((position) => position?.exitExecutionRequired === true);
+  /* desk-led-v4: an unreadable executable mark is a HEALTH fact, never a sell. It is
+     counted here so the floor's card can say "valuation blind on N" instead of the bot
+     quietly selling, which is what the old latch did (TOAD, 2026-09-04). */
+  const markUnavailable = list.filter((position) => Number(position?.markUnavailableSince) > 0).length;
+  const unreachableSince = Number.isSafeInteger(Number(deskUnreachableSince)) && Number(deskUnreachableSince) > 0
+    ? Number(deskUnreachableSince) : 0;
   let state = "healthy";
   if (hardStop || manualAction) state = "manual-action";
   else if (exitBlocked) state = "exits-blocked";
   else if (blockingIntent || blockedPositions || consecutiveFeedFailures || consecutiveTickFailures ||
-      feedRollback || executionReadiness?.ready === false)
+      feedRollback || executionReadiness?.ready === false || mirrorActive === true || unreachableSince)
     state = "degraded";
   else if (entriesPaused) state = "entries-paused";
   const boundedCap = (value, max) => {
@@ -78,6 +87,11 @@ export function executorHeartbeatHealth({
     consecutiveFeedFailures: Math.max(0, Number(consecutiveFeedFailures) || 0),
     consecutiveTickFailures: Math.max(0, Number(consecutiveTickFailures) || 0),
     feedRollback: Boolean(feedRollback),
+    // The desk-unreachability clock and whether the mirror has engaged. Facts about the
+    // bot, no reins: the server learns it is being mirrored, it cannot switch it on or off.
+    deskUnreachableSince: unreachableSince,
+    mirrorActive: mirrorActive === true,
+    markUnavailable,
     executionReadiness: executionReadiness && typeof executionReadiness === "object" ? {
       ready: executionReadiness.ready === true,
       lastSuccessAt: Number(executionReadiness.lastSuccessAt) || 0,

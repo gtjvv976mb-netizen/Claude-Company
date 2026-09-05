@@ -8,6 +8,8 @@ const target = process.argv[2] || "https://claudedotcompany.com";
 const localRoot = fs.existsSync(target) ? path.resolve(target) : null;
 const site = target.replace(/\/$/, "");
 const need = ["poller.mjs", "journal.mjs", "jupiter.mjs", "token2022.mjs", "balance-verification.mjs", "entry-quote-guard.mjs", "exit-trigger.mjs", "feed-drain.mjs", "sol-usd-oracle.mjs", "heartbeat-health.mjs", "sleep-assertion.mjs", "monitor.mjs", "strategy.mjs", "trade-policy.mjs",
+  // desk-led-v4: the desk's ruler and the mirror evaluator ship with the trading process.
+  "dexscreener-consensus.mjs", "desk-mirror.mjs",
   "package.json", "package-lock.json", "install.sh", "macos-launchagent.sh", "macos-release.sh", "launchd-runner.mjs"];
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-install-test-"));
 const sources = new Map();
@@ -265,7 +267,7 @@ check("Node >=22.13 and <25 and pinned execution dependencies are required",
 check("installer never pipes a mutable bootstrap script into a privileged shell",
   !/nodesource[\s\S]*\|[\s\S]*sudo\s+-E\s+bash/.test(installer));
 check("installer stages the complete durable execution and monitoring module graph",
-  /RUNTIME_FILES=\(poller\.mjs journal\.mjs jupiter\.mjs token2022\.mjs balance-verification\.mjs entry-quote-guard\.mjs exit-trigger\.mjs feed-drain\.mjs sol-usd-oracle\.mjs heartbeat-health\.mjs sleep-assertion\.mjs monitor\.mjs strategy\.mjs trade-policy\.mjs\)/.test(installer));
+  /RUNTIME_FILES=\(poller\.mjs journal\.mjs jupiter\.mjs token2022\.mjs balance-verification\.mjs entry-quote-guard\.mjs exit-trigger\.mjs feed-drain\.mjs sol-usd-oracle\.mjs heartbeat-health\.mjs sleep-assertion\.mjs monitor\.mjs strategy\.mjs trade-policy\.mjs dexscreener-consensus\.mjs desk-mirror\.mjs\)/.test(installer));
 const manifest = sources.get("package.json") ? JSON.parse(sources.get("package.json")) : {};
 const lock = sources.get("package-lock.json") ? JSON.parse(sources.get("package-lock.json")) : {};
 check("published manifest pins the signer dependencies",

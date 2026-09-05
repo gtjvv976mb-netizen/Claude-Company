@@ -7,23 +7,31 @@
  * synthetic price paths, so the numbers you see are produced by the same
  * function shared with the server and executor, not by a separate toy model.
  *
- * WHAT THIS BUYS YOU, and it is the whole point:
- *   The desk publishes an entry and, later, an exit. Between those two messages
- *   the naive bot is naked — if the desk's monitor is slow, or your box was
- *   asleep, or the token rugs in ninety seconds, nothing protects the position.
- *   This engine watches the mark every poll and acts on its own:
+ * WHAT THIS ENGINE DECIDES, and what it deliberately no longer decides:
+ *   ENTRY SIZING — risk-at-stop, the Kelly rails, the fee floors, the book heat and
+ *   the two portfolio brakes (DAILY LOSS LIMIT and MAX CONCURRENT POSITIONS) that
+ *   decide whether a bot survives a bad week. All of that is still here, untouched.
  *
- *     STOP        — cut at the desk's stop. Non-negotiable, checked every tick.
- *     BREAKEVEN   — at 1.35x the stop lifts to entry.
- *     TRAIL       — at 1.5x a 25% trail starts ratcheting behind the high.
- *     TARGET      — the authored target or the configured multiple closes in full;
- *                   policy v2 has no partial-exit state.
- *     DESK EXIT   — the desk's own exit always wins and sells everything: it
- *                   knows things the price alone does not (creator sold, LP
- *                   pulled, thesis dead).
+ *   EXITS — none of its own. Until desk-led-v4 (2026-09-05) this file ran a full
+ *   bracket on every held position: a local stop, a 1.35x breakeven and 1.5x/25%
+ *   trail ratchet, a 2x take-profit, the authored target, a band clock and an age
+ *   exit, each on the bot's OWN ruler (a chain-simulated Jupiter sell quote against
+ *   its own fill) and the bot's OWN clock (every poll, two witnesses). The desk ran
+ *   the same policy on ITS ruler (DexScreener consensus vs entry_ref) and ITS clock.
+ *   Two engines that agree on levels and disagree on moments: Shrek, call 55 — the
+ *   bot sold 03:01:42Z on its own normalised stop at -13.5%; the desk's determined
+ *   stop_hit came 03:10:24Z, and the desk's exit row arrived to a position that no
+ *   longer existed. The owner's rule is verbatim: "all exits should be followed not
+ *   after or before, but as exactly as it was determined."
  *
- *   Plus the two portfolio brakes that decide whether a bot survives a bad week:
- *     DAILY LOSS LIMIT and MAX CONCURRENT POSITIONS.
+ *   So stepPosition HOLDS unless the desk has published an exit for this call, and
+ *   then it sells everything (DESK EXIT — the desk knows things the price alone does
+ *   not: creator sold, LP pulled, thesis dead). The pure pricePolicy still exists in
+ *   trade-policy.mjs, shared byte-for-byte with the desk's evaluateExit; the bot runs
+ *   it only in MIRROR mode (executor/desk-mirror.mjs) when the desk has been
+ *   unreachable for DESK_UNREACHABLE_MS, on the desk's absolute levels with the
+ *   desk's ruler, so that the determination is still the desk's even when the desk
+ *   cannot speak.
  *
  * None of this manufactures an edge — the edge is the quality of the desk's
  * calls. This engine exists so a real edge is not destroyed by one bad night,
@@ -313,10 +321,23 @@ export function planEntry({ call, cfg = DEFAULTS, state }) {
     reason: `${why}${boundBy ? `; sized down by ${boundBy}` : ""}; actual stop risk ${(actualF * 100).toFixed(2)}%` };
 }
 
-/** Fresh position record, created after a fill. */
+/** Fresh position record, created after a fill.
+ *
+ * Two families of numbers live on it. The RATIO fields (entry=1, stop, target, high)
+ * are dimensionless off the bot's own fill and remain for VALUATION — heartbeat, monitor,
+ * the board's P&L. The DESK fields (deskEntryRef, deskStop, deskTarget, deskOpenedAt)
+ * are the desk's ABSOLUTE USD levels and the desk's clock, copied verbatim from the
+ * feed's entry event at fill time; they exist so mirror mode can evaluate exactly the
+ * levels the desk would have evaluated, never a ratio off our fill. A caller may pass
+ * them explicitly (desk* keys) or let them fall out of the raw feed event's entry_ref /
+ * opened_at / ts. */
 export function openPosition({ call, sol, fillPrice, cfg = DEFAULTS }) {
   const c = { ...DEFAULTS, ...cfg };
   const stop = Number(call.stop) * (1 - c.stopBufferPct);
+  const positive = (value) => {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
   return {
     mint: call.mint, symbol: call.symbol,
     entry: fillPrice, sol, qty: sol / fillPrice,
@@ -325,26 +346,45 @@ export function openPosition({ call, sol, fillPrice, cfg = DEFAULTS }) {
     high: fillPrice, scaled: false, openedAt: call.ts ?? 0,
     openedAtMs: call.openedAtMs ?? Date.now(),
     /* THE BAND'S CLOCK, carried from the call. Null on a legacy call or an unreadable
-       market cap, in which case the bot's own configured age exit governs, as before. */
+       market cap. The bot itself never acts on it any more — the desk does, and the
+       mirror does when the desk cannot — but it travels with the position so both of
+       those evaluate the window the call was published with. */
     holdBand: call.hold_band ?? call.holdBand ?? null,
     holdMaxMs: Number(call.hold_max_ms ?? call.holdMaxMs) > 0
       ? Number(call.hold_max_ms ?? call.holdMaxMs) : null,
+    /* THE DESK'S OWN LEVELS, absolute, for the mirror. entry_ref here is the desk's
+       (a caller normalising the bracket to ratios passes the raw values as desk*). */
+    deskEntryRef: positive(call.deskEntryRef ?? call.entry_ref),
+    deskStop: positive(call.deskStop),
+    deskTarget: positive(call.deskTarget),
+    deskOpenedAt: positive(call.deskOpenedAt ?? call.opened_at ?? call.ts),
     riskF: null,
   };
 }
 
 /**
- * The per-tick decision for ONE open position. `mark` is the current price;
+ * The per-tick decision for ONE open position. `mark` is the current valuation;
  * `deskExit` is set when the desk has published an exit for this call.
  * Returns {action: hold|sell, fraction, reason}.
+ *
+ * desk-led-v4: HOLD unless the desk said sell. The mark is accepted so callers keep a
+ * single call site for valuation, but no price, level, ratchet or clock in this
+ * function can produce a sell — that is the whole change. The shared pricePolicy is
+ * reached only through the deskExit branch (which sells 1.0 unconditionally) and, in
+ * mirror mode, through desk-mirror.mjs on the desk's own inputs.
  */
 export function stepPosition({ pos, mark, deskExit = null, cfg = DEFAULTS, nowMs = Date.now() }) {
-  const d = pricePolicy({ position: pos, mark, deskExit, nowMs, config: cfg });
-  // Preserve the existing API while ensuring both server and executor use the exact
-  // same pure policy. Mutation is limited to an accepted policy state transition.
-  Object.assign(pos, d.position);
-  return { action: d.action, fraction: d.fraction, reason: d.reason,
-    policyVersion: d.policyVersion };
+  if (deskExit) {
+    const d = pricePolicy({ position: pos, mark, deskExit, nowMs, config: cfg });
+    // Preserve the existing API while ensuring both server and executor use the exact
+    // same pure policy. Mutation is limited to an accepted policy state transition.
+    Object.assign(pos, d.position);
+    return { action: d.action, fraction: d.fraction, reason: d.reason,
+      policyVersion: d.policyVersion };
+  }
+  return { action: "hold", fraction: 0,
+    reason: "desk-led: holding for the desk's determination (no local exit policy)",
+    policyVersion: POLICY_VERSION };
 }
 
 export const freshState = (now = 0) => ({

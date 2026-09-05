@@ -52,16 +52,20 @@ ok("a take profit BELOW entry is clamped, never stored", Number(settingsFor(F).t
 saveSettings(F, { takeProfitX: "auto" });
 ok("auto is expressible", Number(settingsFor(F).take_profit_x) === 0);
 
-console.log("\n...and it reaches the bot, per position");
+console.log("\n...and it reaches the bot, per position — where, since desk-led-v4, it changes NOTHING");
+/* The dial is still stored and still travels on every feed event (a tenant may have set
+ * it, the column is read elsewhere), but the bot has no exit of its own for it to
+ * govern: the DESK determines every exit and the bot sells what it hears. A tenant
+ * multiple that made the bot hold through the desk's determined target — or sell at a
+ * level the desk never called — is a bot-own exit rule, the category Shrek (call 55,
+ * 2026-09-05) retired. So at 2x, 10x and under either dial the bot HOLDS. */
 const c2 = { mint: "m", symbol: "T", entry_ref: 1, stop: 0.6, target: 2, size_sol: 5 };
 const st = { ...freshState(0), equitySol: 5 };
-for (const [x, mark, want] of [[2, 2.0, "sell"], [10, 2.0, "hold"], [10, 10.0, "sell"]]) {
-  // A tenant-selected target owns the exit; the authored target remains the AUTO
-  // fallback. Setting this false mirrors the executor's saved tenant preference.
+for (const [x, mark] of [[2, 2.0], [10, 2.0], [10, 10.0]]) {
   const cfg = { ...DEFAULTS, takeProfitX: x, honorDeskTarget: false, fixedSol: 0, scaleOutPct: 0 };
   const p = openPosition({ call: c2, sol: 0.05, fillPrice: 1, cfg });
   const d = stepPosition({ pos: p, mark, cfg });
-  ok(`at ${x}x rule, a ${mark}x mark => ${want}`, d.action === want, d.reason);
+  ok(`at ${x}x rule, a ${mark}x mark => hold (the dial no longer sells)`, d.action === "hold", `${d.action} — ${d.reason}`);
 }
 
 console.log("\nDIAL 2 — FIXED FUND, chosen by the tenant");

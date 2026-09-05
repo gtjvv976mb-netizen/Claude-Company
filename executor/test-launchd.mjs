@@ -24,7 +24,10 @@ const runtimeFiles = [
   "journal.mjs", "jupiter.mjs", "balance-verification.mjs", "entry-quote-guard.mjs",
   "exit-trigger.mjs", "feed-drain.mjs", "sol-usd-oracle.mjs", "heartbeat-health.mjs",
   "sleep-assertion.mjs", "strategy.mjs",
-  "trade-policy.mjs", "package.json", "package-lock.json",
+  "trade-policy.mjs",
+  // desk-led-v4: the desk's ruler and the mirror evaluator are runtime files too.
+  "dexscreener-consensus.mjs", "desk-mirror.mjs",
+  "package.json", "package-lock.json",
 ];
 let failures = 0;
 
