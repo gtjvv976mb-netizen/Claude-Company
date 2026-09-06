@@ -146,6 +146,14 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--amber);outline-offs
 .door.sol .pill.go:hover{background:var(--sol-window-2);border-color:var(--sol-window-2)}
 .door.rh .pill.go{color:#04120a;background:var(--rh-window);border-color:var(--rh-window)}
 .door.rh .pill.go:hover{background:var(--rh-window-2);border-color:var(--rh-window-2)}
+.wpick{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.wpick button{display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:12.5px;
+  color:var(--ink);background:rgba(255,255,255,.04);border:1px solid var(--floor-rule);
+  border-radius:999px;padding:5px 12px 5px 7px;cursor:pointer;transition:background .18s,border-color .18s}
+.wpick button:hover{background:rgba(255,255,255,.09);border-color:var(--ink-faint)}
+.wpick button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.wpick img{width:17px;height:17px;border-radius:4px;flex:0 0 auto}
+.wpick .wdot{width:17px;height:17px;border-radius:4px;background:var(--floor-rule);flex:0 0 auto}
 .pill.look{color:var(--ink-soft);border-color:rgba(244,236,216,.28);background:transparent}
 .pill.look:hover{color:var(--ink);border-color:var(--ink-soft)}
 .status{grid-column:1/-1;min-height:1.2em;margin:2px 0 0;font-size:9.5px;letter-spacing:.14em;color:var(--ink-faint);text-transform:none;letter-spacing:.02em}
@@ -430,12 +438,13 @@ footer.lobby .fine{max-width:100ch}
       <p class="chip"><b>Solana</b> · pump.fun · Claude Tower, dusk</p>
       <div>
         <h2>Claude Tower <em>on Solana</em></h2>
-        <p>The original. The desk reads pump.fun from the block a coin appears in; you trade SOL from Phantom.</p>
+        <p>The original. The desk reads pump.fun from the block a coin appears in; you trade SOL from your own Solana wallet.</p>
       </div>
       <div class="acts">
-        <button class="pill go" id="goSol" type="button">Connect Phantom</button>
+        <button class="pill go" id="goSol" type="button">Connect wallet</button>
         <a class="pill look" href="https://solana.claudedotcompany.com/">Look around first</a>
       </div>
+      <div class="wpick" id="wpSol" hidden></div>
       <p class="status" id="stSol" aria-live="polite"></p>
     </div>
     <div class="door rh">
@@ -448,6 +457,7 @@ footer.lobby .fine{max-width:100ch}
         <button class="pill go" id="goRh" type="button">Connect wallet</button>
         <a class="pill look" href="https://robinhood.claudedotcompany.com/" data-rh-world>Look around first</a>
       </div>
+      <div class="wpick" id="wpRh" hidden></div>
       <p class="status" id="stRh" aria-live="polite"></p>
     </div>
   </div>
@@ -879,28 +889,109 @@ function enter(k,wallet){
 function say(id,msg,cls){var s=document.getElementById(id);s.className="status"+(cls?" "+cls:"");s.innerHTML=msg||"";}
 function short(a){return a?a.slice(0,4)+"…"+a.slice(-4):"";}
 
-/* Solana — Phantom, or any wallet that speaks the Solana provider standard. */
-document.getElementById("goSol").addEventListener("click",async function(){
-  var b=this;if(entering)return;
-  var p=(window.phantom&&window.phantom.solana)||(window.solana&&window.solana.isPhantom?window.solana:null)||window.solana||null;
-  if(!p||typeof p.connect!=="function"){
-    var mobile=/Android|iPhone|iPad/i.test(navigator.userAgent);
-    var here=location.href.split("#")[0];
-    say("stSol",mobile
-      ?'No Solana wallet found in this browser. <a href="https://phantom.app/ul/browse/'+encodeURIComponent(here)+'?ref='+encodeURIComponent(location.origin)+'" rel="noopener">Open in Phantom</a>, or look around first.'
-      :'No Solana wallet found. <a href="https://phantom.com/download" target="_blank" rel="noopener">Get Phantom</a>, or look around first.',"err");
-    return;
+/* ── WALLETS ────────────────────────────────────────────────────────────────
+   Neither door names a vendor. Solana wallets are found by the Wallet Standard —
+   the registry Phantom, Solflare, Backpack, Glow, Coinbase, Trust, Exodus, OKX and
+   the rest all announce into — with a legacy window.<name>.solana sweep behind it for
+   the ones that never adopted it. EVM wallets are found by EIP-6963, which is the
+   same idea for Ethereum. When more than one is present the reader CHOOSES; picking
+   for them is how you end up with a button that says "Connect Phantom".            */
+
+function walletIcon(w){
+  var src = (w.icon || (w.info && w.info.icon) || "");
+  return /^data:|^https:/.test(src)
+    ? '<img src="' + src + '" alt="" aria-hidden="true">'
+    : '<span class="wdot" aria-hidden="true"></span>';
+}
+/* Render the choices, or connect straight away when there is only one. */
+function offer(list, pickId, statusId, connect, emptyMsg){
+  var box = document.getElementById(pickId);
+  box.innerHTML = ""; box.hidden = true;
+  if(!list.length){ say(statusId, emptyMsg, "err"); return; }
+  if(list.length === 1){ connect(list[0]); return; }
+  say(statusId, "Found " + list.length + " wallets — pick one.");
+  list.forEach(function(w){
+    var b = document.createElement("button");
+    b.type = "button";
+    b.innerHTML = walletIcon(w) + "<span></span>";
+    b.lastChild.textContent = w.name || (w.info && w.info.name) || "Wallet";
+    b.addEventListener("click", function(){ box.hidden = true; box.innerHTML = ""; connect(w); });
+    box.appendChild(b);
+  });
+  box.hidden = false;
+}
+
+/* ── SOLANA ─────────────────────────────────────────────────────────────────── */
+var solStd = [];                                   // Wallet Standard registrations
+function addStd(){
+  for(var i=0;i<arguments.length;i++){
+    var w = arguments[i];
+    if(!w || solStd.indexOf(w) !== -1) continue;
+    var chains = w.chains || [];
+    var canConnect = w.features && w.features["standard:connect"];
+    if(canConnect && chains.some(function(c){ return /^solana:/.test(String(c)); })) solStd.push(w);
   }
-  b.disabled=true;say("stSol","Asking Phantom…");
+  return function(){};                              // the spec wants an unregister fn
+}
+addEventListener("wallet-standard:register-wallet", function(ev){
+  try{ ev.detail({ register: addStd }); }catch(e){}
+});
+try{ dispatchEvent(new CustomEvent("wallet-standard:app-ready", { detail: { register: addStd } })); }catch(e){}
+
+/* Wallets that never adopted the standard still inject themselves. Deduped by the
+   provider object, so a wallet that does both is not offered twice. */
+var SOL_LEGACY = [
+  ["phantom","Phantom"],["solflare","Solflare"],["backpack","Backpack"],["glow","Glow"],
+  ["coinbaseSolana","Coinbase Wallet"],["trustwallet","Trust"],["exodus","Exodus"],
+  ["okxwallet","OKX"],["braveSolana","Brave"],["magicEden","Magic Eden"],["nightly","Nightly"],
+  ["coin98","Coin98"],["mathwallet","MathWallet"],["clover","Clover"],["torus","Torus"]
+];
+function solanaWallets(){
+  var out = solStd.map(function(w){ return { name: w.name, icon: w.icon, std: w }; });
+  var seen = out.map(function(o){ return String(o.name || "").toLowerCase(); });
+  function push(prov, name){
+    if(!prov || typeof prov.connect !== "function") return;
+    if(seen.indexOf(String(name).toLowerCase()) !== -1) return;
+    seen.push(String(name).toLowerCase());
+    out.push({ name: name, icon: prov.icon || "", legacy: prov });
+  }
+  SOL_LEGACY.forEach(function(pair){
+    var root = window[pair[0]];
+    push(root && (root.solana || root), pair[1]);
+  });
+  if(window.solana) push(window.solana, window.solana.isPhantom ? "Phantom" : "Injected wallet");
+  return out;
+}
+async function connectSolana(w){
+  var b = document.getElementById("goSol");
+  b.disabled = true; say("stSol", "Asking " + (w.name || "your wallet") + "…");
   try{
-    var res=await p.connect();
-    var pk=(res&&res.publicKey&&res.publicKey.toString())||(p.publicKey&&p.publicKey.toString())||null;
-    say("stSol","Connected "+short(pk)+" — entering Claude Tower.","ok");
-    enter("sol",{chain:"solana",address:pk});
+    var pk = null;
+    if(w.std){
+      var res = await w.std.features["standard:connect"].connect();
+      var acct = (res && res.accounts && res.accounts[0]) || (w.std.accounts && w.std.accounts[0]);
+      pk = acct && (acct.address || (acct.publicKey && acct.publicKey.toString()));
+    }else{
+      var r = await w.legacy.connect();
+      pk = (r && r.publicKey && r.publicKey.toString()) || (w.legacy.publicKey && w.legacy.publicKey.toString());
+    }
+    if(!pk) throw new Error("the wallet returned no account");
+    say("stSol", "Connected " + short(pk) + " — entering Claude Tower.", "ok");
+    enter("sol", { chain: "solana", address: pk, wallet: w.name || null });
   }catch(e){
-    b.disabled=false;
-    say("stSol",e&&(e.code===4001||/reject|denied/i.test(e.message||""))?"Connection declined — the door stays open.":"Phantom could not connect: "+(e&&e.message||"unknown error"),"err");
+    b.disabled = false;
+    say("stSol", e && (e.code === 4001 || /reject|denied|user/i.test(e.message||""))
+      ? "Connection declined — the door stays open."
+      : (w.name || "The wallet") + " could not connect: " + ((e && e.message) || "unknown error"), "err");
   }
+}
+document.getElementById("goSol").addEventListener("click", function(){
+  if(entering) return;
+  var mobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+  var here = location.href.split("#")[0];
+  offer(solanaWallets(), "wpSol", "stSol", connectSolana, mobile
+    ? 'No Solana wallet in this browser. <a href="https://phantom.app/ul/browse/' + encodeURIComponent(here) + '?ref=' + encodeURIComponent(location.origin) + '" rel="noopener">Open in a wallet browser</a>, or look around first.'
+    : 'No Solana wallet found. Install any Solana wallet — <a href="https://phantom.com/download" target="_blank" rel="noopener">Phantom</a>, <a href="https://solflare.com/download" target="_blank" rel="noopener">Solflare</a> and <a href="https://backpack.app/download" target="_blank" rel="noopener">Backpack</a> all work — or look around first.');
 });
 
 /* Robinhood Chain — any EIP-1193 wallet, discovered by EIP-6963, switched to chain 4663. */
@@ -909,21 +1000,16 @@ var RH_CHAIN={chainId:"0x1237",chainName:"Robinhood Chain",nativeCurrency:{name:
 var evmProviders=[];
 addEventListener("eip6963:announceProvider",function(e){if(e.detail&&e.detail.provider&&!evmProviders.some(function(x){return x.info.uuid===e.detail.info.uuid;}))evmProviders.push(e.detail);});
 dispatchEvent(new Event("eip6963:requestProvider"));
-function pickEvm(){
-  if(evmProviders.length){var pref=evmProviders.find(function(x){return /robinhood/i.test(x.info.name);})||evmProviders.find(function(x){return /metamask|rabby|coinbase/i.test(x.info.name);})||evmProviders[0];return {p:pref.provider,name:pref.info.name};}
-  if(window.ethereum)return {p:window.ethereum,name:"your wallet"};
-  return null;
+function evmWallets(){
+  var out=evmProviders.map(function(x){return {name:x.info.name,icon:x.info.icon,p:x.provider};});
+  /* A wallet older than EIP-6963 only has window.ethereum. Include it, but not when a
+     discovered provider is already the same object. */
+  if(window.ethereum&&!out.some(function(o){return o.p===window.ethereum;}))
+    out.push({name:window.ethereum.isMetaMask?"MetaMask":"Injected wallet",icon:"",p:window.ethereum});
+  return out;
 }
-document.getElementById("goRh").addEventListener("click",async function(){
-  var b=this;if(entering)return;
-  var w=pickEvm();
-  if(!w){
-    var mobile=/Android|iPhone|iPad/i.test(navigator.userAgent);
-    say("stRh",mobile
-      ?'No EVM wallet found in this browser. <a href="https://metamask.app.link/dapp/'+location.host+location.pathname+'" rel="noopener">Open in MetaMask</a>, or look around first.'
-      :'No EVM wallet found. <a href="https://metamask.io/download/" target="_blank" rel="noopener">Get MetaMask</a> or Rabby, or look around first.',"err");
-    return;
-  }
+async function connectEvm(w){
+  var b=document.getElementById("goRh");
   b.disabled=true;say("stRh","Asking "+w.name+"…");
   try{
     var accts=await w.p.request({method:"eth_requestAccounts"});
@@ -947,6 +1033,13 @@ document.getElementById("goRh").addEventListener("click",async function(){
     b.disabled=false;
     say("stRh",e&&(e.code===4001||/reject|denied/i.test(e.message||""))?"Connection declined — the door stays open.":"Could not connect: "+(e&&e.message||"unknown error"),"err");
   }
+}
+document.getElementById("goRh").addEventListener("click",function(){
+  if(entering)return;
+  var mobile=/Android|iPhone|iPad/i.test(navigator.userAgent);
+  offer(evmWallets(),"wpRh","stRh",connectEvm,mobile
+    ?'No EVM wallet in this browser. <a href="https://metamask.app.link/dapp/'+location.host+location.pathname+'" rel="noopener">Open in a wallet browser</a>, or look around first.'
+    :'No EVM wallet found. Install any EVM wallet — <a href="https://metamask.io/download/" target="_blank" rel="noopener">MetaMask</a>, <a href="https://rabby.io/" target="_blank" rel="noopener">Rabby</a> and <a href="https://www.coinbase.com/wallet/downloads" target="_blank" rel="noopener">Coinbase Wallet</a> all work — or look around first.');
 });
 
 /* keyboard: the doors are reachable, the towers are labelled; nothing here traps focus */
