@@ -628,6 +628,20 @@ CURRENT_ACTIVATED=1
 
 NODE_BIN="$(command -v node)"
 SERVICE_USER="$(id -un)"
+# THIS MUST STAY A SYSTEM UNIT. Converting to `systemctl --user` + linger looks
+# like free ergonomics — sixteen sudo lines to zero, and the unit already runs as
+# User=$SERVICE_USER under $HOME — but systemd.exec(5) is explicit that
+# ProtectSystem, ProtectHome, PrivateDevices, ProtectKernelTunables,
+# ProtectKernelModules, ProtectKernelLogs and ProtectControlGroups "are not
+# available in user services (i.e. services run by the per-user service manager)"
+# because "the underlying kernel functionality is only accessible to privileged
+# processes"; ReadWritePaths and PrivateTmp work there only with PrivateUsers=true
+# AND unprivileged user namespaces enabled in the kernel, which an installer cannot
+# assume. Every one of those appears below. A user unit would therefore run the
+# process that holds a funded key with most of this sandbox silently absent, and
+# would require revoking the "systemd can write only the executor directory" check
+# in test-install.mjs to ship. Checked 2026-09-06 against systemd.exec(5); the cost
+# is one sudo, and the ergonomic win is not worth the sandbox.
 echo "▶ writing hardened systemd service…"
 cat > "$UNIT_NEXT" <<UNIT
 [Unit]
