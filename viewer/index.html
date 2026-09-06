@@ -650,7 +650,7 @@ footer.lobby .fine{max-width:100ch}
       </div>
       <div class="lease">
         <div class="tok sol reveal" data-delay="2">
-          <img src="assets/claudeco-256.png" width="64" height="64" alt="The $CLAUDECO mark" loading="lazy">
+          <img src="assets/claudeco-256.png" width="64" height="64" alt="The $CLAUDECO mark, Solana edition" loading="lazy">
           <div>
             <h3>$CLAUDECO <span class="chip sol">Solana</span></h3>
             <span class="ticker">SPL · pump.fun · access token, never a position</span>
@@ -659,7 +659,7 @@ footer.lobby .fine{max-width:100ch}
           </div>
         </div>
         <div class="tok rh reveal" data-delay="3">
-          <img src="assets/claudeco-256.png" width="64" height="64" alt="The $CLAUDECO mark" loading="lazy">
+          <img src="assets/claudeco-rh-256.png" width="64" height="64" alt="The $CLAUDECO mark, Robinhood edition" loading="lazy">
           <div>
             <h3>$CLAUDECO <span class="chip rh">Robinhood</span></h3>
             <span class="ticker">ERC-20 · PONS V2 · paired to NVDA · launched 4 Sep 2026</span>
@@ -1132,7 +1132,14 @@ Array.prototype.forEach.call(document.querySelectorAll(".steps"), function(list)
 var cv = document.getElementById("funnelCanvas");
 if (cv && cv.getContext) {
   var ctx = cv.getContext("2d");
-  var W = cv.width, H = cv.height;
+  /* The gates below are authored in a fixed 1200x520 space, so keep that as the LOGICAL
+     coordinate system and scale the backing store to device pixels — the fixed 1200
+     buffer was being stretched ~1.78x on a 2x display and the chart read soft next to
+     the type around it. */
+  var W = 1200, H = 520;
+  var DPR = Math.min(window.devicePixelRatio || 1, 2);
+  if (cv.width !== W * DPR) { cv.width = W * DPR; cv.height = H * DPR; }
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   var GATES = [
     { x: 250,  name: "screen",     kill: 0.79, color: "#9fd8de" },
     { x: 470,  name: "analysts",   kill: 0.55, color: "#e9b158", lanes: 5 },
@@ -1151,7 +1158,7 @@ if (cv && cv.getContext) {
     }
   }
   function draw(now){
-    if (!t0) t0 = now;
+    if (t0 === null) t0 = now;   // NOT !t0 — the static path sets t0 = 0, which is falsy
     var el = (now - t0) % cycleMs;
     if (el < 30 && particles.length && particles.every(function(p){ return !p.alive || p.x >= TICKET_X; })) spawn();
     ctx.clearRect(0, 0, W, H);

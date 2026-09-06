@@ -39,6 +39,7 @@ const PAGES = [
 ];
 const ASSETS = [
   "claudeco-512.png", "claudeco-256.png", "claudeco-64.png",
+  "claudeco-rh-256.png",          // the Robinhood edition's own mark, for the lease floor
   "banner-1500x500.png", "banner-1200x630.png",
   "codex-turntable-cover.png", "codex-turntable.gif", "codex-turntable.mp4",
   "grox-mulder-front.png",
