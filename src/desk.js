@@ -9,7 +9,7 @@ import { runCEO } from "./agents/ceo.js";
 import { writeOrderSlip } from "./order.js";
 import { emit } from "./lib/bus.js";
 import { spend, assertDailyBudget} from "./lib/llm.js";
-import { cfg } from "./config.js";
+import { cfg, escalationPlan } from "./config.js";
 import * as store from "./lib/store.js";
 import { writeReport } from "./report.js";
 import { liveCalls } from "./calls.js";
@@ -79,6 +79,11 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
   // they cannot eat the day before the publishing cycle has run; a tenant's paid
   // floor run is never throttled. See assertDailyBudget.
   assertDailyBudget(cfg.dailyBudgetUsd, { lane: opts.lane ?? "cycle" });
+  /* EVERY RELAXATION THE QUOTA BOUGHT, IN THE ORDER IT WAS TAKEN. Carried on the record
+     and stamped onto the published call, because the owner asked to be able to read
+     "this was published at L3 because the cycle was short" off the call itself. A
+     silent lowering is the failure mode this list exists to make impossible. */
+  const relaxations = [];
   emit("token:start", { mint, hook });
 
   const ev = await gather(mint, hook);
@@ -144,16 +149,45 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
      this before, more than once", which is the single strongest signal available about
      a coin nobody has traded yet. */
   const read = ev.xRead && !ev.xRead.error ? ev.xRead : null;
-  const grokKill = read?.serial_rugger === true
-    ? `the deployer's own account has rugged before: ${String(read.rug_evidence || "").slice(0, 180) || "stated by the reputation read"}`
-    : (read?.verdict === "manufactured" && read?.paid_or_botted_signs === true)
+  /* THE TWO ARMS ARE NOT THE SAME KIND OF THING, and the cohort quota is what forced
+   * the distinction into the code rather than leaving it in the prose above.
+   *
+   *   serial_rugger      — a FACT the seat claims to have sourced about the DEPLOYER's
+   *                        own account. 4 of the last 100 kills. SAFETY: absolute at
+   *                        every escalation level, for any quota, forever.
+   *   manufactured story — the seat's OPINION about attention. ~21 of 100 kills, the
+   *                        single largest judgement gate on the desk, and a wrong
+   *                        opinion about who is posting costs an opportunity, not a
+   *                        position that cannot be sold. JUDGMENT: L3 of the ladder
+   *                        accepts it, and ONLY when every safety gate has passed —
+   *                        which is enforced downstream in publishCall, not here.
+   *
+   * Nothing about this arm is bypassed quietly: the verdict is still recorded, the
+   * relaxation is stamped on the record, and it rides onto the published call so a
+   * reader sees "published at L3 because the cycle was short" rather than a silence. */
+  const killArm = read?.serial_rugger === true ? "serial_rugger"
+    : (read?.verdict === "manufactured" && read?.paid_or_botted_signs === true) ? "manufactured"
+    : null;
+  const armText = killArm === "serial_rugger"
+    ? `the deployer's own account has rugged before: ${String(read?.rug_evidence || "").slice(0, 180) || "stated by the reputation read"}`
+    : killArm === "manufactured"
       ? "the story is manufactured and the attention behind it is paid or botted"
       : null;
+  const plan = escalationPlan(opts.escalationLevel ?? 0);
+  const waived = killArm === "manufactured" && plan.acceptManufacturedNarrative;
+  const grokKill = waived ? null : armText;
+  if (waived) {
+    const note = `L${plan.level}: the X read called the story manufactured — accepted because the cycle is short of quota; every safety gate still applies`;
+    relaxations.push(note);
+    emit("seat:relaxed", { seat: "XRead", mint, symbol: ev.symbol, level: plan.level, detail: note });
+    store.recordVerdict(cycle, mint, ev.symbol, "XRead",
+      { verdict: "MANUFACTURED", kill: false, kill_reason: null, relaxed_at_level: plan.level, note: armText });
+  }
   if (grokKill) {
     emit("seat:verdict", { seat: "XRead", mint, symbol: ev.symbol, kill: true, detail: grokKill });
     store.recordVerdict(cycle, mint, ev.symbol, "XRead", { verdict: "FAIL", kill: true, kill_reason: grokKill });
-    const rec = { mint, symbol: ev.symbol, outcome: "killed", killedBy: "xread",
-      reason: grokKill, ev, analysts: {}, finalDecision: "killed" };
+    const rec = { mint, symbol: ev.symbol, outcome: "killed", killedBy: "xread", killArm,
+      reason: grokKill, ev, analysts: {}, finalDecision: "killed", relaxations };
     rec.reportFile = writeReport(cycle, rec);
     emit("token:end", { mint, symbol: ev.symbol, outcome: "killed",
       detail: `xread: ${grokKill}`, report: rec.reportFile });
@@ -325,7 +359,10 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
   if (!comp.pass) finalDecision = "VETOED";
 
   const record = { mint, symbol: ev.symbol, outcome: "decided", weighted, ev, analysts,
-    redteamRaw, redteam, risk, pm, ticket, compliance: comp, finalDecision };
+    redteamRaw, redteam, risk, pm, ticket, compliance: comp, finalDecision,
+    // The escalation this workup was bought at, and what it bought. Both travel to
+    // publishCall, which stamps them on the call.
+    escalationLevel: plan.level, relaxations };
 
   // --- Stage 12: the CEO. Only a clean proposal reaches the door. ---
   if (finalDecision === "PROPOSE") {

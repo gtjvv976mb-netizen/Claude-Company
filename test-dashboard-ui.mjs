@@ -6,6 +6,10 @@ import { spawnSync } from "node:child_process";
 import * as copySettings from "./src/copy.js";
 
 const html = fs.readFileSync(new URL("./viewer/office3d.html", import.meta.url), "utf8");
+/* The server half of the cohort surface, read as text: the page can only show a call's
+   escalation level if office.js puts the stamp back on the feed row. Read here rather
+   than imported so this stays a source test and starts no server. */
+const officeSource = fs.readFileSync(new URL("./src/office.js", import.meta.url), "utf8");
 
 const destinations = [...html.matchAll(
   /<button class="dtab"[^>]*data-destination="([^"]+)"[^>]*>([^<]+)/g,
@@ -1144,4 +1148,310 @@ try {
     "withdrawing is one call with no confirmation ceremony of its own");
 }
 
-console.log("dashboard HUD, candidate separation, WALL-ST-E boundary, runner fork, install walkthrough, HQ consent, and Callouts contract pass");
+/* ═══════════════════════════════════════════════════════════════════════════════════
+ * THE COHORT CYCLE ON THE FLOOR PAGE
+ *
+ * The owner asked for at least three published calls per cycle "at any cost, by any
+ * means". The engine pursues that by MORE EFFORT and RELAXED JUDGEMENT on the recorded
+ * L0-L4 ladder and never by crossing the safety floor — ~60 of the last 100 kills are
+ * safety mechanics, 18 of them cannot_exit where the round-trip probe PROVED the
+ * position could not be sold, so a quota filled from that pool is bags, not trades.
+ *
+ * The page's obligation is the other half of that: SHOW WHAT IT COST. The spec's words
+ * are "a reader must be able to see 'this was published at L3 because the cycle was
+ * short', never a silent lowering", and "never state or imply that a quota-filled call
+ * is as good as an L0 call".
+ *
+ * So this block RENDERS. The cohort-cycle builders are lifted out of the shipped page
+ * and executed against a node shim, and every assertion reads the text a tenant would
+ * actually see. A grep would pass on a warning string that is present in the file and
+ * never painted — which is precisely the failure this feature exists to prevent.
+ * ═══════════════════════════════════════════════════════════════════════════════════ */
+{
+  const { MAX_ESCALATION_LEVEL } = await import("./src/config.js");
+
+  const begin = html.indexOf("/* ═══ COHORT CYCLE SURFACE — BEGIN");
+  const end = html.indexOf("/* ═══ COHORT CYCLE SURFACE — END");
+  assert.ok(begin > 0 && end > begin,
+    `could not locate the cohort cycle surface block (begin ${begin}, end ${end})`);
+  const source = html.slice(begin, end);
+
+  /* The whole DOM these builders touch. textContent's setter clears children because
+     the real one does. */
+  const mk = (tag) => {
+    const node = { tag, className: "", _text: "", children: [], attrs: {}, style: {},
+      title: "", parent: null };
+    Object.defineProperty(node, "textContent", {
+      get() { return node._text; },
+      set(v) { node._text = v == null ? "" : String(v); node.children.length = 0; },
+    });
+    node.appendChild = (kid) => { kid.parent = node; node.children.push(kid); return kid; };
+    node.append = (...kids) => { for (const kid of kids) if (kid) { kid.parent = node; node.children.push(kid); } };
+    node.setAttribute = (k, v) => { node.attrs[k] = String(v); };
+    return node;
+  };
+  const dashNode = (tag, cls, text) => {
+    const n = mk(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = String(text);
+    return n;
+  };
+  const cycle = new Function("dashNode", source +
+    "\nreturn { CYCLE_LEVELS, cycleLevelInfo, cycleLevelChip, cycleLevelNote," +
+    " stampCallWithLevel, cycleCountdown, renderCycleCard, renderCycleStrain," +
+    " renderCycleHistory };")(dashNode);
+
+  const walk = (node, out = []) => { out.push(node); for (const kid of node.children) walk(kid, out); return out; };
+  const textOf = (node) => walk(node).map((n) => n.textContent).filter(Boolean).join(" ");
+  const classesOf = (node) => walk(node).map((n) => n.className).filter(Boolean);
+
+  /* ── 1 · THE LADDER THE PAGE PROMISES IS THE LADDER THE ENGINE HAS ──────────
+     There is no L5: no level publishes a safety-failed coin. A sixth row here would
+     promise the reader a rung the desk does not have, so it is checked against the
+     engine's own constant rather than against a number typed twice. */
+  assert.equal(cycle.CYCLE_LEVELS.length, MAX_ESCALATION_LEVEL + 1,
+    `the page describes ${cycle.CYCLE_LEVELS.length} levels; config.MAX_ESCALATION_LEVEL is ${MAX_ESCALATION_LEVEL}`);
+  assert.deepEqual(cycle.CYCLE_LEVELS.map((l) => l.level), [0, 1, 2, 3, 4],
+    `page levels are ${JSON.stringify(cycle.CYCLE_LEVELS.map((l) => l.level))}`);
+  assert.equal(cycle.cycleLevelInfo(5), null,
+    `cycleLevelInfo(5) returned ${JSON.stringify(cycle.cycleLevelInfo(5))} — there is no L5`);
+  /* NULL IS NOT ZERO. A call published outside a cohort had no quota pursuing it. */
+  assert.equal(cycle.cycleLevelInfo(null), null, "a null level must not resolve to L0");
+  assert.equal(cycle.cycleLevelChip(null).textContent, "no quota",
+    `a call with no cycle renders as ${JSON.stringify(cycle.cycleLevelChip(null).textContent)}`);
+
+  /* ── 2 · AN L0 CALL AND AN L3 CALL DO NOT LOOK THE SAME ─────────────────────
+     Rendered, both of them, and every claim below prints the text it read. */
+  const stamp = (level, cycleId = 7) => {
+    const card = mk("div");
+    card.className = "call offered";
+    const header = mk("header");
+    card.appendChild(header);
+    const out = cycle.stampCallWithLevel(card, header, { escalation_level: level, cycle_id: cycleId });
+    return { card, header, ...out };
+  };
+  const zero = stamp(0), three = stamp(3);
+
+  assert.equal(zero.chip.textContent, "L0 · normal",
+    `the L0 chip reads ${JSON.stringify(zero.chip.textContent)}`);
+  assert.equal(three.chip.textContent, "L3 · manufactured story",
+    `the L3 chip reads ${JSON.stringify(three.chip.textContent)}`);
+  assert.notEqual(zero.chip.textContent, three.chip.textContent,
+    "an L0 and an L3 chip must not read the same");
+  assert.equal(zero.chip.className, "lvl lvl0",
+    `the L0 chip's classes are ${JSON.stringify(zero.chip.className)}`);
+  assert.equal(three.chip.className, "lvl lvl3",
+    `the L3 chip's classes are ${JSON.stringify(three.chip.className)}`);
+  /* The card itself is marked at L2+, on an edge the offered/skipped verdict does not
+     own, so a reach cannot be hidden by whichever verdict the floor gave. */
+  assert.equal(zero.card.className, "call offered",
+    `an L0 card's classes are ${JSON.stringify(zero.card.className)}`);
+  assert.match(three.card.className, /\breached\b/,
+    `an L3 card's classes are ${JSON.stringify(three.card.className)}`);
+
+  const zeroText = textOf(zero.card), threeText = textOf(three.card);
+  assert.match(zeroText, /it cleared the desk's normal bar\. Nothing was relaxed for the quota\./,
+    `the L0 card reads: ${JSON.stringify(zeroText)}`);
+  assert.doesNotMatch(zeroText, /REACHED/,
+    `an L0 card must not carry a reach warning; it reads: ${JSON.stringify(zeroText)}`);
+  assert.match(threeText, /REACHED — published at L3 because the cycle was short of quota/,
+    `the L3 card reads: ${JSON.stringify(threeText)}`);
+  assert.match(threeText, /the X read called this coin's story manufactured/,
+    `the L3 card does not say what was relaxed; it reads: ${JSON.stringify(threeText)}`);
+  /* THE SAFETY FLOOR IS STATED ON THE CARD, because "we reached" and "we lowered the
+     floor" are different claims and the reader must not have to guess which one. */
+  assert.match(threeText, /Every safety gate still passed/,
+    `the L3 card does not say the safety gates held: ${JSON.stringify(threeText)}`);
+  assert.match(three.note.className, /reach/,
+    `the L3 note's classes are ${JSON.stringify(three.note.className)}`);
+  assert.equal(zero.note.className, "dp-note",
+    `the L0 note's classes are ${JSON.stringify(zero.note.className)}`);
+
+  /* L1 IS EFFORT, NOT A REACH. Marking it as one would cry wolf on the level that
+     costs money and lowers nothing. */
+  const one = stamp(1);
+  assert.equal(one.card.className, "call offered",
+    `an L1 card's classes are ${JSON.stringify(one.card.className)} — L1 relaxes no standard`);
+  assert.match(textOf(one.card), /Effort only — no standard was lowered for this call\./,
+    `the L1 card reads: ${JSON.stringify(textOf(one.card))}`);
+
+  /* ── 3 · NOTHING CLAIMS A QUOTA CALL IS EQUIVALENT ──────────────────────────
+     Every relaxed level must say so in the same words, and no level may carry the
+     opposite claim. Driven over the whole table so a sixth level cannot ship silent. */
+  for (const level of cycle.CYCLE_LEVELS.filter((l) => l.reach)) {
+    assert.match(level.line, /not as good as a call that cleared at L0/,
+      `L${level.level} does not disclaim equivalence; it reads: ${JSON.stringify(level.line)}`);
+    assert.match(level.line, /short of quota/,
+      `L${level.level} does not say WHY it was relaxed; it reads: ${JSON.stringify(level.line)}`);
+  }
+  for (const level of cycle.CYCLE_LEVELS) {
+    assert.doesNotMatch(level.line, /just as good|as good as an? L0|equivalent|no different|same quality/i,
+      `L${level.level} implies equivalence: ${JSON.stringify(level.line)}`);
+  }
+
+  /* ── 4 · THE CURRENT CYCLE, IN THE OWNER'S OWN SENTENCE ─────────────────────── */
+  const pursuing = cycle.renderCycleCard({ maxLevel: MAX_ESCALATION_LEVEL, enabled: true,
+    current: { id: 7, quota: 3, published: 2, short: 1, level: 2, label: "conviction",
+      passes: 3, pursuitOver: false, waiting: false, holdingFor: [], overdue: false,
+      relaxations: ["L2: conviction floor lowered to 35 (tier 1) — the cycle was short of quota"],
+      ageMs: 60_000, forceCloseInMs: 21_540_000, maxAgeMs: 21_600_000,
+      calls: [{ escalationLevel: 0 }, { escalationLevel: 2 }] } });
+  const pursuingText = textOf(pursuing);
+  assert.match(pursuingText, /Cycle 7 — 2 of 3 published, at level L2/,
+    `the cycle card reads: ${JSON.stringify(pursuingText.slice(0, 200))}`);
+  assert.match(pursuingText, /Still pursuing: 1 short of quota, on pass 3/,
+    `the cycle card does not say it is still pursuing: ${JSON.stringify(pursuingText)}`);
+  assert.match(pursuingText, /stops at L4/,
+    `the cycle card does not name the top of the ladder: ${JSON.stringify(pursuingText)}`);
+  assert.match(pursuingText, /a cycle that cannot find 3 publishes what it found and records the shortfall/,
+    "the card must say a shortfall is recorded, never filled");
+  /* The relaxation wording comes from config.js, which prefixes each string with its own
+     level ("L2: conviction floor lowered…"). Rendered after a sentence that already names
+     the level it read "escalated to L2. L2: conviction floor lowered…" — measured on the
+     rendered page, not guessed — so the duplicate prefix is stripped. */
+  assert.match(pursuingText, /This cycle has escalated to L2: conviction floor lowered to 35 \(tier 1\)/,
+    `the escalation line rendered as: ${JSON.stringify(pursuingText)}`);
+  assert.doesNotMatch(pursuingText, /L2: L2:|escalated to L2\. L2:/,
+    `the level prefix is printed twice: ${JSON.stringify(pursuingText)}`);
+  /* THE INSTRUMENT ITSELF REFUSES THE EQUIVALENCE, not only the cards on it. */
+  assert.match(pursuingText, /a call published at a higher level is not as good as one that cleared at L0/,
+    `the cycle card does not disclaim equivalence: ${JSON.stringify(pursuingText)}`);
+  assert.match(pursuingText, /no escalation and no quota publishes a coin that failed a safety gate/,
+    `the cycle card does not state the safety floor: ${JSON.stringify(pursuingText)}`);
+  /* The quota bar paints one slot per call, coloured by what that call cost. */
+  const bar = walk(pursuing).find((n) => n.className === "cyclebar");
+  assert.ok(bar, "the cycle card has no quota progress bar");
+  assert.deepEqual(bar.children.map((s) => s.className), ["done", "reach", ""],
+    `the three quota slots painted as ${JSON.stringify(bar.children.map((s) => s.className))} for calls at L0, L2 and an empty slot`);
+
+  /* ── 5 · HOLDING, AND THE AGE GUARD'S CLOCK ─────────────────────────────────
+     The cohort waiting on its own calls is the state that looks like a stalled desk
+     from outside and is in fact the model working, so it has to be named. */
+  const holding = cycle.renderCycleCard({ maxLevel: MAX_ESCALATION_LEVEL,
+    current: { id: 8, quota: 3, published: 3, short: 0, level: 1, label: "widen", passes: 2,
+      pursuitOver: true, waiting: true, holdingFor: [41, 42], overdue: false,
+      relaxations: [], ageMs: 1000, forceCloseInMs: 12_000_000, maxAgeMs: 21_600_000,
+      calls: [{ escalationLevel: 0 }, { escalationLevel: 1 }, { escalationLevel: 0 }] } });
+  const holdingText = textOf(holding);
+  assert.match(holding.className, /waiting/,
+    `a holding cycle's card classes are ${JSON.stringify(holding.className)}`);
+  assert.match(holdingText, /waiting for 2 calls to close before the next cycle opens/,
+    `the holding card reads: ${JSON.stringify(holdingText.slice(0, 260))}`);
+  assert.match(holdingText, /3h 20m left before the age guard force-closes it/,
+    `the countdown rendered as: ${JSON.stringify(holdingText)}`);
+  /* A FORCE-CLOSE IS NOT A CANCELLATION. The still-open calls keep being monitored and
+     exited; they only stop holding the gate. Saying otherwise would read as the desk
+     abandoning live positions. */
+  assert.match(holdingText, /They stay live and keep being monitored and exited/,
+    `the holding card does not say what a force-close does: ${JSON.stringify(holdingText)}`);
+  assert.equal(cycle.cycleCountdown(12_000_000), "3h 20m",
+    `cycleCountdown(12000000) = ${JSON.stringify(cycle.cycleCountdown(12_000_000))}`);
+  assert.equal(cycle.cycleCountdown(1_080_000), "18m",
+    `cycleCountdown(1080000) = ${JSON.stringify(cycle.cycleCountdown(1_080_000))}`);
+
+  /* Past the guard and not yet settled: the read never force-closes, so it says so. */
+  const overdue = cycle.renderCycleCard({ maxLevel: MAX_ESCALATION_LEVEL,
+    current: { id: 9, quota: 1, published: 1, short: 0, level: 4, label: "band", passes: 5,
+      pursuitOver: true, waiting: true, holdingFor: [77], overdue: true, relaxations: [],
+      ageMs: 22_000_000, forceCloseInMs: 0, maxAgeMs: 21_600_000,
+      calls: [{ escalationLevel: 4 }] } });
+  assert.match(textOf(overdue), /Past the age guard — it will be force-closed on the desk's next pursuit pass/,
+    `the overdue card reads: ${JSON.stringify(textOf(overdue).slice(0, 260))}`);
+  assert.match(textOf(overdue), /If this line persists, the pursuit loop has stopped/,
+    "an overdue cycle that never clears is itself a signal, and the page says so");
+  const overdueBar = walk(overdue).find((n) => n.className === "cyclebar");
+  assert.deepEqual(overdueBar.children.map((s) => s.className), ["hard"],
+    `an L4 quota slot paints as ${JSON.stringify(overdueBar.children.map((s) => s.className))}`);
+
+  /* No cycle open is a normal state between cohorts, not an error. */
+  const idle = cycle.renderCycleCard({ maxLevel: MAX_ESCALATION_LEVEL, enabled: true, current: null });
+  assert.match(textOf(idle), /No cycle is open/,
+    `with no open cycle the card reads: ${JSON.stringify(textOf(idle))}`);
+  const off = cycle.renderCycleCard({ maxLevel: MAX_ESCALATION_LEVEL, enabled: false, current: null });
+  assert.match(textOf(off), /cohort gate is switched off \(CYCLE_COHORT=0\)/,
+    `with the gate disabled the card reads: ${JSON.stringify(textOf(off))}`);
+
+  /* ── 6 · THE STRAIN SIGNAL ──────────────────────────────────────────────────
+     Regularly reaching L3/L4, or regularly falling short, is the owner's evidence that
+     the funnel is too tight or the market is bad. It is more useful than a green
+     number, and it must appear on the page rather than only on the wire. */
+  const strained = cycle.renderCycleStrain({ straining: true, cycles: 6, reaching: 4,
+    reachingPct: 67, short: 2, shortPct: 33, forced: 1,
+    headline: "The quota is straining: 4 of the last 6 closed cycles reached L3 or L4 (67%) " +
+      "and 2 fell short of quota (33%), with 1 force-closed on the age guard. That is evidence the " +
+      "funnel is too tight or the market is bad. It is not a reason to lower the safety floor." });
+  const strainedText = textOf(strained);
+  assert.match(strained.className, /\bon\b/,
+    `a straining signal's classes are ${JSON.stringify(strained.className)}`);
+  assert.match(strainedText, /The quota is straining/,
+    `the strain box reads: ${JSON.stringify(strainedText)}`);
+  assert.match(strainedText, /4 of the last 6 closed cycles reached L3 or L4 \(67%\)/,
+    "the strain box shows its counts, not an adjective");
+  assert.match(strainedText, /not a reason to lower the safety floor/,
+    `the strain box does not name the remedy that is unavailable: ${JSON.stringify(strainedText)}`);
+
+  const calm = cycle.renderCycleStrain({ straining: false, cycles: 6, reaching: 0,
+    reachingPct: 0, short: 0, shortPct: 0, forced: 0,
+    headline: "Not straining: over the last 6 closed cycles the desk reached L3 or L4 in 0 (0%) " +
+      "and fell short of quota in 0 (0%), both under the 34% bar." });
+  assert.equal(calm.className, "strain",
+    `a calm signal's classes are ${JSON.stringify(calm.className)}`);
+  assert.doesNotMatch(textOf(calm), /The quota is straining/,
+    `a calm desk must not print the alarm; it reads: ${JSON.stringify(textOf(calm))}`);
+  assert.match(textOf(calm), /reached L3 or L4 in 0 \(0%\)/,
+    "even the quiet case shows the counts behind it");
+
+  /* ── 7 · HISTORY: shortfall and force-close are visible, never smoothed ────── */
+  const history = cycle.renderCycleHistory([
+    { id: 12, quota: 3, published: 1, levelReached: 4, shortfall: true, forcedClose: true,
+      forcedOpenIds: [88], realisedPnlPct: -22.4, stillLive: 1, open: false },
+    { id: 11, quota: 3, published: 3, levelReached: 0, shortfall: false, forcedClose: false,
+      forcedOpenIds: [], realisedPnlPct: 13.5, stillLive: 0, open: false },
+  ]);
+  const historyText = textOf(history);
+  assert.match(historyText, /Cycle 12 1 of 3 published/,
+    `the history row reads: ${JSON.stringify(historyText.slice(0, 300))}`);
+  assert.match(historyText, /short 1\/3/,
+    `a short cohort is not marked SHORT: ${JSON.stringify(historyText)}`);
+  assert.match(historyText, /force-closed · 1 still live/,
+    `a force-closed cohort does not name what was still open: ${JSON.stringify(historyText)}`);
+  /* And says it ONCE. Measured on the rendered row: it read "FORCE-CLOSED · 1 STILL LIVE
+     1 still live", the pill and the plain count both firing on the same fact. */
+  assert.equal((historyText.match(/still live/g) || []).length, 1,
+    `"still live" appears ${(historyText.match(/still live/g) || []).length} times in: ${JSON.stringify(historyText)}`);
+  assert.match(historyText, /-22\.4% realised/, "each cohort shows its realised P&L");
+  assert.match(historyText, /\+13\.5% realised/, "including the ones that worked");
+  assert.match(historyText, /a cycle that publishes one honest call is worth more than three with two that cannot be sold/,
+    `the history does not state the shortfall rule: ${JSON.stringify(historyText)}`);
+  /* The level each cohort reached is on its row, so the reader can pair a P&L with the
+     effort behind it rather than reading a bare percentage. */
+  assert.ok(classesOf(history).includes("lvl lvl4") && classesOf(history).includes("lvl lvl0"),
+    `history rows carry level chips: ${JSON.stringify(classesOf(history).filter((c) => c.startsWith("lvl")))}`);
+
+  /* ── 8 · THE PAGE ACTUALLY WIRES IT UP ──────────────────────────────────────
+     The builders above are useless if nothing calls them, and a call sheet with no
+     cycle card is exactly the silent state this feature replaces. */
+  assert.match(html, /call_api\("\/api\/cycle"\)/,
+    "the page never fetches the cycle route");
+  assert.equal((html.match(/paintCycleSurface\(/g) || []).length, 4,
+    `paintCycleSurface is defined once and called from three panels; found ${(html.match(/paintCycleSurface\(/g) || []).length} occurrences`);
+  assert.match(html, /paintCycleSurface\(callsCycleSlot, \{ history: true \}\)/,
+    "the Calls → Published panel shows the cycle with its history");
+  assert.match(html, /paintCycleSurface\(cycleSlot, \{ history: false \}\)/,
+    "the Overview shows the current cycle");
+  assert.match(html, /paintCycleSurface\(visitorCycleSlot, \{ history: false \}\)/,
+    "a visitor with no floor open still sees what the house desk's quota is doing");
+  /* EVERY LIST OF CALLS CARRIES THE LEVEL. Two places list calls: the call cards and
+     the Overview's recent summary. A view where an L3 and an L0 are indistinguishable
+     is a silent lowering wherever it is. */
+  assert.match(html, /stampCallWithLevel\(el, h, c\)/,
+    "the call cards are not stamped with the level they were published at");
+  assert.match(html, /row\.appendChild\(cycleLevelChip\(call\.escalation_level\)\)/,
+    "the Overview's recent-calls list drops the level");
+  /* The server has to send it: copy.feedFor selects an explicit column list, so the
+     stamp is put back in office.js. If that is removed, every card reads as no-quota. */
+  assert.match(officeSource, /withEscalation\(copy\.feedFor\(floorNo/,
+    "the floor feed no longer carries the cohort stamp, so no card can show a level");
+}
+
+console.log("dashboard HUD, candidate separation, WALL-ST-E boundary, runner fork, install walkthrough, HQ consent, Callouts contract, and the cohort cycle surface pass");

@@ -11,6 +11,10 @@ import { bus, backlog, emit, runFor, chronicleRead } from "./lib/bus.js";
 import { census as funnelCensus } from "./funnel.js";
 import { spend, spendSince, spendBySeat } from "./lib/llm.js";
 import { cfg } from "./config.js";
+/* The cohort cycle's own constants. Imported, never re-declared: the ladder has exactly
+   one definition (config.js) and the classification exactly one (calls.js GATE_CLASS).
+   A second copy of "how many levels there are" is how an L5 gets invented by accident. */
+import { CYCLE, MAX_ESCALATION_LEVEL, escalationPlan } from "./config.js";
 import * as store from "./lib/store.js";
 import db from "./lib/store.js";
 import { reconcileMissingEntryAlerts, reconcileMissingExitAlerts } from "./alerts.js";
@@ -321,6 +325,158 @@ export function sanitizeExecutorHealth(value) {
     runtimeCommit: commit,
     runtimeFingerprint,
   };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════════
+ * THE COHORT CYCLE, MADE VISIBLE
+ *
+ * The engine (calls.js, penthouse.js, config.js) already decides everything: the quota,
+ * the L0-L4 ladder, and the safety floor that no level and no quota reaches past. This
+ * file adds no policy. It reads the ledger and hands the owner the one thing the engine
+ * cannot give them — a look at whether the quota is healthy or straining.
+ *
+ * WHY A STRAIN NUMBER AND NOT A GREEN TICK. "Three published" is a number the desk can
+ * always reach by reaching further, so on its own it says nothing. What the owner needs
+ * is the COST of reaching it: how often the desk had to go to L3/L4, how often it fell
+ * short anyway, how often the age guard had to force a cohort open. Regularly reaching
+ * L3/L4 is evidence that the funnel is too tight or the market is bad — and the correct
+ * response to that is to widen the funnel or wait, never to lower the safety floor.
+ * Measured on the last 100 kills, ~60 are safety mechanics (18 cannot_exit alone, where
+ * the round-trip probe PROVED the position could not be sold), so a quota filled from
+ * that pool is three bags rather than three trades.
+ * ═══════════════════════════════════════════════════════════════════════════════════ */
+
+/** Fewer than this many CLOSED cycles is an anecdote, not a pattern. One bad night on a
+ *  dead market must not read as "the funnel is broken". */
+export const STRAIN_MIN_CYCLES = 3;
+/** A third. Reaching L3+ (or falling short) in one cycle out of three is not a run of
+ *  bad luck — it is the shape of the funnel, and the owner should be told plainly. */
+export const STRAIN_PCT = 34;
+
+/**
+ * Is the quota straining, and on what evidence? Pure — takes the history rows, returns
+ * counts. Closed cycles only: a cycle still pursuing has not finished escalating, so
+ * counting it would report a healthy desk as straining every time it opens a cohort.
+ */
+export function cycleStrain(history = []) {
+  const closed = history.filter((c) => c.closedAt != null);
+  const cycles = closed.length;
+  const reaching = closed.filter((c) => Number(c.levelReached) >= 3).length;
+  const short = closed.filter((c) => c.shortfall).length;
+  const forced = closed.filter((c) => c.forcedClose).length;
+  const pct = (n) => (cycles ? Math.round((n / cycles) * 100) : 0);
+  const reachingPct = pct(reaching), shortPct = pct(short);
+  const enough = cycles >= STRAIN_MIN_CYCLES;
+  const straining = enough && (reachingPct >= STRAIN_PCT || shortPct >= STRAIN_PCT);
+  return {
+    cycles, reaching, reachingPct, short, shortPct, forced, forcedPct: pct(forced),
+    minCycles: STRAIN_MIN_CYCLES, thresholdPct: STRAIN_PCT, enough, straining,
+    /* The sentence, written once on the server so the page cannot soften it. It names
+       the remedy that is NOT available, because that is the pressure this whole design
+       exists to resist. */
+    headline: !enough
+      ? `Only ${cycles} closed cycle${cycles === 1 ? "" : "s"} on record — too few to call the funnel healthy or strained.`
+      : straining
+        ? `The quota is straining: ${reaching} of the last ${cycles} closed cycles reached L3 or L4 (${reachingPct}%) ` +
+          `and ${short} fell short of quota (${shortPct}%)${forced ? `, with ${forced} force-closed on the age guard` : ""}. ` +
+          `That is evidence the funnel is too tight or the market is bad. It is not a reason to lower the safety floor.`
+        : `Not straining: over the last ${cycles} closed cycles the desk reached L3 or L4 in ${reaching} (${reachingPct}%) ` +
+          `and fell short of quota in ${short} (${shortPct}%), both under the ${STRAIN_PCT}% bar.`,
+  };
+}
+
+/** One history row, in the wire shape the page reads. camelCase on purpose: the SQL row
+ *  is an implementation detail and a column rename must not silently blank a card. */
+const cycleHistoryRow = (c) => ({
+  id: c.id, openedAt: c.opened_at, closedAt: c.closed_at ?? null,
+  open: c.closed_at == null,
+  quota: c.quota, published: c.calls, levelReached: c.escalation_level_reached,
+  shortfall: !!c.shortfall, forcedClose: !!c.forced_close,
+  forcedOpenIds: (() => { try { return JSON.parse(c.forced_open_ids || "null") || []; } catch { return []; } })(),
+  closeReason: c.close_reason ?? null,
+  stillLive: c.stillLive, realisedPnlPct: c.realisedPnlPct,
+  levels: c.levels ?? [],
+});
+
+/**
+ * THE WHOLE OWNER-FACING CYCLE SURFACE, in one payload.
+ *
+ * `current` is null when no cohort is open — which is a normal state between cycles and
+ * must not render as an error. `waiting` is the cohort model's own gate: the cycle has
+ * stopped pursuing and is holding for its published calls to close. `forceCloseInMs` is
+ * the deadlock guard's clock, and it is surfaced because a guard nobody can see fire is
+ * not a guard.
+ */
+export function cycleSurfacePayload(now = Date.now(), limit = 20) {
+  const status = calls.cycleStatus(now);
+  const rows = calls.cycleHistory(limit).map(cycleHistoryRow);
+  const ladder = [];
+  for (let level = 0; level <= MAX_ESCALATION_LEVEL; level++) {
+    const plan = escalationPlan(level);
+    ladder.push({ level, label: plan.label, relaxations: plan.relaxations });
+  }
+  let current = null;
+  if (status.open) {
+    const plan = escalationPlan(status.level);
+    current = {
+      id: status.id, openedAt: status.openedAt, quota: status.quota,
+      published: status.published, short: status.short,
+      level: status.level, label: plan.label, relaxations: plan.relaxations,
+      passes: status.passes, pursuitOver: status.pursuitOver,
+      /* HOLDING, not merely open: pursuit is finished and calls are still working. This
+         is the state the owner most needs named, because it is the one that looks like
+         a stalled desk from outside and is in fact the cohort model working. */
+      waiting: status.pursuitOver && status.liveCallIds.length > 0,
+      holdingFor: status.liveCallIds,
+      ageMs: status.ageMs, forceCloseInMs: status.forceCloseInMs, maxAgeMs: CYCLE.maxAgeMs,
+      /* PAST THE AGE GUARD, NOT YET SETTLED. This route READS the ledger and never
+         writes it — a GET that force-closes a cohort is a second, unaudited author of
+         the gate, and the deadlock guard belongs to the desk's own pursuit lane
+         (beginCyclePass → settleCycles) and to closeCall. So when the clock has run
+         out the surface says exactly that, rather than showing "due now" forever and
+         implying the guard is broken when in fact the desk simply has not passed yet.
+         A stale `overdue` is itself the signal that the pursuit loop has stopped. */
+      overdue: status.forceCloseInMs <= 0,
+      calls: calls.cycleCalls(status.id).map((k) => ({
+        id: k.id, mint: k.mint, symbol: k.symbol, status: k.status,
+        escalationLevel: k.escalation_level, openedAt: k.opened_at, closedAt: k.closed_at ?? null,
+      })),
+    };
+  }
+  return {
+    enabled: CYCLE.enabled, quota: CYCLE.quota, maxAgeMs: CYCLE.maxAgeMs,
+    maxLevel: MAX_ESCALATION_LEVEL, ladder,
+    current, history: rows, strain: cycleStrain(rows),
+    /* Said on the wire, not only in the page's copy, so no consumer of this route can
+       render a quota-filled call as an equal of one that cleared normally. */
+    note: "The level is how far the desk had to reach to publish. A higher level is not a better call — " +
+      "L0 cleared the desk's normal bar and nothing above it did. The safety floor is identical at every level: " +
+      "no escalation and no quota publishes a coin that failed a safety gate.",
+  };
+}
+
+/**
+ * THE LEVEL TRAVELS WITH THE CALL.
+ *
+ * copy.feedFor selects an explicit column list (deliberately — a column added to `calls`
+ * must not silently join a floor feed), so the cohort stamp is not on a feed row. The
+ * card cannot show what the desk had to reach for unless it is put back, and a call
+ * whose level is invisible is exactly the "silent lowering" the cohort spec forbids.
+ * Read-only, keyed by call id, and wrapped: a feed must never fail because a stamp did.
+ */
+export function withEscalation(rows) {
+  if (!Array.isArray(rows) || !rows.length) return rows;
+  try {
+    const ids = [...new Set(rows.map((r) => Number(r.call_id)).filter(Number.isFinite))];
+    if (!ids.length) return rows;
+    const stamp = new Map(db.prepare(
+      `SELECT id, cycle_id, escalation_level FROM calls WHERE id IN (${ids.map(() => "?").join(",")})`,
+    ).all(...ids).map((r) => [r.id, r]));
+    return rows.map((r) => {
+      const s = stamp.get(Number(r.call_id));
+      return { ...r, cycle_id: s?.cycle_id ?? null, escalation_level: s?.escalation_level ?? null };
+    });
+  } catch { return rows; }
 }
 
 /** Serves the trading floor and streams the desk's real events to it. */
@@ -797,6 +953,17 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           return json(200, { live: calls.liveCalls(), recent: calls.recentCalls(queryLimit(url, 20, 200)), stats: calls.stats() });
         }
         if (url.pathname === "/api/calls/stats") return json(200, calls.stats());
+
+        /* ── THE COHORT CYCLE: the quota, what it cost, and whether it is straining ──
+           Read-only and computed from the cycles ledger on every request. Gated with the
+           same insider() the rest of the house's read surface uses, so the whole call
+           record can be re-closed in one line rather than in eleven. */
+        if (url.pathname === "/api/cycle" && !insider())
+          return json(403, { private: true, error: "the cycle ledger is for tenants and the house" });
+        if (url.pathname === "/api/cycle") {
+          if (req.method !== "GET") return json(405, { error: "method not allowed" });
+          return json(200, cycleSurfacePayload(Date.now(), queryLimit(url, 20, 100)));
+        }
 
         // The exact free-screened market board before Claude/Grok/CEO judgement.
         // Candidates are deliberately distinct from published calls.
@@ -1710,7 +1877,9 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               : leasing.leaseFor(floorNo)?.wallet === me);
             const st = copy.settingsFor(floorNo);
             const settings = floorFeedSettingsForViewer(st, { isOwner });
-            return json(200, { feed: copy.feedFor(floorNo, queryLimit(url, 25, 200)), settings,
+            /* withEscalation puts the cohort stamp back on each row. The card shows the
+               level it was published at, so an L3 call cannot look like an L0 one. */
+            return json(200, { feed: withEscalation(copy.feedFor(floorNo, queryLimit(url, 25, 200))), settings,
                                appetites: copy.APPETITES, rent: leasing.rentStatus(floorNo),
                                record: perf.recordFor(floorNo) });
           }

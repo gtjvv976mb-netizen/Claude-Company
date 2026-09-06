@@ -18,6 +18,12 @@ const num = (k, d) => (process.env[k] ? Number(process.env[k]) : d);
 
 export const CHARTER = fs.readFileSync(path.join(ROOT, "DESK.md"), "utf8");
 
+/* THE OPEN CYCLE'S BAND WINDOW, or null when nothing is widened. Module-scoped
+   because it is a property of the DESK's current pursuit, not of any one coin, and
+   because the two screens that must honour it are not otherwise related. Written only
+   by setCycleBandWindow (see below); read only by the two cfg.screen getters. */
+let _bandWindow = null;
+
 export const cfg = {
   rpc: process.env.SOLANA_RPC || "https://api.mainnet-beta.solana.com",
   birdeyeKey: process.env.BIRDEYE_API_KEY || "",
@@ -80,11 +86,31 @@ minLiquidityUsd: num("DESK_MIN_LIQUIDITY_USD", 12000),
     /* $5k, the floor of the nano sleeve. It sat at $10k while the nano band starts at
      * $5k, so the smallest half of the band the owner asked for was refused as
      * "too_small" by a number nobody had moved. */
-    minMarketCapUsd: num("DESK_MIN_MCAP_USD", 5_000),
+    _minMarketCapUsd: num("DESK_MIN_MCAP_USD", 5_000),
+    /* THE ONLY TWO NUMBERS THE QUOTA LADDER IS ALLOWED TO MOVE.
+     *
+     * They are getters, not constants, because L4 of the escalation ladder widens the
+     * market-cap BAND — and the band is an OPPORTUNITY judgement, stated as such where
+     * it is checked: "a coin this size is perfectly tradeable, it simply is not the
+     * trade this desk exists to find" (evidence.js). Nothing safety-shaped hides behind
+     * these: the liquidity, volume, participation and age floors are per-coin and come
+     * from floorsFor(mcap) — widening the hunt band changes WHICH coins are looked at,
+     * never what any one of them has to clear. A $40m coin admitted at L4 is still
+     * screened against very_high's floors, still exit-probed, still holder-checked.
+     *
+     * A getter rather than an argument because the paid screen (evidence.js) and the
+     * free pre-screen (penthouse.js) both read cfg.screen and neither belongs to this
+     * change. The override is set by exactly one writer — the open cycle, through
+     * setCycleBandWindow — and cleared in a finally, so it can never outlive the pass
+     * that widened it. */
+    get minMarketCapUsd() { return _bandWindow?.mcapMin ?? this._minMarketCapUsd; },
+    set minMarketCapUsd(v) { this._minMarketCapUsd = v; },
     /* $10m, matching the top of the very-high sleeve (categories.js). The two numbers
      * are one taxonomy: a ceiling above the last sleeve creates calls no floor can
      * receive, which is the exact failure the sleeve test was written to catch. */
-    maxMarketCapUsd: num("DESK_MAX_MCAP_USD", 10_000_000),
+    _maxMarketCapUsd: num("DESK_MAX_MCAP_USD", 10_000_000),
+    get maxMarketCapUsd() { return _bandWindow?.mcapMax ?? this._maxMarketCapUsd; },
+    set maxMarketCapUsd(v) { this._maxMarketCapUsd = v; },
   },
 
   // Slippage the desk refuses to accept on a round trip at target size.
@@ -307,3 +333,150 @@ export const MINTS = {
   SOL: "So11111111111111111111111111111111111111112",
   USDC: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
 };
+
+/* ═══════════════════════════════════════════════════════════════════════════════════
+ * THE COHORT CYCLE AND ITS ESCALATION LADDER
+ *
+ * The owner's instruction is that every cycle produces at least three published calls
+ * "at any cost, by any means", and that a new cycle begins once that cycle's calls have
+ * closed. The whole shape of what follows comes from ONE measurement, and it is worth
+ * writing down where the knobs live rather than in a commit message:
+ *
+ *   Of the last 100 kills, ~60 are safety MECHANICS rather than opinions — 18
+ *   cannot_exit (the round-trip probe PROVED the position cannot be sold), 16
+ *   serial_deployer, 9 post_migration_dump, 5 holder_concentration, 4 deployer-has-
+ *   rugged, 4 thin_liquidity, 2 mintable, 2 freezable, 1 wash_suspect.
+ *
+ * Filling a quota out of that pool does not produce three trades. It produces three
+ * bags — and an unsellable bag fails the quota's own purpose, which is to have the desk
+ * actually TRADING. So "by any means" is implemented as MORE EFFORT and RELAXED
+ * JUDGEMENT, on a ladder that is recorded on every call, and the safety floor is never
+ * crossed at any level for any quota. There is no level 5.
+ *
+ * L0 normal      — today's bars, nothing relaxed.
+ * L1 widen       — more candidates, more launchpads, a wider search window. PURE
+ *                  EFFORT: the cost goes up and not one standard moves.
+ * L2 conviction  — accept a lower conviction score, down to a floor that stays above
+ *                  the "would not trade this myself" line.
+ * L3 narrative   — accept a coin the X read calls MANUFACTURED, provided every safety
+ *                  gate passed. This is the largest single judgement gate and it is a
+ *                  model's opinion about attention, not a mechanic that loses money.
+ *                  The other arm of that same seat — "this deployer's own account has
+ *                  rugged before" — is a FACT and stays absolute at every level.
+ * L4 band        — widen the market-cap band and the age window of the SEARCH.
+ *
+ * Read `minAgeFloorMultiplier` below before assuming "age window" means the screen's
+ * minimum pair age. It does not, deliberately.
+ * ═══════════════════════════════════════════════════════════════════════════════════ */
+
+export const MAX_ESCALATION_LEVEL = 4;
+
+export const CYCLE = {
+  /** Three, per the owner. The cycle publishes what it found if it cannot reach it. */
+  quota: num("CYCLE_CALL_QUOTA", 3),
+  /* THE DEADLOCK GUARD. A cohort holds the gate shut until every call it published is
+     closed — so one position that never closes stops the entire desk, permanently, and
+     silently. Past this age the cycle is force-closed and the next opens. Its still-open
+     calls do NOT vanish: they stay live and keep being monitored and exited by the
+     normal lanes (monitorCalls, the 45s fast lane, the executor's mirror). They simply
+     stop holding the gate. */
+  maxAgeMs: num("CYCLE_MAX_AGE_MS", 6 * 3600_000),
+  /** Set CYCLE_COHORT=0 to disable the cohort gate entirely and restore the exact
+      pre-cohort behaviour of every publishing lane. */
+  enabled: process.env.CYCLE_COHORT !== "0",
+
+  /* THE CONVICTION BAR THE LADDER LOWERS. Tier is mandate.js's: 4 the CEO approved it,
+     3 the CEO held it, 2 the PM proposed it, 1 the PM wanted a trigger first.
+     L0/L1 ask for a proposal the PM actually made. */
+  minTier: num("CYCLE_MIN_TIER", 2),
+  minConviction: num("CYCLE_MIN_CONVICTION", 55),
+  /* THE FLOOR AT L2 AND BELOW-NOTHING. "Above the line where I would not trade this
+     myself" is the owner's phrasing; 35 with the PM's own WATCH behind it is a coin the
+     team studied and wanted one more trigger on, which is a maybe — not a no. A PM PASS
+     and a CEO DECLINE are the team's explicit no and stay refused at EVERY level, here
+     as in mandate.js: ranking the team's maybes is not overruling the team. */
+  floorTier: num("CYCLE_FLOOR_TIER", 1),
+  floorConviction: num("CYCLE_FLOOR_CONVICTION", 35),
+};
+
+/**
+ * What the desk is allowed to do differently at each level.
+ *
+ * Every field here is EFFORT or JUDGEMENT. No field of this object can relax a safety
+ * gate, because no safety gate reads it — the classification lives in calls.js
+ * (SAFETY_GATES) and the veto is applied before any of this is consulted.
+ */
+export function escalationPlan(level = 0) {
+  const L = Math.max(0, Math.min(MAX_ESCALATION_LEVEL, Number(level) || 0));
+  const relaxations = [];
+  const plan = {
+    level: L,
+    label: ["normal", "widen", "conviction", "narrative", "band"][L],
+    /* EFFORT (L1+). Multipliers on how many coins are looked at and how long the
+       cycle is allowed to spend looking. The daily money brake in llm.js and the
+       per-cycle budget are NOT touched by any of this — effort can buy more looks, it
+       cannot buy past the money ceiling. */
+    workupMultiplier: 1,
+    perCellMultiplier: 1,
+    huntMultiplier: 1,
+    /** L1 stops the cycle skipping coins simply because a launchpad was unfamiliar. */
+    allLaunchpads: false,
+    /** JUDGEMENT (L2+). */
+    minTier: CYCLE.minTier,
+    minConviction: CYCLE.minConviction,
+    /** JUDGEMENT (L3). The X read's "manufactured" verdict stops ending the workup.
+        Its serial_rugger arm is a FACT and is never covered by this. */
+    acceptManufacturedNarrative: false,
+    /** OPPORTUNITY (L4). The band the SEARCH considers. Per-coin floors are unmoved. */
+    mcapMin: null,
+    mcapMax: null,
+    /** L4 widens the search's age CEILING — it will look at older coins. It never
+        lowers the minimum-age floor, which is why this is a multiplier ≥ 1 on the
+        ceiling and there is deliberately no knob for the floor. See openIssues:
+        `too_new` is classified SAFETY because the research behind it ("rugs express
+        inside the first hour") is a claim about losing money, not about opportunity,
+        and an ambiguous gate is classified SAFETY by rule. */
+    searchAgeCeilingMultiplier: 1,
+    minAgeFloorMultiplier: 1,        // ALWAYS 1. Present so the invariant is testable.
+    relaxations,
+  };
+
+  if (L >= 1) {
+    plan.workupMultiplier = num("CYCLE_L1_WORKUP_X", 2);
+    plan.perCellMultiplier = num("CYCLE_L1_PERCELL_X", 2);
+    plan.huntMultiplier = num("CYCLE_L1_HUNT_X", 2);
+    plan.allLaunchpads = true;
+    relaxations.push("L1: more candidates, every launchpad, a wider sweep — effort only, no standard moved");
+  }
+  if (L >= 2) {
+    plan.minTier = CYCLE.floorTier;
+    plan.minConviction = CYCLE.floorConviction;
+    relaxations.push(`L2: conviction floor lowered to ${plan.minConviction} (tier ${plan.minTier}) — the cycle was short of quota`);
+  }
+  if (L >= 3) {
+    plan.acceptManufacturedNarrative = true;
+    relaxations.push("L3: accepted a coin the X read called the story manufactured — every safety gate still passed");
+  }
+  if (L >= 4) {
+    plan.mcapMin = num("CYCLE_L4_MCAP_MIN", 1_000);
+    plan.mcapMax = num("CYCLE_L4_MCAP_MAX", 40_000_000);
+    plan.searchAgeCeilingMultiplier = num("CYCLE_L4_AGE_X", 4);
+    relaxations.push(`L4: market-cap band widened to $${plan.mcapMin.toLocaleString()}-$${plan.mcapMax.toLocaleString()} and the search's age ceiling to ${plan.searchAgeCeilingMultiplier}x — the minimum-age SAFETY floor is unchanged`);
+  }
+  return plan;
+}
+
+/**
+ * Widen (or clear) the band window the two screens read. ONE writer: the cycle, around
+ * its own pass, in a try/finally. Pass null to clear.
+ *
+ * Deliberately not exported as a mutable variable: a value that can be widened from
+ * anywhere is a safety floor that can be widened from anywhere, and this desk has been
+ * bitten once already by a relaxation nobody could point at afterwards.
+ */
+export function setCycleBandWindow(win) {
+  _bandWindow = win && (win.mcapMin != null || win.mcapMax != null)
+    ? { mcapMin: win.mcapMin ?? null, mcapMax: win.mcapMax ?? null } : null;
+  return _bandWindow;
+}
+export const cycleBandWindow = () => (_bandWindow ? { ..._bandWindow } : null);

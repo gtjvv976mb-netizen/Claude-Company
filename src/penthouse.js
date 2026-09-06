@@ -1,7 +1,8 @@
 import { sweep, classify, CATEGORY_RISK, launchpad } from "./market.js";
 import { gather, screen } from "./data/evidence.js";
 import { workup } from "./desk.js";
-import { openCall, liveCalls, liveCallFor, evaluateExit, closeCall, noteEvent } from "./calls.js";
+import { openCall, liveCalls, liveCallFor, evaluateExit, closeCall, noteEvent,
+  gateFailures, beginCyclePass, recordCyclePublish, cycleStatus, settleCycles } from "./calls.js";
 import { broadcast } from "./copy.js";
 import { announceExit } from "./alerts.js";
 import { listFloors, HQ_FLOOR } from "./tower.js";
@@ -12,7 +13,7 @@ import * as jup from "./data/jupiter.js";
 import { callouts, whaleScore } from "./whales.js";
 import { recordWhaleCallout } from "./identity.js";
 import { regime } from "./data/regime.js";
-import { cfg, floorsFor } from "./config.js";
+import { cfg, floorsFor, CYCLE, MAX_ESCALATION_LEVEL, escalationPlan, setCycleBandWindow } from "./config.js";
 import * as store from "./lib/store.js";
 import * as shadow from "./shadow.js";
 import { buildBoard, selectAcrossBoard, CAP_BANDS, COIN_TYPES } from "./categories.js";
@@ -463,8 +464,68 @@ export async function runPenthouseCycle({
         openedAt: book.holding.opened_at } : null, costUsd: 0 };
   }
 
+  /* ═══ THE COHORT GATE ═══════════════════════════════════════════════════════════
+   *
+   * The owner's instruction: each cycle produces at least three published calls, and a
+   * new cycle begins once THOSE calls have closed. That second half is what this gate
+   * is: while the open cohort still has calls working, the desk does not open another
+   * one. It bounds concurrent exposure to the quota and makes each cohort's P&L
+   * attributable to one cycle instead of smeared across an ever-rolling book.
+   *
+   * The obvious failure mode is a position that never closes taking the whole desk down
+   * with it, so beginCyclePass force-closes a cohort past CYCLE_MAX_AGE_MS (6h) and
+   * leaves its calls live — they keep being monitored and exited by monitorCalls and
+   * the 45-second lane exactly as before, they simply stop holding the gate.
+   *
+   * Standing down still WARMS THE FREE FUNNEL, for the same reason the full-book branch
+   * above does: the single most valuable moment in the desk's day is the one a slot
+   * opens, and arriving at it cold costs four minutes in a market measured in minutes. */
+  let cohort = null;
+  let level = 0;
+  let plan = escalationPlan(0);
+  if (CYCLE.enabled) {
+    cohort = beginCyclePass();
+    if (cohort.waiting) {
+      const warmed = await warmFunnelFn().catch((e) => ({ error: String(e?.message || e) }));
+      const st = cycleStatus();
+      emit("cycle:cohort_waiting", { cycle, cycleId: cohort.cycle.id,
+        published: cohort.published, quota: cohort.quota, level: cohort.level,
+        liveCallIds: cohort.liveCallIds,
+        forceCloseInMin: Math.round((st.forceCloseInMs ?? 0) / 60000), warmed,
+        note: "the cohort's calls are still working — a new cycle opens the moment the last one closes, " +
+          "or when the deadlock guard force-closes this one" });
+      /* considered/ranked are zeroed rather than omitted: index.js prints them on every
+         cycle line, and an `undefined seen` in the operator's log reads as a fault. */
+      return { cycle, skipped: "cohort_open", cycleId: cohort.cycle.id, opened: 0, workedUp: 0,
+        considered: 0, ranked: 0, warmed, costUsd: 0, quota: cohort.quota,
+        published: cohort.published, level: cohort.level, waitingOn: cohort.liveCallIds };
+    }
+    level = cohort.level;
+    plan = escalationPlan(level);
+    /* L4 ONLY: the SEARCH band. Set here and cleared at cycle end. Re-set on every
+       cycle start, so an exception that skips the clear self-heals on the next pass
+       rather than leaving a widened window behind it. Nothing safety-shaped is in it —
+       the per-coin liquidity, volume, participation and age floors come from
+       floorsFor(mcap) and are untouched at every level. */
+    setCycleBandWindow(plan.mcapMin != null || plan.mcapMax != null ? plan : null);
+    if (level > 0)
+      emit("cycle:escalation", { cycle, cycleId: cohort.cycle.id, level, label: plan.label,
+        published: cohort.published, quota: cohort.quota, relaxations: plan.relaxations,
+        note: "the safety floor is unchanged at this and every level" });
+  } else {
+    setCycleBandWindow(null);
+  }
+  /* EFFORT (L1+): more coins, more cells, a longer hunt. Cost goes up; no standard
+     moves. The daily money brake in llm.js and CYCLE_BUDGET_USD still bind. */
+  workups = Math.max(1, Math.round(workups * plan.workupMultiplier));
+  const perCell = Math.max(1, Math.round(PER_CELL * plan.perCellMultiplier));
+  /** How many calls this pass is still trying to publish. 1 without a cohort — exactly
+      the pre-cohort mandate of "every cycle ends in a call". */
+  const want = cohort ? Math.max(0, cohort.quota - cohort.published) : 1;
+
   const startSpend = spend.usd;
-  emit("cycle:start", { cycle, desk: "penthouse" });
+  emit("cycle:start", { cycle, desk: "penthouse", cycleId: cohort?.cycle.id ?? null,
+    level, want, workups });
 
   // MURDOCK reads the weather once per cycle. Risk-off (SOL and BTC both
   // negative over ~25d) grounds the ESTABLISHED sleeve — the one whose returns
@@ -579,7 +640,7 @@ export async function runPenthouseCycle({
    * workup inside one band and learn nothing about the rest of the market — and an
    * empty cell would never even be noticed. Here an empty cell is a finding: "nothing
    * legitimate under $100k this hour" is worth knowing and used to be invisible. */
-  const board = buildBoard(scored, { perCell: PER_CELL, viable: (c) => wouldSurviveScreen(c) === null });
+  const board = buildBoard(scored, { perCell, viable: (c) => wouldSurviveScreen(c) === null });
   // Preserve the exact free-screened shortlist before any paid analyst or choosing
   // seat sees it. The UI labels these candidates, never calls.
   try { recordCandidateBoard(cycle, board, { considered: universe.length }); }
@@ -704,7 +765,8 @@ export async function runPenthouseCycle({
     const hook = `house scan · ${c.category}${c.launchpad ? ` · ${c.launchpad}` : ""}`;
     let rec;
     try {
-      rec = await runFor(null, () => workup(cycle, c.mint, hook, { alwaysTicket: SEQUENTIAL }));
+      rec = await runFor(null, () => workup(cycle, c.mint, hook,
+        { alwaysTicket: SEQUENTIAL, escalationLevel: level }));
     } catch (e) {
       // Out of credit is terminal: the remaining candidates cannot be worked up either,
       // and the cycle should end with what it has rather than crash the process.
@@ -833,7 +895,8 @@ export async function runPenthouseCycle({
 
   if (winner) {
     const pub = publishCall(winner.rec, { category: winner.category, launchpad: winner.launchpad, wx,
-      bestPick: winner.bestPick ?? null });
+      bestPick: winner.bestPick ?? null,
+      escalation: cohort ? level : null, cycleId: cohort?.cycle.id ?? null });
     if (pub.callId) opened.push({ id: pub.callId, symbol: winner.rec?.symbol });
     // Out of the ready pool: the desk is holding this one, not still shopping for it.
     try { funnel.retire(winner.rec?.mint, "published as a call"); } catch {}
@@ -852,16 +915,22 @@ export async function runPenthouseCycle({
    * never do is reach past eligibility: a cycle where every candidate failed a measured
    * safety fact ends with no call, and says so. That is not the desk refusing to
    * decide, it is the market not having offered anything holdable. */
-  if (!opened.length && eligible.length > 1) {
+  /* AND THEN THE REST OF THE COHORT'S QUOTA. Without a cohort `want` is 1 and this is
+     the pre-existing fallback verbatim: take the next eligible rather than end empty.
+     With one, the same walk keeps going until the quota is met — from the SAME eligible
+     field, which has already cleared the safety screen, all five analysts, the red team
+     and compliance. It never reaches past eligibility to find a third. */
+  if (opened.length < want && eligible.length > 1) {
     for (const cand of eligible) {
+      if (opened.length >= want) break;
       if (cand === winner) continue;
-      const pub = publishCall(cand.rec, { category: cand.category, launchpad: cand.launchpad, wx });
+      const pub = publishCall(cand.rec, { category: cand.category, launchpad: cand.launchpad, wx,
+        escalation: cohort ? level : null, cycleId: cohort?.cycle.id ?? null });
       if (pub.callId) {
         opened.push({ id: pub.callId, symbol: cand.rec?.symbol });
         emit("mandate:fellback", { symbol: cand.rec?.symbol,
-          from: winner?.rec?.symbol ?? null,
+          from: winner?.rec?.symbol ?? null, want, opened: opened.length,
           note: "the first choice could not be published — took the next eligible rather than ending empty" });
-        break;
       }
     }
   }
@@ -873,7 +942,7 @@ export async function runPenthouseCycle({
    * the daily money brake calls time. Those are the only three exits: the
    * mandate can spend the whole day's budget hunting, but it cannot force a
    * seat to lie, because a forced call is just a loss with paperwork. */
-  if (!opened.length && process.env.PENTHOUSE_MUST_CALL !== "0") {
+  if (opened.length < want && process.env.PENTHOUSE_MUST_CALL !== "0") {
     const alreadyTried = new Set(shortlist.map((c) => c.mint));
     let hunted = 0;
     /* THE HUNT NEEDS A CLOCK TOO.
@@ -891,10 +960,11 @@ export async function runPenthouseCycle({
      *
      * A cycle that ends without a call is a fine outcome and the record already says
      * so. A cycle that never ends says nothing at all. */
-    const huntDeadline = Date.now() + Number(process.env.PENTHOUSE_HUNT_BUDGET_MS || 240_000);
-    const huntMax = Number(process.env.PENTHOUSE_HUNT_MAX || 12);
+    const huntDeadline = Date.now() +
+      Number(process.env.PENTHOUSE_HUNT_BUDGET_MS || 240_000) * plan.huntMultiplier;
+    const huntMax = Math.round(Number(process.env.PENTHOUSE_HUNT_MAX || 12) * plan.huntMultiplier);
     for (const c of scored) {
-      if (opened.length) break;
+      if (opened.length >= want) break;
       if (hunted >= huntMax) {
         emit("cycle:hunt_capped", { hunted, note: `stopped after ${huntMax} candidates — the cycle must end` });
         break;
@@ -915,7 +985,7 @@ export async function runPenthouseCycle({
       try {
         rec = await runFor(null, () => workup(cycle,
           c.mint, `the mandate · hunting for this cycle's call · ${c.category}${c.launchpad ? ` · ${c.launchpad}` : ""}`,
-          { alwaysTicket: SEQUENTIAL }));
+          { alwaysTicket: SEQUENTIAL, escalationLevel: level }));
       } catch (e) {
         if (e instanceof OutOfCredit) {
           stopped = e.constructor.name === "BudgetExhausted" ? "daily budget reached mid-hunt" : "out of credit mid-hunt";
@@ -927,7 +997,8 @@ export async function runPenthouseCycle({
       }
       if (!rec || rec.outcome === "no_data") continue;
       workedUp++;
-      const pub = publishCall(rec, { category: c.category, launchpad: c.launchpad, wx });
+      const pub = publishCall(rec, { category: c.category, launchpad: c.launchpad, wx,
+        escalation: cohort ? level : null, cycleId: cohort?.cycle.id ?? null });
       if (pub.callId) opened.push({ id: pub.callId, symbol: rec.symbol });
     }
     if (!opened.length && !stopped)
@@ -935,12 +1006,41 @@ export async function runPenthouseCycle({
         "the mandate ranks conviction, it never overrides a measured fact, so a market of honeypots ends in no call" });
   }
 
+  /* The widened band belongs to the pass that widened it. Cleared here; re-set at the
+     top of every cycle, so even a throw cannot leave it widened for more than one. */
+  setCycleBandWindow(null);
+
   const cost = spend.usd - startSpend;
-  emit("cycle:end", { cycle, count: opened.length, spendUsd: Number(cost.toFixed(4)), stopped });
+  /* THE SHORTFALL, RECORDED RATHER THAN PAPERED OVER. A cycle that reached L4 and still
+     could not find three publishes what it found and says so — "a cycle that publishes
+     1 honestly is worth more than 3 with two unsellable". settleCycles() writes the
+     shortfall flag when the cohort closes; this is the same fact on the tape, at the
+     moment the pass that could not fill it ends. */
+  let cohortEnd = null;
+  if (cohort) {
+    const st = cycleStatus();
+    cohortEnd = { cycleId: cohort.cycle.id, quota: cohort.quota,
+      published: st.open ? st.published : cohort.published + opened.length,
+      level, exhausted: level >= MAX_ESCALATION_LEVEL };
+    const short = Math.max(0, cohortEnd.quota - cohortEnd.published);
+    if (short > 0)
+      emit("cycle:short", { ...cohortEnd, short,
+        note: level >= MAX_ESCALATION_LEVEL
+          ? "the ladder is exhausted at L4 — the cohort publishes what it found and records the shortfall. " +
+            "There is no level that publishes a safety-failed coin."
+          : `still short by ${short}; the next pass runs at L${Math.min(MAX_ESCALATION_LEVEL, level + 1)}` });
+  }
+  emit("cycle:end", { cycle, count: opened.length, spendUsd: Number(cost.toFixed(4)), stopped,
+    cohort: cohortEnd });
+  /* Settle again: this pass may have met the quota, and a cohort whose calls all closed
+     inside the pass (a fast nano band closes in minutes) must release the gate now
+     rather than at the next tick. */
+  if (cohort) { try { settleCycles(); } catch {} }
   return { cycle, considered: universe.length, ranked: scored.length,
     workedUp, approved: picks.length, opened: opened.length, replacedUnreadable: replaced,
     costUsd: Number(cost.toFixed(4)), costPerWorkup: workedUp ? Number((cost / workedUp).toFixed(2)) : null,
-    stopped };
+    stopped, cycleId: cohort?.cycle.id ?? null, level, quota: cohort?.quota ?? null,
+    published: cohortEnd?.published ?? null, want };
 }
 
 /**
@@ -967,8 +1067,64 @@ export async function runPenthouseCycle({
  *   stopless, refuted and PASSed candidates are refused by mandate.js before conviction
  *   is consulted at all. The mandate lowered the CONVICTION bar; it did not touch this.
  */
+/**
+ * MAY THIS BECOME ONE OF THE CYCLE'S CALLS, AT THIS ESCALATION LEVEL?
+ *
+ * THE ORDER OF THESE THREE CHECKS IS THE WHOLE SAFETY ARGUMENT, and it is written so
+ * that no future edit can reorder it without the test in test-quota-escalation.mjs
+ * failing loudly:
+ *
+ *   1. SAFETY FIRST, and it does not take `level` as an argument at all. A quota cannot
+ *      reach past a measured fact, so the code that applies the floor is not even given
+ *      the number it would have to consult in order to bend. 32 codes, classified in
+ *      exactly one place (calls.js GATE_CLASS), with UNKNOWN defaulting to SAFETY.
+ *   2. THE EXISTING GATE, unchanged. mandate.eligibility() still runs and still refuses
+ *      everything it refused before. The ladder can only ever be STRICTER than the old
+ *      behaviour, never looser — it adds a bar, it removes none.
+ *   3. THE LEVEL'S JUDGEMENT BAR. Only here does `level` do anything, and all it can
+ *      touch is conviction and tier.
+ *
+ * Measured reason this shape exists: ~60 of the last 100 kills are safety mechanics —
+ * 18 of them cannot_exit, where the round-trip probe PROVED the position cannot be
+ * sold. Three calls filled from that pool are three bags, not three trades, so filling
+ * the quota that way defeats the quota's own purpose.
+ */
+export function cohortEligibility(rec, level = 0) {
+  const plan = escalationPlan(level);
+  const gates = gateFailures(rec);
+  const safety = gates.filter((g) => g.cls === "SAFETY");
+  if (safety.length)
+    return { publishable: false, safety: true, level: plan.level, gate: safety[0].code,
+      gates: safety.map((g) => g.code),
+      reason: `SAFETY FLOOR (L${plan.level}): ${safety.map((g) => g.code).join(", ")} — ` +
+        `${safety[0].detail ?? "a measured fact"}. No escalation level and no quota reaches past this.` };
+
+  const e = eligibility(rec);
+  if (!e.eligible) {
+    const judgment = gates.find((g) => g.cls === "JUDGMENT");
+    return { publishable: false, safety: !!e.safety, level: plan.level,
+      gate: judgment?.code ?? (e.safety ? "unclassified_refusal" : "team_no"), reason: e.reason };
+  }
+
+  const conviction = Number(rec?.pm?.conviction ?? 0);
+  if (e.tier < plan.minTier)
+    return { publishable: false, safety: false, level: plan.level, gate: "tier_below_bar",
+      reason: `tier ${e.tier} (${e.reason}) is below the L${plan.level} bar of ${plan.minTier}` };
+  if (conviction < plan.minConviction)
+    return { publishable: false, safety: false, level: plan.level, gate: "conviction_below_bar",
+      reason: `conviction ${conviction} is below the L${plan.level} bar of ${plan.minConviction}` };
+
+  return { publishable: true, safety: false, level: plan.level, tier: e.tier, conviction,
+    reason: e.reason, relaxations: [...plan.relaxations, ...(rec?.relaxations ?? [])] };
+}
+
 export function publishCall(rec, { category = null, launchpad: pad = null, wx = null,
-  toFloors = null, bestPick = null, sourceFloor = null } = {}) {
+  toFloors = null, bestPick = null, sourceFloor = null,
+  /* THE COHORT STAMP. Both default to null, and a null `escalation` means "no quota is
+     pursuing this" — the lane publishes exactly as it did before the cohort existed.
+     Only the cycle passes them, so a tenant's own floor run, a watch promotion and a
+     trend handoff are untouched by any of this. */
+  escalation = null, cycleId = null } = {}) {
   const e = eligibility(rec);
 
   /* RECORD THE VERDICT HERE, because this is the one place EVERY lane converges.
@@ -989,6 +1145,28 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
       thesis: rec?.pm?.thesis ?? null,
     });
   } catch { /* bookkeeping must never be able to fail a publish */ }
+
+  /* THE QUOTA BAR, when a quota is pursuing this call. Placed here — after the funnel
+     write above and sharing the refusal bookkeeping below — because a refusal the
+     SHADOW BOOK never hears about is a refusal nobody can grade later, and "we are
+     being appropriately careful" and "we are missing everything" then look identical
+     from outside. It can only ever refuse MORE than the old gate, never less:
+     cohortEligibility runs the safety floor first and mandate.eligibility() second, so
+     anything it admits still has to clear `e` below. */
+  const co = escalation != null ? cohortEligibility(rec, escalation) : null;
+  if (co && !co.publishable) {
+    emit("call:withheld", { mint: rec?.mint, symbol: rec?.symbol, safety: co.safety,
+      level: co.level, gate: co.gate, reason: co.reason });
+    try {
+      const ev = rec?.ev ?? {};
+      shadow.recordRefusal({ mint: rec?.mint, symbol: rec?.symbol ?? ev.symbol,
+        stage: co.safety ? "cohort_safety" : "cohort_quota_bar",
+        reason: `L${co.level} ${co.gate}: ${co.reason}`, safety: co.safety,
+        priceUsd: ev.pair?.priceUsd, mcapUsd: ev.pair?.marketCap ?? ev.pair?.fdv });
+    } catch {}
+    return { outcome: co.safety ? "unsafe" : "declined", reason: co.reason,
+      gate: co.gate, level: co.level };
+  }
 
   if (!e.eligible) {
     emit("call:withheld", { mint: rec?.mint, symbol: rec?.symbol,
@@ -1050,6 +1228,7 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
     // Stored so a tenant's micro / low / mid sleeve filter has a number to test.
     mcapUsd: ev.pair?.marketCap ?? ev.pair?.fdv ?? null,
     reportFile: rec.reportFile ?? null,
+    cycleId, escalationLevel: escalation,
   });
   if (call) {
     const evidenceLinked = linkPublishedCall(rec.decisionRunId, call.id, { floorNo: sourceFloor });
@@ -1072,6 +1251,17 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
     // when nothing was approved. Both are legitimate, and they are not the same
     // thing, so the difference goes on the call rather than into a footnote.
     noteEvent(call.id, "mandate", `${e.reason} (tier ${e.tier})`);
+    /* HOW HARD THE DESK HAD TO REACH, ON THE CALL ITSELF. The owner must be able to
+       read "this was published at L3 because the cycle was short" off the record; a
+       relaxation that lives only in a log is a silent lowering. L0 is recorded too —
+       "nothing relaxed" is the fact a reader most needs when the level is zero. */
+    if (escalation != null) {
+      const relaxed = [...escalationPlan(escalation).relaxations, ...(rec.relaxations ?? [])];
+      noteEvent(call.id, "escalation",
+        `published at L${escalation}${cycleId != null ? ` in cycle ${cycleId}` : ""}: ` +
+        (relaxed.length ? relaxed.join(" | ") : "nothing relaxed — this is an ordinary call"));
+      recordCyclePublish(cycleId, call.id, escalation);
+    }
     // Why the choosing seat picked THIS one, on the call itself — so the record shows
     // the reasoning next to the outcome rather than only the outcome.
     if (bestPick?.why)
@@ -1097,8 +1287,9 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
       .filter((f) => f.state === "owned" || f.n === HQ_FLOOR)
       .map((f) => f.n);
     if (floors.length) broadcast(call.id, floors);
-    emit("call:published", { callId: call.id, symbol: call.symbol, tier: e.tier, why: e.reason });
-    return { outcome: "published", callId: call.id, tier: e.tier };
+    emit("call:published", { callId: call.id, symbol: call.symbol, tier: e.tier, why: e.reason,
+      cycleId, level: escalation });
+    return { outcome: "published", callId: call.id, tier: e.tier, level: escalation, cycleId };
   }
   return { outcome: "open_failed" };
 }
