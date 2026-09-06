@@ -1023,6 +1023,55 @@ function wcQr(cv, text, qrcode){
   for(var r = 0; r < n; r++) for(var c = 0; c < n; c++)
     if(q.isDark(r, c)) x.fillRect((c + pad) * s, (r + pad) * s, s, s);
 }
+/* WHAT THE EMPTY STATE USED TO SAY STILL NEEDS SAYING.
+   Before WalletConnect, a phone with no injected wallet was told to open the page
+   inside a wallet's OWN browser, and a desktop with no extension was told where to
+   get one. wcEntry() always adds WalletConnect when an id is configured, so the
+   list is never empty and both of those messages became unreachable the moment
+   this feature shipped — a capability quietly removed.
+
+   It matters most for exactly the wallet people will reach for: MEASURED against
+   the live registry, the top 24 Solana-capable WalletConnect wallets contain no
+   Phantom, no Solflare and no Backpack (entries=50 and search= both hang on that
+   endpoint, so 24 is the practical ceiling). Phantom's in-app browser is how it
+   expects to be reached on a phone. Both paths are legitimate, so both are here. */
+function wcFooter(sol, phone){
+  var f = document.createElement("p");
+  f.style.cssText = "margin:4px 0 10px;font-size:11px;line-height:1.55";
+  var lead = document.createTextNode(phone
+    ? (sol ? "Using Phantom? It opens pages in its own browser: "
+           : "Using MetaMask? It opens pages in its own browser: ")
+    : "No wallet on this computer? ");
+  f.appendChild(lead);
+  var here = location.href.split("#")[0];
+  function link(text, href){
+    var a = document.createElement("a");
+    a.href = href; a.rel = "noopener"; a.textContent = text;
+    if(!phone) a.target = "_blank";
+    a.style.color = "var(--ink)";
+    return a;
+  }
+  if(phone){
+    f.appendChild(link(sol ? "open this page in Phantom" : "open this page in MetaMask",
+      sol ? "https://phantom.app/ul/browse/" + encodeURIComponent(here)
+              + "?ref=" + encodeURIComponent(location.origin)
+          : "https://metamask.app.link/dapp/" + location.host + location.pathname));
+    f.appendChild(document.createTextNode("."));
+  }else{
+    var installs = sol
+      ? [["Phantom", "https://phantom.com/download"], ["Solflare", "https://solflare.com/download"],
+         ["Backpack", "https://backpack.app/download"]]
+      : [["MetaMask", "https://metamask.io/download/"], ["Rabby", "https://rabby.io/"],
+         ["Coinbase Wallet", "https://www.coinbase.com/wallet/downloads"]];
+    installs.forEach(function(pair, i){
+      if(i) f.appendChild(document.createTextNode(i === installs.length - 1 ? " or " : ", "));
+      f.appendChild(link(pair[0], pair[1]));
+    });
+    f.appendChild(document.createTextNode(" all work as extensions."));
+  }
+  return f;
+}
+
 /* Returns a close() the caller uses when the session lands or the reader gives up. */
 function wcSheet(uri, chain, onCancel){
   var phone = /Android|iPhone|iPad/i.test(navigator.userAgent);
@@ -1071,6 +1120,8 @@ function wcSheet(uri, chain, onCancel){
       });
     });
   }
+
+  card.appendChild(wcFooter(chain.indexOf("solana:") === 0, phone));
 
   var x = document.createElement("button");
   x.type = "button"; x.className = "wcclose"; x.textContent = "Cancel";

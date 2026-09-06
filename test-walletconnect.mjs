@@ -95,6 +95,28 @@ const vendor = new URL("viewer/vendor/wc/", root);
     "and never above the vendored folder");
 }
 
+/* ── THE EMPTY STATE'S ADVICE SURVIVED THE FEATURE THAT HID IT ────────────────
+ * offer() connects straight through when the list has exactly one entry, and
+ * wcEntry() always adds WalletConnect once an id is configured — so the list is
+ * never empty and BOTH old empty-state messages became unreachable the moment
+ * this shipped. One of them carried the phone's "open this page inside your
+ * wallet's own browser" handoff, and that is not a nicety: MEASURED against the
+ * live registry, the top 24 Solana-capable WalletConnect wallets contain no
+ * Phantom, Solflare or Backpack (entries=50 and search= both hang, so 24 is the
+ * ceiling). Phantom's in-app browser is how it expects to be reached. Both paths
+ * belong in the sheet, and they are per-chain and per-platform. */
+{
+  const footer = html.slice(html.indexOf("function wcFooter"), html.indexOf("function wcSheet"));
+  assert.match(footer, /phantom\.app\/ul\/browse\//, "the phone keeps the Phantom browse handoff");
+  assert.match(footer, /metamask\.app\.link\/dapp\//, "...and the EVM door keeps MetaMask's");
+  assert.match(footer, /\["Phantom", "https:\/\/phantom\.com\/download"\]/,
+    "the desktop keeps the install guidance the empty state used to give");
+  assert.match(footer, /\["MetaMask", "https:\/\/metamask\.io\/download\/"\]/);
+  assert.doesNotMatch(footer, /innerHTML/, "built from nodes, like everything else in this sheet");
+  assert.match(html, /card\.appendChild\(wcFooter\(chain\.indexOf\("solana:"\) === 0, phone\)\)/,
+    "the sheet tailors it to the door it was opened from, not to a guess");
+}
+
 /* Robinhood Chain is OPTIONAL, never required: a required namespace a wallet does
  * not carry is a flat rejection at the door, and almost no wallet has 4663. */
 assert.match(html, /optionalNamespaces: ns/);
