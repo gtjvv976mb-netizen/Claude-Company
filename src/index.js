@@ -299,11 +299,17 @@ function startPenthouse() {
     let gap = GAP_IDLE;
     try {
       const r = await research();
-      if (r && ((r.workedUp ?? 0) > 0 || (r.opened ?? 0) > 0)) {
+      /* STOPPED IS TESTED FIRST, AND THAT ORDER IS THE POINT. A cycle that works up
+         fifteen coins and THEN hits the credit wall satisfies workedUp > 0, so it used to
+         take the 45-second gap — the fast path — at exactly the moment the desk was least
+         able to do anything. GAP_BLOCKED exists for this and was never reached: measured
+         2026-09-06, 2 cycle:halted against 1,064 dead workups, retrying every 114s where
+         the blocked path asks for 600. Being stopped outranks having been busy. */
+      if (r?.stopped || r?.skipped === "budget") {
+        gap = GAP_BLOCKED;
+      } else if (r && ((r.workedUp ?? 0) > 0 || (r.opened ?? 0) > 0)) {
         setKv("last_cycle_done_at", Date.now());
         gap = GAP_WORKED;
-      } else if (r?.stopped || r?.skipped === "budget") {
-        gap = GAP_BLOCKED;
       } else if (r?.skipped === "position_open") {
         // The book is full, which is success, not a stall — a slot frees when a trade
         // closes and the monitor is what notices that, not this loop.

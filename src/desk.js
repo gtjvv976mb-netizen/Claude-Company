@@ -8,7 +8,7 @@ import { applyRedTeamBar } from "./agents/redteam-policy.js";
 import { runCEO } from "./agents/ceo.js";
 import { writeOrderSlip } from "./order.js";
 import { emit } from "./lib/bus.js";
-import { spend, assertDailyBudget} from "./lib/llm.js";
+import { OutOfCredit, spend, assertDailyBudget} from "./lib/llm.js";
 import { cfg, escalationPlan } from "./config.js";
 import * as store from "./lib/store.js";
 import { writeReport } from "./report.js";
@@ -199,6 +199,10 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
   const cheapKeys = ["liquidity", "flow", "technical"];
   const analysts = {};
   const seatFailures = [];
+  /* Set by collect() when a rejection is the provider refusing on credit. It is checked
+     after each settled batch rather than inside collect, so the other seats in that batch
+     still record their verdicts before the cycle stops. */
+  let creditFailure = null;
   const collect = (k, r) => {
     if (r.status === "fulfilled") {
       analysts[k] = r.value;
@@ -208,11 +212,22 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
     } else {
       seatFailures.push({ seat: k, error: String(r.reason?.message || r.reason) });
       emit("seat:failed", { seat: k, mint, error: String(r.reason?.message || r.reason) });
+      /* A DEAD ACCOUNT IS NOT A SEAT FAILURE. Promise.allSettled turns every rejection
+       * into a value, so the OutOfCredit that lib/llm.js throws when the balance is empty
+       * was being filed here beside a timeout and a bad JSON body, and the workup went on
+       * to return "insufficient_coverage" — a research verdict wearing a billing failure.
+       * penthouse.js:773 has been waiting for that throw the whole time. Measured on
+       * 2026-09-06 while both accounts were dry: 1,323 refused Anthropic requests an hour,
+       * 92% of candidates ending as insufficient_coverage, and 2 cycle:halted in 3.2 hours.
+       * Remember it and rethrow once the batch has been collected, so every seat still
+       * reports and the cycle still halts. */
+      if (r.reason instanceof OutOfCredit) creditFailure = creditFailure ?? r.reason;
     }
   };
 
   const cheap = await Promise.allSettled(cheapKeys.map((k) => runAnalyst(k, ev)));
   cheap.forEach((r, i) => collect(cheapKeys[i], r));
+  if (creditFailure) throw creditFailure;
 
   /* A kill here is final, exactly as it is after the full batch — so stop, and keep the
      X read's $0.148 plus two more seats. This is the whole saving, and it is recorded
@@ -239,6 +254,7 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
   const deepKeys = ["forensics", "narrative"];
   const deep = await Promise.allSettled([runAnalyst("forensics", ev), runNarrative(ev)]);
   deep.forEach((r, i) => collect(deepKeys[i], r));
+  if (creditFailure) throw creditFailure;
 
   // A desk missing half its analysts is not a desk. Refuse to decide on a thin book.
   if (Object.keys(analysts).length < 3) {
