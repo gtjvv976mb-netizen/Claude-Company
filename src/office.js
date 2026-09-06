@@ -1724,6 +1724,24 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
       return;
     }
 
+    /* The vendored WalletConnect bundle, served read-only, same shape as
+       /executor/ above. It MUST come back as JavaScript: a module import of a
+       file served as text/plain is refused on MIME grounds, and the failure
+       looks like a broken wallet rather than a wrong header. Built sites get
+       these copied into dist/vendor by scripts/build-viewer.mjs, so serve them
+       here too or local drifts from live. */
+    if (url.pathname.startsWith("/vendor/")) {
+      const base = path.join(ROOT, "viewer", "vendor");
+      const vf = path.join(base, url.pathname.slice("/vendor/".length));
+      if (!vf.startsWith(base + path.sep) || !fs.existsSync(vf) || !fs.statSync(vf).isFile()) {
+        res.writeHead(404); res.end("not found"); return;
+      }
+      res.writeHead(200, { "content-type": /\.m?js$/.test(vf)
+        ? "text/javascript; charset=utf-8" : "text/plain; charset=utf-8" });
+      res.end(fs.readFileSync(vf));
+      return;
+    }
+
     const file = path.join(ROOT, "viewer", page);
     if (!file.startsWith(path.join(ROOT, "viewer")) || !fs.existsSync(file)) {
       res.writeHead(404); res.end("not found"); return;

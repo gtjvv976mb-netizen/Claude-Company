@@ -154,6 +154,27 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--amber);outline-offs
 .wpick button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
 .wpick img{width:17px;height:17px;border-radius:4px;flex:0 0 auto}
 .wpick .wdot{width:17px;height:17px;border-radius:4px;background:var(--floor-rule);flex:0 0 auto}
+/* WalletConnect's sheet. Modal, because a pairing URI lives for about a minute
+   and must not be lost below the fold on a phone. */
+.wcback{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;
+  padding:18px;background:rgba(6,8,10,.74);backdrop-filter:blur(5px)}
+.wccard{width:min(360px,100%);max-height:88vh;overflow-y:auto;box-sizing:border-box;
+  border-radius:16px;padding:18px;background:#12161a;border:1px solid var(--floor-rule);
+  color:var(--ink);box-shadow:0 24px 60px rgba(0,0,0,.55)}
+.wccard h3{margin:0 0 4px;font-size:15px;letter-spacing:.01em}
+.wccard p{margin:0 0 12px;font-size:11.5px;color:var(--ink-faint);line-height:1.5}
+.wccard canvas{display:block;width:100%;max-width:250px;margin:0 auto 12px;border-radius:10px;
+  background:#fff;padding:10px;box-sizing:border-box}
+.wcrow{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px}
+.wcrow a,.wcrow button{display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:12.5px;
+  color:var(--ink);background:rgba(255,255,255,.04);border:1px solid var(--floor-rule);
+  border-radius:999px;padding:5px 12px 5px 7px;cursor:pointer;text-decoration:none}
+.wcrow a:hover,.wcrow button:hover{background:rgba(255,255,255,.09);border-color:var(--ink-faint)}
+.wcrow a:focus-visible,.wcrow button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.wcrow img{width:17px;height:17px;border-radius:4px;flex:0 0 auto}
+.wcclose{width:100%;margin-top:2px;font:inherit;font-size:12px;color:var(--ink-soft);
+  background:transparent;border:1px solid var(--floor-rule);border-radius:999px;padding:7px;cursor:pointer}
+.wcclose:hover{color:var(--ink);border-color:var(--ink-soft)}
 .pill.look{color:var(--ink-soft);border-color:rgba(244,236,216,.28);background:transparent}
 .pill.look:hover{color:var(--ink);border-color:var(--ink-soft)}
 .status{grid-column:1/-1;min-height:1.2em;margin:2px 0 0;font-size:9.5px;letter-spacing:.14em;color:var(--ink-faint);text-transform:none;letter-spacing:.02em}
@@ -897,11 +918,23 @@ function short(a){return a?a.slice(0,4)+"…"+a.slice(-4):"";}
    same idea for Ethereum. When more than one is present the reader CHOOSES; picking
    for them is how you end up with a button that says "Connect Phantom".            */
 
+/* Built with DOM calls and NEVER innerHTML: this string is supplied by a browser
+   EXTENSION. Wallet Standard icons are meant to be base64 data URIs, but nothing
+   enforces it, and a wallet handing over a raw svg data uri containing a quote
+   closes the src attribute and injects markup into this page. Measured: an icon
+   of data:image/svg+xml,<svg xmlns="..."/> rendered its own closing quote as the
+   button's label. The scheme test is narrowed to image data uris for the same
+   reason — an icon is not a place to accept an arbitrary URL. */
 function walletIcon(w){
-  var src = (w.icon || (w.info && w.info.icon) || "");
-  return /^data:|^https:/.test(src)
-    ? '<img src="' + src + '" alt="" aria-hidden="true">'
-    : '<span class="wdot" aria-hidden="true"></span>';
+  var src = String(w.icon || (w.info && w.info.icon) || "");
+  var el;
+  if(/^data:image\/|^https:\/\//.test(src)){
+    el = document.createElement("img"); el.src = src; el.alt = "";
+  }else{
+    el = document.createElement("span"); el.className = "wdot";
+  }
+  el.setAttribute("aria-hidden", "true");
+  return el;
 }
 /* Render the choices, or connect straight away when there is only one. */
 function offer(list, pickId, statusId, connect, emptyMsg){
@@ -913,12 +946,237 @@ function offer(list, pickId, statusId, connect, emptyMsg){
   list.forEach(function(w){
     var b = document.createElement("button");
     b.type = "button";
-    b.innerHTML = walletIcon(w) + "<span></span>";
-    b.lastChild.textContent = w.name || (w.info && w.info.name) || "Wallet";
+    var label = document.createElement("span");
+    label.textContent = w.name || (w.info && w.info.name) || "Wallet";
+    b.append(walletIcon(w), label);
     b.addEventListener("click", function(){ box.hidden = true; box.innerHTML = ""; connect(w); });
     box.appendChild(b);
   });
   box.hidden = false;
+}
+
+/* ── WALLETCONNECT: the wallets that are not in THIS browser ──────────────────
+   An extension exists only in a desktop browser, and an injected provider exists
+   only inside a wallet app's own in-app browser. Mobile Safari and mobile Chrome
+   have neither — which is most phones — so without this, "connect" on a phone
+   means "install our approved wallet and browse from inside it".
+
+   WalletConnect is a relay: this page shows a QR (desktop) or hands the phone a
+   deep link, the wallet app opens it, and the session runs over
+   wss://relay.walletconnect.org. The bundle is VENDORED under vendor/wc rather
+   than pulled from a CDN — the connect button must not stop working because a
+   third party had a bad minute — and it is imported only when someone actually
+   picks WalletConnect, so nobody pays 500 KB to look at the homepage.
+
+   The project id is public by design: it identifies this app to the relay and
+   authorises nothing. It is still injected at build time rather than typed in
+   here, so a fork builds with its own. No id, no WalletConnect option, and
+   nothing else on the page changes. */
+var WC_ID = String(window.__WC_PROJECT_ID__ || "").trim();
+var SOL_CAIP = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";        // mainnet-beta genesis hash
+var WC_ICON = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>"
+  + "<rect width='32' height='32' rx='9' fill='%233B99FC'/>"
+  + "<path d='M8.5 14.2a10.6 10.6 0 0 1 15 0' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round'/>"
+  + "<path d='M12 18.4a5.7 5.7 0 0 1 8 0' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round'/></svg>";
+var wcp = null;
+function wcEntry(){ return WC_ID ? [{ name:"WalletConnect", icon:WC_ICON, wc:true }] : []; }
+async function wcInit(){
+  if(wcp) return wcp;
+  var m = await import("./vendor/wc/universal-provider.mjs");
+  wcp = await (m.UniversalProvider || m.default).init({
+    projectId: WC_ID,
+    metadata: { name:"Claude Company", description:"The AI trading desk",
+                url: location.origin, icons: [location.origin + "/assets/claudeco-256.png"] },
+  });
+  return wcp;
+}
+
+/* The wallet list comes from WalletConnect's own registry, not a table typed in
+   here: a hard-coded deep link is a button that dies silently the day a wallet
+   changes its scheme. If the registry cannot be reached, the plain wc: link is
+   still offered first — that is the one every wallet registers with the OS. */
+async function wcListings(chain){
+  try{
+    var r = await fetch("https://explorer-api.walletconnect.com/v3/wallets?projectId="
+      + encodeURIComponent(WC_ID) + "&entries=24&page=1&chains=" + encodeURIComponent(chain));
+    if(!r.ok) return [];
+    var l = (await r.json()).listings || {};
+    return Object.keys(l).map(function(k){ return l[k]; })
+      .filter(function(w){ return w && w.mobile && (w.mobile.universal || w.mobile.native); });
+  }catch(e){ return []; }
+}
+/* WalletConnect's own two link conventions, spelled out rather than guessed at. */
+function wcDeepLink(w, uri){
+  var enc = encodeURIComponent(uri);
+  if(w.mobile.universal) return w.mobile.universal.replace(/\/+$/, "") + "/wc?uri=" + enc;
+  var n = w.mobile.native.replace(/\/+$/, "");
+  if(!/:$/.test(n)) n += ":";
+  return n + "//wc?uri=" + enc;
+}
+function wcQr(cv, text, qrcode){
+  var q = qrcode(0, "M"); q.addData(text); q.make();
+  var n = q.getModuleCount(), s = 5, pad = 4;
+  cv.width = cv.height = (n + pad * 2) * s;
+  var x = cv.getContext("2d");
+  x.fillStyle = "#fff"; x.fillRect(0, 0, cv.width, cv.height);
+  x.fillStyle = "#000";
+  for(var r = 0; r < n; r++) for(var c = 0; c < n; c++)
+    if(q.isDark(r, c)) x.fillRect((c + pad) * s, (r + pad) * s, s, s);
+}
+/* Returns a close() the caller uses when the session lands or the reader gives up. */
+function wcSheet(uri, chain, onCancel){
+  var phone = /Android|iPhone|iPad/i.test(navigator.userAgent);
+  var back = document.createElement("div"); back.className = "wcback";
+  var card = document.createElement("div"); card.className = "wccard";
+  card.setAttribute("role", "dialog"); card.setAttribute("aria-modal", "true");
+  var h = document.createElement("h3");
+  h.textContent = phone ? "Open your wallet" : "Scan with your wallet";
+  var p = document.createElement("p");
+  p.textContent = phone
+    ? "Any wallet app installed on this phone can take this link — you do not have to browse from inside it."
+    : "Open your wallet app on your phone and scan this code. It expires in about a minute.";
+  card.append(h, p);
+
+  if(!phone){
+    var cv = document.createElement("canvas"); card.appendChild(cv);
+    import("./vendor/wc/qrcode-generator.mjs").then(function(m){ wcQr(cv, uri, m.default || m); })
+      .catch(function(){ cv.remove(); p.textContent = "Copy the link below into your wallet app."; });
+  }
+
+  var row = document.createElement("div"); row.className = "wcrow";
+  var open = document.createElement("a");
+  open.href = uri; open.rel = "noopener";
+  open.textContent = phone ? "Open my wallet app" : "Open a wallet on this computer";
+  var copy = document.createElement("button"); copy.type = "button"; copy.textContent = "Copy link";
+  copy.addEventListener("click", async function(){
+    try{ await navigator.clipboard.writeText(uri); copy.textContent = "Copied"; }
+    catch(e){ copy.textContent = "Copy failed — select the QR link"; }
+  });
+  row.append(open, copy); card.appendChild(row);
+
+  if(phone){
+    var reg = document.createElement("div"); reg.className = "wcrow"; card.appendChild(reg);
+    wcListings(chain).then(function(list){
+      list.slice(0, 12).forEach(function(w){
+        var a = document.createElement("a");
+        a.href = wcDeepLink(w, uri); a.rel = "noopener";
+        if(w.image_id){
+          var img = document.createElement("img"); img.alt = ""; img.setAttribute("aria-hidden", "true");
+          img.src = "https://explorer-api.walletconnect.com/v3/logo/sm/" + w.image_id
+                  + "?projectId=" + encodeURIComponent(WC_ID);
+          a.appendChild(img);
+        }
+        var t = document.createElement("span"); t.textContent = w.name || "Wallet"; a.appendChild(t);
+        reg.appendChild(a);
+      });
+    });
+  }
+
+  var x = document.createElement("button");
+  x.type = "button"; x.className = "wcclose"; x.textContent = "Cancel";
+  card.appendChild(x);
+  back.appendChild(card); document.body.appendChild(back);
+  var done = false;
+  function close(cancelled){
+    if(done) return; done = true;
+    removeEventListener("keydown", key);
+    back.remove();
+    if(cancelled && onCancel) onCancel();
+  }
+  function key(e){ if(e.key === "Escape") close(true); }
+  addEventListener("keydown", key);
+  x.addEventListener("click", function(){ close(true); });
+  back.addEventListener("click", function(e){ if(e.target === back) close(true); });
+  x.focus();
+  return function(){ close(false); };
+}
+
+async function wcConnect(kind){
+  var sol = kind === "sol";
+  var statusId = sol ? "stSol" : "stRh";
+  var b = document.getElementById(sol ? "goSol" : "goRh");
+  b.disabled = true; say(statusId, "Opening WalletConnect…");
+  var close = null, cancelled = false, onUri = null, p = null, gotUri = false, deadline = null;
+  try{
+    p = await wcInit();
+    onUri = function(uri){
+      gotUri = true; clearTimeout(deadline);
+      close = wcSheet(uri, sol ? SOL_CAIP : "eip155:1", function(){
+        cancelled = true;
+        try{ p.abortPairingAttempt && p.abortPairingAttempt(); }catch(e){}
+        b.disabled = false; say(statusId, "WalletConnect closed — the door stays open.");
+      });
+    };
+    p.on("display_uri", onUri);
+    /* OPTIONAL, never required. A required namespace a wallet does not carry is a
+       flat rejection at the door, and almost no wallet has Robinhood Chain yet.
+       Optional means "connect first, then we ask you to add the chain". */
+    var ns = sol
+      ? { solana: { chains:[SOL_CAIP], events:[],
+                    methods:["solana_signMessage","solana_signTransaction"] } }
+      : { eip155: { chains:["eip155:4663","eip155:1"], events:["chainChanged","accountsChanged"],
+                    methods:["eth_sendTransaction","personal_sign","eth_signTypedData_v4",
+                             "wallet_switchEthereumChain","wallet_addEthereumChain"] } };
+    /* MEASURED, not assumed: with a project id the relay does not recognise, the
+       socket closes with code 3000 and the SDK RETRIES FOREVER. It never rejects,
+       so without this the button sits disabled under "Opening WalletConnect…"
+       indefinitely and the reader is told nothing. An id can go missing, be
+       mistyped, or run past its quota, so this is a live failure mode and not
+       just a test artifact. The deadline covers only the wait for the pairing
+       URI — once the QR is up, the reader gets as long as they like to scan. */
+    var session = await Promise.race([
+      p.connect({ optionalNamespaces: ns }),
+      new Promise(function(_, reject){
+        deadline = setTimeout(function(){
+          if(!gotUri) reject(new Error("its relay did not answer — the project id may be "
+            + "missing, wrong, or past its quota"));
+        }, 15000);
+      }),
+    ]);
+    clearTimeout(deadline);
+    if(close) close();
+    if(cancelled) return;
+    if(!session) throw new Error("the wallet closed the session before it opened");
+
+    if(sol){
+      var acc = ((session.namespaces.solana || {}).accounts || [])[0];
+      var pk = acc && acc.split(":").pop();
+      if(!pk) throw new Error("the wallet returned no Solana account");
+      say(statusId, "Connected " + short(pk) + " — entering Claude Tower.", "ok");
+      enter("sol", { chain:"solana", address:pk, wallet:"WalletConnect" });
+      return;
+    }
+    var e = session.namespaces.eip155 || {};
+    var accts = e.accounts || [];
+    var addr = (accts[0] || "").split(":").pop();
+    if(!addr) throw new Error("the wallet returned no account");
+    var onRh = accts.some(function(a){ return a.indexOf("eip155:4663:") === 0; });
+    if(!onRh){
+      say(statusId, "Asking your wallet for Robinhood Chain…");
+      try{
+        await p.request({ method:"wallet_switchEthereumChain",
+                          params:[{ chainId: RH_CHAIN.chainId }] }, "eip155:1");
+      }catch(se){
+        if(se && (se.code === 4902 || /unrecognized|not added|4902/i.test(se.message || "")))
+          await p.request({ method:"wallet_addEthereumChain", params:[RH_CHAIN] }, "eip155:1");
+        else throw se;
+      }
+    }
+    say(statusId, "Connected " + short(addr) + " on Robinhood Chain — entering.", "ok");
+    enter("rh", { chain:"robinhood", chainId:4663, address:addr, wallet:"WalletConnect" });
+  }catch(err){
+    clearTimeout(deadline);
+    if(close) close();
+    if(cancelled) return;
+    /* Stop the retry loop that is still running behind a timed-out pairing. */
+    if(!gotUri && p){ try{ p.abortPairingAttempt && p.abortPairingAttempt(); }catch(e){} }
+    b.disabled = false;
+    say(statusId, err && (err.code === 4001 || /reject|denied|user closed/i.test(err.message || ""))
+      ? "Connection declined — the door stays open."
+      : "WalletConnect could not connect: " + ((err && err.message) || "unknown error"), "err");
+  }finally{
+    if(p && onUri){ try{ p.off("display_uri", onUri); }catch(e){} }
+  }
 }
 
 /* ── SOLANA ─────────────────────────────────────────────────────────────────── */
@@ -960,9 +1218,10 @@ function solanaWallets(){
     push(root && (root.solana || root), pair[1]);
   });
   if(window.solana) push(window.solana, window.solana.isPhantom ? "Phantom" : "Injected wallet");
-  return out;
+  return out.concat(wcEntry());
 }
 async function connectSolana(w){
+  if(w.wc) return wcConnect("sol");
   var b = document.getElementById("goSol");
   b.disabled = true; say("stSol", "Asking " + (w.name || "your wallet") + "…");
   try{
@@ -1006,9 +1265,10 @@ function evmWallets(){
      discovered provider is already the same object. */
   if(window.ethereum&&!out.some(function(o){return o.p===window.ethereum;}))
     out.push({name:window.ethereum.isMetaMask?"MetaMask":"Injected wallet",icon:"",p:window.ethereum});
-  return out;
+  return out.concat(wcEntry());
 }
 async function connectEvm(w){
+  if(w.wc) return wcConnect("rh");
   var b=document.getElementById("goRh");
   b.disabled=true;say("stRh","Asking "+w.name+"…");
   try{

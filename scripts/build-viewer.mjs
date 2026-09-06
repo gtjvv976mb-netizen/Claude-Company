@@ -85,6 +85,11 @@ const API_BASE = (process.env.API_BASE || "").replace(/\/$/, "");
 // skips the fetch entirely rather than firing a cross-origin request at a host
 // that does not exist yet and painting a CORS error on every load.
 const RH_API_BASE = (process.env.RH_API_BASE || "").replace(/\/$/, "");
+// WalletConnect's project id. PUBLIC by design — it identifies the app to the
+// relay and authorises nothing — but injected rather than committed so a fork
+// builds with its own. Empty means the homepage offers no WalletConnect option,
+// which is the honest state when there is no relay account behind it.
+const WC_PROJECT_ID = String(process.env.WC_PROJECT_ID || "").trim();
 const SOURCE_COMMIT = /^[0-9a-f]{40}$/i.test(String(
   process.env.SOURCE_COMMIT || process.env.GITHUB_SHA || process.env.RENDER_GIT_COMMIT || "",
 )) ? String(process.env.SOURCE_COMMIT || process.env.GITHUB_SHA || process.env.RENDER_GIT_COMMIT).toLowerCase()
@@ -105,6 +110,14 @@ for (const a of ASSETS) {
   fs.copyFileSync(src, path.join(OUT, "assets", a));
 }
 fs.copyFileSync(path.join(ROOT, "token", "claudeco-64.png"), path.join(OUT, "assets", "favicon.png"));
+
+// The vendored WalletConnect graph. Copied verbatim, never rewritten: it is a
+// pinned build, and the whole reason it lives in this repo is that the connect
+// button should not depend on a CDN having a good day.
+const vendorSrc = path.join(ROOT, "viewer", "vendor");
+if (fs.existsSync(vendorSrc)) {
+  fs.cpSync(vendorSrc, path.join(OUT, "vendor"), { recursive: true });
+}
 
 const publicFontsDir = path.join(OUT, "assets", "fonts");
 fs.mkdirSync(publicFontsDir, { recursive: true });
@@ -208,6 +221,10 @@ for (const { src: name, out } of PAGES) {
   if (RH_API_BASE) {
     html = html.replace(/<style>/, () =>
       `<script>window.__RH_API_BASE__=${JSON.stringify(RH_API_BASE)};</script>\n<style>`);
+  }
+  if (WC_PROJECT_ID) {
+    html = html.replace(/<style>/, () =>
+      `<script>window.__WC_PROJECT_ID__=${JSON.stringify(WC_PROJECT_ID)};</script>\n<style>`);
   }
 
   // the dev server's routes become relative links
