@@ -9924,13 +9924,30 @@ async function loadWallsteDashboard({ background = false } = {}) {
     copyRaised.onclick = () => copyVisibleCommand(copyRaised, raisedProfileCommand);
     liveStep.appendChild(copyRaised);
 
-    setupStep(5, "Fund the burner last",
+    /* A key on exactly one disk. The flow tells people to send real SOL to an address
+       whose private key has never been copied anywhere, and nothing used to mention
+       that. burner-backup.mjs ships with the release; this is where it is needed. */
+    const fundStep = setupStep(5, "Fund the burner last",
       activation.walletFunded
         ? "The confirmed-chain read reports the burner at or above the conservative reserve for its self-reported active trade cap. Keep the balance deliberately small."
         : wallet.address
           ? "Only after the local checks above pass, send SOL from your own wallet to the public address in the final read-only card below."
           : "Wait until the paper heartbeat reports the burner public address. Never enter or upload its private key here.",
       activation.walletFunded === true);
+    fundStep.appendChild(dashNode("p", "dp-note",
+      "Back the wallet up before you fund it. Its key was generated on that host and "
+      + "exists nowhere else, so a reimaged or dead machine takes the balance with it. "
+      + "The recovery file is base58 — the form Phantom, Solflare and Backpack import — "
+      + "so recovering does not need this software. Run both lines on the executor host; "
+      + "an unverified backup is a guess, and neither line sends anything anywhere."));
+    fundStep.appendChild(dashNode("pre", "commandbox",
+      "node burner-backup.mjs --out ~/wall-st-e-recovery.txt\n"
+      + "node burner-backup.mjs --verify ~/wall-st-e-recovery.txt"));
+    const copyBackup = dashNode("button", "dp-btn ghost commandcopy", "Copy backup commands");
+    copyBackup.type = "button";
+    copyBackup.onclick = () => copyVisibleCommand(copyBackup,
+      "node burner-backup.mjs --out ~/wall-st-e-recovery.txt\nnode burner-backup.mjs --verify ~/wall-st-e-recovery.txt");
+    fundStep.appendChild(copyBackup);
     setupCard.appendChild(setupSteps);
     el.appendChild(setupCard);
 

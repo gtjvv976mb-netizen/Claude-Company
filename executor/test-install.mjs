@@ -266,8 +266,22 @@ check("Node >=22.13 and <25 and pinned execution dependencies are required",
     installer.includes("npm ci --ignore-scripts"));
 check("installer never pipes a mutable bootstrap script into a privileged shell",
   !/nodesource[\s\S]*\|[\s\S]*sudo\s+-E\s+bash/.test(installer));
-check("installer stages the complete durable execution and monitoring module graph",
-  /RUNTIME_FILES=\(poller\.mjs journal\.mjs jupiter\.mjs token2022\.mjs balance-verification\.mjs entry-quote-guard\.mjs exit-trigger\.mjs feed-drain\.mjs sol-usd-oracle\.mjs heartbeat-health\.mjs sleep-assertion\.mjs monitor\.mjs strategy\.mjs trade-policy\.mjs dexscreener-consensus\.mjs desk-mirror\.mjs\)/.test(installer));
+/* The exact list is pinned in one place only — ../test-executor-publish.mjs derives
+   it from poller.mjs's import graph and from the build's publish list, so a module
+   that runs unpublished, or is published without running, fails there. What matters
+   HERE is that the published installer stages the durable graph and the offline
+   recovery tool, whatever order they appear in. */
+{
+  const staged = installer.match(/RUNTIME_FILES=\(([^)]*)\)/)?.[1]?.split(/\s+/) ?? [];
+  const required = ["poller.mjs", "journal.mjs", "jupiter.mjs", "token2022.mjs",
+    "balance-verification.mjs", "entry-quote-guard.mjs", "exit-trigger.mjs", "feed-drain.mjs",
+    "sol-usd-oracle.mjs", "heartbeat-health.mjs", "sleep-assertion.mjs", "monitor.mjs",
+    "strategy.mjs", "trade-policy.mjs", "dexscreener-consensus.mjs", "desk-mirror.mjs",
+    /* a key on exactly one disk is a stranded-funds bug waiting for its first dead host */
+    "burner-backup.mjs"];
+  check("installer stages the complete durable execution and monitoring module graph",
+    required.every((f) => staged.includes(f)));
+}
 const manifest = sources.get("package.json") ? JSON.parse(sources.get("package.json")) : {};
 const lock = sources.get("package-lock.json") ? JSON.parse(sources.get("package-lock.json")) : {};
 check("published manifest pins the signer dependencies",

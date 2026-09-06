@@ -175,6 +175,9 @@ const EXECUTOR_FILES = [
      note above warns about, in the one file the note did not name. The test below now
      derives the installer's own list and refuses any drift, so this cannot recur. */
   "token2022.mjs",
+  /* the offline recovery tool — see burner-backup.mjs. A key on one disk is a
+     stranded-funds bug waiting for its first dead host. */
+  "burner-backup.mjs",
   "package.json", "package-lock.json",
 ];
 for (const f of EXECUTOR_FILES) {
