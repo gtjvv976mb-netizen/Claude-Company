@@ -885,9 +885,22 @@ if(!reduced){
 var DEST={sol:document.querySelector(".door.sol a.look").getAttribute("href"),
           rh:document.querySelector(".door.rh a.look").getAttribute("href")};
 var gate=document.getElementById("top"),entering=false;
+/* THE HAND-OFF HAS TO CROSS AN ORIGIN. This page is claudedotcompany.com and the
+   towers are solana./robinhood.claudedotcompany.com, so the sessionStorage the
+   tower reads has never once contained this — it has been dead since the towers
+   moved to their own subdomains. It rides in the FRAGMENT now, which is never
+   sent to any server and is stripped by the tower on arrival. sessionStorage is
+   still written, because a same-origin build (the dev server, a standalone) is
+   the case it does work for.
+
+   Only WHICH PROVIDER to prefer travels. The address stays out of the URL: it
+   identifies a person, the tower learns it from the wallet a moment later
+   anyway, and a URL is the one place that value should never sit. */
 function enter(k,wallet){
   if(entering)return;entering=true;
   try{sessionStorage.setItem("cc_gate",JSON.stringify({world:k,wallet:wallet||null,t:Date.now()}));}catch(e){}
+  var hop="";
+  try{ hop="#cc="+encodeURIComponent(JSON.stringify({w:k,r:(wallet&&wallet.rdns)||null})); }catch(e){}
   var t=towers[k];
   gate.classList.add("to-"+k);
   /* light the building, floor by floor */
@@ -903,7 +916,7 @@ function enter(k,wallet){
     gate.style.setProperty("--cx",k==="sol"?"18%":"-18%");
     gate.classList.add("entering");
   },when);
-  setTimeout(function(){location.href=DEST[k];},reduced?700:when+2100);
+  setTimeout(function(){location.href=DEST[k]+hop;},reduced?700:when+2100);
 }
 
 /* ── the two doors ───────────────────────────────────────────────────────── */
@@ -1253,7 +1266,11 @@ async function wcConnect(kind){
       var acc = wcAccounts(session, "solana:")[0];
       var pk = acc && acc.split(":").pop();
       if(!pk) throw new Error("the wallet returned no Solana account");
-      say(statusId, "Connected " + short(pk) + " — entering Claude Tower.", "ok");
+      /* A WalletConnect session belongs to THIS origin, and the tower is another
+         one with no WalletConnect of its own — so it will ask again at its door.
+         Saying only "entering" is a promise this page cannot keep. */
+      say(statusId, "Connected " + short(pk)
+        + " — opening Claude Tower. It asks for your wallet again at its own door.", "ok");
       enter("sol", { chain:"solana", address:pk, wallet:"WalletConnect" });
       return;
     }
@@ -1280,9 +1297,8 @@ async function wcConnect(kind){
     try{ cid = await p.request({ method:"eth_chainId" },
                                onRh ? "eip155:4663" : "eip155:1"); }catch(ce){}
     var onChain = String(cid || "").toLowerCase() === RH_CHAIN.chainId;
-    say(statusId, "Connected " + short(addr)
-      + (onChain ? " on Robinhood Chain" : "")
-      + " — entering." + (onChain ? "" : " Switch your wallet to Robinhood Chain if it asks."), "ok");
+    say(statusId, "Connected " + short(addr) + (onChain ? " on Robinhood Chain" : "")
+      + " — opening the tower. It asks for your wallet again at its own door.", "ok");
     enter("rh", { chain:"robinhood", chainId:4663, address:addr, wallet:"WalletConnect" });
   }catch(err){
     clearTimeout(deadline);
@@ -1382,7 +1398,7 @@ var evmProviders=[];
 addEventListener("eip6963:announceProvider",function(e){if(e.detail&&e.detail.provider&&!evmProviders.some(function(x){return x.info.uuid===e.detail.info.uuid;}))evmProviders.push(e.detail);});
 dispatchEvent(new Event("eip6963:requestProvider"));
 function evmWallets(){
-  var out=evmProviders.map(function(x){return {name:x.info.name,icon:x.info.icon,p:x.provider};});
+  var out=evmProviders.map(function(x){return {name:x.info.name,icon:x.info.icon,p:x.provider,rdns:x.info.rdns};});
   /* A wallet older than EIP-6963 only has window.ethereum. Include it, but not when a
      discovered provider is already the same object. */
   if(window.ethereum&&!out.some(function(o){return o.p===window.ethereum;}))
@@ -1410,7 +1426,7 @@ async function connectEvm(w){
       if(String(cid).toLowerCase()!==RH_CHAIN.chainId)throw new Error("the wallet stayed on chain "+parseInt(cid,16)+" — switch to Robinhood Chain and try again");
     }
     say("stRh","Connected "+short(addr)+" on Robinhood Chain — entering.","ok");
-    enter("rh",{chain:"robinhood",chainId:4663,address:addr});
+    enter("rh",{chain:"robinhood",chainId:4663,address:addr,rdns:w.rdns||null});
   }catch(e){
     b.disabled=false;
     say("stRh",e&&(e.code===4001||/reject|denied/i.test(e.message||""))?"Connection declined — the door stays open.":"Could not connect: "+(e&&e.message||"unknown error"),"err");

@@ -190,6 +190,34 @@ const vendor = new URL("viewer/vendor/wc/", root);
     "the sheet tailors it to the door it was opened from, not to a guess");
 }
 
+/* ── THE HAND-OFF CROSSES AN ORIGIN ───────────────────────────────────────────
+ * This page is claudedotcompany.com; the towers are solana./robinhood. of it.
+ * sessionStorage is per-origin, so the tower's reader has never once seen this —
+ * dead since the towers moved to their own subdomains. It rides in the fragment,
+ * which no server ever sees. Only WHICH provider to prefer crosses: an address
+ * identifies a person and does not belong in a URL, and the tower learns it from
+ * the wallet a moment later anyway. */
+{
+  assert.match(html, /hop="#cc="\+encodeURIComponent\(JSON\.stringify\(\{w:k,r:\(wallet&&wallet\.rdns\)\|\|null\}\)\)/,
+    "the handoff carries the world and the provider preference");
+  assert.doesNotMatch(html, /hop[\s\S]{0,120}address/,
+    "and never the address");
+  assert.match(html, /location\.href=DEST\[k\]\+hop;/, "...and the navigation carries it");
+  assert.match(html, /rdns:x\.info\.rdns/, "EIP-6963's rdns is kept so there is something to prefer");
+  assert.match(html, /rdns:w\.rdns\|\|null/, "...and passed through the door");
+  /* Do not promise what the destination cannot deliver: the tower has no
+     WalletConnect of its own, and the session belongs to this origin. */
+  assert.match(html, /It asks for your wallet again at its own door/,
+    "a WalletConnect connection says plainly that the tower will ask again");
+  /* Only the WalletConnect path. An injected wallet lands on a tower that CAN
+     find it, so "entering Claude Tower" is true there and is left alone. */
+  const wc = html.slice(html.indexOf("async function wcConnect"), html.indexOf("/* ── SOLANA ──"));
+  assert.doesNotMatch(wc, /— entering\b/,
+    "the WalletConnect path makes no promise the tower cannot keep");
+  assert.equal((wc.match(/It asks for your wallet again at its own door/g) || []).length, 2,
+    "both chains say it");
+}
+
 /* Robinhood Chain is OPTIONAL, never required: a required namespace a wallet does
  * not carry is a flat rejection at the door, and almost no wallet has 4663. */
 assert.match(html, /optionalNamespaces: ns/);
