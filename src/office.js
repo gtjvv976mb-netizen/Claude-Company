@@ -1228,6 +1228,16 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
                 .map((r) => ({ symbol: r.symbol, verdict: r.verdict, reason: r.reason,
                   sizeSol: r.size_sol, minutesAgo: Math.round((now - r.delivered_at) / 60000) }));
             } catch (e) { return [{ error: String(e.message) }]; } })(),
+            /* HOW MANY FLOORS WANT HQ TO RUN THEIR BOT.
+               Put HERE, in the heartbeat's HQ branch, rather than on
+               /executor/status: the demand signal is a count across every floor,
+               and /executor/status is scoped to one floor and readable by any
+               tenant who holds it — which would show one customer how many other
+               customers want custody. This branch is already the operator's own
+               view and nobody else's. Aggregate only: the count and its dates,
+               never which wallet asked. Nothing behind this number is running;
+               the managed track does not exist. */
+            botOperatorDemand: hqViewer ? copy.hqOperatorDemand() : null,
             // The house's billing state, and therefore the operator's business alone.
             providerCredit: hqViewer ? {
               blocked: provider.blocked,
@@ -1563,6 +1573,118 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             if (s2.ok) settled++;
           }
           return json(200, { ok: true, fillsFound: scanned, settled, record: perf.recordFor(floorNo) });
+        }
+
+        /* ── WHO RUNS THIS FLOOR'S BOT ───────────────────────────────────────
+           A HUMAN DECISION, SO IT IS BEHIND THE HUMAN'S GATE. Every other route
+           in this file that a bot can reach is authenticated by the floor's
+           executor secret — a credential that sits in a config file on a machine
+           and is read by a process. This one is not: choosing custody is the
+           tenant's own act, and a bot that could vote 'hq_requested' on its
+           owner's behalf would be forging the one signal the operator is going
+           to spend months acting on. Same wallet session as the floor's other
+           owner-only settings routes, and an executor secret presented here is
+           not a session token, so walletFor() returns null and it 401s.
+
+           CHOOSING 'hq_requested' PROVISIONS NOTHING. No wallet is created, no
+           deposit is accepted, no delivery, dial or filter changes — the managed
+           track does not exist, and this route must never be the thing that makes
+           it look like it does. It writes three columns on this floor's own
+           settings row and returns them. */
+        const operatorMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/bot-operator$/);
+        if (operatorMatch) {
+          const floorNo = Number(operatorMatch[1]);
+          if (!me) return json(401, { error: "sign in with your wallet first" });
+          if (!holdsFloor(floorNo)) return json(403, { error: "this is not your floor" });
+          const read = () => {
+            const s = copy.settingsFor(floorNo);
+            /* The consent SUMMARY rides along — acknowledged / stale / which version —
+               so the panel knows whether to open the disclosure before it offers the
+               managed track, without pulling the whole text on every read. The text
+               itself is one route away, at /api/floor/N/hq-consent. */
+            const consent = copy.hqConsentFor(floorNo);
+            return { floorNo, botOperator: s.bot_operator, botOperatorAt: s.bot_operator_at,
+              hqRequestedAt: s.hq_requested_at, tracks: copy.BOT_OPERATOR_TRACKS,
+              consent: { acknowledged: consent.acknowledged, stale: consent.stale,
+                version: consent.version, sha256: consent.sha256, at: consent.at },
+              disclosure: { version: consent.disclosureVersion, sha256: consent.disclosureSha256,
+                url: `/api/floor/${floorNo}/hq-consent` } };
+          };
+          if (req.method === "GET") { res.setHeader("cache-control", "no-store"); return json(200, read()); }
+          if (req.method !== "POST") return json(405, { error: "method not allowed" });
+          const body = await readBody();
+          /* An unknown value is a 400 and writes nothing. Coercing it to the
+             nearest enum member would silently record a custody decision the
+             tenant never made — the one mistake this whole feature exists to
+             avoid — and answering 200 for a write that did not happen is the
+             false success the take and fill routes already learned not to send. */
+          const r = copy.setBotOperator(floorNo, body?.choice, {});
+          /* A REFUSAL FOR WANT OF CONSENT IS NOT A BAD REQUEST. 'hq_requested' is a
+             valid choice; what is missing is the acknowledgement, and the caller can
+             fix that and retry — so it is 409 with the current version and hash, and
+             the panel opens the disclosure rather than showing "invalid value". */
+          if (!r.ok && r.needsAcknowledgement)
+            return json(409, { ...read(), error: r.error, needsAcknowledgement: true,
+              staleAcknowledgement: !!r.staleAcknowledgement });
+          if (!r.ok) return json(400, { error: r.error, allowed: copy.BOT_OPERATORS });
+          return json(200, { ok: true, ...read() });
+        }
+
+        /* ── THE DISCLOSURE AND ITS ACKNOWLEDGEMENT ──────────────────────────
+           Two verbs on one path, because the panel needs exactly two: read the
+           words to show, and record that they were read.
+
+             GET  /api/floor/N/hq-consent
+               -> { disclosure: { version, sha256, title, intro, conditions,
+                                  closing, text, publishedAt },
+                    consent: {...}, history: [...] }
+               Render `text` (or the same `conditions` it is built from — the words
+               are identical) and send `sha256` back unchanged. The hash is over
+               that exact text; a page that renders its own wording would be
+               collecting an acknowledgement of something else.
+
+             POST /api/floor/N/hq-consent
+               { action: "acknowledge", version, sha256, conditions: [1..8] } -> 200
+               { action: "withdraw" }                                         -> 200
+
+           Same gate as the choice itself: the floor owner's WALLET SESSION, never
+           the executor secret. Consent to custody is a person's act, and the
+           credential a process holds must not be able to give it.
+
+           ACKNOWLEDGING PROVISIONS NOTHING. It writes one row in hq_consents and
+           does not change the floor's operator choice, its dials, or its feed. */
+        const consentMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/hq-consent$/);
+        if (consentMatch) {
+          const floorNo = Number(consentMatch[1]);
+          if (!me) return json(401, { error: "sign in with your wallet first" });
+          if (!holdsFloor(floorNo)) return json(403, { error: "this is not your floor" });
+          const d = copy.hqDisclosure();
+          const view = () => ({ floorNo,
+            disclosure: { version: d.version, sha256: d.sha256, title: d.title,
+              intro: d.intro, conditions: d.conditions, closing: d.closing,
+              text: d.text, publishedAt: d.publishedAt },
+            consent: copy.hqConsentFor(floorNo),
+            history: copy.hqConsentHistory(floorNo, 20) });
+          if (req.method === "GET") { res.setHeader("cache-control", "no-store"); return json(200, view()); }
+          if (req.method !== "POST") return json(405, { error: "method not allowed" });
+          const body = await readBody();
+          const action = body?.action;
+          if (action === "withdraw") {
+            const w = copy.withdrawHqInterest(floorNo, me, {});
+            if (!w.ok) return json(400, { error: w.error });
+            return json(200, { ok: true, withdrawn: w.withdrawn, botOperator: w.botOperator ?? null, ...view() });
+          }
+          if (action !== "acknowledge")
+            return json(400, { error: "action must be acknowledge or withdraw" });
+          /* The WALLET IS THE SESSION'S, never the body's: a floor owner may only
+             acknowledge as themselves, and a body-supplied wallet would let one
+             signed-in tenant file consent under somebody else's name. */
+          const a = copy.acknowledgeHqDisclosure(floorNo, me, {
+            version: body?.version, sha256: body?.sha256, conditions: body?.conditions });
+          if (!a.ok && a.stale)
+            return json(409, { error: a.error, stale: true, ...view() });
+          if (!a.ok) return json(400, { error: a.error, missing: a.missing ?? null, ...view() });
+          return json(200, { ok: true, ...view() });
         }
 
         // ── a floor's copy settings and its personal feed ──

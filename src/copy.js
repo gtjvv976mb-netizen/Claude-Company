@@ -140,6 +140,44 @@ ensureColumn("copy_settings", "take_profit_x", "REAL NOT NULL DEFAULT 0");
 ensureColumn("copy_settings", "fixed_sol", "REAL NOT NULL DEFAULT 0");
 ensureColumn("copy_settings", "mcap_tier", "TEXT NOT NULL DEFAULT 'any'");
 
+/* WHO RUNS THIS FLOOR'S BOT — the one question the product never asked out loud.
+ *
+ * A tenant could lease a floor, set six filters and still not know whether a bot was
+ * supposed to appear on its own. There are exactly two answers, and they differ on
+ * CUSTODY, which is the whole decision:
+ *
+ *   'self'          the tenant runs it on their own machine. The burner keypair is
+ *                   generated there and never leaves it; this desk holds no key of
+ *                   theirs and cannot move their funds. One command, live today:
+ *                   curl -fsSL https://claudedotcompany.com/install.sh | bash -s -- --floor N
+ *                   It costs them a machine that stays awake and, for live trading,
+ *                   two RPC accounts.
+ *   'hq_requested'  the tenant is ASKING for a managed track that does not exist. Not
+ *                   a line of it: multi-tenant keys, deposits, withdrawals, per-user
+ *                   ledgers, reconciliation and key-at-rest were scoped at 4-8 months,
+ *                   and it cannot accept one deposit before the legal work, because it
+ *                   means this operator holding a customer's key and trading their
+ *                   money at its own discretion. So this value provisions NOTHING. It
+ *                   takes no deposit, mints no custodial wallet, and changes no
+ *                   trading behaviour anywhere in this file. It is a recorded want,
+ *                   and the count of them is the demand signal that decides whether
+ *                   those months are ever spent.
+ *
+ * NULL is the third state and the default: they have not chosen. A custody decision is
+ * never defaulted on someone's behalf — a floor that silently read 'self' would be
+ * telling the tenant they had agreed to run a machine, and one that silently read
+ * 'hq_requested' would be manufacturing the demand number the owner is trying to
+ * measure. Deliberately NOT reachable through saveSettings(): this must not be able to
+ * ride along in a generic settings patch from a form that meant to change a sleeve. */
+ensureColumn("copy_settings", "bot_operator", "TEXT");
+// When the CURRENT choice was made — moves on every change, including a change away.
+ensureColumn("copy_settings", "bot_operator_at", "INTEGER");
+/* When this floor FIRST asked for the managed track. Never overwritten, and kept even
+ * if the floor later switches to 'self': the owner is reading demand over time, and a
+ * timestamp that jumped forward on every re-click would compress months of interest
+ * into "everybody asked this week". Current demand is bot_operator; this is its date. */
+ensureColumn("copy_settings", "hq_requested_at", "INTEGER");
+
 /* One-time data migrations need their own ledger. ALTER TABLE keeps schemas current,
  * but it cannot repair a value that an older release seeded incorrectly. In that
  * release floor 50 was created with the balanced preset, whose category list excludes
@@ -263,6 +301,14 @@ export function settingsFor(floorNo) {
   }
   const preset = APPETITES[s.appetite] ?? APPETITES.balanced;
   return { ...s, auto: !!s.auto, preset,
+    /* Read back EXPLICITLY, and normalised to null. `SELECT *` already carries these
+     * three, but a row written before the ALTER TABLE returns undefined for them, and
+     * `undefined` disappears from JSON.stringify — so the panel would receive a
+     * settings object with no bot_operator key at all and could not tell "has not
+     * chosen" from "the server forgot to say". Unset must arrive as a stated null. */
+    bot_operator: s.bot_operator ?? null,
+    bot_operator_at: s.bot_operator_at ?? null,
+    hq_requested_at: s.hq_requested_at ?? null,
     categories: s.categories ? JSON.parse(s.categories) : preset.categories,
     // null means every pad — a floor that has expressed no preference should not
     // silently miss calls when a new launchpad is added.
@@ -341,6 +387,434 @@ export function saveSettings(floorNo, patch) {
   db.prepare("UPDATE copy_settings SET appetite=?, bankroll_sol=?, auto=?, categories=?, launchpads=?, min_liq_usd=?, webhook_url=?, executor_url=?, executor_secret=?, take_profit_x=?, fixed_sol=?, mcap_tier=?, updated_at=? WHERE floor_no=?")
     .run(appetite, bankroll, auto, cats, pads, minLiq, hook, execUrl, execSecret, takeProfitX, fixedSol, mcapTier, Date.now(), floorNo);
   return settingsFor(floorNo);
+}
+
+/** The only two answers. Unset is the absence of one, not a third option to pick. */
+export const BOT_OPERATORS = Object.freeze(["self", "hq_requested"]);
+
+/**
+ * WHAT EACH TRACK ACTUALLY COSTS — shipped as data so no screen has to remember it.
+ *
+ * The temptation in a comparison like this is to make self-hosting sound arduous, and
+ * that would be a lie that pushes people toward the option where somebody else holds
+ * their keys. It is one command, it is live, and it says so here. What each track
+ * really costs is stated for both, and neither carries a return number: the house
+ * record is 26 up / 28 down across 55 calls on 2 settled trades, which this site
+ * already says is too few to claim an edge, so anything derived from it would be a
+ * claim the evidence does not support. Read the record from /api/record; do not
+ * restate it as a forecast anywhere.
+ */
+export const BOT_OPERATOR_TRACKS = Object.freeze({
+  self: Object.freeze({
+    id: "self",
+    label: "You run it",
+    available: true,
+    /* CUSTODY FIRST. It is the difference; everything else is logistics. */
+    custody: "The burner keypair is generated on your machine and never leaves it. " +
+      "This desk holds no key of yours and cannot move your funds.",
+    install: "curl -fsSL https://claudedotcompany.com/install.sh | bash -s -- --floor N",
+    installNote: "One command, macOS and Linux. It generates the burner locally and " +
+      "defaults to a dry run — nothing trades until you pass the live flags yourself.",
+    costs: Object.freeze([
+      "A machine that stays awake — the bot only trades while it is running.",
+      "Two RPC accounts for live trading (a primary and a secondary).",
+    ]),
+  }),
+  hq_requested: Object.freeze({
+    id: "hq_requested",
+    label: "HQ runs it for you",
+    /* NOT A SWITCH. Marking interest is the entire behaviour of this value. */
+    available: false,
+    status: "register interest",
+    /* The panel must show the disclosure and record an acknowledgement before this
+     * value can be stored at all — see setBotOperator and /api/floor/:n/hq-consent. */
+    requiresAcknowledgement: true,
+    custody: "This operator would hold the key and could move the funds. Your recourse " +
+      "would depend on this operator.",
+    costs: Object.freeze([
+      "Custody: your key, and therefore your money, sits with this operator.",
+      "This operator's own machine has a measured availability record of 39 boots and " +
+        "33 stops in five days (measured to 2026-09-06).",
+    ]),
+    note: "It does not exist yet — multi-tenant keys, deposits, withdrawals, per-user " +
+      "ledgers, reconciliation and key-at-rest were scoped at 4-8 months, and it needs " +
+      "legal work before it can take a single deposit. Choosing this takes no money, " +
+      "creates no wallet, and starts no trading. It records that you want it.",
+  }),
+});
+
+/**
+ * Record who the tenant says should run their bot. Nothing else happens here — most
+ * of all for 'hq_requested', which writes three columns on this floor's own settings
+ * row and touches no wallet, no deposit, no delivery and no dial.
+ *
+ * Anything outside the enum is refused rather than coerced: a custody decision is the
+ * last place to be lenient about input, and a typo silently landing on 'self' would
+ * tell a tenant they had agreed to run a machine they never agreed to run.
+ */
+export function setBotOperator(floorNo, choice, { now = Date.now() } = {}) {
+  const n = Number(floorNo);
+  if (!Number.isInteger(n) || n <= 0) return { ok: false, error: "bad floor" };
+  if (!BOT_OPERATORS.includes(choice))
+    return { ok: false, error: `choice must be one of ${BOT_OPERATORS.join(", ")}` };
+  /* CONSENT FIRST, INTEREST SECOND. Asking for a track where this operator holds the key
+   * is not recordable until the tenant has acknowledged today's disclosure — otherwise
+   * the demand number the owner is going to spend months acting on would be a count of
+   * clicks by people who were never told what they were asking for. Refused, not
+   * coerced, and refused with the version and hash so the caller can show the current
+   * text and try again. 'self' is unaffected: nobody needs a disclosure to be told that
+   * their own machine keeps their own key. */
+  if (choice === "hq_requested" && !hqConsentFor(n).acknowledged) {
+    const c = hqConsentFor(n);
+    return { ok: false, needsAcknowledgement: true, staleAcknowledgement: c.stale,
+      error: c.stale
+        ? "the disclosure has changed since this floor acknowledged it — acknowledge the current one first"
+        : "acknowledge the disclosure before asking for the managed track",
+      disclosure: { version: c.disclosureVersion, sha256: c.disclosureSha256 } };
+  }
+  settingsFor(n);                                   // the row must exist before we write it
+  const prior = db.prepare("SELECT hq_requested_at FROM copy_settings WHERE floor_no=?").get(n);
+  /* FIRST ask wins, forever. COALESCE, not an overwrite: see the column's own note —
+   * re-clicking must not restamp demand as new, and switching to 'self' must not erase
+   * the fact that this floor once asked. */
+  const hqAt = choice === "hq_requested" ? (prior?.hq_requested_at ?? now) : (prior?.hq_requested_at ?? null);
+  db.prepare("UPDATE copy_settings SET bot_operator=?, bot_operator_at=?, hq_requested_at=? WHERE floor_no=?")
+    .run(choice, now, hqAt, n);
+  const s = settingsFor(n);
+  return { ok: true, floorNo: n, botOperator: s.bot_operator,
+    botOperatorAt: s.bot_operator_at, hqRequestedAt: s.hq_requested_at };
+}
+
+/**
+ * THE DEMAND SIGNAL — how many floors have asked for the managed track, and since when.
+ *
+ * The owner is being asked to commit 4-8 months and a legal review to a track that
+ * does not exist. This is the number that decides it, so it is counted from the stored
+ * choices themselves rather than from anyone's recollection of who mentioned it.
+ * Aggregate on purpose: the operator needs the count and the dates, not a roster of
+ * which tenant wants custody. Owner-only at the route.
+ */
+export function hqOperatorDemand() {
+  const row = db.prepare(`SELECT COUNT(*) n, MIN(hq_requested_at) first_at, MAX(hq_requested_at) last_at
+    FROM copy_settings WHERE bot_operator='hq_requested'`).get() || {};
+  const self = db.prepare("SELECT COUNT(*) n FROM copy_settings WHERE bot_operator='self'").get()?.n ?? 0;
+  const unset = db.prepare("SELECT COUNT(*) n FROM copy_settings WHERE bot_operator IS NULL").get()?.n ?? 0;
+  /* CURRENT INTEREST vs STALE INTEREST. A floor that asked under an older disclosure has
+   * not withdrawn — it simply has not been shown the words that changed — and the two
+   * must not be added together, because the second number is the one that would be used
+   * to justify building this. Counted by joining the live acknowledgement row and
+   * comparing its hash to today's, so nothing has to be swept when a version ships. */
+  const d = hqDisclosure();
+  const cur = db.prepare(`SELECT COUNT(*) n FROM copy_settings s
+    JOIN hq_consents c ON c.floor_no = s.floor_no AND c.current = 1 AND c.action = 'acknowledged'
+    WHERE s.bot_operator = 'hq_requested' AND c.disclosure_sha256 = ?`).get(d.sha256)?.n ?? 0;
+  return {
+    requested: row.n ?? 0,
+    currentInterest: cur,
+    staleInterest: Math.max(0, (row.n ?? 0) - cur),
+    disclosureVersion: d.version,
+    disclosureSha256: d.sha256,
+    firstRequestAt: row.first_at ?? null,
+    latestRequestAt: row.last_at ?? null,
+    selfHosted: self,
+    undecided: unset,
+    // Said out loud next to the number, because the number is the whole case for
+    // building it: nothing behind this count is running, and none of it can run yet.
+    note: "floors that asked for a managed track. It does not exist and provisions nothing.",
+  };
+}
+
+/* ── THE CONSENT RECORD BEHIND A MANAGED-TRACK REQUEST ────────────────────────────
+ *
+ * Registering interest in a track where somebody else holds your key is not a
+ * preference, and a click on "HQ runs it" is not evidence that anyone read what that
+ * means. So the interest is gated on an ACKNOWLEDGEMENT of a disclosure, and the
+ * acknowledgement is a row.
+ *
+ * A TABLE, NOT MORE COLUMNS. Three columns on copy_settings would hold only the latest
+ * state and would be overwritten by the next click; what an operator needs two years
+ * from now is the trail — who accepted which words, when, and when they took it back.
+ * Every acknowledgement and every withdrawal is an INSERT here. Nothing updates a row's
+ * facts; the only mutable field is the `current` flag, which says which row is live.
+ *
+ * WHAT IT MAY HOLD: the floor, the wallet the session already carries, the disclosure
+ * version, the SHA-256 of the exact text shown, which conditions were ticked, and the
+ * time. No name, no email, no IP, no device — none of that is needed to prove that this
+ * wallet accepted these words, and collecting it would be collecting it. */
+db.exec(`
+CREATE TABLE IF NOT EXISTS hq_consents (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  floor_no          INTEGER NOT NULL,
+  wallet            TEXT NOT NULL,          -- the signed-in wallet; never taken from a body
+  action            TEXT NOT NULL,          -- acknowledged | withdrawn
+  version           TEXT NOT NULL,          -- the disclosure version string shown
+  disclosure_sha256 TEXT NOT NULL,          -- SHA-256 of the exact text shown on screen
+  conditions        TEXT,                   -- JSON array of the condition numbers ticked
+  created_at        INTEGER NOT NULL,
+  current           INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS hq_consents_floor ON hq_consents (floor_no, current);
+`);
+
+/**
+ * THE DISCLOSURE ITSELF — SERVER-SIDE DATA, HASHED FROM ITS OWN WORDS.
+ *
+ * The hash is what makes an acknowledgement worth anything later: it proves WHICH words
+ * were on screen. That only holds if the hash is taken over the same source the page
+ * renders, so the text is built here, hashed here, and served whole — never typed into
+ * a template on one side and hashed on the other, which is exactly how a stored hash
+ * ends up certifying a paragraph nobody ever saw.
+ *
+ * It is DISCLOSURE, not a contract. The managed track needs an agreement drafted by a
+ * lawyer before it can hold a single deposit, and this says so rather than standing in
+ * for it — hence plain sentences and no clause-shaped language anywhere in the copy.
+ *
+ * Every measured fact in it is a number this codebase or this site already reports, and
+ * the unflattering ones are the point: an availability record of 39 starts and 33 stops,
+ * a research desk that has been out of paid credit and silent for over a day, and a
+ * house record of 55 calls at 26 up / 28 down on 2 settled trades with realised P&L
+ * negative — which the site itself calls too few to claim an edge. Softening any of
+ * those would make the acknowledgement worthless, because it would be an
+ * acknowledgement of a nicer arrangement than the one on offer.
+ */
+const HQ_DISCLOSURE_2026_09_06 = {
+  version: "2026-09-06.1",
+  title: "If HQ ran your bot — what that would mean",
+  intro: [
+    "This is not the agreement, and nothing here holds your money. It is the set of facts about an arrangement that does not exist yet, so you can decide whether you want it. If it is ever offered, a real agreement written by a lawyer comes first.",
+    "Ticking these boxes records your interest. It takes no deposit, creates no wallet for you, and changes nothing about how your floor trades today.",
+  ],
+  conditions: [
+    { n: 1, heading: "Who holds the key", points: [
+      "The wallet would be created by us, and the private key would be held by us on the operator's own machine. You would not hold it.",
+      "That is the opposite of the self-hosted option, where the key is generated on your machine and never leaves it.",
+      "While your funds sat in that wallet, your ability to move them would depend on us.",
+    ] },
+    { n: 2, heading: "Who decides the trades", points: [
+      "The desk would choose what to buy and when to sell, inside the filters and caps you set.",
+      "You would not be approving individual trades.",
+    ] },
+    { n: 3, heading: "What the machine is", points: [
+      "It would run on the operator's own computer, not in a data centre.",
+      "Measured over five days, that machine recorded 39 starts and 33 stops, with 38 sleep-related events.",
+      "While it is asleep or offline, nothing is watching your positions.",
+    ] },
+    { n: 4, heading: "What it depends on", points: [
+      "The research desk needs paid API credit at two separate providers before it can publish a single call.",
+      "It has been out of paid credit and has published nothing for over a day.",
+    ] },
+    { n: 5, heading: "The record so far", points: [
+      "55 calls published: 26 up and 28 down, with only 2 settled trades and realised P&L negative.",
+      "This site's own line about that record is that it is too few to claim an edge.",
+      "No expected return is offered here, and none should be read into those numbers.",
+    ] },
+    { n: 6, heading: "What you could lose", points: [
+      "Everything you put in. Memecoin trading can take the whole balance, quickly.",
+      "Separately from market losses: theft, a lost key, a bug, or the operator becoming unavailable could each cost you the balance.",
+    ] },
+    { n: 7, heading: "Getting your money back", points: [
+      "There is no withdrawal system. It is not slow — it is unbuilt.",
+      "Whatever gets built, taking money out would depend on the operator being available.",
+    ] },
+    { n: 8, heading: "It does not exist yet", points: [
+      "Nothing is being managed today. This records that you want it.",
+      "You would be told if and when it is offered, and there would be a real agreement to read before anything holds your money.",
+    ] },
+  ],
+  closing: [
+    "Ticking every box records that you read these facts and accept them as they stand. It is not a contract and it commits you to nothing.",
+    "You can withdraw your interest at any time, in one click, on this same panel.",
+  ],
+};
+
+/** The exact bytes that get hashed and shown. Deterministic and boring on purpose: any
+ *  cleverness here (locale dates, a Set's iteration order, JSON.stringify of an object)
+ *  is a way for the same disclosure to hash differently on two machines and invalidate
+ *  every acknowledgement in the table for no reason. */
+function renderDisclosure(d) {
+  const lines = [d.title, ""];
+  for (const p of d.intro) lines.push(p);
+  for (const c of d.conditions) {
+    lines.push("", `${c.n}. ${c.heading}`);
+    for (const p of c.points) lines.push(`- ${p}`);
+  }
+  lines.push("");
+  for (const p of d.closing) lines.push(p);
+  return lines.join("\n") + "\n";
+}
+
+/* Append-only, newest last. A disclosure version is never edited in place: changing the
+ * words changes the hash, and every acknowledgement of the old words stops counting as
+ * current — which is the whole mechanism, and it only works if the old text stays around
+ * to explain what those older rows were an acknowledgement OF. */
+const HQ_DISCLOSURES = [];
+
+/**
+ * Ship a disclosure version. The one below is published at import; a later release adds
+ * the next one the same way, and that is deliberately the ONLY way — so the hash is
+ * always computed from the text by the same code, and a new version can never be
+ * introduced with a hash somebody pasted in by hand.
+ */
+export function publishHqDisclosure(entry) {
+  if (!entry || typeof entry.version !== "string" || !entry.version.trim())
+    throw new Error("a disclosure needs a version string");
+  if (HQ_DISCLOSURES.some((d) => d.version === entry.version))
+    throw new Error(`disclosure version ${entry.version} already published`);
+  const conditions = Array.isArray(entry.conditions) ? entry.conditions : [];
+  if (!conditions.length) throw new Error("a disclosure needs its conditions");
+  conditions.forEach((c, i) => {
+    if (c.n !== i + 1) throw new Error(`conditions must be numbered 1..n; got ${c.n} at index ${i}`);
+  });
+  const text = renderDisclosure({ title: entry.title ?? "", intro: entry.intro ?? [],
+    conditions, closing: entry.closing ?? [] });
+  const rec = Object.freeze({
+    version: entry.version,
+    title: entry.title,
+    intro: Object.freeze([...(entry.intro ?? [])]),
+    conditions: Object.freeze(conditions.map((c) => Object.freeze({ ...c, points: Object.freeze([...c.points]) }))),
+    closing: Object.freeze([...(entry.closing ?? [])]),
+    text,
+    // Hex SHA-256 over the UTF-8 of the text above. Computed from the words, always.
+    sha256: crypto.createHash("sha256").update(text, "utf8").digest("hex"),
+    publishedAt: entry.publishedAt ?? Date.now(),
+  });
+  HQ_DISCLOSURES.push(rec);
+  return rec;
+}
+publishHqDisclosure(HQ_DISCLOSURE_2026_09_06);
+
+/** The disclosure a tenant must acknowledge right now: text, version and hash together,
+ *  so a page renders the same source the hash was taken over. */
+export function hqDisclosure() { return HQ_DISCLOSURES[HQ_DISCLOSURES.length - 1]; }
+
+/**
+ * WHAT THIS FLOOR HAS ACKNOWLEDGED — and whether it still counts.
+ *
+ * Two different things, and both are needed. `current` is stored: it is cleared when the
+ * tenant withdraws or supersedes their acknowledgement. Staleness is DERIVED by comparing
+ * the stored hash with the current one, and derived on purpose — a stored "is stale" flag
+ * would have to be rewritten across every row on the day a disclosure changes, and the
+ * one row that missed the sweep would read as consent to words nobody had shown.
+ *
+ * `acknowledged` is the only field a gate should read: current AND over today's words.
+ */
+export function hqConsentFor(floorNo) {
+  const n = Number(floorNo);
+  const d = hqDisclosure();
+  const row = Number.isInteger(n)
+    ? db.prepare("SELECT * FROM hq_consents WHERE floor_no=? AND current=1 AND action='acknowledged' ORDER BY id DESC LIMIT 1").get(n)
+    : null;
+  const stale = !!row && row.disclosure_sha256 !== d.sha256;
+  return {
+    floorNo: n,
+    acknowledged: !!row && !stale,
+    stale,
+    wallet: row?.wallet ?? null,
+    version: row?.version ?? null,
+    sha256: row?.disclosure_sha256 ?? null,
+    conditions: row?.conditions ? JSON.parse(row.conditions) : null,
+    at: row?.created_at ?? null,
+    disclosureVersion: d.version,
+    disclosureSha256: d.sha256,
+  };
+}
+
+/** The trail itself, newest first — every acknowledgement and every withdrawal this
+ *  floor has made. The tenant's own floor, so it carries the wallet; the aggregate
+ *  demand figure the operator sees never does. */
+export function hqConsentHistory(floorNo, limit = 20) {
+  const n = Number(floorNo);
+  if (!Number.isInteger(n)) return [];
+  return db.prepare("SELECT id, wallet, action, version, disclosure_sha256, conditions, created_at, current FROM hq_consents WHERE floor_no=? ORDER BY id DESC LIMIT ?")
+    .all(n, Math.max(1, Math.min(200, Number(limit) || 20)))
+    .map((r) => ({ id: r.id, wallet: r.wallet, action: r.action, version: r.version,
+      sha256: r.disclosure_sha256, conditions: r.conditions ? JSON.parse(r.conditions) : null,
+      at: r.created_at, current: !!r.current }));
+}
+
+/**
+ * Record that this wallet read today's disclosure and accepted it.
+ *
+ * The version AND the hash both have to match what is current, and the hash is the one
+ * that matters: a version string can be reused by a careless edit, whereas the hash
+ * changes the moment a single character of the text does. A caller sending yesterday's
+ * hash is a page that was open while the disclosure changed, and the honest answer is to
+ * refuse and re-show it — accepting it would file a signature against words this tenant
+ * never had in front of them.
+ *
+ * ACKNOWLEDGING PROVISIONS NOTHING. It writes one row in this table. No wallet is
+ * created, no deposit is taken, no dial on the floor moves, and the tenant's operator
+ * choice does not change either — consent comes first, the interest is a second act.
+ */
+export function acknowledgeHqDisclosure(floorNo, wallet, { version, sha256, conditions, now = Date.now() } = {}) {
+  const n = Number(floorNo);
+  if (!Number.isInteger(n) || n <= 0) return { ok: false, error: "bad floor" };
+  if (typeof wallet !== "string" || !wallet.trim()) return { ok: false, error: "no wallet" };
+  const d = hqDisclosure();
+  if (version !== d.version || sha256 !== d.sha256)
+    return { ok: false, stale: true,
+      error: "the disclosure changed while it was on screen — read the current one and acknowledge that",
+      disclosure: { version: d.version, sha256: d.sha256 } };
+  /* EVERY CONDITION, TICKED ONE BY ONE. Enforced on the server as well as in the panel,
+   * because a single blanket checkbox is exactly the shape people click through — and
+   * the custody condition is the one this whole flow exists to make someone read. */
+  const ticked = Array.isArray(conditions) ? [...new Set(conditions.map(Number))].sort((a, b) => a - b) : [];
+  const needed = d.conditions.map((c) => c.n);
+  if (needed.some((k) => !ticked.includes(k)))
+    return { ok: false, error: `acknowledge every condition (${needed.join(", ")})`,
+      missing: needed.filter((k) => !ticked.includes(k)) };
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    // Supersede rather than overwrite: the older row stays, with its own words' hash.
+    db.prepare("UPDATE hq_consents SET current=0 WHERE floor_no=? AND current=1").run(n);
+    db.prepare(`INSERT INTO hq_consents (floor_no, wallet, action, version, disclosure_sha256, conditions, created_at, current)
+                VALUES (?,?,'acknowledged',?,?,?,?,1)`)
+      .run(n, wallet, d.version, d.sha256, JSON.stringify(needed), now);
+    db.exec("COMMIT");
+  } catch (e) { db.exec("ROLLBACK"); return { ok: false, error: String(e.message) }; }
+  return { ok: true, consent: hqConsentFor(n) };
+}
+
+/**
+ * Withdraw the interest — as easily as it was given, which is the test of whether it was
+ * ever really optional. One call: the current acknowledgement stops being current, the
+ * floor's operator choice goes back to unset (not to 'self' — withdrawing a request is
+ * not a decision to run a machine), and the withdrawal is itself a row, because a trail
+ * that records only the yeses is not a trail.
+ *
+ * hq_requested_at is deliberately left alone: it is the date this floor FIRST asked, and
+ * the operator reads demand over time. Current demand is bot_operator, which this clears.
+ */
+export function withdrawHqInterest(floorNo, wallet, { now = Date.now() } = {}) {
+  const n = Number(floorNo);
+  if (!Number.isInteger(n) || n <= 0) return { ok: false, error: "bad floor" };
+  if (typeof wallet !== "string" || !wallet.trim()) return { ok: false, error: "no wallet" };
+  const had = hqConsentFor(n);
+  const s = db.prepare("SELECT bot_operator FROM copy_settings WHERE floor_no=?").get(n);
+  const hadRow = !!had.version;
+  const wasRequesting = s?.bot_operator === "hq_requested";
+  /* Nothing to withdraw is not an error — a second click on the same button must not
+   * fail — but it does not write a row either, or the trail fills with withdrawals of
+   * nothing and the real one gets harder to find. */
+  if (!hadRow && !wasRequesting) return { ok: true, withdrawn: false, consent: hqConsentFor(n) };
+  const d = hqDisclosure();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare("UPDATE hq_consents SET current=0 WHERE floor_no=? AND current=1").run(n);
+    /* The withdrawal row is current=0 on purpose: current=1 means "a live acknowledgement
+     * of these words", and a withdrawal is the opposite of one. Reading the trail is how
+     * you see it happened. Its hash is of the words that were withdrawn from when they
+     * are known, so the row says what was undone. */
+    db.prepare(`INSERT INTO hq_consents (floor_no, wallet, action, version, disclosure_sha256, conditions, created_at, current)
+                VALUES (?,?,'withdrawn',?,?,NULL,?,0)`)
+      .run(n, wallet, had.version ?? d.version, had.sha256 ?? d.sha256, now);
+    if (wasRequesting)
+      db.prepare("UPDATE copy_settings SET bot_operator=NULL, bot_operator_at=? WHERE floor_no=?").run(now, n);
+    db.exec("COMMIT");
+  } catch (e) { db.exec("ROLLBACK"); return { ok: false, error: String(e.message) }; }
+  return { ok: true, withdrawn: true, consent: hqConsentFor(n),
+    botOperator: db.prepare("SELECT bot_operator FROM copy_settings WHERE floor_no=?").get(n)?.bot_operator ?? null };
 }
 
 const openCount = (floorNo) => db.prepare(`

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import * as copySettings from "./src/copy.js";
 
 const html = fs.readFileSync(new URL("./viewer/office3d.html", import.meta.url), "utf8");
 
@@ -391,4 +392,756 @@ try {
   assert.match(view, /Date\.now\(\) - bb\.at > 90_000/, "a stale read is labelled stale");
 }
 
-console.log("dashboard HUD, candidate separation, WALL-ST-E boundary, and Callouts contract pass");
+/* ── THE FORK: WHO RUNS YOUR BOT ───────────────────────────────────────────────
+ * The panel used to open with install instructions, which answered the only question
+ * that matters — who holds the key — without asking it. These assertions hold the
+ * shape of the question and, more importantly, the honesty of the two answers:
+ *
+ *   1. NEITHER is preselected. A default here is a custody decision made by a website.
+ *   2. The managed track says it does not exist, and says the operator would hold the
+ *      key. It is a register-interest card; it must never read like a product.
+ *   3. The self-hosted track is not padded. It is ONE COMMAND and it works today;
+ *      overstating that friction would push a reader toward the option where somebody
+ *      else can move their money, which is the worst direction to mislead in.
+ *
+ * The fork is rendered for real rather than grepped: it is evaluated against a small
+ * node shim (this repo has no DOM library), so what is asserted is the tree a tenant
+ * sees, not a string that happens to be in the file. The persistence callback is
+ * stubbed — nothing here touches the network or the server owner's route. */
+{
+  const forkStart = html.indexOf('const RUNNER_SELF = "self";');
+  const forkEnd = html.indexOf("/* ── THE WALL-ST-E EXECUTOR CARD");
+  assert.ok(forkStart > 0 && forkEnd > forkStart,
+    `could not locate the runner-fork block (start ${forkStart}, end ${forkEnd})`);
+  const forkSource = html.slice(forkStart, forkEnd);
+
+  /* A node is whatever dashNode returns: a tag, a class, its text, and its children.
+     That is every property these assertions read, so the shim is the whole DOM. */
+  const shimNode = (tag, cls, text) => {
+    const node = {
+      tag, className: cls || "", textContent: text == null ? "" : String(text),
+      children: [], attrs: {}, type: "", disabled: false, onclick: null,
+    };
+    node.appendChild = (child) => { node.children.push(child); return child; };
+    node.append = (...kids) => { for (const kid of kids) node.children.push(kid); };
+    node.setAttribute = (key, value) => { node.attrs[key] = String(value); };
+    node.getAttribute = (key) => (key in node.attrs ? node.attrs[key] : null);
+    return node;
+  };
+  const built = new Function("dashNode", forkSource + `
+    return { RUNNER_SELF, RUNNER_HQ, normalizeRunnerChoice, runnerTrackBadge, runnerTrackTone,
+             renderRunnerFork, RUNNER_HQ_CONFIRMATION, saveRunnerChoice };`)(shimNode);
+  const { RUNNER_SELF, RUNNER_HQ, normalizeRunnerChoice, runnerTrackBadge, renderRunnerFork } = built;
+
+  /* The half of the contract that is agreed with the server owner: the two values. */
+  assert.equal(RUNNER_SELF, "self", `self-hosted track value is ${JSON.stringify(RUNNER_SELF)}`);
+  assert.equal(RUNNER_HQ, "hq_requested", `managed track value is ${JSON.stringify(RUNNER_HQ)}`);
+  for (const [raw, want] of [[undefined, null], [null, null], ["", null], ["managed", null],
+    ["self", "self"], ["hq_requested", "hq_requested"]]) {
+    const got = normalizeRunnerChoice(raw);
+    assert.equal(got, want,
+      `normalizeRunnerChoice(${JSON.stringify(raw)}) is ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
+  }
+
+  const walk = (node, out = []) => { out.push(node); for (const kid of node.children) walk(kid, out); return out; };
+  const textOf = (node) => walk(node).map((n) => n.textContent).filter(Boolean).join(" ");
+  const nodeWithAttr = (root, key, value) => walk(root).find((n) => n.attrs[key] === value);
+
+  const unset = renderRunnerFork(null, async () => ({ ok: true }));
+  const unsetText = textOf(unset);
+  assert.match(unsetText, /Who runs your bot\?/, `the fork asks the question: ${unsetText.slice(0, 80)}`);
+
+  /* 1 · NEITHER OPTION IS PRESELECTED. */
+  const pressed = [RUNNER_SELF, RUNNER_HQ]
+    .map((value) => nodeWithAttr(unset, "data-runner-pick", value).attrs["aria-pressed"]);
+  assert.deepEqual(pressed, ["false", "false"],
+    `an unset floor must preselect neither track; aria-pressed values are ${JSON.stringify(pressed)}`);
+  const chosenClasses = [RUNNER_SELF, RUNNER_HQ]
+    .map((value) => nodeWithAttr(unset, "data-runner-option", value).className);
+  assert.ok(!chosenClasses.some((cls) => /(^|\s)runner-opt on(\s|$)/.test(cls)),
+    `no card is styled as chosen while nothing is chosen; classes are ${JSON.stringify(chosenClasses)}`);
+
+  /* 2 · CUSTODY IS THE MOST PROMINENT LINE IN EACH CARD — first paragraph in the card
+     and, in the stylesheet, larger than the prose around it. */
+  const custodyOf = (value) => walk(nodeWithAttr(unset, "data-runner-option", value))
+    .find((n) => n.className === "runner-custody");
+  for (const value of [RUNNER_SELF, RUNNER_HQ]) {
+    const option = nodeWithAttr(unset, "data-runner-option", value);
+    const index = option.children.findIndex((n) => n.className === "runner-custody");
+    assert.equal(index, 1,
+      `custody must be the first line under the ${value} card's heading; it is child ${index} of ` +
+      JSON.stringify(option.children.map((n) => n.className || n.tag)));
+  }
+  const proseSize = Number(html.match(/\.runner-opt p\{[^}]*font-size:(\d+(?:\.\d+)?)px/)?.[1]);
+  const custodySize = Number(html.match(/\.runner-custody\{font-size:(\d+(?:\.\d+)?)px!important/)?.[1]);
+  assert.ok(custodySize > proseSize,
+    `the custody line must outweigh the prose around it: custody ${custodySize}px vs prose ${proseSize}px`);
+
+  const selfCustody = custodyOf(RUNNER_SELF).textContent;
+  assert.match(selfCustody, /generated on your own machine, never leaves it/,
+    `self-hosted custody line is: ${selfCustody}`);
+  assert.match(selfCustody, /the desk never receives it/, `self-hosted custody line is: ${selfCustody}`);
+  const hqCustody = custodyOf(RUNNER_HQ).textContent;
+  assert.match(hqCustody, /operator would hold the key to the wallet your funds sit in, and could move them/,
+    `managed custody line is: ${hqCustody}`);
+  assert.match(hqCustody, /depend entirely on the operator/, `managed custody line is: ${hqCustody}`);
+
+  /* 3 · THE MANAGED CARD IS LABELLED UNAVAILABLE, PLAINLY AND IN ITS BADGE. */
+  const hqText = textOf(nodeWithAttr(unset, "data-runner-option", RUNNER_HQ));
+  const hqBadge = walk(nodeWithAttr(unset, "data-runner-option", RUNNER_HQ))
+    .find((n) => /dashbadge/.test(n.className)).textContent;
+  assert.equal(hqBadge, "NOT AVAILABLE YET", `the managed badge reads ${JSON.stringify(hqBadge)}`);
+  assert.match(hqText, /This does not exist yet/, `managed card text: ${hqText}`);
+  assert.match(hqText, /no account to fund, no wallet address to send to/, `managed card text: ${hqText}`);
+  assert.match(hqText, /records that you want it/, `managed card text: ${hqText}`);
+
+  /* 4 · THE SELF-HOSTED CARD SAYS ONE COMMAND, AND SAYS IT IS AVAILABLE NOW. */
+  const selfText = textOf(nodeWithAttr(unset, "data-runner-option", RUNNER_SELF));
+  const selfBadge = walk(nodeWithAttr(unset, "data-runner-option", RUNNER_SELF))
+    .find((n) => /dashbadge/.test(n.className)).textContent;
+  assert.equal(selfBadge, "AVAILABLE NOW", `the self-hosted badge reads ${JSON.stringify(selfBadge)}`);
+  assert.match(selfText, /One command, on macOS or Linux/, `self-hosted card text: ${selfText}`);
+  assert.match(selfText, /a machine that stays awake, and two RPC accounts of your own/,
+    `the self-hosted card states its real cost: ${selfText}`);
+  assert.match(hqText, /custody, plus this operator's uptime/,
+    `the managed card states its real cost: ${hqText}`);
+
+  /* 5 · NOTHING THIS PANEL SAYS CALLS SELF-HOSTING HARD WORK. It is one command; padding
+     that friction would be a lie told toward the riskier option. The scan covers the
+     fork AND the install steps it reveals, and it reads the STRING LITERALS — what a
+     tenant is shown — rather than the file, because a source comment explaining that
+     the clone path is "no longer the default" is a note to the next engineer, not a
+     claim about difficulty made to a user. */
+  const shownStrings = (source) => (source.match(/"(?:[^"\\\n]|\\.)*"/g) || []).join(" \u2028 ");
+  const panelBlocks = [["runner fork", forkSource],
+    ["install steps", html.slice(html.indexOf('const installerSha256 = "'),
+      html.indexOf("setupCard.appendChild(setupSteps);"))]];
+  for (const [name, source] of panelBlocks) {
+    assert.ok(source.length > 400, `could not locate the ${name} block (length ${source.length})`);
+    const shown = shownStrings(source);
+    assert.ok(shown.length > 200, `the ${name} block yielded only ${shown.length} characters of shown text`);
+    for (const word of ["long", "complicated", "difficult", "arduous"]) {
+      const found = shown.match(new RegExp("\\b" + word + "\\w*", "gi"));
+      assert.equal(found, null,
+        `the ${name} block must not describe self-hosting as "${word}"; found ${JSON.stringify(found)} ` +
+        `in ${shown.length} characters of shown text`);
+    }
+  }
+
+  /* 6 · CHOOSING IS RECORDED, AND NOTHING IS PROVISIONED. The callback is stubbed: this
+     test never reaches the server owner's route. */
+  const seen = [];
+  const armed = renderRunnerFork(null, async (value) => { seen.push(value); return { ok: true, message: "recorded" }; });
+  await nodeWithAttr(armed, "data-runner-pick", RUNNER_HQ).onclick();
+  assert.deepEqual(seen, [RUNNER_HQ], `pressing the managed option reports ${JSON.stringify(seen)}`);
+  const armedStatus = walk(armed).find((n) => /runner-status/.test(n.className));
+  assert.equal(armedStatus.textContent, "recorded",
+    `the fork shows what the caller reported, got ${JSON.stringify(armedStatus.textContent)}`);
+  await nodeWithAttr(armed, "data-runner-pick", RUNNER_SELF).onclick();
+  assert.deepEqual(seen, [RUNNER_HQ, RUNNER_SELF], `pressing both reports ${JSON.stringify(seen)}`);
+  assert.match(forkSource, /JSON\.stringify\(\{ choice: value \}\)/,
+    "the write carries the choice and nothing else — no key, no amount, no address");
+
+  /* 7 · THE HQ CONFIRMATION SURVIVES A RELOAD, and says the three things that keep this
+     from being mistaken for a funded, running service. */
+  const requested = renderRunnerFork(RUNNER_HQ, async () => ({ ok: true }));
+  const requestedText = textOf(requested);
+  for (const promise of [/Nothing has been provisioned/, /No wallet has been created for you/,
+    /there is no deposit address/, /no funds should be sent anywhere for this/,
+    /You will be told if and when it exists/]) {
+    assert.match(requestedText, promise,
+      `a floor on the managed track is told: ${requestedText.slice(requestedText.indexOf("Recorded:"), requestedText.indexOf("Recorded:") + 260)}`);
+  }
+  const requestedPressed = [RUNNER_SELF, RUNNER_HQ]
+    .map((value) => nodeWithAttr(requested, "data-runner-pick", value).attrs["aria-pressed"]);
+  assert.deepEqual(requestedPressed, ["false", "true"],
+    `only the chosen track is pressed, got ${JSON.stringify(requestedPressed)}`);
+
+  /* 8 · THE INSTALL CARD IS DOWNSTREAM OF THE CHOICE, on both install surfaces. */
+  assert.match(html, /if \(runnerChoice === RUNNER_SELF\) el\.appendChild\(setupCard\);/,
+    "the five-step install card is attached only on the self-hosted track");
+  assert.match(html, /else if \(runnerChoice === RUNNER_HQ\) \{[\s\S]{0,400}?"Nothing is running for you"/,
+    "...and a floor that asked for HQ is told nothing is running rather than shown the other track's steps");
+  assert.match(html, /\} else \{[\s\S]{0,300}?"Choose a track first"/,
+    "...and an unset floor is asked the question instead of handed instructions");
+  assert.match(html, /if \(settingsRunner === RUNNER_SELF\) box\.appendChild\(installBox\);/,
+    "the second install surface in the settings pane is gated by the same choice");
+  const forkAt = html.indexOf("el.appendChild(renderRunnerFork(runnerChoice");
+  const setupAt = html.indexOf("const setupCard = dashNode(");
+  const gridAt = html.indexOf('const statusGrid = dashNode("div", "dashgrid")');
+  assert.ok(forkAt > 0 && forkAt < gridAt && forkAt < setupAt,
+    `the fork is the first thing in the panel, ahead of every install instruction ` +
+    `(fork ${forkAt}, status grid ${gridAt}, install card ${setupAt})`);
+
+  /* 9 · THE HEADER SAYS WHICH TRACK THIS FLOOR IS ON. A tenant must never have to guess. */
+  const badges = [null, RUNNER_SELF, RUNNER_HQ].map((choice) => runnerTrackBadge(choice));
+  assert.deepEqual(badges,
+    ["TRACK · NOT CHOSEN", "TRACK · YOU RUN IT", "TRACK · HQ REQUESTED · NOT RUNNING"],
+    `the header badge for unset / self / hq reads ${JSON.stringify(badges)}`);
+  assert.match(html,
+    /lead\.appendChild\(dashNode\("span", "dashbadge " \+ runnerTrackTone\(runnerChoice\), runnerTrackBadge\(runnerChoice\)\)\);\n\s*el\.append\(lead\);/,
+    "the WALL-ST-E panel header carries the active track beside the bot's mode");
+  assert.match(html, /"Who runs your bot: " \+ runnerTrackBadge\(\n?\s*normalizeRunnerChoice\(settings\?\.runner_choice/,
+    "the settings-pane bot card names the track too, so the two surfaces cannot disagree");
+}
+
+
+/* ══ THE TWO MODALS THE CUSTODY FORK OPENS ═══════════════════════════════════
+ *
+ * Both are executed, not grepped. The CCModals block is lifted out of the shipped
+ * page and evaluated against a node shim, so every assertion below reads the tree a
+ * tenant actually gets. A grep would pass on a string that is present in the file and
+ * never rendered — which is exactly how a "read more" ends up hiding condition 1.
+ *
+ * The disclosure comes from src/copy.js, the same source the server serves and hashes.
+ * Hard-coding eight conditions here would let a ninth ship with no checkbox and a
+ * green suite.
+ */
+{
+  const start = html.indexOf("window.CCModals = (function () {");
+  const end = html.indexOf("</script>", start);
+  assert.ok(start > 0 && end > start,
+    `could not locate the CCModals block (start ${start}, end ${end})`);
+  const modalSource = html.slice(start, end);
+
+  /* The shim is the whole DOM these builders touch: a tag, a class, text, children,
+     attributes, and the four handlers. textContent's setter clears children because
+     the real one does, and both modals repaint by assigning "" to it. */
+  const makeDom = () => {
+    const mk = (tag) => {
+      const node = { tag, className: "", _text: "", children: [], attrs: {}, style: {},
+        id: "", type: "", href: "", disabled: false, hidden: false, checked: false,
+        tabIndex: 0, onclick: null, onchange: null, parent: null, scrollTop: 0 };
+      Object.defineProperty(node, "textContent", {
+        get() { return node._text; },
+        set(value) { node._text = value == null ? "" : String(value); node.children.length = 0; },
+      });
+      node.appendChild = (child) => { child.parent = node; node.children.push(child); return child; };
+      node.append = (...kids) => { for (const kid of kids) if (kid) { kid.parent = node; node.children.push(kid); } };
+      node.setAttribute = (key, value) => { node.attrs[key] = String(value); };
+      node.getAttribute = (key) => (key in node.attrs ? node.attrs[key] : null);
+      node.removeAttribute = (key) => { delete node.attrs[key]; };
+      node.remove = () => {
+        if (node.parent) {
+          const at = node.parent.children.indexOf(node);
+          if (at >= 0) node.parent.children.splice(at, 1);
+        }
+        node.parent = null;
+      };
+      node.contains = () => false;
+      node.focus = () => {};
+      return node;
+    };
+    const body = mk("body");
+    const bound = [];
+    const store = new Map();
+    return {
+      body, bound, store,
+      document: { createElement: mk, body, activeElement: null,
+        addEventListener: (type, fn) => bound.push([type, fn]),
+        removeEventListener: (type, fn) => {
+          const at = bound.findIndex(([t, f]) => t === type && f === fn);
+          if (at >= 0) bound.splice(at, 1);
+        } },
+      window: { matchMedia: () => ({ matches: false }) },
+      localStorage: { getItem: (k) => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) },
+      navigator: { clipboard: { writeText: async () => {} } },
+    };
+  };
+  const loadModals = (dom) => new Function("window", "document", "localStorage", "navigator",
+    modalSource + "\nreturn window.CCModals;")(dom.window, dom.document, dom.localStorage, dom.navigator);
+
+  const walk = (node, out = []) => { out.push(node); for (const kid of node.children) walk(kid, out); return out; };
+  const textOf = (node) => walk(node).map((n) => n.textContent).filter(Boolean).join(" ");
+  const withAttr = (root, key, value) => walk(root)
+    .filter((n) => (value == null ? key in n.attrs : n.attrs[key] === String(value)));
+  const settle = async () => { for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0)); };
+  const FLOOR = 12;
+
+  /* ── 1 · NINE STEPS, AND IT OPENS ON THE FIRST ─────────────────────────────── */
+  {
+    const dom = makeDom();
+    const modals = loadModals(dom);
+    const steps = modals.installSteps({ floorNo: FLOOR, installerSha256: "a".repeat(64) });
+    assert.equal(steps.length, 9, `the walkthrough has ${steps.length} steps, expected 9`);
+    assert.deepEqual(steps.map((s) => s.n), [1, 2, 3, 4, 5, 6, 7, 8, 9],
+      `steps are numbered ${JSON.stringify(steps.map((s) => s.n))}`);
+
+    modals.openInstallWalkthrough({ floorNo: FLOOR, installerSha256: "a".repeat(64) });
+    const scrim = dom.body.children[dom.body.children.length - 1];
+    assert.ok(scrim, "opening the walkthrough attached nothing to the document");
+    const dialogNode = walk(scrim).find((n) => n.attrs.role === "dialog");
+    assert.ok(dialogNode, "the walkthrough is not marked up as a dialog");
+    assert.equal(dialogNode.attrs["aria-modal"], "true",
+      `aria-modal is ${JSON.stringify(dialogNode.attrs["aria-modal"])}`);
+    const shown = textOf(scrim);
+    assert.match(shown, /Step 1 of 9/, `the walkthrough opens reading: ${shown.slice(0, 160)}`);
+    const stage = walk(scrim).find((n) => n.attrs["data-step-stage"] != null);
+    assert.equal(stage.attrs["data-step-stage"], "1",
+      `the first stage rendered is step ${stage.attrs["data-step-stage"]}`);
+    /* BACK IS DEAD ON STEP 1 AND NEXT IS DEAD ON STEP 9: the progress indicator and
+       the two controls must agree about where the reader is. */
+    const back = withAttr(scrim, "data-walk", "back")[0];
+    const next = withAttr(scrim, "data-walk", "next")[0];
+    assert.equal(back.disabled, true, `Back on step 1 is disabled=${back.disabled}`);
+    assert.equal(next.disabled, false, `Next on step 1 is disabled=${next.disabled}`);
+    const pips = walk(scrim).filter((n) => n.tag === "i");
+    assert.equal(pips.length, 9, `the progress indicator has ${pips.length} marks, expected 9`);
+    assert.equal(pips.filter((p) => p.className === "now").length, 1,
+      `exactly one mark is the current step; got ${JSON.stringify(pips.map((p) => p.className))}`);
+
+    /* IT REMEMBERS WHERE THE READER STOPPED, per floor. */
+    const key = modals.walkthroughKey(FLOOR);
+    assert.equal(dom.store.get(key), "1", `step memory after opening is ${dom.store.get(key)}`);
+    for (let step = 1; step < 9; step++) next.onclick();
+    assert.match(textOf(scrim), /Step 9 of 9/, "nine Next presses reach the last step");
+    assert.equal(dom.store.get(key), "9", `step memory after walking to the end is ${dom.store.get(key)}`);
+    assert.equal(withAttr(scrim, "data-walk", "next")[0].disabled, true,
+      "Next is disabled on the last step");
+
+    const reopened = makeDom();
+    reopened.store.set(modals.walkthroughKey(FLOOR), "6");
+    const again = loadModals(reopened);
+    again.openInstallWalkthrough({ floorNo: FLOOR, installerSha256: "a".repeat(64) });
+    assert.match(textOf(reopened.body), /Step 6 of 9/,
+      `reopening resumes where the reader stopped, not at 1: ${textOf(reopened.body).slice(0, 120)}`);
+    /* Junk, a foreign floor's value, or a step that no longer exists is step 1 — a
+       remembered position is a convenience, never a reason to open on nothing. */
+    for (const junk of ["", "0", "10", "abc", "3.5"]) {
+      const got = again.rememberedStep(999, 9);
+      assert.equal(got, 1, `an unset floor resumes at ${got}`);
+      reopened.store.set(again.walkthroughKey(998), junk);
+      const fromJunk = again.rememberedStep(998, 9);
+      assert.equal(fromJunk, 1, `a stored ${JSON.stringify(junk)} resumes at ${fromJunk}`);
+    }
+  }
+
+  /* ── 2 · THE INSTALL LINE CARRIES THIS FLOOR'S REAL NUMBER ──────────────────
+     No placeholder the reader has to fill in. The tone rules allow exactly one
+     substitution and this page already knows it. */
+  {
+    for (const floorNo of [7, 12, 48]) {
+      const dom = makeDom();
+      const modals = loadModals(dom);
+      modals.openInstallWalkthrough({ floorNo, installerSha256: "b".repeat(64) });
+      const scrim = dom.body.children[dom.body.children.length - 1];
+      const next = withAttr(scrim, "data-walk", "next")[0];
+      next.onclick(); next.onclick();                      // step 3 is the install
+      const stage = walk(scrim).find((n) => n.attrs["data-step-stage"] != null);
+      assert.equal(stage.attrs["data-step-stage"], "3", "step 3 is the install step");
+      const commands = withAttr(scrim, "data-copy").map((n) => n.attrs["data-copy"]);
+      const wanted = `curl -fsSL https://claudedotcompany.com/install.sh | bash -s -- --floor ${floorNo}`;
+      assert.ok(commands.includes(wanted),
+        `floor ${floorNo}'s install line is missing; the copyable commands are ${JSON.stringify(commands)}`);
+      assert.doesNotMatch(commands.join(" "), /<N>|<floor|YOUR_FLOOR|\{floor/i,
+        `a placeholder survived into a copyable command: ${JSON.stringify(commands)}`);
+      const shown = textOf(scrim);
+      assert.match(shown, /installs a dry run/,
+        `the install step says what it installs: ${shown.slice(0, 200)}`);
+    }
+  }
+
+  /* ── 3 · STEP 5 EXISTS, IS THE BACKUP, AND IS VISUALLY ITS OWN THING ────────
+     Skipping this is the one omission that costs a reader everything they later
+     deposit, so it is not a bullet among bullets: it is the only step carrying the
+     critical treatment, it has its own banner, and it names the file. */
+  {
+    const dom = makeDom();
+    const modals = loadModals(dom);
+    const steps = modals.installSteps({ floorNo: FLOOR, installerSha256: "c".repeat(64) });
+    const critical = steps.filter((s) => s.critical === true);
+    assert.equal(critical.length, 1,
+      `exactly one step is the distinct one; ${critical.length} are marked critical`);
+    assert.equal(critical[0].n, 5, `the critical step is step ${critical[0].n}`);
+    assert.match(critical[0].title, /back up the key/i,
+      `step 5 is titled ${JSON.stringify(critical[0].title)}`);
+
+    modals.openInstallWalkthrough({ floorNo: FLOOR, installerSha256: "c".repeat(64) });
+    const scrim = dom.body.children[dom.body.children.length - 1];
+    const next = withAttr(scrim, "data-walk", "next")[0];
+    for (let i = 0; i < 4; i++) next.onclick();
+    const stage = walk(scrim).find((n) => n.attrs["data-step-stage"] != null);
+    assert.equal(stage.attrs["data-step-stage"], "5", "four Next presses land on step 5");
+    assert.match(stage.className, /ccm-critical/,
+      `the backup step's own stage class is ${JSON.stringify(stage.className)}`);
+    assert.equal(stage.attrs["data-critical"], "1",
+      `the backup step is flagged data-critical=${JSON.stringify(stage.attrs["data-critical"])}`);
+    const flag = walk(stage).find((n) => n.className === "ccm-critical-flag");
+    assert.ok(flag, "the backup step has no banner of its own");
+    assert.match(flag.textContent, /before you fund/i, `its banner reads ${JSON.stringify(flag.textContent)}`);
+    /* No other step may wear the same treatment, or "distinct" means nothing. */
+    for (const step of [1, 2, 3, 4, 6, 7, 8, 9]) {
+      const other = makeDom();
+      const build = loadModals(other);
+      other.store.set(build.walkthroughKey(FLOOR), String(step));
+      build.openInstallWalkthrough({ floorNo: FLOOR, installerSha256: "c".repeat(64) });
+      const otherStage = walk(other.body).find((n) => n.attrs["data-step-stage"] != null);
+      assert.doesNotMatch(otherStage.className, /ccm-critical/,
+        `step ${step} also wears the critical treatment (${otherStage.className})`);
+    }
+    const shown = textOf(stage);
+    assert.match(shown, /~\/claudeco-executor\/burner\.json/, `step 5 names the key file: ${shown.slice(0, 200)}`);
+    assert.match(shown, /NOWHERE ELSE/, "step 5 says the key exists in exactly one place");
+    const commands = withAttr(stage, "data-copy").map((n) => n.attrs["data-copy"]).join("\n");
+    assert.match(commands, /burner-backup\.mjs --out ~\/wall-st-e-recovery\.txt/,
+      `step 5's copyable commands are: ${JSON.stringify(commands)}`);
+    assert.match(commands, /burner-backup\.mjs --verify ~\/wall-st-e-recovery\.txt/,
+      "an unverified backup is a guess, so the verify line is offered too");
+  }
+
+  /* ── 4 · IT SAYS HOW TO STOP THE BOT ────────────────────────────────────────
+     A user who cannot stop a trading bot will panic, so the last step reproduces the
+     two sentinels the executor actually reads — including the mode, because a
+     touch-created file is 644 and the runtime rejects it as not owner-only. */
+  {
+    const dom = makeDom();
+    const modals = loadModals(dom);
+    dom.store.set(modals.walkthroughKey(FLOOR), "9");
+    modals.openInstallWalkthrough({ floorNo: FLOOR, installerSha256: "d".repeat(64) });
+    const scrim = dom.body.children[dom.body.children.length - 1];
+    const stage = walk(scrim).find((n) => n.attrs["data-step-stage"] != null);
+    assert.equal(stage.attrs["data-step-stage"], "9", "the stop instructions are step 9");
+    const shown = textOf(stage);
+    const commands = withAttr(stage, "data-copy").map((n) => n.attrs["data-copy"]);
+    const joined = commands.join("\n");
+    assert.ok(commands.includes("install -m 600 /dev/null ~/claudeco-executor/PAUSE_ENTRIES"),
+      `the pause sentinel is missing or wrong; copyable commands are ${JSON.stringify(commands)}`);
+    assert.ok(commands.includes("install -m 600 /dev/null ~/claudeco-executor/HARD_STOP"),
+      `the hard-stop sentinel is missing or wrong; copyable commands are ${JSON.stringify(commands)}`);
+    assert.ok(commands.includes("rm ~/claudeco-executor/PAUSE_ENTRIES"),
+      `resuming is missing; copyable commands are ${JSON.stringify(commands)}`);
+    assert.doesNotMatch(joined, /touch ~\/claudeco-executor/,
+      `a sentinel created with touch is mode 644 and reads as not owner-only; found ${JSON.stringify(joined)}`);
+    assert.match(shown, /owner-only/, "step 9 says why the mode matters");
+    assert.match(shown, /refuses new buys but keeps/,
+      `step 9 states what a pause does: ${shown.slice(0, 260)}`);
+    assert.match(shown, /no new submissions at all, including automated exits/,
+      "step 9 states what the hard stop does, exits included");
+    assert.match(shown, /Stopping the process does not close an on-chain position/,
+      "step 9 does not let a reader believe stopping the service flattens a position");
+    assert.ok(commands.includes("sudo systemctl stop cc-executor"),
+      `the Linux stop command is missing; got ${JSON.stringify(commands)}`);
+    assert.ok(commands.includes("bash ~/claudeco-executor/current/macos-launchagent.sh unload"),
+      `the macOS stop command is missing; got ${JSON.stringify(commands)}`);
+    assert.match(shown, /uninstall/i, "step 9 also says how to uninstall");
+  }
+
+  /* ── 5 · THE CONSENT SHEET RENDERS EVERY CONDITION, EACH WITH ITS OWN BOX ───
+     The condition list comes from the server module, so a ninth condition shipped
+     without a checkbox fails here rather than collecting a signature nobody gave. */
+  const disclosure = copySettings.hqDisclosure();
+  const conditionCount = disclosure.conditions.length;
+  const consentContext = (dom, overrides = {}) => ({
+    floorNo: FLOOR,
+    load: async () => ({ floorNo: FLOOR, disclosure,
+      consent: { acknowledged: false, stale: false }, history: [] }),
+    acknowledge: async (sent) => { dom.sent = sent; return { ok: true,
+      view: { floorNo: FLOOR, disclosure,
+        consent: { acknowledged: true, stale: false, version: disclosure.version,
+          sha256: disclosure.sha256, at: 1_757_190_000_000 }, history: [] } }; },
+    withdraw: async () => ({ ok: true, withdrawn: true }),
+    registerInterest: async () => { dom.registered = (dom.registered || 0) + 1; return { ok: true }; },
+    ...overrides,
+  });
+  {
+    const dom = makeDom();
+    const modals = loadModals(dom);
+    modals.openHqConsent(consentContext(dom));
+    await settle();
+    const scrim = dom.body.children[dom.body.children.length - 1];
+    const conditions = withAttr(scrim, "data-condition");
+    assert.equal(conditions.length, conditionCount,
+      `the server serves ${conditionCount} conditions and the sheet renders ${conditions.length}`);
+    assert.deepEqual(conditions.map((n) => Number(n.attrs["data-condition"])),
+      disclosure.conditions.map((c) => c.n),
+      `the numbering on screen is ${JSON.stringify(conditions.map((n) => n.attrs["data-condition"]))}`);
+    const ticks = withAttr(scrim, "data-tick");
+    assert.equal(ticks.length, conditionCount,
+      `one checkbox per condition: ${conditionCount} conditions, ${ticks.length} boxes`);
+    for (const condition of conditions) {
+      const own = withAttr(condition, "data-tick");
+      assert.equal(own.length, 1,
+        `condition ${condition.attrs["data-condition"]} owns ${own.length} checkboxes, expected exactly 1`);
+    }
+
+    /* EVERY WORD THE HASH WAS TAKEN OVER IS ON SCREEN, and none of it is folded away.
+       A collapsed section here would hide the custody sentence, which is the only
+       sentence that decides anything. */
+    const shown = textOf(scrim);
+    for (const condition of disclosure.conditions) {
+      assert.ok(shown.includes(condition.heading),
+        `condition ${condition.n}'s heading "${condition.heading}" is not on screen`);
+      for (const point of condition.points) {
+        assert.ok(shown.includes(point),
+          `condition ${condition.n} drops a line the hash covers: "${point.slice(0, 70)}…"`);
+      }
+    }
+    for (const line of [...disclosure.intro, ...disclosure.closing]) {
+      assert.ok(shown.includes(line), `the disclosure drops "${line.slice(0, 70)}…"`);
+    }
+    assert.equal(walk(scrim).filter((n) => n.tag === "details" || /(^|\s)fold(\s|$)/.test(n.className)).length, 0,
+      "nothing in the consent sheet is behind a disclosure widget");
+    assert.ok(shown.includes(disclosure.sha256),
+      `the sheet shows the hash of the words it rendered; got ${shown.slice(-160)}`);
+    assert.ok(shown.includes(disclosure.version),
+      "the sheet shows which disclosure version it rendered");
+
+    /* ── 6 · CONTINUE IS DEAD UNTIL EVERY BOX IS TICKED ─────────────────────── */
+    const proceed = withAttr(scrim, "data-consent", "continue")[0];
+    assert.equal(proceed.disabled, true,
+      `Continue starts disabled=${proceed.disabled} with 0 of ${conditionCount} ticked`);
+    for (let index = 0; index < ticks.length; index++) {
+      ticks[index].checked = true;
+      ticks[index].onchange();
+      const want = index < ticks.length - 1;
+      assert.equal(proceed.disabled, want,
+        `with ${index + 1} of ${conditionCount} ticked Continue is disabled=${proceed.disabled}, ` +
+        `expected ${want} (label "${proceed.textContent}")`);
+    }
+    /* Unticking one takes it back. A gate that only ever opens is not a gate. */
+    ticks[3].checked = false; ticks[3].onchange();
+    assert.equal(proceed.disabled, true,
+      `unticking a box re-disables Continue; disabled=${proceed.disabled}`);
+    ticks[3].checked = true; ticks[3].onchange();
+    assert.equal(proceed.disabled, false, "and re-ticking it opens the gate again");
+
+    /* ── 7 · THE CONFIRMATION IS HONEST ABOUT WHAT DID NOT HAPPEN ──────────── */
+    await proceed.onclick();
+    await settle();
+    assert.deepEqual(dom.sent, { version: disclosure.version, sha256: disclosure.sha256,
+      conditions: disclosure.conditions.map((c) => c.n) },
+      `the acknowledgement echoes the served version and hash exactly; it sent ${JSON.stringify(dom.sent)}`);
+    assert.equal(dom.registered, 1,
+      `the interest is written once after the acknowledgement, not ${dom.registered} times`);
+    const confirmation = withAttr(scrim, "data-consent", "confirmation")[0];
+    assert.ok(confirmation, "the flow does not end on a confirmation");
+    const said = textOf(confirmation);
+    for (const promise of [
+      /Nothing has been provisioned/,
+      /No wallet has been created for you/,
+      /There is no deposit address/,
+      /No funds should be sent anywhere for this/,
+      /if anyone asks you to send funds for it, it is not us/,
+      /You will be told if and when this is offered/,
+      /a real agreement written by a lawyer will exist for you to read before anything holds your money/,
+      /this flow is not that agreement/,
+    ]) {
+      assert.match(said, promise, `the confirmation must say ${promise}; it says: ${said}`);
+    }
+    assert.doesNotMatch(said, /your bot is (now )?managed|is now running|funds are|deposit (to|at|address:)/i,
+      `the confirmation must not imply anything is running or funded: ${said}`);
+    /* NOTHING IN EITHER MODAL MAY LOOK LIKE SOMEWHERE TO SEND MONEY. A base58 run of
+       32+ characters is what a Solana address looks like to a reader in a hurry. */
+    const everything = textOf(scrim) + " " + withAttr(scrim, "data-copy")
+      .map((n) => n.attrs["data-copy"]).join(" ");
+    const addressish = everything.match(/\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g);
+    assert.equal(addressish, null,
+      `the consent flow shows something an address-shaped string: ${JSON.stringify(addressish)}`);
+
+    /* WITHDRAWING IS THE SAME ONE CLICK. */
+    const undo = withAttr(scrim, "data-consent", "withdraw")[0];
+    assert.ok(undo, "withdrawing is not offered on the confirmation");
+    assert.equal(undo.hidden, false, `the withdraw control is hidden=${undo.hidden} on the confirmation`);
+    await undo.onclick();
+    await settle();
+    const cleared = withAttr(scrim, "data-consent", "withdrawn")[0];
+    assert.ok(cleared, "withdrawing does not confirm itself");
+    assert.match(textOf(cleared), /withdrawn/i, `withdrawal says: ${textOf(cleared)}`);
+    assert.match(textOf(cleared), /Nothing was ever provisioned/,
+      "withdrawal repeats that there was never anything to return");
+  }
+
+  /* ── 8 · A CHANGED DISCLOSURE MAKES THEM TICK AGAIN ─────────────────────────
+     The hash is the entire audit trail. If the server says the words moved, the page
+     re-renders from what came back and reopens the gate — an acknowledgement of
+     superseded text certifies nothing. */
+  {
+    const dom = makeDom();
+    const modals = loadModals(dom);
+    const newer = { ...disclosure, version: disclosure.version + "-next",
+      sha256: "f".repeat(64) };
+    let attempts = 0;
+    modals.openHqConsent(consentContext(dom, {
+      acknowledge: async (sent) => {
+        attempts++;
+        dom.sent = sent;
+        if (attempts === 1) return { ok: false, stale: true, error: "the wording changed",
+          view: { floorNo: FLOOR, disclosure: newer,
+            consent: { acknowledged: false, stale: true }, history: [] } };
+        return { ok: true, view: { floorNo: FLOOR, disclosure: newer,
+          consent: { acknowledged: true, stale: false, version: newer.version,
+            sha256: newer.sha256, at: 1 }, history: [] } };
+      },
+    }));
+    await settle();
+    const scrim = dom.body.children[dom.body.children.length - 1];
+    const tickAll = () => { for (const box of withAttr(scrim, "data-tick")) { box.checked = true; box.onchange(); } };
+    tickAll();
+    const proceed = withAttr(scrim, "data-consent", "continue")[0];
+    await proceed.onclick();
+    await settle();
+    assert.equal(dom.registered, undefined,
+      `a stale acknowledgement must not record interest; it recorded ${dom.registered}`);
+    assert.equal(withAttr(scrim, "data-consent", "confirmation").length, 0,
+      "a stale acknowledgement must not land on the confirmation");
+    assert.equal(proceed.disabled, true,
+      `after a stale answer the gate is shut again; disabled=${proceed.disabled}`);
+    const shown = textOf(scrim);
+    assert.match(shown, /wording changed/i, `the reader is told why they must tick again: ${shown.slice(0, 200)}`);
+    assert.ok(shown.includes(newer.sha256),
+      "the sheet now shows the hash of the words that came back, not the ones it had");
+    tickAll();
+    await proceed.onclick();
+    await settle();
+    assert.deepEqual(dom.sent, { version: newer.version, sha256: newer.sha256,
+      conditions: disclosure.conditions.map((c) => c.n) },
+      `the retry echoes the NEW version and hash; it sent ${JSON.stringify(dom.sent)}`);
+    assert.equal(dom.registered, 1, `interest is recorded once the current words are accepted`);
+  }
+
+  /* ── 9 · A FAILED WRITE IS NEVER REPORTED AS A RECORD ───────────────────────
+     For the managed track the record IS the product, so "recorded" must never be
+     printed over a write that did not land. */
+  {
+    const dom = makeDom();
+    const modals = loadModals(dom);
+    modals.openHqConsent(consentContext(dom, {
+      registerInterest: async () => ({ ok: false, error: "the desk answered 503" }),
+    }));
+    await settle();
+    const scrim = dom.body.children[dom.body.children.length - 1];
+    for (const box of withAttr(scrim, "data-tick")) { box.checked = true; box.onchange(); }
+    await withAttr(scrim, "data-consent", "continue")[0].onclick();
+    await settle();
+    const said = textOf(scrim);
+    assert.match(said, /the interest itself was not recorded/,
+      `a refused write must say so: ${said.slice(-400)}`);
+    assert.match(said, /Nothing was provisioned either way/,
+      "and must still say nothing was provisioned");
+    assert.equal(withAttr(scrim, "data-consent", "continue")[0].disabled, false,
+      "and must leave Continue live so the reader can try again");
+  }
+
+  /* ── 10 · A FAILED LOAD LEAVES A READABLE WINDOW ────────────────────────────── */
+  {
+    const dom = makeDom();
+    const modals = loadModals(dom);
+    modals.openHqConsent(consentContext(dom, {
+      load: async () => { throw new Error("the desk is down"); },
+    }));
+    await settle();
+    const said = textOf(dom.body);
+    assert.match(said, /could not be loaded/, `a failed load reads: ${said.slice(0, 300)}`);
+    assert.match(said, /Nothing was recorded and nothing was provisioned/,
+      "a failed load still states that nothing happened");
+    assert.equal(withAttr(dom.body, "data-tick").length, 0,
+      "a failed load must not render a tickable sheet");
+  }
+
+  /* ── 11 · NOTHING IN EITHER MODAL CALLS SELF-HOSTING HARD WORK ──────────────
+     It is one command plus a series of decisions. Padding that friction would be a
+     lie told in the direction of the track that hands somebody else the key — the
+     worst direction to lie in. The scan reads the STRING LITERALS, which is what a
+     tenant is shown, rather than the file, whose comments are notes to the next
+     engineer. */
+  {
+    const shownStrings = (modalSource.match(/"(?:[^"\\\n]|\\.)*"/g) || []).join("   ");
+    assert.ok(shownStrings.length > 4000,
+      `the modal block yielded only ${shownStrings.length} characters of shown text`);
+    for (const word of ["long", "complicated", "difficult", "arduous", "advanced"]) {
+      const found = shownStrings.match(new RegExp("\\b" + word + "\\w*", "gi"));
+      assert.equal(found, null,
+        `neither modal may describe self-hosting as "${word}"; found ${JSON.stringify(found)} ` +
+        `in ${shownStrings.length} characters of shown text`);
+    }
+    /* And the same scan over the text a reader is actually handed, assembled by
+       rendering every screen — a word can reach the page through a server payload
+       or a concatenation that no literal contains. */
+    const dom = makeDom();
+    const modals = loadModals(dom);
+    let rendered = "";
+    for (let step = 1; step <= 9; step++) {
+      const fresh = makeDom();
+      const build = loadModals(fresh);
+      fresh.store.set(build.walkthroughKey(FLOOR), String(step));
+      build.openInstallWalkthrough({ floorNo: FLOOR, installerSha256: "e".repeat(64) });
+      rendered += " " + textOf(fresh.body);
+    }
+    modals.openHqConsent(consentContext(dom));
+    await settle();
+    const consentScrim = dom.body.children[dom.body.children.length - 1];
+    rendered += " " + textOf(consentScrim);
+    for (const box of withAttr(consentScrim, "data-tick")) { box.checked = true; box.onchange(); }
+    await withAttr(consentScrim, "data-consent", "continue")[0].onclick();
+    await settle();
+    rendered += " " + textOf(consentScrim);
+    for (const word of ["long", "complicated", "difficult", "arduous", "advanced"]) {
+      const found = rendered.match(new RegExp("\\b" + word + "\\w*", "gi"));
+      assert.equal(found, null,
+        `the rendered modals must not describe self-hosting as "${word}"; found ${JSON.stringify(found)} ` +
+        `in ${rendered.length} characters of rendered text`);
+    }
+    assert.ok(rendered.length > 8000,
+      `the rendered sweep only collected ${rendered.length} characters, so it proved little`);
+  }
+
+  /* ── 12 · BOTH MODALS ARE REACHABLE FROM THE CHOICE THAT ALREADY RENDERS ────
+     Rendered, not grepped: the fork is built again with the two openers stubbed, and
+     pressing each card's second button must reach its own screen. A button that opens
+     the wrong modal is exactly as useless as a button that opens nothing. */
+  {
+    const forkStart = html.indexOf('const RUNNER_SELF = "self";');
+    const forkEnd = html.indexOf("/* ── THE WALL-ST-E EXECUTOR CARD");
+    const forkSource = html.slice(forkStart, forkEnd);
+    const dom = makeDom();
+    const fork = new Function("dashNode", forkSource +
+      "\nreturn { RUNNER_SELF, RUNNER_HQ, renderRunnerFork };")(dom.document.createElement
+        ? (tag, cls, text) => { const n = dom.document.createElement(tag);
+            if (cls) n.className = cls; if (text != null) n.textContent = String(text); return n; }
+        : null);
+    const opened = [];
+    const card = fork.renderRunnerFork(null, async () => ({ ok: true }), {
+      openWalkthrough: () => opened.push("walkthrough"),
+      openConditions: () => opened.push("conditions"),
+    });
+    const buttons = withAttr(card, "data-runner-more");
+    assert.equal(buttons.length, 2,
+      `each card offers a way to read before choosing; found ${buttons.length} such buttons`);
+    const byTrack = Object.fromEntries(buttons.map((b) => [b.attrs["data-runner-more"], b]));
+    assert.ok(byTrack[fork.RUNNER_SELF] && byTrack[fork.RUNNER_HQ],
+      `the two buttons belong to ${JSON.stringify(Object.keys(byTrack))}`);
+    assert.match(byTrack[fork.RUNNER_SELF].textContent, /9 steps/,
+      `the self-hosted card's button reads ${JSON.stringify(byTrack[fork.RUNNER_SELF].textContent)}`);
+    assert.match(byTrack[fork.RUNNER_HQ].textContent, /conditions/i,
+      `the managed card's button reads ${JSON.stringify(byTrack[fork.RUNNER_HQ].textContent)}`);
+    byTrack[fork.RUNNER_SELF].onclick();
+    byTrack[fork.RUNNER_HQ].onclick();
+    assert.deepEqual(opened, ["walkthrough", "conditions"],
+      `pressing the two buttons opened ${JSON.stringify(opened)}`);
+    /* READING IS NOT CHOOSING. Neither button may write a track. */
+    const wrote = [];
+    const readOnly = fork.renderRunnerFork(null, async (value) => { wrote.push(value); return { ok: true }; }, {
+      openWalkthrough: () => {}, openConditions: () => {},
+    });
+    for (const button of withAttr(readOnly, "data-runner-more")) button.onclick();
+    assert.deepEqual(wrote, [],
+      `opening a modal must record nothing; it wrote ${JSON.stringify(wrote)}`);
+  }
+  assert.match(html, /more: "Walk me through it · 9 steps",\n\s*moreHook: "openWalkthrough",/,
+    "the self-hosted card opens the walkthrough");
+  assert.match(html, /more: "Read the conditions first",\n\s*moreHook: "openConditions",/,
+    "the managed card opens the conditions");
+  assert.match(html, /openWalkthrough: openWallsteWalkthrough,\n\s*openConditions: \(\) => openHqConditions\(/,
+    "the WALL-ST-E panel wires both openers into the fork");
+  assert.match(html, /if \(saved\.needsAcknowledgement\) \{\n\s*openHqConditions\(/,
+    "a 409 from the desk opens the conditions instead of printing a status code");
+  assert.match(html, /call_api\("\/api\/floor\/" \+ FLOOR_N \+ "\/bot-operator"/,
+    "the choice is written to the route the server actually exposes");
+  assert.match(html, /JSON\.stringify\(\{ action: "acknowledge", version, sha256, conditions \}\)/,
+    "the acknowledgement carries the served version and hash back unchanged");
+  assert.match(html, /JSON\.stringify\(\{ action: "withdraw" \}\)/,
+    "withdrawing is one call with no confirmation ceremony of its own");
+}
+
+console.log("dashboard HUD, candidate separation, WALL-ST-E boundary, runner fork, install walkthrough, HQ consent, and Callouts contract pass");

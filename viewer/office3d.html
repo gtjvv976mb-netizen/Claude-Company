@@ -330,6 +330,125 @@ body{
 .commandbox{margin-top:7px;padding:8px;border:1px dashed var(--card-line);border-radius:7px;
   background:var(--card);font:9.5px/1.5 "JetBrains Mono",monospace;overflow-wrap:anywhere;white-space:pre-wrap}
 .commandcopy{margin-top:6px}
+/* ── THE FORK: WHO RUNS YOUR BOT ───────────────────────────────────────────────
+   Two cards, identically weighted on purpose. The track that exists must not be drawn
+   as the lesser option and the track that does not exist must not be drawn as the
+   premium one, because the only honest way to read this pair is on what each costs.
+   .runner-custody is the emphasised block in BOTH cards: custody is the difference,
+   so it is the line the eye lands on first, not a footnote under the buttons. */
+.runner-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));gap:9px;margin-top:8px}
+.runner-opt{display:flex;flex-direction:column;gap:7px;min-width:0;padding:11px;
+  border:1px solid var(--card-line);border-radius:9px;background:var(--panel)}
+.runner-opt.on{border-color:var(--teal);box-shadow:inset 0 0 0 1px var(--teal)}
+.runner-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.runner-head h5{margin:0;font-size:13px}
+.runner-opt p{margin:0;color:var(--ink-soft);font-size:11px;line-height:1.45}
+.runner-custody{font-size:12px!important;color:var(--ink)!important;font-weight:600;padding:8px 9px;
+  border-left:3px solid var(--amber);border-radius:6px;background:color-mix(in srgb,var(--amber) 9%,var(--card))}
+.runner-cost{color:var(--ink-faint)!important}
+.runner-opt .dp-btn{margin-top:auto;align-self:flex-start}
+.runner-status{margin-top:8px}
+.runner-status.good{color:var(--good)}
+.runner-status.bad{color:var(--bad)}
+.runner-opt .runner-more{margin-top:0;align-self:flex-start}
+/* ── THE TWO MODALS THE FORK OPENS ────────────────────────────────────────────
+   MEASURED, NOT ASSUMED. This panel's own history is two overflow defects at the
+   narrow column width: a 64-hex digest painted 394px of unbreakable text into a
+   294px box, and a three-column metric grid that hyphenated "Clear" into "Cle/ar".
+   So every rule below that can hold an unbreakable token — commands, file paths, wallet
+   addresses, the disclosure hash — breaks anywhere, and every grid is auto-fit
+   rather than a fixed column count. The dialog is measured at a 351px inner
+   column, which is the phone rail this floor panel actually renders in.
+
+   MOTION IS OPT-IN. The entry animation lives inside a
+   prefers-reduced-motion: no-preference query, so a reader who has asked their OS
+   for stillness gets a dialog that is simply there. */
+.ccm-scrim{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;
+  padding:12px;background:rgba(4,2,10,.74);backdrop-filter:blur(2px);overflow-y:auto}
+.ccm{position:relative;width:min(560px,calc(100vw - 24px));max-height:min(88vh,820px);
+  display:flex;flex-direction:column;min-height:0;min-width:0;
+  background:var(--panel);border:1px solid var(--panel-line);border-radius:12px;
+  box-shadow:0 24px 60px rgba(0,0,0,.7);overflow:hidden}
+@media (prefers-reduced-motion: no-preference){
+  .ccm{animation:ccmIn .16s ease-out}
+}
+@keyframes ccmIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.ccm-head{display:flex;align-items:flex-start;gap:10px;padding:12px 13px;
+  border-bottom:1px solid var(--panel-line);background:var(--card)}
+.ccm-head .ccm-titles{flex:1;min-width:0}
+.ccm-head h3{margin:0;font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:17px;
+  line-height:1.2;overflow-wrap:break-word}
+.ccm-head p{margin:3px 0 0;font-size:11px;line-height:1.45;color:var(--ink-faint);overflow-wrap:break-word}
+.ccm-x{flex:none;width:28px;height:28px;padding:0;border-radius:6px;cursor:pointer;
+  background:transparent;border:1px solid var(--panel-line);color:var(--ink-soft);font-size:15px;line-height:1}
+.ccm-x:hover{color:var(--ink);border-color:var(--card-line)}
+.ccm-x:focus-visible,.ccm button:focus-visible,.ccm a:focus-visible,.ccm input:focus-visible{
+  outline:2px solid var(--amber);outline-offset:2px}
+.ccm-body{flex:1;min-height:0;min-width:0;overflow-y:auto;overflow-x:hidden;
+  padding:12px 13px;display:flex;flex-direction:column;gap:9px}
+.ccm-body p,.ccm-body li{margin:0;font-size:12px;line-height:1.5;color:var(--ink-soft);overflow-wrap:break-word}
+.ccm-body h4{margin:0;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint)}
+.ccm-body h5{margin:0;font-size:13px;line-height:1.3;color:var(--ink);overflow-wrap:break-word}
+.ccm-body ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px}
+.ccm-body ul li{display:flex;gap:8px;align-items:flex-start;min-width:0}
+.ccm-body ul li::before{content:"·";flex:none;color:var(--amber);font-weight:700;line-height:1.5}
+.ccm-foot{flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  padding:10px 13px;border-top:1px solid var(--panel-line);background:var(--card)}
+.ccm-foot .ccm-spacer{flex:1 1 auto;min-width:0}
+/* A command is the one thing in here a reader must be able to select in full: it
+   wraps at any character, never ellipsises, and never scrolls sideways. */
+.ccm-cmd{margin:0;padding:9px;border:1px dashed var(--card-line);border-radius:7px;background:var(--card);
+  font:10px/1.55 "JetBrains Mono",monospace;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere;
+  word-break:break-word;max-width:100%}
+.ccm-copy{align-self:flex-start;max-width:100%}
+/* ── THE WALKTHROUGH ── */
+.ccm-prog{display:flex;flex-direction:column;gap:6px}
+.ccm-prog-line{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;
+  font:600 9.5px "JetBrains Mono",monospace;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-faint)}
+.ccm-prog-track{display:flex;gap:3px}
+.ccm-prog-track i{flex:1 1 0;min-width:0;height:4px;border-radius:2px;background:var(--card-line)}
+.ccm-prog-track i.on{background:var(--amber)}
+.ccm-prog-track i.now{background:var(--sol-green)}
+.ccm-step{display:flex;flex-direction:column;gap:9px;min-width:0}
+/* STEP 5 IS ITS OWN SCREEN AND LOOKS LIKE IT. Backing up the burner is the single
+   step whose omission costs the reader every lamport they later deposit, so it is
+   not a bullet in a list of bullets: coral edge, its own banner, its own weight. */
+.ccm-step.ccm-critical{padding:11px;border:1px solid var(--coral);border-left:4px solid var(--coral);
+  border-radius:9px;background:color-mix(in srgb,var(--coral) 10%,var(--card))}
+.ccm-critical-flag{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:999px;
+  align-self:flex-start;max-width:100%;background:var(--coral);color:#170707;
+  font:700 9.5px "JetBrains Mono",monospace;letter-spacing:.08em;text-transform:uppercase;
+  overflow-wrap:break-word;white-space:normal;text-align:left}
+.ccm-critical h5{font-size:14px}
+.ccm-critical p{color:var(--ink)}
+/* ── THE CONSENT SHEET ── */
+.ccm-disclosure{display:flex;flex-direction:column;gap:11px;padding:11px;border:1px solid var(--card-line);
+  border-radius:9px;background:var(--card);min-width:0}
+.ccm-cond{display:flex;flex-direction:column;gap:7px;padding:10px;border:1px solid var(--card-line);
+  border-radius:8px;background:var(--panel);min-width:0}
+.ccm-cond.ticked{border-color:var(--good)}
+.ccm-cond h5{display:flex;gap:7px;align-items:baseline;min-width:0}
+.ccm-cond h5 b{flex:none;font:700 11px "JetBrains Mono",monospace;color:var(--amber)}
+.ccm-tick{display:flex;gap:9px;align-items:flex-start;cursor:pointer;min-width:0;
+  padding:8px;border-radius:7px;border:1px solid var(--card-line);background:var(--card)}
+.ccm-tick input{flex:none;width:17px;height:17px;margin:1px 0 0;accent-color:var(--sol-green);cursor:pointer}
+.ccm-tick span{font-size:11.5px;line-height:1.45;color:var(--ink);overflow-wrap:break-word}
+.ccm-hash{font:9.5px/1.5 "JetBrains Mono",monospace;color:var(--ink-faint);overflow-wrap:anywhere;
+  word-break:break-word;margin:0}
+.ccm-done{display:flex;flex-direction:column;gap:9px;padding:12px;border-radius:10px;
+  border:1px solid color-mix(in srgb,var(--good) 46%,var(--card-line));
+  background:color-mix(in srgb,var(--good) 8%,var(--card));min-width:0}
+.ccm-done h5{font-size:14px}
+.ccm-done p{color:var(--ink)}
+.ccm-err{color:var(--bad);font-size:11.5px;line-height:1.45;margin:0;overflow-wrap:break-word}
+.ccm-ok{color:var(--good);font-size:11.5px;line-height:1.45;margin:0;overflow-wrap:break-word}
+@media (max-width:760px){
+  .ccm-scrim{padding:8px;align-items:flex-end}
+  .ccm{width:100%;max-height:min(90vh,780px);border-radius:14px}
+  .ccm-body{padding:11px}
+  .ccm-foot{padding:9px 11px}
+  .ccm-foot .dp-btn{flex:1 1 auto;min-width:0}
+}
 .held-list{display:flex;flex-direction:column;gap:5px;margin-top:7px}
 .held-list .datarow{padding:6px 8px}
 .secretbox{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:8px;border:1px dashed var(--card-line);border-radius:7px;background:var(--panel)}
@@ -693,6 +812,664 @@ select.dp-in{cursor:pointer}
   let t = null;
   try { t = localStorage.getItem("cc_theme"); } catch {}
   document.documentElement.dataset.theme = t === "light" ? "light" : "dark";
+})();
+</script>
+
+<script>
+/* ══ THE TWO SCREENS THE CUSTODY FORK OPENS ══════════════════════════════════
+ *
+ * The fork asks who runs the bot. Each answer needs a screen the other one does
+ * not, and both were previously missing:
+ *
+ *   "I'll run it myself"  → a walkthrough of the nine things that actually happen,
+ *      because the install card underneath the fork is a reference card, not a
+ *      guided path, and a reader meeting it cold cannot tell which lines are
+ *      decisions and which are description.
+ *
+ *   "Have HQ run it"      → the conditions, and a recorded acknowledgement of them.
+ *      That track DOES NOT EXIST. Nothing on this screen may take a deposit, show
+ *      a deposit address, generate a wallet, or leave a reader thinking money is
+ *      being looked after. It ends in "your interest is recorded", never in
+ *      "your bot is managed".
+ *
+ * WHY THIS IS A PLAIN SCRIPT AND NOT PART OF THE PANEL'S MODULE. The panel is three
+ * separate module scopes that a test cannot re-evaluate in isolation. These
+ * builders are the two surfaces where a wrong word costs somebody their wallet, so
+ * they live in one addressable block a regression test can execute against a shim
+ * DOM and assert on the RENDERED text rather than on the source that produces it.
+ *
+ * THE DISCLOSURE TEXT IS NEVER AUTHORED HERE. It is served by /api/floor/N/hq-consent
+ * together with the SHA-256 taken over those exact words, and this page renders what
+ * came back. A page that templated its own wording would collect an acknowledgement
+ * of one text while storing the hash of another, which is worse than storing nothing.
+ */
+window.CCModals = (function () {
+  const REDUCE_MOTION = () => {
+    try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; }
+  };
+  const el = (tag, cls, text) => {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text != null) node.textContent = String(text);
+    return node;
+  };
+  const para = (parent, cls, text) => { const p = el("p", cls, text); parent.appendChild(p); return p; };
+  const bullets = (parent, items) => {
+    if (!items || !items.length) return null;
+    const list = el("ul");
+    for (const item of items) list.appendChild(el("li", "", item));
+    parent.appendChild(list);
+    return list;
+  };
+  /* Copy is offered on every command, and it says what happened either way: a button
+     that silently does nothing in a browser with the clipboard blocked is worse than
+     one that says the text is there to select. */
+  const commandBlock = (parent, label, text) => {
+    parent.appendChild(el("pre", "ccm-cmd", text));
+    const button = el("button", "dp-btn ghost ccm-copy", label);
+    button.type = "button";
+    button.setAttribute("data-copy", text);
+    button.onclick = async () => {
+      const was = button.textContent;
+      try {
+        await navigator.clipboard.writeText(text);
+        button.textContent = "Copied ✓";
+      } catch { button.textContent = "Clipboard blocked — select it above"; }
+      setTimeout(() => { button.textContent = was; }, 1800);
+    };
+    parent.appendChild(button);
+    return button;
+  };
+
+  /* ── THE SHELL: one dialog, escape-closable, focus-trapping ────────────────
+     A modal that leaks focus to the 3D floor behind it is a modal a keyboard user
+     cannot finish, and this one asks for eight deliberate ticks. Tab cycles inside
+     the dialog; Escape closes it; focus returns to whatever opened it. */
+  function openDialog({ title, subtitle, label }) {
+    const opener = document.activeElement;
+    const scrim = el("div", "ccm-scrim");
+    scrim.setAttribute("data-ccm", label || "dialog");
+    const box = el("div", "ccm");
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    box.tabIndex = -1;
+    const head = el("div", "ccm-head");
+    const titles = el("div", "ccm-titles");
+    const heading = el("h3", "", title);
+    heading.id = "ccm-title-" + (label || "dialog");
+    box.setAttribute("aria-labelledby", heading.id);
+    titles.appendChild(heading);
+    if (subtitle) para(titles, "", subtitle);
+    head.appendChild(titles);
+    const close = el("button", "ccm-x", "✕");
+    close.type = "button";
+    close.setAttribute("aria-label", "Close");
+    head.appendChild(close);
+    const body = el("div", "ccm-body");
+    const foot = el("div", "ccm-foot");
+    box.append(head, body, foot);
+    scrim.appendChild(box);
+
+    let closed = false;
+    const dismiss = () => {
+      if (closed) return;
+      closed = true;
+      document.removeEventListener("keydown", onKey, true);
+      scrim.remove();
+      try { opener && opener.focus && opener.focus(); } catch {}
+    };
+    const focusable = () => {
+      let found = [];
+      try {
+        found = Array.prototype.slice.call(box.querySelectorAll(
+          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled])'));
+      } catch { found = []; }
+      return found;
+    };
+    function onKey(event) {
+      if (event.key === "Escape") { event.preventDefault(); dismiss(); return; }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || !box.contains(active))) {
+        event.preventDefault(); last.focus();
+      } else if (!event.shiftKey && (active === last || !box.contains(active))) {
+        event.preventDefault(); first.focus();
+      }
+    }
+    close.onclick = dismiss;
+    /* Clicking the scrim closes; clicking inside must not. Neither modal loses work
+       on a stray click: the walkthrough remembers its step and the consent screen
+       has written nothing until Continue is pressed. */
+    scrim.onclick = (event) => { if (event.target === scrim) dismiss(); };
+    document.addEventListener("keydown", onKey, true);
+    (document.body || document.documentElement).appendChild(scrim);
+    try { box.focus(); } catch {}
+    return { scrim, box, head, body, foot, close, dismiss, setTitle: (t) => { heading.textContent = t; } };
+  }
+
+  /* ══ MODAL 1 · THE NINE STEPS ═══════════════════════════════════════════════
+   * Every command and every gate below was read out of the shipped installer,
+   * poller.mjs, executor/README.md or sleep-assertion.mjs. Where the software
+   * enforces something, this says so plainly rather than describing it as a
+   * recommendation — a reader who is surprised by a gate at step 7 was misled
+   * at step 3.
+   *
+   * TONE: this is one command plus a series of decisions. It is never described
+   * to a tenant as anything more than that, because padding the friction of the
+   * track that exists would be a lie told in the direction of the track that
+   * hands somebody else the key.
+   */
+  const INSTALL_HOME = "~/claudeco-executor";
+  function installSteps(context) {
+    const floor = context.floorNo;
+    const oneCommand = "curl -fsSL https://claudedotcompany.com/install.sh | bash -s -- --floor " + floor;
+    const shaKnown = /^[0-9a-f]{64}$/i.test(String(context.installerSha256 || ""));
+    return [
+      { n: 1, title: "What you need first",
+        lede: "Three things, and none of them cost money.",
+        points: [
+          "A computer that stays awake. If it sleeps, the bot stops watching your positions.",
+          "macOS or Linux. On Windows, install Ubuntu under WSL2 and run everything inside it.",
+          "About ten minutes.",
+        ],
+        notes: ["Nothing in this walkthrough costs money. Trading is a separate decision you make "
+          + "later, on that machine, and it takes deliberate steps of its own."] },
+
+      { n: 2, title: "Get your floor's feed secret",
+        /* NAME BOTH BUTTONS. The credential can be minted from either surface and they
+           are labelled differently; sending a reader to look for one word that is only
+           on the other pane is the placeholder this walkthrough is meant to remove. */
+        lede: "Create it from the panel behind this window. In the WALL-ST-E view the button reads "
+          + "“Create credential”; in Settings the same control reads “Create my executor feed secret”.",
+        points: [
+          "It is READ-ONLY. It lets your bot read the calls published to floor " + floor
+            + " and post a heartbeat back.",
+          "It cannot sign a transaction and it cannot move funds. It is not a wallet key.",
+          "Treat it like a password: anyone holding it can read your floor's calls.",
+        ],
+        notes: ["You will be asked for it during the install, at the terminal, with the typing hidden."] },
+
+      { n: 3, title: "Run one command",
+        lede: "On the machine that will run the bot. Your floor number is already in it.",
+        commands: [{ label: "Copy the install command", text: oneCommand }],
+        points: [
+          "This installs a dry run. WALL-ST-E watches the feed, writes down what it would have done, "
+            + "and trades nothing until you arm it yourself on that machine.",
+        ],
+        extras: [
+          shaKnown ? { kind: "sha", text: String(context.installerSha256) } : null,
+          { kind: "command", label: "Copy the checksum command",
+            text: "curl -fsSL https://claudedotcompany.com/install.sh | shasum -a 256",
+            note: shaKnown
+              ? "Compare that output with the digest above before you run anything. It is the digest of the "
+                + "very installer this site is serving."
+              : "This build has not stamped its installer digest, so compare the output against the digest on "
+                + "the published site rather than against this preview." },
+          { kind: "command", label: "Copy the --help command",
+            text: "curl -fsSL https://claudedotcompany.com/install.sh | bash -s -- --help",
+            note: "Prints what it would do and exits without installing anything." },
+          { kind: "download", label: "Download the double-click installer (macOS)",
+            href: "/executor/Install%20WALL-ST-E.command",
+            note: "For anyone who would rather not open a terminal. macOS quarantines a downloaded "
+              + ".command file: right-click it and choose Open the first time. It runs the same line." },
+        ].filter(Boolean) },
+
+      { n: 4, title: "What the installer is doing",
+        lede: "Five things, in this order, so none of it is a surprise.",
+        points: [
+          "Checks Node (it needs >=22.13 and <25). If it is missing or the wrong version, it OFFERS to "
+            + "download the official build, verify it against nodejs.org's own SHASUMS256.txt, and unpack a "
+            + "private copy used only by this executor. No sudo. Your system Node and your shell profile are "
+            + "left alone.",
+          "Generates a dedicated burner keypair ON THIS MACHINE at " + INSTALL_HOME + "/burner.json, mode "
+            + "0600. It is never transmitted anywhere.",
+          "Asks for the feed secret with the typing hidden. It is never a command-line flag, because argv "
+            + "lands in your shell history and in the process list.",
+          "Installs a supervised service: a per-user LaunchAgent on macOS (no sudo), a hardened systemd "
+            + "unit on Linux.",
+          "Starts in DRY RUN.",
+        ] },
+
+      { n: 5, title: "Back up the key",
+        critical: true,
+        flag: "Do this before you fund anything",
+        lede: INSTALL_HOME + "/burner.json exists on that disk and NOWHERE ELSE. Nobody — not this site, "
+          + "not the operator — can recover it for you.",
+        commands: [{ label: "Copy the backup commands",
+          text: "node " + INSTALL_HOME + "/current/burner-backup.mjs --out ~/wall-st-e-recovery.txt\n"
+            + "node " + INSTALL_HOME + "/current/burner-backup.mjs --verify ~/wall-st-e-recovery.txt" }],
+        points: [
+          "Run both lines on the executor host. Neither one sends anything anywhere; the second proves the "
+            + "file you just wrote still restores the wallet, and an unverified backup is a guess.",
+          "The recovery file is base58 — the form Phantom, Solflare and Backpack import — so getting "
+            + "your funds back never depends on this software still working.",
+          "Then move that file somewhere this machine cannot reach.",
+        ],
+        notes: ["This is the one step where skipping it can cost you everything you later deposit. A "
+          + "reimaged disk, a dead drive or a lost machine takes the balance with it."] },
+
+      { n: 6, title: "Watch it work, with no money at risk",
+        lede: "It is reading your floor's live calls and running the whole policy, writing down what it "
+          + "WOULD have done. It signs nothing and submits nothing.",
+        commands: [
+          { label: "Copy the macOS log command",
+            text: "tail -f ~/Library/Logs/ClaudeCompany/wallste.stdout.log" },
+          { label: "Copy the Linux log command", text: "sudo journalctl -u cc-executor -f" },
+        ],
+        points: [
+          "Within about a minute this panel shows a heartbeat and the burner's public address.",
+          "Watch a few calls go by before you consider going live. That is the entire point of the dry run.",
+        ] },
+
+      { n: 7, title: "Going live — this is where real money starts",
+        lede: "The software enforces every one of these. None of them is a suggestion.",
+        points: [
+          "Two RPC endpoints from DIFFERENT providers. The secondary must not be another hostname at the "
+            + "same registrable domain; the executor cross-checks the two and refuses to act on one "
+            + "provider's word. The rate-limited public Solana RPC is rejected for either endpoint, and both "
+            + "must be HTTPS.",
+          "A Jupiter API key. Live mode refuses to start without it.",
+          "A pinned local checkout plus the exact 40-character published commit. --live never runs "
+            + "downloaded code, so this step needs a git clone even though the dry run did not.",
+          "You fund the burner address yourself. The installer never funds a wallet.",
+          "You RETYPE THE BURNER'S OWN PUBLIC KEY when prompted. LIVE_TRADING_ACK must equal it exactly or "
+            + "the service refuses to arm.",
+          "Caps start as a canary: 0.005 SOL per trade, 0.01 SOL rolling 24h deployed, and a 0.01 SOL "
+            + "rolling 24h realised-loss brake. Raising any one of them requires all three together plus a "
+            + "second typed acknowledgement.",
+        ],
+        notes: ["The exact live command, with the pinned commit and the cap flags, is on the install card in "
+          + "the panel behind this window. This step is the decision; that card is the paste."] },
+
+      { n: 8, title: "Confirm it is armed",
+        lede: "Two readings agree, or it is not armed.",
+        points: [
+          "This panel shows LIVE rather than PAPER.",
+          "The log prints “READINESS proved” — an unsigned rehearsal against both providers, "
+            + "proving it could execute, having signed nothing.",
+          "If readiness will not prove, it is usually a flaky RPC. It retries.",
+        ] },
+
+      { n: 9, title: "Knowing how to stop it",
+        lede: "Two sentinel files and one service command. Learn these before you need them.",
+        points: [
+          "PAUSE: while " + INSTALL_HOME + "/PAUSE_ENTRIES exists, WALL-ST-E refuses new buys but keeps "
+            + "monitoring, keeps closing recorded positions, and keeps reconciling pending attempts.",
+          "HARD STOP: while " + INSTALL_HOME + "/HARD_STOP exists, it creates no new submissions at all, "
+            + "including automated exits. It still reconciles transactions already signed or submitted, and "
+            + "open positions then need you to manage them.",
+        ],
+        commands: [
+          { label: "Copy the pause command",
+            text: "install -m 600 /dev/null " + INSTALL_HOME + "/PAUSE_ENTRIES" },
+          { label: "Copy the resume command", text: "rm " + INSTALL_HOME + "/PAUSE_ENTRIES" },
+          { label: "Copy the hard-stop command",
+            text: "install -m 600 /dev/null " + INSTALL_HOME + "/HARD_STOP" },
+        ],
+        notes: [
+          "Create both with install -m 600, not with touch. A safety control other users can write is not a "
+            + "safety control, so the executor requires these files to be owner-only; touch makes them mode "
+            + "644 and it reports the sentinel as not owner-only.",
+          "Stopping the process does not close an on-chain position. Neither sentinel is removed by any "
+            + "install, upgrade or uninstall command — removing one is always your own deliberate act.",
+        ],
+        extras: [
+          { kind: "command", label: "Copy the macOS stop command",
+            text: "bash " + INSTALL_HOME + "/current/macos-launchagent.sh unload",
+            note: "Stops and disables the supervised process on macOS. Uninstall with the same script: "
+              + "macos-launchagent.sh uninstall, which requires the unload first and removes only the plist." },
+          { kind: "command", label: "Copy the Linux stop command", text: "sudo systemctl stop cc-executor",
+            note: "The host-level emergency brake on Linux. To uninstall: sudo systemctl disable --now "
+              + "cc-executor, then remove /etc/systemd/system/cc-executor.service and reload the daemon." },
+          { kind: "note", note: "Neither uninstall touches your logs, your journal, your burner key, or "
+            + "either sentinel. Back the key up (step 5) before you remove anything." },
+        ] },
+    ];
+  }
+
+  const walkthroughKey = (floorNo) => "cc_wallste_walkthrough_" + floorNo;
+  const rememberedStep = (floorNo, count) => {
+    let raw = null;
+    try { raw = localStorage.getItem(walkthroughKey(floorNo)); } catch {}
+    const parsed = Number(raw);
+    /* An absent, junk or out-of-range value is step 1. A remembered step is a
+       convenience, never a reason to open on a blank screen. */
+    return Number.isInteger(parsed) && parsed >= 1 && parsed <= count ? parsed : 1;
+  };
+
+  function openInstallWalkthrough(context) {
+    const ctx = context || {};
+    const floorNo = ctx.floorNo;
+    const steps = installSteps(ctx);
+    const total = steps.length;
+    const dialog = openDialog({
+      title: "Run it yourself — the nine steps",
+      subtitle: "Floor " + floorNo + ". One command, then a series of decisions that are yours. You can close "
+        + "this and come back; it remembers where you were.",
+      label: "walkthrough",
+    });
+
+    const progress = el("div", "ccm-prog");
+    const progressLine = el("div", "ccm-prog-line");
+    const progressCount = el("span", "", "");
+    const progressName = el("span", "", "");
+    progressLine.append(progressCount, progressName);
+    const track = el("div", "ccm-prog-track");
+    const pips = [];
+    for (let index = 0; index < total; index++) { const pip = el("i"); pips.push(pip); track.appendChild(pip); }
+    progress.append(progressLine, track);
+    dialog.body.appendChild(progress);
+    const stage = el("div", "ccm-step");
+    stage.setAttribute("data-step-stage", "1");
+    dialog.body.appendChild(stage);
+
+    const back = el("button", "dp-btn ghost", "← Back");
+    back.type = "button";
+    back.setAttribute("data-walk", "back");
+    const next = el("button", "dp-btn", "Next →");
+    next.type = "button";
+    next.setAttribute("data-walk", "next");
+    const done = el("button", "dp-btn ghost", "Close");
+    done.type = "button";
+    done.setAttribute("data-walk", "close");
+    done.onclick = dialog.dismiss;
+    dialog.foot.append(back, el("div", "ccm-spacer"), done, next);
+
+    let current = rememberedStep(floorNo, total);
+    const paint = () => {
+      const step = steps[current - 1];
+      stage.textContent = "";
+      stage.className = "ccm-step" + (step.critical ? " ccm-critical" : "");
+      stage.setAttribute("data-step-stage", String(step.n));
+      if (step.critical) stage.setAttribute("data-critical", "1");
+      else stage.removeAttribute("data-critical");
+      if (step.flag) stage.appendChild(el("span", "ccm-critical-flag", step.flag));
+      stage.appendChild(el("h5", "", "Step " + step.n + " · " + step.title));
+      if (step.lede) para(stage, "", step.lede);
+      for (const command of step.commands || []) commandBlock(stage, command.label, command.text);
+      bullets(stage, step.points);
+      for (const extra of step.extras || []) {
+        if (extra.kind === "sha") {
+          para(stage, "", "The installer this site is serving has SHA-256:");
+          stage.appendChild(el("pre", "ccm-cmd", extra.text));
+        } else if (extra.kind === "command") {
+          if (extra.note) para(stage, "", extra.note);
+          commandBlock(stage, extra.label, extra.text);
+        } else if (extra.kind === "download") {
+          const link = el("a", "dp-btn ghost ccm-copy", extra.label);
+          link.href = extra.href;
+          link.setAttribute("download", "Install WALL-ST-E.command");
+          stage.appendChild(link);
+          if (extra.note) para(stage, "", extra.note);
+        } else if (extra.kind === "note") {
+          para(stage, "", extra.note);
+        }
+      }
+      for (const note of step.notes || []) para(stage, "", note);
+
+      progressCount.textContent = "Step " + current + " of " + total;
+      progressName.textContent = step.title;
+      for (let index = 0; index < pips.length; index++) {
+        pips[index].className = index + 1 < current ? "on" : index + 1 === current ? "now" : "";
+      }
+      back.disabled = current === 1;
+      next.disabled = current === total;
+      next.textContent = current === total ? "Finished" : "Next →";
+      try { localStorage.setItem(walkthroughKey(floorNo), String(current)); } catch {}
+      /* Reduced motion means no smooth scroll either: the request is about movement,
+         not about scroll bars. */
+      try { dialog.body.scrollTo({ top: 0, behavior: REDUCE_MOTION() ? "auto" : "smooth" }); }
+      catch { dialog.body.scrollTop = 0; }
+    };
+    back.onclick = () => { if (current > 1) { current--; paint(); } };
+    next.onclick = () => { if (current < total) { current++; paint(); } };
+    paint();
+    return { dialog, steps, goTo: (n) => { current = n; paint(); }, get step() { return current; } };
+  }
+
+  /* ══ MODAL 2 · THE CONDITIONS, AND A RECORDED ACKNOWLEDGEMENT ═══════════════
+   * WHAT IT MUST NOT DO: accept a deposit, show a deposit address, create a wallet,
+   * or leave a reader believing anything is being managed. It records interest.
+   *
+   * WHAT IT MUST DO: render the SERVER'S words, all of them, with nothing folded
+   * away, one checkbox per numbered condition, and send back the version and hash
+   * exactly as they were served. The hash is the audit trail — it is what proves
+   * later which words a tenant actually saw — and it only means that if the words
+   * on screen are the words it was taken over.
+   */
+  const HQ_DONE_HEADLINE = "Your interest is recorded. Nothing has been provisioned.";
+  const HQ_DONE_LINES = [
+    "No wallet has been created for you. There is no deposit address. No funds should be sent anywhere for "
+      + "this — if anyone asks you to send funds for it, it is not us.",
+    "Nothing about how your floor trades today has changed.",
+    "You will be told if and when this is offered. If it ever is, a real agreement written by a lawyer will "
+      + "exist for you to read before anything holds your money — and this flow is not that agreement.",
+    "The only track that runs today is your own machine, and that is one command.",
+  ];
+
+  function openHqConsent(context) {
+    const ctx = context || {};
+    const dialog = openDialog({
+      title: "If HQ ran your bot",
+      subtitle: "Floor " + ctx.floorNo + ". Read these, tick each one, and your interest is recorded. It takes "
+        + "no deposit and creates no wallet.",
+      label: "consent",
+    });
+    dialog.body.appendChild(el("p", "", "Loading the conditions…"));
+
+    const withdrawButton = el("button", "dp-btn ghost", "Withdraw my interest");
+    withdrawButton.type = "button";
+    withdrawButton.setAttribute("data-consent", "withdraw");
+    const continueButton = el("button", "dp-btn", "Continue — record my interest");
+    continueButton.type = "button";
+    continueButton.setAttribute("data-consent", "continue");
+    const cancel = el("button", "dp-btn ghost", "Close");
+    cancel.type = "button";
+    cancel.onclick = dialog.dismiss;
+    dialog.foot.append(withdrawButton, el("div", "ccm-spacer"), cancel, continueButton);
+
+    const message = el("p", "ccm-err");
+    message.setAttribute("data-consent", "message");
+
+    let view = null;
+
+    const renderConfirmation = (extra) => {
+      dialog.body.textContent = "";
+      const done = el("div", "ccm-done");
+      done.setAttribute("data-consent", "confirmation");
+      done.appendChild(el("h5", "", HQ_DONE_HEADLINE));
+      for (const line of HQ_DONE_LINES) para(done, "", line);
+      if (extra) para(done, "ccm-ok", extra);
+      dialog.body.appendChild(done);
+      const record = view && view.consent;
+      if (record && record.at) {
+        const stamp = el("p", "ccm-hash", "Recorded " + new Date(record.at).toISOString()
+          + " · disclosure " + record.version + " · sha256 " + record.sha256);
+        dialog.body.appendChild(stamp);
+      }
+      para(dialog.body, "", "Changed your mind? Withdrawing takes one click and clears the record; the button "
+        + "is right there, and it is the same one click that made it.");
+      dialog.body.appendChild(message);
+      continueButton.hidden = true;
+      continueButton.disabled = true;
+      withdrawButton.hidden = false;
+      cancel.textContent = "Done";
+    };
+
+    const renderDisclosure = () => {
+      dialog.body.textContent = "";
+      const disclosure = view.disclosure;
+      const consent = view.consent || {};
+      const sheet = el("div", "ccm-disclosure");
+      sheet.setAttribute("data-consent", "disclosure");
+      sheet.appendChild(el("h5", "", disclosure.title));
+      for (const line of disclosure.intro || []) para(sheet, "", line);
+
+      const ticks = [];
+      /* ONE CHECKBOX PER NUMBERED CONDITION, and no collapsed section anywhere in
+         here. A "read more" that hides condition 1 hides the custody sentence, which
+         is the only sentence that decides anything. */
+      for (const condition of disclosure.conditions || []) {
+        const card = el("div", "ccm-cond");
+        card.setAttribute("data-condition", String(condition.n));
+        const heading = el("h5");
+        heading.append(el("b", "", String(condition.n) + "."), el("span", "", condition.heading));
+        card.appendChild(heading);
+        bullets(card, condition.points);
+        const label = el("label", "ccm-tick");
+        const box = el("input");
+        box.type = "checkbox";
+        box.setAttribute("data-tick", String(condition.n));
+        box.onchange = () => {
+          card.className = "ccm-cond" + (box.checked ? " ticked" : "");
+          sync();
+        };
+        label.append(box, el("span", "", "I have read and accept condition " + condition.n + ": "
+          + condition.heading + "."));
+        card.appendChild(label);
+        sheet.appendChild(card);
+        ticks.push({ n: condition.n, box });
+      }
+      for (const line of disclosure.closing || []) para(sheet, "", line);
+      dialog.body.appendChild(sheet);
+
+      const hash = el("p", "ccm-hash", "Disclosure " + disclosure.version + " · sha256 "
+        + disclosure.sha256);
+      dialog.body.appendChild(hash);
+      if (consent.acknowledged) {
+        para(dialog.body, "ccm-ok", "You have already acknowledged this version. Ticking again simply records "
+          + "it again; withdrawing clears it.");
+      } else if (consent.stale) {
+        para(dialog.body, "ccm-err", "The wording changed since you last acknowledged it. Your earlier "
+          + "acknowledgement does not count as current any more, so please read this version and tick again.");
+      }
+      dialog.body.appendChild(message);
+
+      const sync = () => {
+        const outstanding = ticks.filter((t) => !t.box.checked).length;
+        continueButton.disabled = outstanding > 0;
+        continueButton.textContent = outstanding > 0
+          ? outstanding + (outstanding === 1 ? " box left" : " boxes left")
+          : "Continue — record my interest";
+      };
+      continueButton.hidden = false;
+      withdrawButton.hidden = !(consent.acknowledged || consent.stale);
+      cancel.textContent = "Close";
+      sync();
+
+      continueButton.onclick = async () => {
+        message.className = "ccm-err";
+        message.textContent = "";
+        continueButton.disabled = true;
+        const previous = continueButton.textContent;
+        continueButton.textContent = "Recording…";
+        const result = await ctx.acknowledge({
+          version: disclosure.version,
+          sha256: disclosure.sha256,
+          conditions: ticks.map((t) => t.n),
+        });
+        continueButton.textContent = previous;
+        if (result && result.stale && result.view) {
+          /* The words moved while this window was open. Re-render from what came back
+             and make them tick again — an acknowledgement of superseded text is not an
+             acknowledgement of anything. */
+          view = result.view;
+          renderDisclosure();
+          message.className = "ccm-err";
+          message.textContent = "The wording changed while this was open. Here are the current words; please "
+            + "read them and tick again.";
+          return;
+        }
+        if (!result || !result.ok) {
+          continueButton.disabled = false;
+          message.className = "ccm-err";
+          message.textContent = "Nothing was recorded" + (result && result.error ? " (" + result.error + ")" : "")
+            + ". Nothing was provisioned either way.";
+          return;
+        }
+        if (result.view) view = result.view;
+        /* The acknowledgement is filed. Registering the interest itself is a second,
+           separate write, and the confirmation says which of the two happened. */
+        const interest = ctx.registerInterest ? await ctx.registerInterest() : { ok: true };
+        renderConfirmation(interest && interest.ok
+          ? null
+          : "Your acknowledgement was filed, but the interest itself was not recorded ("
+            + ((interest && interest.error) || "the desk refused it") + "). Nothing was provisioned either "
+            + "way; try Continue again from this panel.");
+        if (!(interest && interest.ok)) {
+          continueButton.hidden = false;
+          continueButton.disabled = false;
+        }
+      };
+    };
+
+    withdrawButton.onclick = async () => {
+      withdrawButton.disabled = true;
+      const previous = withdrawButton.textContent;
+      withdrawButton.textContent = "Withdrawing…";
+      const result = await ctx.withdraw();
+      withdrawButton.disabled = false;
+      withdrawButton.textContent = previous;
+      if (!result || !result.ok) {
+        message.className = "ccm-err";
+        message.textContent = "That was not withdrawn" + (result && result.error ? " (" + result.error + ")" : "")
+          + ", so the record still stands. Try again.";
+        return;
+      }
+      if (result.view) view = result.view;
+      dialog.body.textContent = "";
+      const cleared = el("div", "ccm-done");
+      cleared.setAttribute("data-consent", "withdrawn");
+      cleared.appendChild(el("h5", "", "Your interest is withdrawn."));
+      para(cleared, "", result.withdrawn === false
+        ? "There was nothing on file to withdraw, so nothing changed."
+        : "The record is cleared and this floor is back to having chosen no track. Nothing was ever "
+          + "provisioned, so there is nothing to return.");
+      para(cleared, "", "Your own machine still runs the bot today, and the walkthrough for that is one "
+        + "click away in the panel behind this window.");
+      dialog.body.appendChild(cleared);
+      dialog.body.appendChild(message);
+      withdrawButton.hidden = true;
+      continueButton.hidden = true;
+      cancel.textContent = "Done";
+    };
+
+    /* The load is last: everything above is wiring, and a failed fetch must leave a
+       readable window rather than a blank one. */
+    Promise.resolve()
+      .then(() => ctx.load())
+      .then((loaded) => {
+        if (!loaded || !loaded.disclosure) throw new Error("the desk sent no disclosure");
+        view = loaded;
+        if (loaded.consent && loaded.consent.acknowledged && ctx.alreadyRequested) renderConfirmation(null);
+        else renderDisclosure();
+      })
+      .catch((error) => {
+        dialog.body.textContent = "";
+        para(dialog.body, "ccm-err", "The conditions could not be loaded ("
+          + ((error && error.message) || "no answer from the desk") + "). Nothing was recorded and nothing "
+          + "was provisioned. Close this and try again.");
+        continueButton.hidden = true;
+        withdrawButton.hidden = true;
+      });
+
+    return dialog;
+  }
+
+  return {
+    openDialog,
+    installSteps,
+    openInstallWalkthrough,
+    openHqConsent,
+    walkthroughKey,
+    rememberedStep,
+    HQ_DONE_HEADLINE,
+    HQ_DONE_LINES,
+  };
 })();
 </script>
 <div class="topbar">
@@ -8184,6 +8961,255 @@ async function refreshBudget() {
 /* ── the tenant's own settings: appetite, bankroll, and which platforms ──── */
 const ALL_PADS = ["pump.fun", "letsbonk.fun", "bags.fm", "moonshot", "boop.fun", "meteora-dbc", "trix", "other"];
 
+/* ── WHO RUNS YOUR BOT · THE FORK IN THE ROAD ─────────────────────────────────
+ * A tenant used to arrive at a wall of install steps with no question asked first,
+ * which quietly answered the only question that matters — who holds the key — on
+ * their behalf. This asks it out loud and leaves it unanswered until they answer it:
+ * NEITHER card is preselected, because a default here is a custody decision made by
+ * the website on somebody else's money.
+ *
+ * THE MANAGED TRACK DOES NOT EXIST. Not a line of it. Multi-tenant keys, deposits,
+ * withdrawals, per-user ledgers, reconciliation and key-at-rest were scoped at four
+ * to eight months, and none of it can accept a single deposit before the legal work
+ * is done, because it means this operator holding customers' keys and trading their
+ * funds at its own discretion. So the card records that somebody WANTS it — the
+ * demand signal is the whole reason to build it — and provisions nothing: no wallet,
+ * no address, no deposit, no implication that money is being looked after.
+ *
+ * AND THE SELF-HOSTED TRACK IS NOT MADE TO SOUND WORSE THAN IT IS. It became one
+ * command yesterday, on macOS and on Linux, and it is live. Padding that friction to
+ * make custody look attractive would be a lie told in the direction of the riskier
+ * option, which is the worst direction to lie in. The comparison therefore leads with
+ * custody in both cards and then states each track's real cost: your own machine and
+ * your own RPC accounts on one side, custody and this operator's uptime on the other.
+ */
+const RUNNER_SELF = "self";
+const RUNNER_HQ = "hq_requested";
+/* Only the two agreed values are a track. An empty column, an older row, a hand-typed
+   patch — anything else is UNSET, which shows the fork again rather than putting a
+   tenant on a track they never chose. */
+const normalizeRunnerChoice = (raw) => (raw === RUNNER_SELF || raw === RUNNER_HQ ? raw : null);
+const runnerTrackBadge = (choice) => choice === RUNNER_SELF ? "TRACK · YOU RUN IT"
+  : choice === RUNNER_HQ ? "TRACK · HQ REQUESTED · NOT RUNNING"
+  : "TRACK · NOT CHOSEN";
+const runnerTrackTone = (choice) => choice === RUNNER_SELF ? "good" : "warn";
+/* What a tenant is told after asking for the managed track, on the click AND on every
+   later load — a confirmation that only exists for one second is a confirmation that
+   was never really made. It says the three things that keep this from being mistaken
+   for a product: nothing exists, nothing was provisioned, send nobody money. */
+const RUNNER_HQ_CONFIRMATION =
+  "Recorded: you want HQ to run this bot. Nothing has been provisioned. No wallet has been created for you, "
+  + "there is no deposit address, and no funds should be sent anywhere for this — if anyone asks you to send "
+  + "funds for it, it is not us. You will be told if and when it exists. Until then the only track that "
+  + "actually runs is your own machine, and that is one command.";
+/* Self-hosting needs nothing from this server: the key is made on the tenant's host and
+   the installer never asks the desk for permission. So a failed WRITE of the 'self'
+   choice must not hide the install instructions — it is a bookkeeping failure, not a
+   blocker. The managed choice is the OPPOSITE: the record is the entire product, so it
+   is never faked locally and a failed write says so. */
+let runnerChoiceLocalSelf = false;
+
+function renderRunnerFork(choice, onChoose, hooks) {
+  /* THE SCREEN BEHIND EACH ANSWER. Each card gets a second, quieter button that
+     opens the thing a reader needs BEFORE they commit: the nine install steps on one
+     side, the custody conditions on the other. Reading is not choosing — neither
+     button writes anything — and both are reachable again afterwards, because people
+     abandon halfway through and come back. */
+  const openers = hooks || {};
+  const card = dashNode("section", "dashsection runner-fork");
+  card.setAttribute("data-runner-fork", "1");
+  card.appendChild(dashNode("h4", "", "Who runs your bot?"));
+  card.appendChild(dashNode("p", "dp-note",
+    "Two tracks. The difference that decides everything else is custody — who holds the key to the wallet "
+    + "your money sits in. Nothing is picked for you: this floor is on no track until you choose one."));
+  const grid = dashNode("div", "runner-grid");
+  const status = dashNode("p", "dp-note runner-status");
+  const picks = [];
+  const addOption = (spec) => {
+    const chosen = choice === spec.value;
+    const opt = dashNode("article", "runner-opt" + (chosen ? " on" : ""));
+    opt.setAttribute("data-runner-option", spec.value);
+    const head = dashNode("div", "runner-head");
+    head.append(dashNode("h5", "", spec.title), dashNode("span", "dashbadge " + spec.badgeTone, spec.badge));
+    opt.appendChild(head);
+    /* CUSTODY FIRST, IN BOTH CARDS. It is the one line that decides whether a bad day
+       costs you a trade or costs you the wallet. */
+    opt.appendChild(dashNode("p", "runner-custody", spec.custody));
+    opt.appendChild(dashNode("p", "", spec.how));
+    opt.appendChild(dashNode("p", "runner-cost", spec.cost));
+    const pick = dashNode("button", "dp-btn" + (chosen ? "" : " ghost"), chosen ? spec.chosenLabel : spec.label);
+    pick.type = "button";
+    pick.setAttribute("data-runner-pick", spec.value);
+    /* aria-pressed is "false" on BOTH until a tenant presses one. An unset floor sees a
+       genuine question, and a screen reader hears one too. */
+    pick.setAttribute("aria-pressed", String(chosen));
+    pick.onclick = async () => {
+      for (const button of picks) button.disabled = true;
+      status.className = "dp-note runner-status";
+      status.textContent = spec.pending;
+      const outcome = await onChoose(spec.value);
+      for (const button of picks) button.disabled = false;
+      status.className = "dp-note runner-status " + (outcome && outcome.ok ? "good" : "bad");
+      status.textContent = (outcome && outcome.message)
+        || (outcome && outcome.ok ? "Saved." : "That was not recorded, and nothing changed.");
+    };
+    picks.push(pick);
+    opt.appendChild(pick);
+    if (spec.more) {
+      const more = dashNode("button", "dp-btn ghost runner-more", spec.more);
+      more.type = "button";
+      more.setAttribute("data-runner-more", spec.value);
+      more.onclick = () => { const open = openers[spec.moreHook]; if (open) open(); };
+      opt.appendChild(more);
+    }
+    grid.appendChild(opt);
+  };
+
+  addOption({
+    value: RUNNER_SELF,
+    title: "I'll run it myself",
+    badge: "AVAILABLE NOW",
+    badgeTone: "good",
+    custody: "You hold the key. It is generated on your own machine, never leaves it, and the desk never "
+      + "receives it — nobody here can move your funds, including us.",
+    how: "One command, on macOS or Linux, and it starts in dry run: it watches the feed and trades nothing "
+      + "until you arm it yourself on that machine. Choosing this opens the install card below.",
+    cost: "What it costs you: a machine that stays awake, and two RPC accounts of your own before it can "
+      + "trade live.",
+    label: "I'll run it myself",
+    chosenLabel: "✓ You run it · this is your track",
+    pending: "Saving your choice…",
+    more: "Walk me through it · 9 steps",
+    moreHook: "openWalkthrough",
+  });
+
+  addOption({
+    value: RUNNER_HQ,
+    title: "Have HQ run it for me",
+    badge: "NOT AVAILABLE YET",
+    badgeTone: "warn",
+    custody: "The operator would hold the key to the wallet your funds sit in, and could move them. What you "
+      + "could do about that would depend entirely on the operator.",
+    how: "This does not exist yet. It is being built, not offered: there is no account to fund, no wallet "
+      + "address to send to, and nothing on this page will run a bot for you today. Choosing it records that "
+      + "you want it — that is all it does, and it is how the operator decides whether to build it.",
+    cost: "What it costs you: custody, plus this operator's uptime — the operator's own machine started 39 "
+      + "times and stopped 33 times over five days.",
+    label: "Register interest · nothing gets provisioned",
+    chosenLabel: "✓ Interest registered · still nothing running",
+    pending: "Recording that you want this…",
+    more: "Read the conditions first",
+    moreHook: "openConditions",
+  });
+
+  card.appendChild(grid);
+  /* The confirmation is part of the RENDERED state, not a toast. A tenant who asked for
+     the managed track last week must still find, on a cold load, the sentence saying
+     nothing was provisioned for them. */
+  if (choice === RUNNER_HQ) card.appendChild(dashNode("p", "boundary-note", RUNNER_HQ_CONFIRMATION));
+  card.appendChild(status);
+  return card;
+}
+
+/* The write. The dedicated route is the contract; the copy patch is the fallback for a
+   deploy where the route has not shipped yet, and it writes the same tenant column, so
+   a tenant is never told their choice was recorded when it was not. */
+async function saveRunnerChoice(value) {
+  let result = await call_api("/api/floor/" + FLOOR_N + "/bot-operator", {
+    method: "POST", body: JSON.stringify({ choice: value }),
+  });
+  if (result.status === 404 || result.status === 405) {
+    result = await call_api("/api/floor/" + FLOOR_N + "/runner", {
+      method: "POST", body: JSON.stringify({ choice: value }),
+    });
+  }
+  if (result.status === 404 || result.status === 405) {
+    result = await call_api("/api/floor/" + FLOOR_N + "/copy", {
+      method: "POST", body: JSON.stringify({ runnerChoice: value }),
+    });
+  }
+  if (result.status === 200) return { ok: true };
+  /* 409 IS NOT A FAILURE, IT IS A MISSING SIGNATURE. The desk refuses 'hq_requested'
+     until the floor's owner has acknowledged the CURRENT conditions, and the fix is to
+     read them — so this reports that fact rather than an error code, and the caller
+     opens the conditions instead of printing "the desk answered 409". */
+  if (result.status === 409) return { ok: false, needsAcknowledgement: true,
+    error: result.body?.error || "the conditions have to be read and accepted first" };
+  return { ok: false, error: result.body?.error
+    || (result.status === 401 ? "Not signed in on this device — connect the wallet that holds this floor."
+      : result.status === 403 ? "This wallet does not hold this floor."
+      : "the desk answered " + result.status) };
+}
+
+/* ── THE CONSENT ROUTE, AS THE PANEL USES IT ──────────────────────────────────
+   Two verbs on one path. The page never authors the words and never computes the
+   hash: it renders exactly what GET returned and hands the SAME version and sha256
+   back on the POST, so the row the desk stores certifies the text a person read. A
+   409 means those words moved while the window was open — the modal re-renders from
+   the view in the response and asks for the ticks again. */
+async function loadHqConsentView() {
+  const result = await call_api("/api/floor/" + FLOOR_N + "/hq-consent");
+  if (result.status !== 200) throw new Error(result.body?.error
+    || (result.status === 401 ? "connect the wallet that holds this floor"
+      : result.status === 403 ? "this wallet does not hold this floor"
+      : "the desk answered " + result.status));
+  return result.body;
+}
+async function acknowledgeHqConditions({ version, sha256, conditions }) {
+  const result = await call_api("/api/floor/" + FLOOR_N + "/hq-consent", {
+    method: "POST",
+    body: JSON.stringify({ action: "acknowledge", version, sha256, conditions }),
+  });
+  if (result.status === 200) return { ok: true, view: result.body };
+  if (result.status === 409) return { ok: false, stale: true, view: result.body,
+    error: result.body?.error || "the wording changed" };
+  return { ok: false, view: result.body, error: result.body?.error
+    || (Array.isArray(result.body?.missing) && result.body.missing.length
+      ? "conditions " + result.body.missing.join(", ") + " were not ticked"
+      : "the desk answered " + result.status) };
+}
+async function withdrawHqInterest() {
+  const result = await call_api("/api/floor/" + FLOOR_N + "/hq-consent", {
+    method: "POST", body: JSON.stringify({ action: "withdraw" }),
+  });
+  if (result.status !== 200) return { ok: false, error: result.body?.error
+    || "the desk answered " + result.status };
+  return { ok: true, withdrawn: result.body?.withdrawn !== false, view: result.body };
+}
+
+/* The two openers, in one place, so both install surfaces and the fork cannot drift
+   apart on what they open. Reading is free: neither of these writes anything. */
+function openWallsteWalkthrough() {
+  return window.CCModals.openInstallWalkthrough({
+    floorNo: FLOOR_N,
+    installerSha256: "__CLAUDE_COMPANY_INSTALLER_SHA256__",
+  });
+}
+function openHqConditions({ alreadyRequested = false, onRecorded = null } = {}) {
+  return window.CCModals.openHqConsent({
+    floorNo: FLOOR_N,
+    alreadyRequested,
+    load: loadHqConsentView,
+    acknowledge: acknowledgeHqConditions,
+    withdraw: async () => {
+      const outcome = await withdrawHqInterest();
+      /* Withdrawing clears the consent AND puts the floor back to no track at all, so
+         the panel behind this window is repainted rather than left claiming a track
+         the desk no longer records. */
+      if (outcome.ok && onRecorded) onRecorded();
+      return outcome;
+    },
+    /* Acknowledging is not the same act as asking for the track. The modal files the
+       acknowledgement, then this writes the interest, and the confirmation says which
+       of the two happened — never "recorded" for a write that did not land. */
+    registerInterest: async () => {
+      const saved = await saveRunnerChoice(RUNNER_HQ);
+      if (saved.ok && onRecorded) onRecorded();
+      return saved;
+    },
+  });
+}
+
 /* ── THE WALL-ST-E EXECUTOR CARD ──────────────────────────────────────────────
    A legacy browser burner can export its key for recovery, but no browser signing
    code ships in this page. Live-capable execution is local and polling-only. */
@@ -8197,7 +9223,14 @@ function buildBotCard(settings) {
      rejects transaction broadcast. Keep recovery access for anyone who funded a
      browser burner before the gate shipped; those funds must not be stranded. */
   const releaseGate = mk("div");
-  releaseGate.appendChild(mk("div", "dp-h", "WALL-ST-E · self-hosted autotrader"));
+  releaseGate.appendChild(mk("div", "dp-h", "WALL-ST-E · your autotrader"));
+  /* THE TRACK, WHEREVER THE STATE IS. This card reports what the bot is doing, so it
+     also reports whose machine is supposed to be doing it. "self-hosted" used to be
+     asserted in the heading as though it were the only arrangement; it is now one of
+     two, and a heading is not the place to answer a question the tenant owns. */
+  releaseGate.appendChild(mk("div", "dp-note", "Who runs your bot: " + runnerTrackBadge(
+    normalizeRunnerChoice(settings?.runner_choice ?? settings?.runnerChoice)
+    || (runnerChoiceLocalSelf ? RUNNER_SELF : null)) + "."));
   releaseGate.appendChild(mk("div", "dp-note",
     "Claude Company is noncustodial: the central site publishes calls but never receives a wallet key or signs a trade. " +
     "Browser and webhook signing stay disabled. WALL-ST-E can trade only from the local poller after you explicitly arm it."));
@@ -8345,10 +9378,19 @@ function buildControls(settings) {
     sec.appendChild(rot);
     box.appendChild(sec);
 
+    /* THE SAME FORK GOVERNS THIS SURFACE. Two install surfaces and one of them stale is
+       exactly how a tenant ends up back on a track they never chose, so this one shows
+       the same track and hides the same instructions. The fork itself lives once, on
+       the WALL-ST-E destination; a second copy of a custody explanation is a second
+       copy that drifts. */
+    const settingsRunner = normalizeRunnerChoice(settings.runner_choice ?? settings.runnerChoice)
+      || (runnerChoiceLocalSelf ? RUNNER_SELF : null);
+    box.appendChild(mk("div", "dp-note", "Who runs your bot: " + runnerTrackBadge(settingsRunner) + "."));
+    const installBox = mk("div");
     // Install from the exact source commit that built this page. The installer prompts
     // through /dev/tty so the feed secret never lands in argv or shell history.
-    box.appendChild(mk("div", "dp-h", "Install WALL-ST-E · dry run by default"));
-    box.appendChild(mk("div", "dp-note",
+    installBox.appendChild(mk("div", "dp-h", "Install WALL-ST-E · dry run by default"));
+    installBox.appendChild(mk("div", "dp-note",
       "One line on the machine that will run the bot. The installer reads the executor feed secret privately, stores credentials and the burner key in mode-0600 files, and starts without trading."));
     const releaseCommit = "__CLAUDE_COMPANY_SOURCE_COMMIT__";
     const hasPinnedExecutorRelease = /^[0-9a-f]{40}$/i.test(releaseCommit);
@@ -8368,7 +9410,7 @@ function buildControls(settings) {
     const box2 = mk("div", "bud-addr");
     box2.style.cssText = "white-space:pre-wrap;word-break:break-all;font-size:10px;line-height:1.5";
     box2.textContent = cmd;
-    box.appendChild(box2);
+    installBox.appendChild(box2);
     const copyBtn = mk("button", "dp-btn ghost", "Copy the command");
     copyBtn.type = "button";
     copyBtn.disabled = !hasPinnedExecutorRelease;
@@ -8377,12 +9419,12 @@ function buildControls(settings) {
       catch { box2.style.userSelect = "all"; copyBtn.textContent = "Select it above"; }
       setTimeout(() => (copyBtn.textContent = "Copy the command"), 1500);
     };
-    box.appendChild(copyBtn);
+    installBox.appendChild(copyBtn);
     // The promise belongs next to the command, where the decision is actually made.
-    box.appendChild(mk("p", "dp-note",
+    installBox.appendChild(mk("p", "dp-note",
       "This installs a dry run: it watches the feed and trades nothing until you separately arm it on that machine."));
     if (hasPinnedExecutorRelease && installerDigestKnown) {
-      box.appendChild(mk("p", "dp-note",
+      installBox.appendChild(mk("p", "dp-note",
         "Check it before you run it: curl -fsSL https://claudedotcompany.com/install.sh | shasum -a 256 "
         + "should print the digest below."));
       /* Its own wrapping box for the same reason as the dashboard's: 64 hex characters
@@ -8390,14 +9432,14 @@ function buildControls(settings) {
       const digestBox = mk("div", "bud-addr");
       digestBox.style.cssText = "white-space:pre-wrap;word-break:break-all;font-size:10px;line-height:1.5";
       digestBox.textContent = installerDigest;
-      box.appendChild(digestBox);
+      installBox.appendChild(digestBox);
     }
     // For the reader who will not open a terminal. Same installer, Finder-friendly wrapper.
     const launcherDl = mk("a", "dp-btn ghost", "Download the double-click installer (macOS)");
     launcherDl.href = "/executor/Install%20WALL-ST-E.command";
     launcherDl.setAttribute("download", "Install WALL-ST-E.command");
     launcherDl.style.marginTop = "4px";
-    box.appendChild(launcherDl);
+    installBox.appendChild(launcherDl);
     /* Demoted, not deleted: some readers will not pipe a URL into a shell on principle. */
     const cloneWays = foldSection("Prefer to clone it yourself?");
     cloneWays.body.appendChild(mk("p", "dp-note",
@@ -8418,7 +9460,7 @@ function buildControls(settings) {
       setTimeout(() => (copyCloneBtn.textContent = "Copy the git-clone install"), 1500);
     };
     cloneWays.body.appendChild(copyCloneBtn);
-    box.appendChild(cloneWays.wrap);
+    installBox.appendChild(cloneWays.wrap);
 
     // Step two is a click as well: the installer will ask for this.
     if (settings.executor_secret) {
@@ -8430,15 +9472,15 @@ function buildControls(settings) {
         catch { copySec.textContent = "Clipboard blocked — copy it from the field above"; }
         setTimeout(() => (copySec.textContent = "Copy my secret (the installer asks for it)"), 2200);
       };
-      box.appendChild(copySec);
+      installBox.appendChild(copySec);
     }
-    box.appendChild(mk("p", "dp-note",
+    installBox.appendChild(mk("p", "dp-note",
       "Two clicks and two pastes, and that is the floor: this site never receives a key and never signs, " +
       "so the only thing that can trade for you is software on a machine you control. There is no button " +
       "here that can do it instead \u2014 by design."));
 
-    box.appendChild(mk("div", "dp-h", "Optional · supervised live canary"));
-    box.appendChild(mk("div", "dp-note",
+    installBox.appendChild(mk("div", "dp-h", "Optional · supervised live canary"));
+    installBox.appendChild(mk("div", "dp-note",
       "Only after reviewing the dry run: put two private HTTPS Solana RPC URLs from independent providers and the Jupiter API key in separate mode-0600 files. " +
       "The installer shows the new burner address and arms only when you retype that public key in the terminal. " +
       "The default canary is 0.005 SOL per trade, 0.01 SOL rolling deployment, and a 0.01 SOL rolling realized-loss entry brake. " +
@@ -8450,7 +9492,7 @@ function buildControls(settings) {
     const liveBox = mk("div", "bud-addr");
     liveBox.style.cssText = "white-space:pre-wrap;word-break:break-all;font-size:10px;line-height:1.5";
     liveBox.textContent = liveCmd;
-    box.appendChild(liveBox);
+    installBox.appendChild(liveBox);
     const copyLive = mk("button", "dp-btn ghost", "Copy the live-canary command");
     copyLive.type = "button";
     copyLive.disabled = !hasPinnedExecutorRelease;
@@ -8459,10 +9501,22 @@ function buildControls(settings) {
       catch { liveBox.style.userSelect = "all"; copyLive.textContent = "Select it above"; }
       setTimeout(() => (copyLive.textContent = "Copy the live-canary command"), 1500);
     };
-    box.appendChild(copyLive);
-    box.appendChild(mk("div", "dp-note",
+    installBox.appendChild(copyLive);
+    installBox.appendChild(mk("div", "dp-note",
       "The browser cannot see or control that service. Verify its mode, wallet, journal and fills on the host itself. " +
       "On its first start WALL-ST-E skips all existing calls and waits for the next one. See /executor/README.md before funding the dedicated burner."));
+    if (settingsRunner === RUNNER_SELF) box.appendChild(installBox);
+    else {
+      /* No install instructions before the question is answered. The pointer names what
+         is missing rather than leaving a gap with no explanation. */
+      box.appendChild(mk("div", "dp-note", settingsRunner === RUNNER_HQ
+        ? "You asked HQ to run it. That does not exist yet \u2014 nothing is running, nothing was provisioned, and no funds should be sent for it. The install steps belong to the other track, so they are not shown here. Open the WALL-ST-E tab to switch to running it yourself: one command, and it works today."
+        : "No track chosen yet. Open the WALL-ST-E tab and answer \u201cWho runs your bot?\u201d first \u2014 that question decides who holds the key, and the install steps appear once you have answered it."));
+      const goFork = mk("button", "dp-btn ghost", "Open \u201cWho runs your bot?\u201d");
+      goFork.type = "button";
+      goFork.onclick = () => window.showDashboard?.("wallste");
+      box.appendChild(goFork);
+    }
   }
 
   const save = mk("button", "dp-btn", "Save settings");
@@ -9697,13 +10751,61 @@ async function loadWallsteDashboard({ background = false } = {}) {
     const activeCaps = capPolicy.active || null;
     const secret = feedR.status === 200 ? feedR.body?.settings?.executor_secret : null;
     window.__botHeartbeat = heartbeat;
+    /* WHICH TRACK IS THIS FLOOR ON. The server owner is landing the column and the
+       route in the same hour as this panel, so the reader accepts either spelling of
+       the field from either payload and validates the VALUE, which is the half of the
+       contract that is actually agreed. Unknown or absent reads as unset. */
+    const runnerChoice = normalizeRunnerChoice(
+      status.runnerChoice ?? status.runner_choice
+      ?? (feedR.status === 200 ? feedR.body?.settings?.runner_choice ?? feedR.body?.settings?.runnerChoice : null),
+    ) || (runnerChoiceLocalSelf ? RUNNER_SELF : null);
 
     const mode = heartbeat?.mode ? String(heartbeat.mode).toUpperCase() : "NOT REPORTED";
     const connected = telemetry.connected === true;
-    el.append(dashLead("",
-      "Your self-hosted autotrader. This page observes its outbound heartbeat and confirmed public balance; it cannot start, stop, steer, sign for, or fund it.",
+    const lead = dashLead("",
+      "Your autotrader. This page observes its outbound heartbeat and confirmed public balance; it cannot start, stop, steer, sign for, or fund it.",
       connected ? mode + " · CONNECTED" : heartbeat ? mode + " · STALE" : "NOT LINKED",
-      connected ? "good" : heartbeat ? "bad" : "warn"));
+      connected ? "good" : heartbeat ? "bad" : "warn");
+    /* THE TRACK RIDES IN THE HEADER, BESIDE THE MODE. A tenant must never have to
+       reason about which of the two arrangements they are on: it is stated wherever
+       the bot's state is stated. "NOT RUNNING" is part of the HQ badge on purpose. */
+    lead.appendChild(dashNode("span", "dashbadge " + runnerTrackTone(runnerChoice), runnerTrackBadge(runnerChoice)));
+    el.append(lead);
+    /* FIRST, AHEAD OF EVERY INSTALL INSTRUCTION. The question of who holds the key is
+       not a detail discovered halfway down a setup card. */
+    const repaintTrack = () => { dashboardFeedCache = null; setTimeout(loadWallsteDashboard, 400); };
+    el.appendChild(renderRunnerFork(runnerChoice, async (value) => {
+      const saved = await saveRunnerChoice(value);
+      if (saved.ok) {
+        if (value === RUNNER_SELF) runnerChoiceLocalSelf = true;
+        repaintTrack();
+        return { ok: true, message: value === RUNNER_HQ ? RUNNER_HQ_CONFIRMATION
+          : "You run it. The install card is below — one command, dry run by default." };
+      }
+      if (value === RUNNER_SELF) {
+        /* Bookkeeping failed, not the track. Self-hosting asks this server for nothing,
+           so the instructions are shown anyway and the failure is stated plainly rather
+           than dressed up as a blocker. */
+        runnerChoiceLocalSelf = true;
+        setTimeout(loadWallsteDashboard, 400);
+        return { ok: false, message: "The desk did not record the choice (" + saved.error
+          + "), but self-hosting needs nothing from the desk: the install card is below." };
+      }
+      /* THE DESK ASKED FOR THE CONDITIONS TO BE READ. That is the whole point of the
+         409, so the panel opens them rather than reporting a number at somebody. */
+      if (saved.needsAcknowledgement) {
+        openHqConditions({ onRecorded: repaintTrack });
+        return { ok: false, message: "Read the conditions first — they are open now. Nothing has been "
+          + "recorded and nothing has been provisioned." };
+      }
+      /* For the managed track the record IS the product. Never claim it was made. */
+      return { ok: false, message: "Your interest was NOT recorded (" + saved.error
+        + "). Nothing was provisioned either way. Try again, or run it yourself — that track works today." };
+    }, {
+      openWalkthrough: openWallsteWalkthrough,
+      openConditions: () => openHqConditions({ alreadyRequested: runnerChoice === RUNNER_HQ,
+        onRecorded: repaintTrack }),
+    }));
     const boundary = dashNode("div", "boundary-note");
     boundary.innerHTML = "<strong>OBSERVATION ONLY · TENANT MACHINE ONLY.</strong> " +
       "Telemetry is self-reported by your machine. Burner balance is a read-only confirmed-chain lookup. " +
@@ -9938,6 +11040,14 @@ async function loadWallsteDashboard({ background = false } = {}) {
     setupCard.appendChild(dashNode("h4", "", "Owner-only local activation · five deliberate steps"));
     setupCard.appendChild(dashNode("p", "dp-note",
       "Run every command on the executor host. This browser can prepare settings and copy text; it cannot install, start, arm, sign, stop, or fund WALL-ST-E."));
+    /* THE GUIDED PATH IS REACHABLE FROM HERE TOO, and it reopens wherever the reader
+       stopped. This card is the reference; the walkthrough is the path through it, and
+       a reader who closed it halfway must not have to start again to find step 5. */
+    const openWalk = dashNode("button", "dp-btn ghost", "Walk me through it · 9 steps");
+    openWalk.type = "button";
+    openWalk.setAttribute("data-open-walkthrough", "1");
+    openWalk.onclick = () => openWallsteWalkthrough();
+    setupCard.appendChild(openWalk);
     const setupSteps = dashNode("div", "setup-steps");
     const setupStep = (number, title, text, done = false) => {
       const step = dashNode("article", "setup-step" + (done ? " done" : ""));
@@ -10085,7 +11195,29 @@ async function loadWallsteDashboard({ background = false } = {}) {
       "node burner-backup.mjs --out ~/wall-st-e-recovery.txt\nnode burner-backup.mjs --verify ~/wall-st-e-recovery.txt");
     fundStep.appendChild(copyBackup);
     setupCard.appendChild(setupSteps);
-    el.appendChild(setupCard);
+    /* THE INSTALL CARD IS DOWNSTREAM OF THE CHOICE. It is attached only on the
+       self-hosted track: an unset floor is asked the question instead of being handed
+       instructions that presume the answer, and a floor that asked for the managed
+       track is told the truth about it rather than quietly sent to a terminal. The
+       card is built either way because it is a few dozen nodes and one attach point is
+       one place to audit; the gate is here, and it is the only one. */
+    if (runnerChoice === RUNNER_SELF) el.appendChild(setupCard);
+    else if (runnerChoice === RUNNER_HQ) {
+      const waiting = dashNode("section", "dashsection");
+      waiting.appendChild(dashNode("h4", "", "Nothing is running for you"));
+      waiting.appendChild(dashNode("p", "dp-note",
+        "You asked HQ to run this bot. That does not exist yet, so no bot is running, no wallet was created, "
+        + "and no money is being managed. The install steps are hidden because they are the other track's steps. "
+        + "If you would rather not wait, choose \u201cI'll run it myself\u201d above: it is one command and it works today."));
+      el.appendChild(waiting);
+    } else {
+      const unchosen = dashNode("section", "dashsection");
+      unchosen.appendChild(dashNode("h4", "", "Choose a track first"));
+      unchosen.appendChild(dashNode("p", "dp-note",
+        "The install steps appear once you have said who runs the bot. That question decides who holds the "
+        + "key, so this page will not answer it for you."));
+      el.appendChild(unchosen);
+    }
 
     /* The last pulses, newest first. One overwritten blob meant a tenant could never
 
