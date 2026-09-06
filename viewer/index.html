@@ -285,6 +285,9 @@ a.inl:hover{text-decoration-color:var(--amber)}
 @media (max-width:860px){.fgates{grid-template-columns:repeat(3,1fr)}.fgate:nth-child(3){border-right:0}.fgate:nth-child(-n+3){border-bottom:1px solid var(--floor-rule)}}
 @media (max-width:520px){.fgates{grid-template-columns:repeat(2,1fr)}.fgate:nth-child(3){border-right:1px solid var(--floor-rule)}.fgate:nth-child(2n){border-right:0}.fgate:nth-child(-n+4){border-bottom:1px solid var(--floor-rule)}}
 .funnelnote{margin-top:14px;font-size:13.5px;color:var(--ink-faint);font-family:"JetBrains Mono",ui-monospace,monospace;letter-spacing:.04em}
+.funnelplay{margin-left:10px;font:inherit;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-soft);background:transparent;border:1px solid var(--floor-rule);border-radius:999px;padding:3px 11px;cursor:pointer;transition:color .2s,border-color .2s}
+.funnelplay:hover,.funnelplay[aria-pressed="true"]{color:var(--ink);border-color:var(--ink-faint)}
+.funnelplay:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
 
 /* ── Floor 47 · the seats ────────────────────────────────────────────── */
 .principles{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin-bottom:clamp(22px,3vw,36px)}
@@ -529,7 +532,7 @@ footer.lobby .fine{max-width:100ch}
           <div class="fgate"><span class="kicker">12 · CEO → ticket</span><h4>The only seat that makes a call</h4><p>What leaves the building is an unsigned ticket: route, size, stop, targets, the band's clock. Always unsigned. A whole cycle lands around $4.</p></div>
         </div>
       </div>
-      <p class="funnelnote reveal" data-delay="3" id="funnelNote">Dots are coins. Grey ones died at a gate. The one that reaches the right edge is a ticket.</p>
+      <p class="funnelnote reveal" data-delay="3" id="funnelNote">Dots are coins. Grey ones died at a gate. The one that reaches the right edge is a ticket. <button class="funnelplay" type="button" id="funnelPlay" aria-pressed="false">Play the sweep</button></p>
     </div>
   </section>
 
@@ -1219,18 +1222,35 @@ if (cv && cv.getContext) {
   }
   function drawDot(p, alpha){ ctx.globalAlpha = alpha; ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 6.283); ctx.fill(); ctx.globalAlpha = 1; }
   spawn();
-  if (reduced) {
-    // one static frame, far into the sweep: most dead, a few alive, one at the slot
-    t0 = 0; for (var k = 0; k < 600; k++) draw(k * 16);
-    running = false;
-  } else if (hasIO) {
-    var vio = new IntersectionObserver(function(es){
+  /* prefers-reduced-motion sets the DEFAULT, not the ceiling. It means "do not move
+     things at me unasked" — not that a reader who wants the sweep may never have it.
+     So: a correct static frame either way, auto-run only where motion is welcome, and
+     a control so anyone can choose. */
+  var userWants = null;                       // null = follow the OS
+  function wantsMotion(){ return userWants === null ? !reduced : userWants; }
+  function startSweep(){ if (running) return; running = true; t0 = null; requestAnimationFrame(draw); }
+  function staticFrame(){ running = false; t0 = 0; for (var k = 0; k < 600; k++) draw(k * 16); }
+  var playBtn = document.getElementById("funnelPlay");
+  function syncBtn(){
+    if (!playBtn) return;
+    playBtn.textContent = running ? "Pause the sweep" : "Play the sweep";
+    playBtn.setAttribute("aria-pressed", running ? "true" : "false");
+  }
+  staticFrame();                              // a real picture before anything moves
+  if (hasIO) {
+    new IntersectionObserver(function(es){
       var on = es[0].isIntersecting;
-      if (on && !running) { running = true; t0 = null; requestAnimationFrame(draw); }
-      if (!on) running = false;
-    }, { threshold: 0.2 });
-    vio.observe(cv);
-  } else { running = true; requestAnimationFrame(draw); }
+      if (on && wantsMotion()) startSweep();
+      else if (!on) running = false;
+      syncBtn();
+    }, { threshold: 0.2 }).observe(cv);
+  } else if (wantsMotion()) startSweep();
+  if (playBtn) playBtn.addEventListener("click", function(){
+    userWants = !running;
+    if (userWants) startSweep(); else staticFrame();
+    syncBtn();
+  });
+  syncBtn();
 }
 })();
 </script>
