@@ -1709,7 +1709,7 @@ function buildPlant(at) {
         emissiveIntensity: 0.16, depthWrite: false,
       }));
     medallion.rotation.x = -Math.PI / 2;
-    medallion.position.set(SPOTS.meeting[0], 0.024, SPOTS.meeting[1]);
+    medallion.position.set(0, 0.024, 0);   // the real centre of the room, not the meeting spot
     medallion.receiveShadow = true; medallion.castShadow = false;
     medallion.userData.noBake = true;
     room.add(medallion);
