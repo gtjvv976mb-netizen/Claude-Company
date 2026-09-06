@@ -16,7 +16,10 @@
  * daily brake sees Grok dollars too.
  */
 import db from "./store.js";
-import { noteUnpersistedProviderSpend, spend, withProviderBudget } from "./llm.js";
+import { acquireCredit, noteUnpersistedProviderSpend, spend, withProviderBudget }
+  from "./llm.js";
+// Pure module: patterns only, no config or db, so no cycle back into the client.
+import { isProviderCreditError } from "../provider-health.js";
 import { emit, runContext } from "./bus.js";
 
 const BASE = process.env.XAI_BASE_URL || "https://api.x.ai/v1";
@@ -95,27 +98,57 @@ function responseText(r) {
 
 async function xai(path, body, timeoutMs = 90000,
   { seat, maxTokens = 8000, maxSearches = 0, minSearches = 0 } = {}) {
-  return withProviderBudget({ provider: "xai", maxTokens, maxSearches, payload: body }, async () => {
-    const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), timeoutMs);
-    try {
-      const res = await fetch(`${BASE}${path}`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${process.env.XAI_API_KEY}` },
-        body: JSON.stringify(body),
-        signal: ctl.signal,
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) return { ok: false,
-        error: `xai ${res.status}: ${JSON.stringify(data?.error ?? data).slice(0, 200)}` };
-      const searches = Math.max(minSearches,
-        (data?.output ?? []).filter((item) => /search/i.test(item?.type ?? "")).length);
-      meterGrok(seat, data, searches);
-      return { ok: true, data };
-    } catch (e) {
-      return { ok: false, error: String(e.message || e) };
-    } finally { clearTimeout(t); }
-  });
+  /* THE xAI BREAKER, and it must fail OPEN, not throw.
+   *
+   * When the xAI account is dry the API answers 403 "your team has used all available
+   * credits", and every caller in this file has always turned that into { ok:false }:
+   * a missing X read costs the desk a piece of evidence, never a cycle. That is the
+   * contract this module documents at the top and it does not move for the breaker.
+   * Throwing OutOfCredit here instead would let a dry xAI account halt cycles that a
+   * FUNDED Anthropic account could still run — the exact cross-provider blackout the
+   * 2026-09-05 incident produced by hand, when the operator topped up Anthropic while
+   * xAI was the empty one. So the gate is refused in xAI's own idiom, and the message
+   * is worded as its 403 so provider-health.js still classifies the outage correctly. */
+  const gate = acquireCredit("xai", { seat });
+  if (!gate.allowed) return { ok: false, error: gate.message };
+  try {
+    return await withProviderBudget({ provider: "xai", maxTokens, maxSearches, payload: body }, async () => {
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), timeoutMs);
+      try {
+        const res = await fetch(`${BASE}${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${process.env.XAI_API_KEY}` },
+          body: JSON.stringify(body),
+          signal: ctl.signal,
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          const error = `xai ${res.status}: ${JSON.stringify(data?.error ?? data).slice(0, 200)}`;
+          /* Only a credit refusal opens it. A 429, a 500 or an aborted fetch goes to
+             failure(), which cannot open a closed breaker — those retry on their own
+             and always have. */
+          if (isProviderCreditError(error)) gate.refused(error);
+          else gate.failure(new Error(error));
+          return { ok: false, error };
+        }
+        const searches = Math.max(minSearches,
+          (data?.output ?? []).filter((item) => /search/i.test(item?.type ?? "")).length);
+        meterGrok(seat, data, searches);
+        gate.success();          // xAI billed us: the account is live, close the breaker
+        return { ok: true, data };
+      } catch (e) {
+        gate.failure(e);
+        return { ok: false, error: String(e.message || e) };
+      } finally { clearTimeout(t); }
+    });
+  } catch (e) {
+    /* reserveProviderBudget() refuses OUR OWN daily ceiling by throwing BudgetExhausted
+       straight out of xai(), as it always has. Release the probe slot on the way past
+       so a budget wall cannot strand the breaker half-open, and rethrow untouched. */
+    gate.failure(e);
+    throw e;
+  }
 }
 
 /**

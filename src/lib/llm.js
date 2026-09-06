@@ -76,6 +76,352 @@ export class OutOfCredit extends Error {}
  * right thing, so the brake subclasses it rather than inventing a parallel path. */
 export class BudgetExhausted extends OutOfCredit {}
 
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * THE CREDIT CIRCUIT BREAKER — one per provider, in the layer that holds the key.
+ *
+ * WHY: a dry account does not slow the desk down, it makes it spend the day being
+ * told no. Measured 2026-09-06 with both balances empty: 1,323 refused requests an
+ * hour. Letting OutOfCredit escape desk.js's Promise.allSettled and taking the 600s
+ * blocked gap instead of the 45s worked gap cut cycles/hour 37 -> 17 — and refusals
+ * only 1,323 -> 1,254, a 5% dent. The reason is concurrency: PENTHOUSE_WORKUP_CONCURRENCY
+ * is 3, so when one workup hits the wall and halts the cycle, the two still in flight
+ * fire every remaining seat at a provider that is certainly going to refuse. The halt
+ * stops the NEXT candidate; it cannot un-fire the calls already in the air. Nothing
+ * short of refusing at the provider layer, before the request is built, removes them —
+ * hence a breaker here rather than another guard further up. ~1,250 refusals an hour
+ * also costs Render CPU and ~224,000 junk chronicle rows a day.
+ *
+ * THE PROPERTY THAT MATTERS MOST IS RECOVERY, NOT REFUSAL. The operator tops the
+ * account up and expects the desk back with no deploy, no restart, no manual step. A
+ * breaker that latches open is strictly worse than the bug it replaces: the desk would
+ * look dead while the account was funded, and nothing in the heartbeat would say why.
+ * So the half-open probe is not an optimisation, it is the whole point, and the state
+ * machine below is built so that it CANNOT be skipped:
+ *
+ *   - The only exit from "open" towards a CALL is acquire() itself, which converts
+ *     open -> half_open the first time it is called after the cooldown. There is no
+ *     timer to be cleared, no listener to be unsubscribed, nothing that a restart can
+ *     lose. If the desk is calling the provider at all, the probe happens.
+ *   - "half_open" holds exactly ONE probe, so a top-up is tested by a single call and
+ *     never by a thundering herd of fifteen seats.
+ *   - A probe that never reports (a promise that never settles, a killed await) would
+ *     otherwise latch half_open forever, so the probe holds a LEASE. Once it expires
+ *     the next caller takes the probe instead. Every state therefore drains back to a
+ *     new probe on a bounded clock.
+ *
+ *   - A probe that is BILLED is proof of funding whatever it then says, so success is
+ *     reported at the meter, not after the response has been validated. A truncated or
+ *     off-contract answer used to re-open the breaker on the one call that had just
+ *     proved the account was funded.
+ *   - And the breaker stands itself down rather than latch on evidence it never
+ *     gathered: CREDIT_BREAKER_STAND_DOWN_PROBES consecutive NON-credit probe failures
+ *     close it and let the true error surface. A revoked key or a mis-set model name is
+ *     not a credit outage and must not be reported as one for an afternoon.
+ *
+ * Maximum time-to-recovery, from credit returning to ordinary calls flowing again:
+ *   COOLDOWN_MS                      + the time to the desk's next call   (normal)
+ *   COOLDOWN_MS + PROBE_LEASE_MS     + the time to the desk's next call   (hung probe)
+ *   COOLDOWN_MS x STAND_DOWN_PROBES  + the time to the desk's next call   (not credit)
+ * With the defaults that is 60s, 360s and 120s. test-credit-breaker.mjs prints all
+ * three, measured.
+ *
+ * PER PROVIDER, STRICTLY. Anthropic and xAI are separate accounts on separate cards,
+ * and on 2026-09-05 the operator topped up Anthropic while xAI was the dry one. A
+ * shared breaker would have blacked out the funded provider. The map below is keyed by
+ * provider and no code path reads another provider's record.
+ *
+ * IT NEVER SWALLOWS A NON-CREDIT ERROR. Only a call site that has positively
+ * identified a credit refusal calls refused(); a timeout, a 500 or a schema mismatch
+ * goes to failure(), which cannot open a closed breaker and leaves the error itself
+ * completely untouched on its way to the caller.
+ *
+ * AND A REPORT ONLY COUNTS FOR THE BREAKER IT WAS ISSUED AGAINST. Every gate carries
+ * the record's epoch, which changes on every open and every close, so a request that
+ * was already in the air when the outage began cannot re-open a breaker that has since
+ * recovered — the ownership guard failure() always had, extended to refused().
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* A NON-NUMBER MUST NOT BECOME A NO-OP BREAKER.
+ *
+ * DESK_CREDIT_BREAKER_COOLDOWN_S=60s is the natural mistake for a name ending in _S,
+ * and Number("60s") is NaN. NaN survives BOTH Math.max and Math.min unchanged, so the
+ * bounds below cannot catch it — and `now < readyAt` is false against NaN, which lets
+ * every caller straight through. The breaker would do nothing at all while the owner's
+ * heartbeat showed an open breaker with a null countdown, forever. Parse through
+ * Number.isFinite with the documented default as the fallback, and say so out loud:
+ * a typo the operator can see is a typo the operator fixes. */
+function breakerSeconds(name, defaultSeconds) {
+  const raw = process.env[name];
+  if (raw == null || String(raw).trim() === "") return defaultSeconds;
+  const parsed = Number(raw);
+  if (Number.isFinite(parsed)) return parsed;
+  console.warn(`[credit breaker] ${name}="${raw}" is not a number ` +
+    `— using the default ${defaultSeconds}s (the value is SECONDS, digits only)`);
+  return defaultSeconds;
+}
+
+/** Bounded on both ends deliberately. Under 5s the breaker is just the retry storm
+ *  with extra steps; over 15 minutes the desk looks dead for a quarter of an hour
+ *  after a top-up, which is the failure mode this whole thing exists to prevent. */
+export const CREDIT_BREAKER_COOLDOWN_MS = Math.min(15 * 60_000, Math.max(5_000,
+  Math.round(breakerSeconds("DESK_CREDIT_BREAKER_COOLDOWN_S", 60) * 1000)));
+
+/** How long a probe may hold the single slot before another caller may take it. Must
+ *  outlast the slowest legitimate call — a max-effort 32k-token stream, or grok's 120s
+ *  x_search — or a slow probe would be lapped and become the herd it prevents. */
+export const CREDIT_BREAKER_PROBE_LEASE_MS = Math.max(CREDIT_BREAKER_COOLDOWN_MS,
+  Math.min(30 * 60_000, Math.max(30_000,
+    Math.round(breakerSeconds("DESK_CREDIT_BREAKER_PROBE_LEASE_S", 300) * 1000))));
+
+/** How many CONSECUTIVE non-credit probe failures stand the breaker down. See
+ *  gateFor().failure(): the breaker's mandate is credit and nothing else, so it must
+ *  not stay open on evidence it never gathered. */
+export const CREDIT_BREAKER_STAND_DOWN_PROBES = 2;
+
+/* Printed once, at boot, so a mis-set cooldown is visible in the log rather than
+   silently in effect. Skipped under the test runner, where 80 files would each say it. */
+if (process.env.NODE_ENV !== "test") {
+  console.log(`[credit breaker] cooldown ${CREDIT_BREAKER_COOLDOWN_MS / 1000}s · ` +
+    `probe lease ${CREDIT_BREAKER_PROBE_LEASE_MS / 1000}s · ` +
+    `stand-down after ${CREDIT_BREAKER_STAND_DOWN_PROBES} consecutive non-credit probes`);
+}
+
+/* Time is injected so the recovery test can advance a clock instead of sleeping for a
+ * minute — a test that sleeps for the real cooldown is a test nobody runs. Production
+ * never calls this; the default is the wall clock. */
+let breakerClock = () => Date.now();
+export function setCreditBreakerClock(fn) {
+  breakerClock = typeof fn === "function" ? fn : () => Date.now();
+}
+
+const CREDIT_BREAKERS = new Map();
+const breakerRecord = (provider) => {
+  let b = CREDIT_BREAKERS.get(provider);
+  if (!b) {
+    b = { provider, state: "closed", openedAt: null, probeStartedAt: null,
+      /* epoch changes on EVERY open and EVERY close, and every gate carries the epoch
+         it was issued under. That is what tells a report from a request that is still
+         in the air apart from a report about the state the breaker is in NOW. */
+      epoch: 0,
+      probeSeq: 0, opens: 0, probes: 0, refusedWhileOpen: 0,
+      nonCreditProbeFailures: 0, lastError: null };
+    CREDIT_BREAKERS.set(provider, b);
+  }
+  return b;
+};
+
+/* The refusal is worded as the PROVIDER's own refusal, on purpose. provider-health.js
+ * classifies an outage by matching the error text ("anthropic balance is empty",
+ * "xai 403 ... credit"), and the heartbeat's BLOCKED state is built on that match. A
+ * breaker that invented new wording would have silently turned the heartbeat green the
+ * moment it started working, which is the opposite of visible. */
+function breakerRefusalMessage(provider, waitMs) {
+  const secs = Math.max(1, Math.ceil(waitMs / 1000));
+  return provider === "xai"
+    ? `xai 403: credit breaker open — the xAI account refused for lack of credits; ` +
+      `no request sent, next probe in ${secs}s`
+    : `the Anthropic balance is empty — the desk cannot think ` +
+      `(credit breaker open, no request sent, next probe in ${secs}s)`;
+}
+
+/* One place that changes the epoch, so no transition can forget to. The cached
+   closed-state gate is dropped with it: a cached gate holding a stale epoch would be a
+   gate that can never report a refusal — the "breaker that never opens" bug again. */
+function bumpEpoch(b) {
+  b.epoch += 1;
+  b.closedGate = null;
+}
+
+function issueProbe(b, now) {
+  b.state = "half_open";
+  b.probeStartedAt = now;
+  b.probeSeq += 1;
+  b.probes += 1;
+  return b.probeSeq;
+}
+
+/* A gate the breaker refused. Same SHAPE as an allowed gate, deliberately: a caller
+   that forgets to check `allowed` should get a harmless no-op, not a TypeError in the
+   middle of an outage. Every method is a no-op because no request was made, so this
+   call has learned nothing about the account either way. */
+const refusedGate = (message, retryInMs) => ({
+  allowed: false, probe: false, message, retryInMs,
+  success() {}, refused() {}, failure() {},
+});
+
+/** A token whose failure() only acts if this call still owns the probe. A late report
+ *  from a lapsed probe must not re-open a breaker that has since closed, nor restart
+ *  the cooldown of one a newer refusal has already re-opened. */
+function gateFor(provider, b, seq) {
+  const epoch = b.epoch;
+  const owns = () => b.state === "half_open" && b.probeSeq === seq;
+  /* A report is only about the breaker it was issued against. Measured 2026-09-07: a
+     seat acquired a gate while CLOSED, its request sat in the air through the whole
+     outage — dry account, sibling opens the breaker, operator tops up, probe succeeds,
+     breaker closes — and then reported its credit error and re-opened a healthy
+     breaker. The epoch is the ownership guard failure() always had, extended to the
+     one report that could arrive from before the recovery. */
+  const current = () => b.epoch === epoch;
+  return {
+    allowed: true,
+    probe: seq != null,
+    // Proof the account pays: close, whatever state we were in.
+    success() { noteCreditSuccess(provider); },
+    // The caller has positively identified a credit refusal. Open (or re-open) — but
+    // only if the breaker has not transitioned since this call was let out.
+    refused(message) { if (current()) noteCreditRefusal(provider, message); },
+    // Anything else. Cannot open a closed breaker; only releases a probe we still own.
+    failure(err) {
+      if (seq == null || !owns()) return;
+      b.probeStartedAt = null;
+      b.lastError = String(err?.message ?? err ?? "").slice(0, 240) || b.lastError;
+      /* THE BREAKER'S MANDATE IS CREDIT AND NOTHING ELSE, so it must not stay open on
+       * evidence it never gathered. A deterministic non-credit fault — a mis-set model
+       * name after a retier, a revoked key, blocked egress — fails every probe for a
+       * reason that has nothing to do with the balance. Re-opening on each of those
+       * kept a FUNDED desk silent indefinitely while reporting a credit outage it no
+       * longer had: measured at 60 minutes, 60 spent probes, siblings costing zero
+       * requests. After CREDIT_BREAKER_STAND_DOWN_PROBES consecutive non-credit probe
+       * failures the breaker stands down and the real error surfaces to the caller as
+       * it always would — the desk fails loudly with the true fault instead of quietly
+       * as "out of credit". A genuine credit refusal resets the count. */
+      b.nonCreditProbeFailures += 1;
+      if (b.nonCreditProbeFailures >= CREDIT_BREAKER_STAND_DOWN_PROBES) {
+        const downMs = b.openedAt ? Math.max(0, breakerClock() - b.openedAt) : 0;
+        b.state = "closed";
+        b.openedAt = null;
+        bumpEpoch(b);
+        emit("desk:breaker_stood_down", { provider, downMs,
+          probes: b.nonCreditProbeFailures, refusedWhileOpen: b.refusedWhileOpen,
+          reason: "consecutive non-credit probe failures — not a credit outage",
+          lastError: b.lastError });
+        b.nonCreditProbeFailures = 0;
+        b.probes = 0;
+        b.refusedWhileOpen = 0;
+        return;
+      }
+      /* Not yet: a probe that failed has not proved the account pays either, so the
+       * breaker goes back to open with the cooldown restarted rather than staying
+       * half-open with a spent slot. The error itself is untouched throughout. */
+      b.state = "open";
+      b.openedAt = breakerClock();
+    },
+  };
+}
+
+/**
+ * Ask the breaker for permission to call `provider`. Returns a gate:
+ *   { allowed: true,  probe }  — go ahead; report back via success/refused/failure
+ *   { allowed: false, message, retryInMs } — the caller refuses IN ITS OWN IDIOM
+ *
+ * The caller does the refusing, not the breaker, because the two providers have
+ * different contracts and neither may be quietly changed: llm.js throws OutOfCredit
+ * (which desk.js halts the cycle on), while grok.js has always failed open with
+ * { ok:false } for a live 403 and must keep doing exactly that — a throw there would
+ * let a dry xAI account halt a cycle that a funded Anthropic account could still run,
+ * which is the cross-provider blackout this design exists to prevent.
+ */
+export function acquireCredit(provider, { now = breakerClock() } = {}) {
+  const b = breakerRecord(provider);
+  /* The hot path — a healthy provider — hands back a cached gate rather than a frozen
+     no-op. An earlier draft returned a no-op here and the breaker NEVER OPENED: the very
+     first refusal is by definition delivered to a caller holding a closed-state gate, so
+     a gate that cannot report a refusal is a breaker that can never trip. Caught by the
+     recovery test, which measured fetch calls instead of trusting the state field. */
+  if (b.state === "closed") return (b.closedGate ??= gateFor(provider, b, null));
+
+  if (b.state === "open") {
+    const readyAt = b.openedAt + CREDIT_BREAKER_COOLDOWN_MS;
+    if (now < readyAt) {
+      b.refusedWhileOpen += 1;
+      return refusedGate(breakerRefusalMessage(provider, readyAt - now), readyAt - now);
+    }
+    return gateFor(provider, b, issueProbe(b, now));   // the single probe
+  }
+
+  // half_open: one probe at a time, until its lease runs out.
+  const heldFor = now - (b.probeStartedAt ?? now);
+  if (b.probeStartedAt != null && heldFor < CREDIT_BREAKER_PROBE_LEASE_MS) {
+    b.refusedWhileOpen += 1;
+    const waitMs = CREDIT_BREAKER_PROBE_LEASE_MS - heldFor;
+    return refusedGate(breakerRefusalMessage(provider, waitMs), waitMs);
+  }
+  /* The probe never reported. Reclaim rather than latch — this is the branch that makes
+   * "open with no scheduled probe" unreachable. */
+  return gateFor(provider, b, issueProbe(b, now));
+}
+
+/** A provider refused for credit. Opens that provider's breaker and nobody else's. */
+export function noteCreditRefusal(provider, message) {
+  const b = breakerRecord(provider);
+  const reopened = b.state !== "closed";
+  b.state = "open";
+  b.openedAt = breakerClock();
+  b.probeStartedAt = null;
+  b.opens += 1;
+  /* The provider named the balance, so whatever non-credit noise came before it is not
+     the story any more. Two non-credit probes SEPARATED by a real refusal must not add
+     up to a stand-down. */
+  b.nonCreditProbeFailures = 0;
+  b.lastError = String(message ?? "").slice(0, 240);
+  bumpEpoch(b);
+  /* The chronicle should show the transition, not just the silence that follows it.
+   * Without this the only trace of a breaker doing its job is an absence of events,
+   * which reads identically to a dead process. */
+  emit("desk:breaker_open", { provider, reopened,
+    cooldownMs: CREDIT_BREAKER_COOLDOWN_MS, opens: b.opens,
+    reason: reopened ? "probe refused again" : "credit refusal" });
+  return b;
+}
+
+/** A provider answered and billed. Closes that provider's breaker if it was open. */
+export function noteCreditSuccess(provider) {
+  const b = CREDIT_BREAKERS.get(provider);
+  if (!b || b.state === "closed") return null;   // the hot path: one map get, no work
+  const downMs = b.openedAt ? Math.max(0, breakerClock() - b.openedAt) : 0;
+  b.state = "closed";
+  b.openedAt = null;
+  b.probeStartedAt = null;
+  b.lastError = null;
+  b.nonCreditProbeFailures = 0;
+  bumpEpoch(b);
+  emit("desk:breaker_closed", { provider, downMs, probes: b.probes,
+    refusedWhileOpen: b.refusedWhileOpen });
+  b.probes = 0;
+  b.refusedWhileOpen = 0;
+  return b;
+}
+
+/** Snapshot for diagnostics and the owner heartbeat. Read-only: never a transition. */
+export function creditBreakerState(provider, { now = breakerClock() } = {}) {
+  const b = CREDIT_BREAKERS.get(provider);
+  if (!b || b.state === "closed") {
+    return { provider, state: "closed", openedAt: null, probeReadyInMs: 0,
+      refusedWhileOpen: 0, opens: b?.opens ?? 0, lastError: null };
+  }
+  const probeReadyInMs = b.state === "open"
+    ? Math.max(0, b.openedAt + CREDIT_BREAKER_COOLDOWN_MS - now)
+    : Math.max(0, (b.probeStartedAt ?? now) + CREDIT_BREAKER_PROBE_LEASE_MS - now);
+  return { provider, state: b.state, openedAt: b.openedAt,
+    openedMsAgo: b.openedAt == null ? null : Math.max(0, now - b.openedAt),
+    probeInFlight: b.state === "half_open", probeReadyInMs,
+    opens: b.opens, probes: b.probes, refusedWhileOpen: b.refusedWhileOpen,
+    lastError: b.lastError };
+}
+
+/** Every provider whose breaker is not closed, for the owner-only heartbeat branch. */
+export function openCreditBreakers({ now = breakerClock() } = {}) {
+  const out = [];
+  for (const provider of CREDIT_BREAKERS.keys()) {
+    const s = creditBreakerState(provider, { now });
+    if (s.state !== "closed") out.push(s);
+  }
+  return out;
+}
+
+/** Tests only. Production has no reason to forget an outage it is living through. */
+export function resetCreditBreakers() { CREDIT_BREAKERS.clear(); }
+
 /**
  * THE RESERVE — the publishing lane cannot be starved by the scanning lanes.
  *
@@ -378,6 +724,13 @@ export async function ask({
   // Thinking counts against max_tokens, so the deeper the effort the more headroom the
   // visible answer needs. 8000 flat starved the xhigh seats of any room to reply.
   maxTokens ??= effort === "max" ? 32000 : effort === "xhigh" ? 24000 : 16000;
+  /* THE BREAKER, before a single byte of request is built. This is the whole saving:
+     with the account dry, the fifteen seats of an in-flight workup used to each pay a
+     round trip to be refused (1,254 an hour after the halt fix). Here they cost one
+     map lookup. Placed above the retry loop so no seat:thinking is emitted and no
+     budget is reserved for a call that is not going to happen. */
+  const gate = acquireCredit("anthropic");
+  if (!gate.allowed) throw new OutOfCredit(gate.message);
   let lastErr;
   for (let a = 1; a <= attempts; a++) {
     try {
@@ -417,9 +770,24 @@ export async function ask({
         req.fallbacks = "default";
       }
       const res = await withProviderBudget({ provider: "anthropic", maxTokens, payload: req }, async () => {
-        const stream = client.beta.messages.stream(req);
+        /* maxRetries:0 — ONE OWNER FOR THE RETRY POLICY. The SDK retries 429/5xx
+           internally, and this loop retries them too, so the two multiplied:
+           ask({attempts:3}) against a 529 measured NINE network requests. The loop
+           keeps the job because it is the one that emits seat:retry and backs off
+           where the chronicle can see it. */
+        const stream = client.beta.messages.stream(req, { maxRetries: 0 });
         const message = await stream.finalMessage();
         meterAnthropicUsage(model, message, seat, effort);
+        /* THE BILLING FACT, REPORTED WHERE THE BILLING FACT IS KNOWN.
+           A response that arrives and is metered is proof the provider served us and
+           charged us — whatever the response then turns out to SAY. Reporting success
+           only after validation meant a truncated or off-contract answer took the
+           gate.failure() path below, so the one call that PROVED the account was
+           funded re-opened the breaker: measured 1 request, "response did not match
+           contract", and a real $0.0055 of metered spend, with the desk concluding it
+           was broke. Validation failures are ordinary errors that never touch the
+           breaker again. */
+        gate.success();
         return message;
       });
 
@@ -449,11 +817,16 @@ export async function ask({
       }
 
       emit("seat:done", { seat, usd: spend.usd });
+      // The breaker was already told, at the meter — see above.
       return parsed;
     } catch (err) {
       lastErr = err;
+      /* A safety refusal is a BILLED, completed call — the model ran and declined, and
+         the meter above has already closed the breaker on that bill. It is not a seat
+         failure to retry, so it leaves immediately and untouched. */
       if (err instanceof Refusal) throw err;
       if (/credit balance is too low/i.test(String(err?.message))) {
+        gate.refused(String(err?.message));
         emit("desk:out_of_credit", { seat });
         throw new OutOfCredit("the Anthropic balance is empty — the desk cannot think");
       }
@@ -464,6 +837,10 @@ export async function ask({
       await new Promise((r) => setTimeout(r, 800 * a * a));
     }
   }
+  /* Not a credit failure — a timeout, a 500, a contract mismatch. It cannot open a
+     closed breaker; it only releases a probe this call was holding, and the error
+     itself travels on completely unchanged. */
+  gate.failure(lastErr);
   emit("seat:failed", { seat, error: String(lastErr?.message || lastErr) });
   throw lastErr;
 }
@@ -473,6 +850,12 @@ export async function ask({
  * structured output format, so we search in one call and shape the result in a second.
  */
 export async function askWithWeb({ seat, model, effort, schema, prompt, system, maxTokens = 16000 }) {
+  /* The second Anthropic entry point, and it needs the breaker as much as ask() does:
+     the narrative seat runs on every workup, so with the account dry it was a full
+     third of the refusals. Guarded before seat:searching so a breaker-refused call
+     does not narrate itself into the chronicle either. */
+  const gate = acquireCredit("anthropic");
+  if (!gate.allowed) throw new OutOfCredit(gate.message);
   emit("seat:searching", { seat, model });
 
   // Server-tool errors do NOT throw: they arrive as a result block whose content is an
@@ -491,12 +874,34 @@ export async function askWithWeb({ seat, model, effort, schema, prompt, system, 
       output_config: { effort },
       messages: [{ role: "user", content: prompt }],
     };
-    research = await withProviderBudget({ provider: "anthropic", maxTokens,
-      maxSearches: 2, payload: req }, async () => {
-      const message = await client.messages.create(req);
-      meterAnthropicUsage(model, message, seat, effort);
-      return message;
-    });
+    /* This call had NO credit handler at all: a dry account threw the provider's raw
+       "credit balance is too low" error out of askWithWeb, where desk.js filed it beside
+       a timeout as an ordinary seat failure — the same disguise the halt fix removed
+       from ask(). Classify it here, on the identical test ask() uses, so the breaker
+       learns from this seat too and the cycle halts on it. Every other error is
+       rethrown byte-for-byte, exactly as before. */
+    try {
+      research = await withProviderBudget({ provider: "anthropic", maxTokens,
+        maxSearches: 2, payload: req }, async () => {
+        /* No maxRetries override here, deliberately: unlike ask(), this call has no
+           retry loop of its own — the loop it sits in retries web_search TOOL errors
+           only — so the SDK is already the single owner of its retry policy. */
+        const message = await client.messages.create(req);
+        meterAnthropicUsage(model, message, seat, effort);
+        // Metering is the proof the account is live: report it here, beside the bill,
+        // never after a downstream check that could fail for its own reasons.
+        gate.success();
+        return message;
+      });
+    } catch (err) {
+      if (/credit balance is too low/i.test(String(err?.message))) {
+        gate.refused(String(err?.message));
+        emit("desk:out_of_credit", { seat });
+        throw new OutOfCredit("the Anthropic balance is empty — the desk cannot think");
+      }
+      gate.failure(err);
+      throw err;
+    }
 
     const errs = research.content
       .filter((b) => b.type === "web_search_tool_result" && !Array.isArray(b.content))

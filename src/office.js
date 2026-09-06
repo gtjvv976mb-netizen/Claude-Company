@@ -9,7 +9,7 @@ import path from "node:path";
 import { ROOT } from "./config.js";
 import { bus, backlog, emit, runFor, chronicleRead } from "./lib/bus.js";
 import { census as funnelCensus } from "./funnel.js";
-import { spend, spendSince, spendBySeat } from "./lib/llm.js";
+import { spend, spendSince, spendBySeat, openCreditBreakers } from "./lib/llm.js";
 import { cfg } from "./config.js";
 /* The cohort cycle's own constants. Imported, never re-declared: the ladder has exactly
    one definition (config.js) and the classification exactly one (calls.js GATE_CLASS).
@@ -1413,6 +1413,17 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               lastSuccessTs: provider.lastSuccessTs,
               recoveryGraceMs: provider.recoveryGraceMs,
             } : null,
+            /* WHICH PROVIDER IS CURRENTLY BEING REFUSED WITHOUT A REQUEST.
+               providerCredit above is derived from chronicle history and answers "did
+               the money run out recently"; this is the live switch and answers "is the
+               desk calling anyone right now, and when does it next try". The breaker
+               makes the desk quiet on purpose, and quiet is indistinguishable from dead
+               unless the state is on the page — so probeReadyInMs is here explicitly:
+               it is the operator's countdown to recovery after a top-up, and it never
+               needs a deploy or a restart to run down. Per provider, because Anthropic
+               and xAI are separate accounts and topping up one funds neither the other
+               nor this list's other row. Empty array = both breakers closed. */
+            creditBreakers: hqViewer ? openCreditBreakers({ now }) : null,
             /* The desk's own failures, not the market's. Anything here is the desk
              * losing paid work to its own plumbing. */
             // Which of the house's own seats are erroring is a build detail, not news.
