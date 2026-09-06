@@ -117,10 +117,14 @@ export const evidenceScopeFor = (floorNo) =>
 const recordedConfig = () => ({
   equityUsd: cfg.equityUsd,
   maxRiskPct: cfg.maxRiskPct,
-  maxBookRiskPct: cfg.maxBookRiskPct,
   maxCandidates: cfg.maxCandidates,
-  targetSizeUsd: cfg.targetSizeUsd,
-  maxRoundTripSlippagePct: cfg.maxRoundTripSlippagePct,
+  /* `targetSizeUsd`, `maxRoundTripSlippagePct` and `maxBookRiskPct` were recorded here
+     and are gone with the settings themselves (2026-09-07). Recording them as `undefined` would have been
+     worse than dropping them: an evaluation run stamped with two null policy fields
+     reads as a misconfigured desk rather than as a desk that no longer has those
+     policies. Runs recorded BEFORE today keep their values on their own rows, which is
+     the honest history — the desk did size and did enforce a cost ceiling, and the
+     grades from that era were produced under those settings. */
   screen: cfg.screen,
   dailyBudgetUsd: cfg.dailyBudgetUsd,
 });

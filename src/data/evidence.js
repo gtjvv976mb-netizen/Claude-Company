@@ -9,6 +9,7 @@ import { emit } from "../lib/bus.js";
 import { whaleFeed } from "../identity.js";
 import * as pf from "./pumpfun.js";
 import { regime } from "./regime.js";
+import { botProbeNotional } from "../probe-size.js";
 
 /**
  * Everything the desk knows about one token, fetched deterministically.
@@ -37,11 +38,35 @@ export async function gather(mint, hook = "") {
    * take forty seconds by itself. Nothing here costs a model call, so this is pure
    * latency: same requests, same order of magnitude of bytes, one round trip instead
    * of six. Every failure mode is unchanged because each promise keeps its own catch. */
-  const usdcRaw = Math.round(cfg.targetSizeUsd * 1e6);
+  /* THE ROUND TRIP IS A ROUTE TEST, NOT A COST TEST — and after 2026-09-07 that is the
+   * only thing it is allowed to be.
+   *
+   * WHAT IT ANSWERS: can this token be sold at all? A forward quote and a reverse quote
+   * prove a sell route exists and returns something. That is a fact about the COIN — the
+   * honeypot question, in the same family as a live freeze authority or a transfer hook
+   * — and it is the desk's job. `unverified_exit` below still refuses anything the probe
+   * cannot measure, because unverified is not safe.
+   *
+   * WHAT IT NO LONGER ANSWERS: what selling COSTS. The desk used to kill on the round
+   * trip's percentage (`cannot_exit`, against cfg.maxRoundTripSlippagePct) and derive a
+   * minimum stop distance from it. Both are gone. The cost of a round trip is not a
+   * property of the coin alone; it is a property of the coin AND the order size, and
+   * the desk does not know the order size — the bot does, on the operator's own machine.
+   * On 2026-09-07 this probe ran at $75 and refused a coin at "8.08% > ceiling 8%" while
+   * the bot's real clip was about $2, where the same pool is far cheaper to leave.
+   *
+   * WHY A NOTIONAL AT ALL, THEN. A quote needs an amount; there is no size-free way to
+   * ask Jupiter whether a route exists. So the desk MEASURES one rather than choosing
+   * one: probe-size.js reads the largest per-trade cap a live WALL-ST-E has declared on
+   * its own heartbeat, and falls back to a stated instrument constant when no bot is
+   * reporting. It is a test amount, not a trade amount, and nothing downstream may veto
+   * on it — see probe-size.js. */
+  const probeSize = botProbeNotional();
+  const usdcRaw = Math.round(probeSize.sizeUsd * 1e6);
   const wantsDeployer = hook !== "monitor" && mint.endsWith("pump");
   const [mintAcct, rt, jp, promo, marketRegime, deployerRaw] = await Promise.all([
     sol.mintInfo(mint),
-    // Exitability probe at the desk's real target size, quoted in USDC.
+    // Route probe: does a sell path exist and return anything? Quoted in USDC.
     jup.roundTrip({ quoteMint: MINTS.USDC, tokenMint: mint, quoteAmountRaw: String(usdcRaw) }),
     jup.price([mint]),
     ds.paidOrders(mint),
@@ -156,9 +181,18 @@ export async function gather(mint, hook = "") {
     },
     mintAccount: mintAcct.ok ? mintAcct : { error: mintAcct.error },
     holders: holders.ok ? holders : { error: holders.error },
+    /* The notional and its PROVENANCE travel with the measurement, for the report and
+       the floor's screen. They are a LABEL on the route test — "this is the amount the
+       quote was taken at, and here is where that amount came from" — never an input to
+       a veto. The one number that still gates is whether the probe completed at all
+       (unverified_exit); the percentage is recorded and shown, and judged by nobody
+       here. `roundTripLossPct` reaching the seats as prose is fine: a coin that costs
+       a fortune to leave is worth SAYING, and the bot decides what to do about it. */
     exitProbe: rt.ok
-      ? { targetSizeUsd: cfg.targetSizeUsd, ...rt }
-      : { targetSizeUsd: cfg.targetSizeUsd, error: rt.error },
+      ? { targetSizeUsd: probeSize.sizeUsd, sizeSource: probeSize.source,
+          sizeFromBot: probeSize.fromBot, ...rt }
+      : { targetSizeUsd: probeSize.sizeUsd, sizeSource: probeSize.source,
+          sizeFromBot: probeSize.fromBot, error: rt.error },
     jupPrice,
     derived: {
       totalLiquidityUsd: liq,
@@ -196,18 +230,36 @@ export function screen(ev) {
    * `totalLiquidityUsd` arrives as 0 rather than null, `??` keeps the 0, and the coin
    * dies as `thin_liquidity` on a number nobody measured. A real zero and an unread
    * feed are different facts. Falling back to the pair's own figure when the venue
-   * total is absent OR zero hands the question to the exit probe below, which measures
-   * the round trip directly — and `unverified_exit` still refuses anything that probe
-   * cannot measure, `cannot_exit` anything that measures worse than the ceiling. */
+   * total is absent OR zero hands the question to the route probe below — and
+   * `unverified_exit` still refuses anything that probe cannot measure. (It used to
+   * add "and `cannot_exit` anything that measures worse than the ceiling"; that gate is
+   * gone, and what it cost the desk is written out at its old site further down.) */
   const totalLiq = (ev.pairs?.totalLiquidityUsd || null) ?? p.liquidityUsd;
   /* The SAME band-relative floors the free pre-screen used. If these two ever diverge
    * the desk pays for workups it was always going to refuse, so they read one source. */
   const fl = floorsFor(p.marketCap ?? p.fdv ?? null);
-  /* Same distinction the free screen now draws: a pool that cannot be READ is not a
-   * pool that is thin. The desk does not let it through on trust — it hands it to the
-   * exit probe below, which measures the round trip directly. unverified_exit refuses
-   * anything that probe cannot measure, and cannot_exit refuses anything that measures
-   * worse than the ceiling, so an unreadable pool still has to prove it can be left. */
+  /* THIN LIQUIDITY STAYS, AND IT IS NOT AN INCONSISTENCY. Read alongside the deleted
+   * `cannot_exit` above it looks like the same kind of judgment survived one deletion
+   * and not the other, so say why in the file rather than leaving the next reader to
+   * re-litigate it.
+   *
+   * `cannot_exit` asked HOW MUCH IT COSTS to leave, which is a fact about the coin and
+   * the order size together — a $2 clip and a $75 clip get different answers out of the
+   * same pool, and the desk does not know which one the bot will place. That is a money
+   * question and it belongs to the bot.
+   *
+   * `thin_liquidity` asks WHETHER THERE IS A MARKET, which is a fact about the coin
+   * alone and gets the same answer at every size. A coin with $0.65 of liquidity across
+   * two venues is not an expensive market, it is not a market: there is nothing on the
+   * other side of any order, and no sizing decision the bot could make would change
+   * that. It sits in the same family as a live freeze authority or a transfer hook —
+   * WHAT this coin is, not HOW MUCH to buy of it — which is exactly the desk's job.
+   * (Live proof it is not theoretical: SAXDUK, killed with "total liquidity across 1
+   * venues = 0.1 < floor 12000".)
+   *
+   * And the same read/thin distinction the free screen draws: a pool that cannot be
+   * READ is not a pool that is thin. An unreadable pool is handed to the route probe
+   * below, and `unverified_exit` refuses anything that probe cannot measure. */
   check(totalLiq != null && totalLiq < fl.liq,
     "thin_liquidity", `total liquidity across ${ev.pairs?.count} venues = ${totalLiq} < floor ${fl.liq} for this cap band`);
   /* THE BAND'S FLOOR, like every other check on this screen.
@@ -249,8 +301,29 @@ export function screen(ev) {
     "too_small", `market cap $${Math.round(mcap ?? 0).toLocaleString()} is under the ` +
       `$${Math.round(s.minMarketCapUsd || 0).toLocaleString()} floor — too little coin to trade`);
 
-  check(ev.exitProbe?.roundTripLossPct != null && ev.exitProbe.roundTripLossPct > cfg.maxRoundTripSlippagePct,
-    "cannot_exit", `round-trip loss ${ev.exitProbe.roundTripLossPct}% > ceiling ${cfg.maxRoundTripSlippagePct}% at $${cfg.targetSizeUsd}`);
+  /* `cannot_exit` WAS HERE, and it was the desk's single most expensive mistake.
+   *
+   * It read: round-trip loss above cfg.maxRoundTripSlippagePct (8%) at the probed
+   * notional ⇒ killed, SAFETY, no escalation level may reach past it. Twelve of the
+   * desk's last hundred kills died on this line ALONE, nothing else against them, and
+   * eleven of those twelve were between 8.0% and 9.2% — marginal against a ceiling
+   * measured at $75 when the bot trades about $2. DEGS: "round-trip loss 8.08% >
+   * ceiling 8% at $75". That coin was tradeable and the desk never mentioned it.
+   *
+   * The cost of a round trip is a function of the pool AND the order size. The desk
+   * knows the pool; only the bot knows the size, and only at the moment it signs. So
+   * the judgment moved to where the inputs are real, and it is enforced there twice:
+   *   executor/jupiter.mjs:1341-1350 — preflightEntry quotes forward and reverse at the
+   *     bot's own amountRaw and throws "entry round-trip loss X% exceeds cap Y%".
+   *   executor/poller.mjs:1234-1253 — takes that measured loss, applies the slippage
+   *     haircut and worst-case fees, and refuses the entry when what is left no longer
+   *     clears the authored stop.
+   * Neither can be fooled by a size nobody is going to trade.
+   *
+   * WHAT REMAINS OF THE PROBE HERE is the route question, immediately below:
+   * `unverified_exit` still kills when the probe did not complete, because "we could
+   * not find out whether this can be sold" is a coin-quality fact and unverified is
+   * not safe. */
 
   // The Pinocchio gate's hard kills: a desk must never reason on a number that
   // two independent sources cannot agree exists.

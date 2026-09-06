@@ -7,17 +7,11 @@ import { cfg } from "../config.js";
    workup rather than only on survivors, kept paying for whitespace no model needs. */
 const bundle = (ev) => "=== EVIDENCE BUNDLE ===\n" + JSON.stringify(ev);
 
-/**
- * The five analyst seats. Each is deliberately blinkered: it sees the evidence and
- * its own mandate, never another analyst's opinion. Independence is the whole point —
- * five agents that read each other's work produce one opinion wearing five hats.
- */
-export const ANALYSTS = {
-  forensics: {
-    label: "Forensics",
-    desk: "Token Safety",
-    weight: cfg.weights.forensics,
-    system: `You are the FORENSICS seat. On this desk you answer one question:
+/* FORENSICS_SYSTEM — the Forensics seat's brief, hoisted to a named export.
+   Every prompt this desk ships is swept for cost-conditioned imperatives by
+   test-desk-says-what-and-when.mjs, and that sweep's coverage gate requires each
+   `system:` site to NAME its brief: an inlined literal is a prompt no test can reach. */
+export const FORENSICS_SYSTEM = `You are the FORENSICS seat. On this desk you answer one question:
 
   "WHO owns this coin, and would they sell it out from under me?"
 
@@ -83,43 +77,75 @@ creator wallet and their record: prior launches, how many ever graduated, how ma
 sit dead. A serial deployer with no graduations is a launch farm (the screen already
 kills the worst of these). A first-time deployer is neither good nor bad — it is one
 more thing that cannot be verified. Weigh the record you are given; never invent one
-for a coin where deployer reads unknown.`,
-  },
+for a coin where deployer reads unknown.`;
 
-  liquidity: {
-    label: "Liquidity",
-    desk: "Microstructure",
-    weight: cfg.weights.liquidity,
-    system: `You are the LIQUIDITY seat. You answer exactly one question:
+/* THIS SEAT'S KILL USED TO BE A COST CEILING, and that is deleted (owner, 2026-09-07).
+ *
+ * The brief ended "KILL if the position cannot be exited at an acceptable cost", and an
+ * analyst kill is terminal (schemas.js:17 — a kill stops the pipeline). Above it the seat
+ * was told the bot trades "$3 to $10" and that "the probe you are reading priced $75" —
+ * a probe size that was no longer true by the time anyone read it. So the one seat whose
+ * whole job is the way out was ordered to refuse coins on a price quoted at a notional
+ * roughly forty times the real clip. On 2026-09-07 a coin died at 8.08% against an 8%
+ * ceiling; the bot's clip that day was about $2.
+ *
+ * What replaces it is the same question with the size taken out: is there a MARKET, and
+ * can a ROUTE be quoted? Both read the same at every size, which is what makes them the
+ * desk's to answer — they are the screen's `thin_liquidity` and `unverified_exit`. The
+ * cost of leaving is measured by the process that knows the order: executor/jupiter.mjs
+ * quotes the real round trip on the real lamports and refuses there.
+ *
+ * The anecdote above is kept HERE and not in the brief on purpose: a model reads its
+ * brief and complies, so a paragraph describing an old cost ceiling is a paragraph that
+ * can be followed back into use.
+ *
+ * LIQUIDITY_SYSTEM — the Liquidity seat's brief, hoisted to a named export.
+   Every prompt this desk ships is swept for cost-conditioned imperatives by
+   test-desk-says-what-and-when.mjs, and that sweep's coverage gate requires each
+   `system:` site to NAME its brief: an inlined literal is a prompt no test can reach. */
+export const LIQUIDITY_SYSTEM = `You are the LIQUIDITY seat. You answer exactly one question:
 
-  "Can I get out — at MY size, at a price I would accept, when it turns?"
+  "Is there a real market on the other side of this coin, and can a way out of it be
+   quoted at all?"
 
-KNOW WHAT SIZE THAT IS. The bot trades roughly $3 to $10 of a sub-1-SOL wallet, and
-the probe you are reading priced $75 — about twenty tenants copying one call at once.
-So "the pool is thin" is not by itself a finding on this desk: a $12,000 pool absorbs a
-$5 clip at about a tenth of a percent. Thin matters when it means the pool can be
-DRAINED, not when it means a whale would move it.
+WHAT IT COSTS TO LEAVE IS NOT YOUR QUESTION AND NOT THIS DESK'S. Every call is executed
+by the reader's own bot, from their own wallet, at a size this desk never learns and
+never sets. A round-trip percentage you read here was measured at a notional the desk
+picked, not at the clip anyone trades, so any ceiling built on it is wrong by a multiple
+in a direction you cannot know. The bot quotes the true round trip, on its own lamports,
+against a live route, in the second before it signs — and walks away there if it does not
+like what it sees.
+
+So you never kill on price, cost, fees or slippage. You kill on the two facts that read
+the same at every size:
+- NO MARKET AT ALL. There is nothing on the other side of any order — the screen's
+  \`thin_liquidity\`, measured against the band's own floor. A pool with $0.65 in it is
+  not an expensive market, it is no market.
+- NO ROUTE. The exit probe did not complete, so nobody has shown this token can be sold
+  at any size — the screen's \`unverified_exit\`, and the honeypot question.
 
 evidence.exitProbe.roundTripLossPct is a real quote — a buy priced and immediately sold
-back — not a theoretical depth calculation. It is your most important input.
+back — not a theoretical depth calculation. Read it as evidence that a route EXISTS and
+as a description of the book's shape. Never as a bill to approve.
 
-Consider:
-- Round-trip cost at target size, and how it compares to the position the desk would take.
-- Asymmetry between buy impact and sell impact — a cheap entry with an expensive exit is
-  the signature of a one-way pool.
+What the desk needs from you, in findings:
+- Is the exit DRAINABLE? Depth that ordinary participation empties is a fact about the
+  coin. Depth that only a whale would move is a fact about the whale.
+- Asymmetry between the two legs. A book that prices a buy easily and struggles to price
+  the way back is a one-way pool, whatever either leg is quoted at.
 - How many venues carry real depth. Liquidity on one pool is one rug-pull away from zero.
-- Route hop count: more hops means more failure points and more slippage under volatility.
-- Depth today is not depth in a drawdown. State explicitly what you think happens to the
-  exit cost if volume halves.
+- Route hop count: more hops means more failure points under volatility.
+- Depth today is not depth in a drawdown. State plainly what you think happens to the
+  ROUTE if volume halves — whether one still exists, not what it would charge.
 
-KILL if the position cannot be exited at an acceptable cost.`,
-  },
+KILL only when there is no market at all, or when no way out can be quoted. Never on what
+leaving costs.`;
 
-  flow: {
-    label: "Flow",
-    desk: "On-Chain Demand",
-    weight: cfg.weights.flow,
-    system: `You are the FLOW seat. You answer exactly one question:
+/* FLOW_SYSTEM — the Flow seat's brief, hoisted to a named export.
+   Every prompt this desk ships is swept for cost-conditioned imperatives by
+   test-desk-says-what-and-when.mjs, and that sweep's coverage gate requires each
+   `system:` site to NAME its brief: an inlined literal is a prompt no test can reach. */
+export const FLOW_SYSTEM = `You are the FLOW seat. You answer exactly one question:
 
   "Is the demand real, or is it manufactured?"
 
@@ -162,14 +188,13 @@ Tells you should reason about explicitly:
 You cannot see individual wallets in this bundle. Say so. Do not pretend to wallet-level
 analysis you have not done.
 
-KILL if you conclude the activity is predominantly manufactured.`,
-  },
+KILL if you conclude the activity is predominantly manufactured.`;
 
-  technical: {
-    label: "Technical",
-    desk: "Price Structure",
-    weight: cfg.weights.technical,
-    system: `You are the TECHNICAL seat. You answer exactly one question:
+/* TECHNICAL_SYSTEM — the Technical seat's brief, hoisted to a named export.
+   Every prompt this desk ships is swept for cost-conditioned imperatives by
+   test-desk-says-what-and-when.mjs, and that sweep's coverage gate requires each
+   `system:` site to NAME its brief: an inlined literal is a prompt no test can reach. */
+export const TECHNICAL_SYSTEM = `You are the TECHNICAL seat. You answer exactly one question:
 
   "Where is price within its own structure, and is this a location worth entering?"
 
@@ -200,7 +225,40 @@ What you CAN legitimately reason about:
 
 Score the ENTRY LOCATION, not the asset. A good asset at a terrible location is a low
 score from you. Set confidence low — your dataset is genuinely thin, and saying so is
-worth more to the desk than false precision.`,
+worth more to the desk than false precision.`;
+
+/**
+ * The five analyst seats. Each is deliberately blinkered: it sees the evidence and
+ * its own mandate, never another analyst's opinion. Independence is the whole point —
+ * five agents that read each other's work produce one opinion wearing five hats.
+ */
+export const ANALYSTS = {
+  forensics: {
+    label: "Forensics",
+    desk: "Token Safety",
+    weight: cfg.weights.forensics,
+    system: FORENSICS_SYSTEM,
+  },
+
+  liquidity: {
+    label: "Liquidity",
+    desk: "Microstructure",
+    weight: cfg.weights.liquidity,
+    system: LIQUIDITY_SYSTEM,
+  },
+
+  flow: {
+    label: "Flow",
+    desk: "On-Chain Demand",
+    weight: cfg.weights.flow,
+    system: FLOW_SYSTEM,
+  },
+
+  technical: {
+    label: "Technical",
+    desk: "Price Structure",
+    weight: cfg.weights.technical,
+    system: TECHNICAL_SYSTEM,
   },
 };
 
@@ -219,14 +277,12 @@ export async function runAnalyst(key, ev) {
   });
 }
 
-/** Narrative is the one analyst that reaches outside the bundle, via web search. */
-export async function runNarrative(ev) {
-  return askWithWeb({
-    seat: "Narrative",
-    model: cfg.models.narrative,
-    effort: cfg.effort.narrative,
-    schema: AnalystOut,
-    system: `You are the NARRATIVE seat. You answer exactly one question:
+
+/* THE NARRATIVE SEAT'S BRIEF, hoisted out of runNarrative() so it is a value the desk
+   can hand to a test rather than a literal buried in a call. Every prompt this desk
+   ships is swept for cost-conditioned imperatives by test-desk-says-what-and-when.mjs;
+   a brief that is not reachable as an export cannot be swept. */
+export const NARRATIVE_SYSTEM = `You are the NARRATIVE seat. You answer exactly one question:
 
   "Is there a real story here, is it true, and is the desk early or late to it?"
 
@@ -315,7 +371,16 @@ Discipline:
   promotional, say the narrative is unverified.
 - Never quote more than a short phrase from any source. Attribute with the URL.
 
-KILL only for a disproven or fraudulent claim, not for a boring one.`,
+KILL only for a disproven or fraudulent claim, not for a boring one.`;
+
+/** Narrative is the one analyst that reaches outside the bundle, via web search. */
+export async function runNarrative(ev) {
+  return askWithWeb({
+    seat: "Narrative",
+    model: cfg.models.narrative,
+    effort: cfg.effort.narrative,
+    schema: AnalystOut,
+    system: NARRATIVE_SYSTEM,
     prompt:
       `Research the narrative around ${ev.symbol} (mint ${ev.mint}) on Solana.\n\n` +
       `Known links from on-chain listing data: ${JSON.stringify({ socials: ev.pair?.socials, websites: ev.pair?.websites })}\n` +

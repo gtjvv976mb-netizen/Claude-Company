@@ -46,14 +46,25 @@ const call = openCall({
 });
 const d = decide(FLOOR, call);
 ok("the default tenant is OFFERED the call", d.verdict === "offered", `${d.verdict} — ${(d.reason || "").slice(0, 90)}`);
-ok("...at a size that clears network fees (>= 0.02 SOL)", Number(d.sizeSol) >= 0.02, `${d.sizeSol} SOL`);
+/* THE SIZE ASSERTION INVERTED ON 2026-09-07. It read `Number(d.sizeSol) >= 0.02` —
+   the desk offering a tenant a number that clears Solana's fixed fees. The desk does
+   not size a stranger's wallet, so there is no number to check; what a tenant must get
+   is the CALL. Their bot sizes it from its own FIXED_SOL / MAX_SOL_PER_TRADE and its own
+   fee floor (executor/strategy.mjs:232-234, 305). */
+ok("...with no size attached, and saying so", d.sizeSol === null && d.sizeBinding === false,
+  `sizeSol=${d.sizeSol} sizeBinding=${d.sizeBinding}`);
 const res = broadcast(call.id, [FLOOR]);
 ok("broadcast delivered to the tenant", res.ok && res.offered === 1, `offered=${res.offered} skipped=${res.skipped}`);
 await alerts.announceEntry(call);
 const feed = executorFeedPayload(FLOOR, 0);
 const ev = (feed.events || []).find((e) => e.call_id === call.id && e.type === "entry");
 ok("the tenant's executor feed serves the ENTRY", !!ev, ev ? `symbol=${ev.symbol} size=${ev.size_sol}` : "no event");
-ok("...with the bot's sizing and the floor's rules", ev && Number(ev.size_sol) >= 0.02 && feed.rules && "fixed_sol" in feed.rules,
+/* The wire still CARRIES a size field, for rows written before today and for older
+   clients that would break without it — and it is null on everything new, and labelled
+   non-binding either way (office.js size_binding). */
+ok("...carrying no size, labelled non-binding, with the floor's own rules",
+  ev && ev.size_sol == null && ev.size_binding === false && feed.rules
+  && feed.rules.size_binding === false && "fixed_sol" in feed.rules,
   ev ? `size ${ev.size_sol}, rules ${JSON.stringify(feed.rules)}` : "");
 ok("...and the floor's verdicts ride the feed", Array.isArray(feed.decisions) && feed.decisions[0]?.verdict === "offered",
   feed.decisions?.[0] ? `${feed.decisions[0].symbol} ${feed.decisions[0].verdict}` : "no decisions");
@@ -61,11 +72,18 @@ const payload = JSON.stringify(feed).toLowerCase();
 for (const forbidden of ["secretkey", "privatekey", "seed", "mnemonic", "keypair"])
   ok(`the tenant feed carries no ${forbidden}`, !payload.includes(forbidden));
 
-console.log("\nAN EXPLICIT FIXED SIZE IS HONOURED ON A TENANT FLOOR TOO");
+console.log("\nA TENANT'S FIXED SIZE IS THEIR OWN BUSINESS, NOT SOMETHING THE DESK ECHOES");
+/* This asserted that a tenant stating 0.05 SOL was "offered at least the executable
+   minimum" — the desk reading their setting and re-issuing it as a delivered size, which
+   made the desk look like the author of a number it had not chosen. The setting is still
+   stored (their board renders it, and it is theirs to change); the delivery is silent. */
 saveSettings(FLOOR, { fixedSol: 0.05 });
 const fixed = decide(FLOOR, call);
-ok("a tenant who states 0.05 SOL is offered at least the executable minimum",
-  fixed.verdict === "offered" && Number(fixed.sizeSol) >= 0.02, `${fixed.verdict} ${fixed.sizeSol}`);
+ok("a tenant who states 0.05 SOL gets the same sizeless delivery as everyone else",
+  fixed.verdict === "offered" && fixed.sizeSol === null && fixed.reason === d.reason,
+  `${fixed.verdict} ${fixed.sizeSol}`);
+ok("...while their own setting is still stored and still theirs",
+  Number(settingsFor(FLOOR).fixed_sol) === 0.05, `fixed_sol=${settingsFor(FLOOR).fixed_sol}`);
 
 console.log("\nTHE EXIT FOLLOWS THE SAME ROAD");
 closeCall(call.id, "target_hit", 0.0021);

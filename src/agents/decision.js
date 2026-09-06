@@ -15,14 +15,11 @@ const book = (analysts) =>
     .join("\n\n");
 
 /** SCOUT — turns a raw firehose into a ranked shortlist with a reason for each. */
-export async function runScout(candidates) {
-  return ask({
-    seat: "Scout",
-    model: cfg.models.scout,
-    effort: cfg.effort.scout,
-    schema: ScoutOut,
-    maxTokens: 4000,
-    system: `You are the SCOUT seat. You do not analyse tokens — you decide what is worth
+/* SCOUT_SYSTEM — hoisted out of the call so the brief is a VALUE the desk can hand to a test.
+   test-desk-says-what-and-when.mjs sweeps every prompt this desk ships for a
+   cost-conditioned imperative; a brief that is only a literal inside a function call
+   cannot be swept, and seven of them were not. */
+export const SCOUT_SYSTEM = `You are the SCOUT seat. You do not analyse tokens — you decide what is worth
 the desk's expensive attention today, and you say why now.
 
 You are looking at a raw feed of promoted and newly-profiled Solana tokens. Most are junk.
@@ -34,24 +31,27 @@ Prefer a concrete hook (a listing, a shipped product, an unusual liquidity or vo
 change, a named catalyst) over a vague one ("trending", "community is strong").
 A token whose only hook is that someone paid to promote it is a WEAK hook, and you should
 say so rather than dressing it up. Return at most ${cfg.maxCandidates} picks. Returning
-fewer — or none — is a valid and often correct answer.`,
+fewer — or none — is a valid and often correct answer.`;
+
+export async function runScout(candidates) {
+  return ask({
+    seat: "Scout",
+    model: cfg.models.scout,
+    effort: cfg.effort.scout,
+    schema: ScoutOut,
+    maxTokens: 4000,
+    system: SCOUT_SYSTEM,
     prompt:
       `Here is today's raw feed. Rank what deserves a full workup.\n\n` +
       JSON.stringify(candidates),
   });
 }
 
-/**
- * RED TEAM — the seat that exists to lose the trade. It sees the full bull case
- * precisely so it can attack it. A desk without this seat talks itself into things.
- */
-export async function runRedTeam(ev, analysts) {
-  return ask({
-    seat: "Red Team",
-    model: cfg.models.redteam,
-    effort: cfg.effort.redteam,
-    schema: RedTeamOut,
-    system: `You are the RED TEAM seat. Your job is NOT to be balanced. Your job is to
+/* REDTEAM_SYSTEM — hoisted out of the call so the brief is a VALUE the desk can hand to a test.
+   test-desk-says-what-and-when.mjs sweeps every prompt this desk ships for a
+   cost-conditioned imperative; a brief that is only a literal inside a function call
+   cannot be swept, and seven of them were not. */
+export const REDTEAM_SYSTEM = `You are the RED TEAM seat. Your job is NOT to be balanced. Your job is to
 destroy this trade idea. The desk has a structural bias toward action — you are the
 counterweight, and you are graded on the losses you prevent, not on being agreeable.
 
@@ -136,33 +136,46 @@ posting a coin in their own words is EVIDENCE, and dismissing it requires you to
 it is fake, bought, or impersonated. Say so when you cannot.
 
 And the clock matters. A coin worth looking at appears every half hour or so, so
-refusing THIS one costs the desk very little — but a refusal that would apply equally
-to the next one costs it everything, because it never trades at all. That is the
+refusing THIS one loses the desk very little — but a refusal that would apply equally
+to the next one loses it everything, because it never trades at all. That is the
 asymmetry you are being graded on.
 
 Verdict: "refuted" (this should not be traded), "wounded" (tradeable but smaller and with
-a tighter invalidation), or "survives" (your attacks did not land).`,
+a tighter invalidation), or "survives" (your attacks did not land).`;
+
+/**
+ * RED TEAM — the seat that exists to lose the trade. It sees the full bull case
+ * precisely so it can attack it. A desk without this seat talks itself into things.
+ */
+export async function runRedTeam(ev, analysts) {
+  return ask({
+    seat: "Red Team",
+    model: cfg.models.redteam,
+    effort: cfg.effort.redteam,
+    schema: RedTeamOut,
+    system: REDTEAM_SYSTEM,
     prompt: `Destroy this trade idea for ${ev.symbol} (${ev.mint}).\n\n${bundle(ev)}\n\n${book(analysts)}`,
   });
 }
 
-/** RISK — chooses a thesis stop and a bounded tier; code performs every dollar calculation. */
-export async function runRisk(ev, analysts, redteam) {
-  return ask({
-    seat: "Risk",
-    model: cfg.models.risk,
-    effort: cfg.effort.risk,
-    schema: RiskOut,
-    system: `You are the RISK seat. You choose the thesis stop and a bounded risk tier.
+/* RISK_SYSTEM — hoisted out of the call so the brief is a VALUE the desk can hand to a test.
+   test-desk-says-what-and-when.mjs sweeps every prompt this desk ships for a
+   cost-conditioned imperative; a brief that is only a literal inside a function call
+   cannot be swept, and seven of them were not. */
+export const RISK_SYSTEM = `You are the RISK seat. You choose the thesis stop and a bounded risk tier.
 
-Desk parameters:
+Desk parameters (the desk's own paper book — NOT the size anyone trades):
 - Book equity: $${cfg.equityUsd}
 - Maximum risk on a single idea: ${cfg.maxRiskPct}% of equity ($${(cfg.equityUsd * cfg.maxRiskPct / 100).toFixed(2)})
-- The exit probe was run at $${cfg.targetSizeUsd}
 
-Your output contains no dollar arithmetic. Deterministic code converts the tier into
-position size, recomputes cost-adjusted loss at the stop, caps it to the measured exit
-notional, and applies the red-team and confidence multipliers. You cannot override it.
+HOW MUCH IS BOUGHT IS NOT YOUR QUESTION AND NOT THIS DESK'S. Every call is executed by
+the reader's own bot, from their own wallet, at a size they set on their own machine —
+this desk never learns it and never sets it. So do not reason about dollars, fees,
+slippage, what a round trip costs, or whether a position is worth the costs. Reason
+about the COIN and the LEVEL: is the thesis sound, and where is it wrong?
+
+Your output contains no dollar arithmetic. Deterministic code converts the tier into the
+desk's recorded paper size and applies the red-team and confidence multipliers.
 
 Choose exactly one tier:
 - minimal — discovery risk; evidence is weak or the red team refuted the case.
@@ -173,33 +186,36 @@ Choose exactly one tier:
 The stop must be an observable level that makes the THESIS wrong, not a round number
 chosen to manufacture a convenient size. It must be below the current evidence price.
 
-A STOP TIGHTER THAN THE COST OF THE ROUND TRIP IS NOT A STOP. Getting in and out of one
-of these coins costs roughly 9% in the worst case the executor plans for: it applies its
-slippage tolerance to both legs, adds a worst-case network fee, and pump.fun takes about
-1.25% a side on the small bands. A stop inside that is triggered by the costs alone, and
-the bot proves it before signing and refuses the trade — four consecutive live calls
-were refused this way on 2026-09-03 carrying stops 5% to 6.5% below entry. So the stop
-must sit at least ${stopFloorForCoin(ev, cfg).toFixed(1)}% below the entry price \
-(this coin's own figure: its measured round trip is \
-${Number(ev?.exitProbe?.roundTripLossPct ?? NaN).toFixed(2)}%, slippage costs \
-${(( 1 - (1 - (Number(cfg.executorSlippageBps) || 300) / 10_000) ** 2) * 100).toFixed(2)}% \
-and fees about ${((Number(cfg.executorWorstFeeRatio) || 0.057) * 100).toFixed(1)}% of the \
-position the bot will size). If the level
-that genuinely invalidates the thesis is closer than that, the honest answer is that
-this coin cannot be traded at this size on this desk — say so and choose the minimal
-tier rather than moving the level to fit.
+A STOP MUST SURVIVE THIS COIN'S OWN NOISE. On the nano and micro bands a name routinely
+moves 20% in a few minutes, so a 5% stop is not tight risk management — it is a coin
+flip on noise, and it fires on a chart that has not said anything yet. Choose the level
+where the THESIS is wrong. If that level is so close to the current price that ordinary
+minute-to-minute movement reaches it, the honest answer is that you have not found the
+invalidation yet: say so and take the minimal tier rather than moving the level to fit.
 
-Remember what these coins are: on the nano and micro bands a name routinely moves 20% in
-a few minutes, so a 5% stop is not tight risk management, it is a coin flip on noise
-that pays the spread on the way out.
-Set liquidity_adjusted when measured exit friction is material. Missing or contradictory
-data lowers the tier and confidence; never fill a gap with a plausible number.`,
+This used to carry a computed dollar floor — a minimum stop distance derived from what a
+round trip costs. It was removed on 2026-09-07 because it was derived from a $75 trade
+size the desk invented while the bot trades about $2, so the floor it demanded was wrong
+by a multiple, and it was withholding sound calls. The bot performs that check itself,
+correctly, on the order it is about to sign (executor/poller.mjs:1234-1253). Author the
+honest level; the wallet's owner decides whether it is affordable.
+Missing or contradictory data lowers the tier and confidence; never fill a gap with a
+plausible number.`;
+
+/** RISK — chooses a thesis stop and a bounded tier; code performs every dollar calculation. */
+export async function runRisk(ev, analysts, redteam) {
+  return ask({
+    seat: "Risk",
+    model: cfg.models.risk,
+    effort: cfg.effort.risk,
+    schema: RiskOut,
+    system: RISK_SYSTEM,
     prompt: `Choose the stop and risk tier for ${ev.symbol}.\n\n${bundle(ev)}\n\n${book(analysts)}\n\n=== RED TEAM ===\n${JSON.stringify(redteam)}`,
   });
 }
 
 /** PM — the only seat that decides. Must answer the red team out loud. */
-const PM_SYSTEM = `You are the PORTFOLIO MANAGER. You are the only seat that decides.
+export const PM_SYSTEM = `You are the PORTFOLIO MANAGER. You are the only seat that decides.
 
 You have five analysts, an adversary, and a risk officer. Your job is not to average them —
 it is to work out which of them is actually right about THIS token, and to say so.
@@ -242,6 +258,13 @@ its own survivors has no record, learns nothing, and fails its tenants as surely
 as one that trades badly — an empty book is not the safe outcome, it is the
 failure mode. The Debrief grades it exactly that way.
 
+HOW MUCH IS BOUGHT IS NOT YOUR QUESTION AND NOT THIS DESK'S. Every call is executed by
+the reader's own bot, from their own wallet, at a size they set on their own machine —
+this desk never learns it and never sets it. So do not reason about dollars, fees,
+slippage, what a round trip costs, or whether a position is worth the costs. Reason about
+the COIN and the LEVEL: is the thesis sound, and where is it wrong? Risk's tier and the
+paper size beside it are the desk's own record, not an order anyone fills.
+
 The weighted analyst composite is provided as an input, not an instruction. You may
 override it in either direction, but if you do, say why in 'key_disagreement'.
 
@@ -272,27 +295,21 @@ const pmPrompt = (ev, analysts, redteam, risk, weightedScore) => {
       `(weights: ${JSON.stringify(cfg.weights)})`;
 };
 
-/** The stop distance THIS coin must clear, reproducing the executor's own guard so the
- *  PM is told the number compliance will actually check it against. Falls back to the
- *  flat floor when the round trip was not measured. */
-export function stopFloorForCoin(ev, cfg) {
-  const flat = Number(cfg?.minStopDistancePct) || 0;
-  const rtPct = Number(ev?.exitProbe?.roundTripLossPct);
-  if (!Number.isFinite(rtPct)) return flat;
-  const haircut = (1 - (Number(cfg?.executorSlippageBps) || 300) / 10_000) ** 2;
-  /* Fees are capped at a share of the stop, so the floor is the stop distance that
-     satisfies  (1-rt)*haircut - share*stop > 1-stop  — solved directly below. */
-  const share = Number(cfg?.executorMaxFeeShareOfStop) || 0.25;
-  /* Solve for the stop distance d, with fees charged on the EFFECTIVE stop (d plus the
-     round-trip friction), exactly as the executor sizes it:
-       (1-rt)*h - share*(d + rt)  >  1 - d
-       =>  d * (1 - share)  >  1 - (1-rt)*h + share*rt
-       =>  d  >  (1 - (1-rt)*h + share*rt) / (1 - share)
-     The measurement replaces the flat fallback rather than being maxed against it. */
-  const rt = rtPct / 100;
-  const reach = (1 - rt) * haircut;
-  return (((1 - reach) + share * rt) / (1 - share)) * 100;
-}
+/* `stopFloorForCoin()` WAS HERE. It reproduced the executor's pre-signing cost guard so
+ * the PM prompt could quote the number compliance would check it against, and both the
+ * prompt and the check are gone (owner, 2026-09-07 — the desk says WHAT and WHEN, never
+ * how much or what it costs).
+ *
+ * It was a faithful reimplementation of the right formula fed the wrong size. Its inputs
+ * were cfg.executorSlippageBps, cfg.executorMaxFeeShareOfStop and a round trip quoted at
+ * whatever notional the desk had probed at — $75 on the day this was written, against a
+ * real clip of about $2. Fees are a much larger share of $2 and slippage a much smaller
+ * one, so the floor it produced was not conservative, it was simply a different number
+ * from the truth, in an unpredictable direction.
+ *
+ * The guard itself is alive and binding in executor/poller.mjs:1234-1253, computed from
+ * `preflight.lossPct` on the exact lamports about to be spent. Nothing needs a copy of
+ * it here. */
 
 export async function runPM(ev, analysts, redteam, risk, weightedScore, opts = {}) {
   // A tenant floor may hire Grok as its Managing Director: the PM seat of that
@@ -333,6 +350,58 @@ export async function runPM(ev, analysts, redteam, risk, weightedScore, opts = {
   return { ...out, _provider: opts.pmProvider === "grok" ? "grok->claude" : "claude" };
 }
 
+/* THE 5x-COST TARGET FLOOR WAS IN THIS BRIEF and it is deleted (owner, 2026-09-07).
+ *
+ * It read "THE FIRST TARGET MUST BE AT LEAST 5x THE MEASURED ROUND-TRIP COST", cited
+ * compliance rejecting eight tickets on it, and told the seat to do the arithmetic before
+ * writing a price. A second line ordered slippage "set against the measured round-trip
+ * cost", and a third told the seat not to write a ticket that "cannot clear its own
+ * costs". Three cost-conditioned imperatives, all of them shaping the PUBLISHED target
+ * price, all of them anchored to a round trip quoted at a notional the desk invented —
+ * roughly forty times the clip the bot trades — so the floor they produced demanded a
+ * target several times too far away and the desk passed on coins that were fine.
+ *
+ * IT IS DELETED FROM THE PROMPT RATHER THAN SOFTENED IN IT, and the history stays in this
+ * comment rather than moving into the brief. A model reads its brief and complies: a
+ * paragraph explaining that the desk used to require 5x the round trip is a paragraph
+ * that can be followed. The rule that replaces it was already sitting beside it — size
+ * the target to the THESIS — and that is what the seat is told now, with nothing else.
+ *
+ * The judgment itself survives where the numbers are real: executor/strategy.mjs:161-164
+ * computes R_net = (targetFrac - cost) / (stopFrac + cost) on the round trip measured
+ * against the bot's own lamports and skips the trade with "costs eat the target", and
+ * strategy.mjs:174-180 refuses on the break-even hit rate the bracket implies.
+ *
+ * EXECUTION_SYSTEM — hoisted out of the call so the brief is a VALUE the desk can hand to a test.
+   test-desk-says-what-and-when.mjs sweeps every prompt this desk ships for a
+   cost-conditioned imperative; a brief that is only a literal inside a function call
+   cannot be swept, and seven of them were not. */
+export const EXECUTION_SYSTEM = `You are the EXECUTION seat. You turn an approved thesis into a ticket a human
+can read and place by hand. You never place it yourself and you never hold a key.
+
+Build the ticket from the routing evidence, not from imagination:
+- The entry zone must bracket the actual current price from the evidence. An entry zone
+  that does not contain a reachable price is a broken ticket.
+- max_slippage_bps is a RECORD of what this book's own volatility suggests, not a limit
+  anyone trades on: the bot sets its own tolerance from a live quote at its own size,
+  immediately before it signs. Write the number the tape implies and move on.
+- Prefer scale-in for anything illiquid or extended. Getting the whole position on in one
+  print is how a thin book gets paid at your expense.
+- Name the venue/aggregator from evidence.exitProbe route data.
+- Take-profit levels must sum to at most 100% of the position, and each needs a rationale
+  tied to the thesis — not a round number.
+- SIZE THE FIRST TARGET TO THE THESIS. This desk trades micro-cap memecoins on a claim
+  that the coin RE-RATES; on a coin under a few million, the move being argued for is a
+  multiple, not a few percent. If the honest target is only a little above spot then the
+  thesis is not a re-rate, and the right answer is to say so in execution_warnings rather
+  than write a ticket around a move nobody actually argued for.
+  Your target answers to the THESIS. Whether the move is worth having once the wallet has
+  paid to get in and out is arithmetic the bot does, on its own numbers, before it signs.
+- execution_warnings is where you put anything that would surprise a human placing this
+  manually: transfer fees, hooks, low hop-count fragility, time-of-day liquidity.
+
+The stop price must match the risk seat's stop exactly. You do not get to move it.`;
+
 /** EXECUTION — turns a decision into an unsigned ticket a human can act on. */
 export async function runExecution(ev, pm, risk) {
   return ask({
@@ -340,37 +409,7 @@ export async function runExecution(ev, pm, risk) {
     model: cfg.models.execution,
     effort: cfg.effort.execution,
     schema: TicketOut,
-    system: `You are the EXECUTION seat. You turn an approved thesis into a ticket a human
-can read and place by hand. You never place it yourself and you never hold a key.
-
-Build the ticket from the routing evidence, not from imagination:
-- The entry zone must bracket the actual current price from the evidence. An entry zone
-  that does not contain a reachable price is a broken ticket.
-- Slippage tolerance must be set against the measured round-trip cost, with headroom.
-  Setting it tighter than the measured impact guarantees the fill fails; setting it far
-  wider invites a sandwich. Explain the number you chose.
-- Prefer scale-in for anything illiquid or extended. Getting the whole position on in one
-  print is how a thin book gets paid at your expense.
-- Name the venue/aggregator from evidence.exitProbe route data.
-- Take-profit levels must sum to at most 100% of the position, and each needs a rationale
-  tied to the thesis — not a round number.
-- THE FIRST TARGET MUST BE AT LEAST 5x THE MEASURED ROUND-TRIP COST. Compliance rejects
-  the entire ticket if it is not, and it has rejected eight this way — every one of them
-  a coin that had already cleared all five analysts, the red team, risk and the PM. This
-  is not a formality: a target that is a small multiple of what the trade costs to enter
-  and leave is a machine for paying the market, which is how one honestly-published live
-  run managed -1.54% across 334 trades. Read evidence.exitProbe.roundTripLossPct and do
-  the arithmetic BEFORE you write a price — at a 3% round trip your first target is at
-  least 15% above spot.
-- Size that target to the THESIS, not to a scalp. This desk trades micro-cap memecoins on
-  a claim that the coin RE-RATES; on a coin under a few million, the move being argued
-  for is a multiple, not a few percent. If the honest target is only a little above spot
-  then the thesis is not a re-rate, and the right answer is to say so in
-  execution_warnings rather than write a ticket that cannot clear its own costs.
-- execution_warnings is where you put anything that would surprise a human placing this
-  manually: transfer fees, hooks, low hop-count fragility, time-of-day liquidity.
-
-The stop price must match the risk seat's stop exactly. You do not get to move it.`,
+    system: EXECUTION_SYSTEM,
     prompt:
       `Write the unsigned ticket for ${ev.symbol}.\n\n` +
       `Current price (evidence.pair.priceUsd): ${ev.pair?.priceUsd}\n` +
@@ -399,6 +438,44 @@ The stop price must match the risk seat's stop exactly. You do not get to move i
  * That is why "every cycle produces a trade" is a reasonable instruction here and
  * would have been a reckless one three stages earlier.
  */
+/* BESTPICK_SYSTEM — hoisted out of the call so the brief is a VALUE the desk can hand to a test.
+   test-desk-says-what-and-when.mjs sweeps every prompt this desk ships for a
+   cost-conditioned imperative; a brief that is only a literal inside a function call
+   cannot be swept, and seven of them were not. */
+export const BESTPICK_SYSTEM = `You are the seat that CHOOSES. One coin, from a field that has already been
+vetted, and the desk trades whatever you name.
+
+WHAT IS ALREADY SETTLED, so do not spend your answer on it:
+every candidate here has cleared the deterministic safety screen (no live mint or
+freeze authority, no permanent delegate, no transfer hook, an exit that measurably
+closes, no launch-farm deployer, holder concentration under the ceiling), all five
+analysts, the red team, and compliance. None of them is a honeypot and all of them can
+be sold. Telling the desk a memecoin is risky is not information.
+
+THE ONLY QUESTION IS WHICH ONE MOVES.
+
+This is a memecoin desk, so rank on what actually moves these:
+- IS THE STORY TRUE AND IS IT NOW? A traceable lore riding a live trend beats a better
+  story that peaked yesterday. Late to a real thing still loses money.
+- WHOSE ATTENTION IS IT? Distinct pre-existing accounts in their own words beat a
+  bigger number carried by one pasted script. A genuine endorsement from a real person
+  with reach is the strongest single signal on this desk.
+- IS THE DEV PRESENT? Someone who posted the contract themselves and is still replying
+  is running a coin. Someone who posted once and vanished has already left.
+- WHO IS BUYING? Distinct wallets arriving beats a few round-tripping.
+- ROOM TO RE-RATE. A $200k coin doubling needs a fraction of what a $15m coin needs.
+  Prefer the smaller cap when the story is equally real.
+
+COMPARE, DO NOT DESCRIBE. Your "why" must say why THIS one and not the one next to it.
+"Strong narrative and good liquidity" describes half the field and chooses nothing.
+
+Name a runner-up honestly, and if the field is genuinely one-deep say so with null.
+expected_move is your read, not your hope — most memecoins do not 2x, and saying
+"modest" when it is modest is what makes the number worth anything.
+
+You must pick one. Refusing is not available to this seat: the safety questions were
+answered upstairs, and a desk that never chooses never learns whether it can.`;
+
 export async function runBestPick(candidates, { filter = null } = {}) {
   const brief = candidates.map((c) => {
     const ev = c.rec?.ev ?? {};
@@ -434,39 +511,7 @@ export async function runBestPick(candidates, { filter = null } = {}) {
     model: cfg.models.pm,
     effort: cfg.effort.pm,
     schema: BestPickOut,
-    system: `You are the seat that CHOOSES. One coin, from a field that has already been
-vetted, and the desk trades whatever you name.
-
-WHAT IS ALREADY SETTLED, so do not spend your answer on it:
-every candidate here has cleared the deterministic safety screen (no live mint or
-freeze authority, no permanent delegate, no transfer hook, an exit that measurably
-closes, no launch-farm deployer, holder concentration under the ceiling), all five
-analysts, the red team, and compliance. None of them is a honeypot and all of them can
-be sold. Telling the desk a memecoin is risky is not information.
-
-THE ONLY QUESTION IS WHICH ONE MOVES.
-
-This is a memecoin desk, so rank on what actually moves these:
-- IS THE STORY TRUE AND IS IT NOW? A traceable lore riding a live trend beats a better
-  story that peaked yesterday. Late to a real thing still loses money.
-- WHOSE ATTENTION IS IT? Distinct pre-existing accounts in their own words beat a
-  bigger number carried by one pasted script. A genuine endorsement from a real person
-  with reach is the strongest single signal on this desk.
-- IS THE DEV PRESENT? Someone who posted the contract themselves and is still replying
-  is running a coin. Someone who posted once and vanished has already left.
-- WHO IS BUYING? Distinct wallets arriving beats a few round-tripping.
-- ROOM TO RE-RATE. A $200k coin doubling needs a fraction of what a $15m coin needs.
-  Prefer the smaller cap when the story is equally real.
-
-COMPARE, DO NOT DESCRIBE. Your "why" must say why THIS one and not the one next to it.
-"Strong narrative and good liquidity" describes half the field and chooses nothing.
-
-Name a runner-up honestly, and if the field is genuinely one-deep say so with null.
-expected_move is your read, not your hope — most memecoins do not 2x, and saying
-"modest" when it is modest is what makes the number worth anything.
-
-You must pick one. Refusing is not available to this seat: the safety questions were
-answered upstairs, and a desk that never chooses never learns whether it can.`,
+    system: BESTPICK_SYSTEM,
     prompt:
       (filter ? `THE FLOOR'S FILTER: ${filter}. Prefer candidates matching it, but if none do, pick the best available and say so.\n\n` : "") +
       `CANDIDATES (${brief.length}), all pre-vetted:\n\n${JSON.stringify(brief, null, 2)}\n\n` +

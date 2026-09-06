@@ -216,8 +216,35 @@ export function evaluateExit(call, now) {
   if (newFlag) return { fire: true, code: "authority_appeared", urgency: "unconditional",
     detail: `a control appeared that was not there at the call: ${newFlag}`, pct: 100 };
 
-  if (now.rtLossPct != null && now.rtLossPct > 12) return { fire: true, code: "cannot_exit", urgency: "unconditional",
-    detail: `round trip is now ${now.rtLossPct.toFixed(1)}% — the position can no longer be left cleanly`, pct: 100 };
+  /* THE `cannot_exit` EXIT TRIGGER WAS HERE AND IS DELETED, NOT RE-KEYED
+   * (owner, 2026-09-07 — the desk says WHAT and WHEN, never how much or what it costs).
+   *
+   * It read `now.rtLossPct > 12` and fired an UNCONDITIONAL 100% exit. Reproduced before
+   * removal: a 12.1% reading dumped the whole position on a call whose liquidity was
+   * still 97% of what it was at the call and whose mark was ABOVE the entry. That is a
+   * sell ordered on a price the desk had to pay at a notional the desk chose — the same
+   * $75-versus-$2 mistake as the screen kill of the same name, one file later and on a
+   * position somebody already holds.
+   *
+   * DELETED RATHER THAN RE-KEYED TO THE BAND FLOOR, deliberately. The obvious rewrite —
+   * "fire when liquidity falls under the band's own floor" — is a second, weaker copy of
+   * `liq_collapse` immediately below, which already fires unconditionally when liquidity
+   * falls to 60% of what it was AT THE CALL. That is the better ruler for a position: it
+   * is relative to the market this call was actually opened into, so it catches a pool
+   * draining out from under a coin that was always thin AND one that was deep and is not
+   * any more, while an absolute floor catches only the second. Two triggers on one fact
+   * would fire together and disagree about why.
+   *
+   * WHAT COVERS THE POSITION GOING BAD, all on facts the desk can observe at any size:
+   *   authority_appeared  a control that was not there at the call (above)
+   *   liq_collapse        the market leaving (below)
+   *   went_dark           the desk can no longer read the coin (penthouse.js:1806)
+   *   pricePolicy         stop, target, trail and the band's clock
+   * And the cost of leaving, at the size actually held, is measured by the process that
+   * holds it: executor/jupiter.mjs quotes the real round trip on the real lamports.
+   *
+   * The `cannot_exit` STRING survives in alerts.js's urgency table on purpose: exits
+   * already written to the journal under that code still have to render. */
 
   if (call.liq_at_call && now.liqUsd != null && now.liqUsd < 0.6 * call.liq_at_call)
     return { fire: true, code: "liq_collapse", urgency: "unconditional",
@@ -275,11 +302,18 @@ export function stats() {
  * means", and a new cycle once that cycle's calls have closed. Everything below exists
  * to make that instruction produce TRADES rather than BAGS.
  *
- * The measurement that shapes it: of the last 100 kills, ~60 are safety mechanics, not
- * opinions — 18 cannot_exit alone, where the round-trip probe PROVED the position could
- * not be sold. Publishing three of those is not three calls, it is three coins nobody
- * can get out of, and the quota's own purpose (a desk that trades) is defeated by
- * filling it that way. So the quota is pursued by EFFORT and by relaxed JUDGEMENT on a
+ * The measurement that shapes it: of the last 100 kills, most are safety mechanics
+ * rather than opinions — the honeypot controls (mintable, freezable, seizable, a
+ * transfer hook), the launch farm (12 serial_deployer), the graduate dead zone (15
+ * post_migration_dump), the bundled float. Every one is a fact about the coin, and a
+ * coin that fails one is a coin nobody can get out of. Publishing three of those is not
+ * three calls, it is three bags, and the quota's own purpose (a desk that trades) is
+ * defeated by filling it that way.
+ *
+ * RE-MEASURED 2026-09-07, after the money gates were removed: 12 of those 100 kills
+ * died ONLY on `cannot_exit`, a cost ceiling the desk had no business enforcing. They
+ * are not safety and they never were, so the safety pool this ladder must respect is
+ * smaller — and correspondingly more honest — than it was. So the quota is pursued by EFFORT and by relaxed JUDGEMENT on a
  * recorded ladder, and never by lowering the floor.
  *
  * THE CLASSIFICATION LIVES HERE AND ONLY HERE. One table, one lookup, one default.
@@ -326,7 +360,25 @@ ensureColumn("cycles", "close_reason", "TEXT");
  */
 export const GATE_CLASS = Object.freeze({
   // ── the free screen (data/evidence.js) ────────────────────────────────────────────
-  cannot_exit: "SAFETY",              // the round-trip probe PROVED it cannot be sold (18/100 kills)
+  /* `cannot_exit` WAS THE FIRST ENTRY IN THIS TABLE and it is deleted, not reclassified
+   * (owner, 2026-09-07: the desk says only WHAT and WHEN; how much, and what it costs,
+   * belong to the bot). It vetoed a coin whose round trip cost more than 8% AT A
+   * NOTIONAL THE DESK CHOSE — $75, while the bot's real clip is about $2. It was the
+   * single most destructive line in the funnel: 12 of the last 100 kills died on it with
+   * nothing else against them, 11 of those between 8.0% and 9.2%.
+   *
+   * REMOVED RATHER THAN DOWNGRADED TO JUDGMENT, deliberately. Making it JUDGMENT would
+   * have kept it killing at L0-L2 and let a quota waive it at L3 — the desk would still
+   * be refusing tradeable coins, and would additionally be waiving a real cost fact
+   * under pressure to fill three slots. The judgment does not belong on a ladder; it
+   * belongs to the process that knows the order size, where it is unconditional:
+   * executor/jupiter.mjs:1341-1350 and executor/poller.mjs:1234-1253.
+   *
+   * The code string still exists ELSEWHERE and that is not an oversight: calls.js:219
+   * fires an EXIT alert coded `cannot_exit` when a position the desk already holds sees
+   * its round trip pass 12%. That is a WHEN-to-sell judgment about a coin whose exit the
+   * desk is managing, not a publish gate, and it never reaches gateFailures() — the exit
+   * alert namespace (alerts.js) and this table are separate vocabularies. */
   unverified_exit: "SAFETY",          // unverified is not safe: we could not measure the way out
   unverified_mint: "SAFETY",          // mint/freeze authority UNKNOWN, which is not absent
   unverified_holders: "SAFETY",       // concentration and bundling UNKNOWN
@@ -339,6 +391,12 @@ export const GATE_CLASS = Object.freeze({
   serial_deployer: "SAFETY",          // the launch farm (16/100 kills)
   post_migration_dump: "SAFETY",      // the graduate dead zone (9/100 kills)
   wash_suspect: "SAFETY",             // the volume is a machine round-tripping
+  /* THIN LIQUIDITY IS A COIN FACT, NOT A COST FACT — which is why it survived the round
+     that removed cannot_exit. "How much does it cost to leave?" changes with the order
+     size, so only the bot can answer it. "Is there a market here at all?" gets the same
+     answer at every size: a coin with $0.65 of liquidity across two venues has nothing
+     on the other side of any order. Same family as a live freeze authority. The check
+     itself (data/evidence.js) carries the same reasoning at length. */
   thin_liquidity: "SAFETY",           // below the BAND's own floor — the floor travels with the coin
   liquidity_did_not_hold: "SAFETY",   // liquidity that posed for a snapshot and left
   /* AMBIGUOUS, THEREFORE SAFETY. These three read as "the market is not real yet",
@@ -400,12 +458,19 @@ export const JUDGMENT_GATES = Object.freeze(
 /* EVERY COMPLIANCE VIOLATION IS SAFETY, WHATEVER ITS CODE.
  *
  * Compliance is code, not a model, and every violation it raises is a hard rule of the
- * charter. The one that matters most to a QUOTA is stop_inside_costs: the executor
- * refused four consecutive LIVE calls on 2026-09-03 (HeeHaw, TOAD, USWS, HeeHaw again,
- * stops 5%-6.5% below entry) because the round-trip costs alone would trigger the stop.
- * Publishing one of those to reach three produces a call that cannot trade — the quota's
- * own purpose, defeated by the act of filling it. So compliance is matched by SOURCE
- * rather than by code list, and a new violation code is covered the day it is written. */
+ * charter — matched by SOURCE rather than by code list, so a new violation code is
+ * covered the day it is written.
+ *
+ * This note used to justify the rule with `stop_inside_costs` (the executor refusing
+ * four consecutive live calls on 2026-09-03 whose stops sat inside the round-trip
+ * costs), and that veto no longer exists: it was the desk recomputing the bot's cost
+ * guard on a size the desk invented, and it is enforced for real at
+ * executor/poller.mjs:1234-1253. The rule is unchanged and the reason is simpler —
+ * compliance raises charter violations, and a quota does not get to waive the charter
+ * because it is short a call. What is left after 2026-09-07 is coin-quality and
+ * record-consistency: proposal-only language, an unanswered refutation, the desk's own
+ * risk arithmetic agreeing with itself, a stop below the entry zone, take-profit legs
+ * summing under 100%. None of those become negotiable at L4. */
 export const complianceGateClass = () => "SAFETY";
 
 /**

@@ -244,7 +244,24 @@ export function planEntry({ call, cfg = DEFAULTS, state }) {
   let want = (f * equity) / effectiveStopFrac;
   if (c.fixedSol > 0) { want = c.fixedSol; why = `operator ceiling ${c.fixedSol} SOL`; }
   want = Math.min(want, c.maxSolPerTrade);
-  if (call.size_sol != null) want = Math.min(want, Number(call.size_sol));
+  /* THE DESK'S size_sol IS NOT CONSULTED, AND THE min() THAT USED TO CONSULT IT IS GONE
+   * ON PURPOSE. Do not restore it.
+   *
+   * It read `if (call.size_sol != null) want = Math.min(want, Number(call.size_sol))`,
+   * which looks like pure prudence — it could only ever shrink the order. That is
+   * exactly why it survived so long. But shrinking IS deciding: a desk that can move
+   * the number down by an arbitrary amount is choosing how much is bought, and the
+   * owner's rule (2026-09-07) is architectural rather than a risk preference — the
+   * trading team decides WHAT to buy and WHEN to sell, and this bot decides HOW MUCH,
+   * from its own configuration and its own caps. A remote party who can set the size
+   * to 0.0001 can silence this bot as surely as one who can set it to 10.
+   *
+   * `call.size_sol` still arrives on the wire (the desk publishes it as an advisory
+   * estimate for the tenant's screen and its own record) and is deliberately read
+   * NOWHERE in the sizing path. Every limit that still binds below — the operator
+   * ceiling, maxSolPerTrade, the per-name risk cap, book heat, the daily deploy cap,
+   * the spendable balance, the fee floor — is this process's own number, which is the
+   * point. */
   if (convictionScale < 1) {
     /* SCALING DOWN STOPS HELPING ONCE FEES DOMINATE.
      *

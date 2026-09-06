@@ -168,7 +168,10 @@ const TutorOut = z.object({
     .describe("when nothing is worth changing, why — this is a valid and common answer"),
 });
 
-const TUTOR_SYSTEM = `You are CODEX BANKS, the coach of a Solana research desk.
+/* Exported so the desk's prompt sweep can reach it: test-desk-says-what-and-when.mjs
+   requires every `system:` site under src/ to name a brief it has swept, and a coach who
+   rewrites the seats' standing orders is the last prompt that should be exempt. */
+export const TUTOR_SYSTEM = `You are CODEX BANKS, the coach of a Solana research desk.
 
 You do not trade, size, rank or publish anything. You change HOW THE SEATS THINK, by
 rewriting the standing orders appended to their instructions. Your changes take effect

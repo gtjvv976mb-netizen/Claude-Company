@@ -91,9 +91,13 @@ export function rank(c) {
    * screen were discarded here anyway.
    *
    * Being early on the curve is the target state for this desk, not a defect. It is left
-   * NEUTRAL rather than made a bonus: the exit probe still has to measure it, and
-   * unverified_exit and cannot_exit still refuse it if the measurement fails or comes
-   * back too wide. Safety is unchanged; only a false premise was removed. */
+   * NEUTRAL rather than made a bonus: the route probe still has to measure it, and
+   * unverified_exit still refuses it if no route can be quoted at all. (`cannot_exit`
+   * was named here too — the 8% cost ceiling — and it was deleted on 2026-09-07 for the
+   * same reason this penalty was: it refused coins on a number measured at a size
+   * nobody trades. The bot enforces the real one at its real size,
+   * executor/jupiter.mjs:1341-1350.) Safety is unchanged; only false premises were
+   * removed. */
 
   const liqKnown = p.liquidityUsd != null || p.liquidity?.usd != null;
 
@@ -295,10 +299,11 @@ export function wouldSurviveScreen(c) {
    * So an unreadable pool defers to that measurement instead of pre-empting it, and only
    * when the tape independently shows a real market. A pool figure that IS readable and
    * IS below the floor still kills here, exactly as before. Nothing downstream moves:
-   * unverified_exit still refuses a coin whose round trip cannot be measured, and
-   * cannot_exit still refuses one that measures worse than the ceiling. This trades a
-   * proxy that is wrong for a whole class of coin against a direct measurement — which
-   * is a strengthening of the safety argument, not a loosening of it. */
+   * unverified_exit still refuses a coin whose sell route cannot be quoted at all.
+   * (`cannot_exit`, the cost ceiling, stood beside it and was removed 2026-09-07: the
+   * desk does not judge what leaving costs, because that depends on an order size only
+   * the bot knows.) This trades a proxy that is wrong for a whole class of coin against
+   * a direct measurement — a strengthening of the safety argument, not a loosening. */
   const liqUnknown = p.liquidityUsd == null && p.liquidity?.usd == null;
   if (!liqUnknown && liq < fl.liq) return "thin_liquidity";
   const tapeCarries = tape != null && tapeVol >= Math.max(300, fl.vol / 5);
@@ -1084,10 +1089,15 @@ export async function runPenthouseCycle({
  *   3. THE LEVEL'S JUDGEMENT BAR. Only here does `level` do anything, and all it can
  *      touch is conviction and tier.
  *
- * Measured reason this shape exists: ~60 of the last 100 kills are safety mechanics —
- * 18 of them cannot_exit, where the round-trip probe PROVED the position cannot be
- * sold. Three calls filled from that pool are three bags, not three trades, so filling
- * the quota that way defeats the quota's own purpose.
+ * Measured reason this shape exists: most of the last 100 kills are safety mechanics —
+ * honeypot controls, the launch farm, the graduate dead zone, a bundled float. Three
+ * calls filled from that pool are three bags, not three trades, so filling the quota
+ * that way defeats the quota's own purpose.
+ *
+ * The count used to read "~60, 18 of them cannot_exit". Re-measured 2026-09-07: 12 of
+ * those 100 died on `cannot_exit` ALONE and that gate is deleted — it was a cost
+ * ceiling quoted at $75 for a bot that trades about $2, which is not a safety fact at
+ * all. The safety pool this ladder must never reach past is genuinely smaller now.
  */
 export function cohortEligibility(rec, level = 0) {
   const plan = escalationPlan(level);

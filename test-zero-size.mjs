@@ -51,15 +51,37 @@ ok("the result carries deterministic audit notes",
   clean.rail_notes.some((n) => /converted to/.test(n)), clean.rail_notes.join("; "));
 
 console.log("\nMECHANICAL FAILURES ARE ZERO");
+/* "exit above the ceiling" WAS THE SECOND ENTRY HERE — a round trip over
+   cfg.maxRoundTripSlippagePct forced a mechanical zero. It is gone with that ceiling
+   (owner, 2026-09-07: the desk says WHAT and WHEN, never how much or what it costs).
+   Leaving it would have made the deletion of the `cannot_exit` screen kill cosmetic: the
+   coin would have passed the screen, had a paid workup run on it, been sized to zero
+   here, and then died at the `zero_authorized_size` publication gate — refused by the
+   same judgment one file later, with a reason string pointing at the wrong place.
+   What survives is the half the desk can answer: DID THE PROBE COMPLETE? A probe that
+   errored means nobody has shown this token can be sold, which is the honeypot question
+   and a fact about the coin. Asserted first below, and the cost case after it. */
 for (const [name, ev] of [
   ["unmeasured exit", evidence({ probe: null })],
-  ["exit above the ceiling", evidence({ probe: 8.01 })],
   ["live mint authority", evidence({ mintAuthority: "MintAuth111" })],
   ["live freeze authority", evidence({ freezeAuthority: "FreezeAuth111" })],
 ]) {
   const r = rail(ev);
   ok(`${name} -> zero`, r.position_size_usd === 0, r.rail_notes.join("; "));
   ok(`${name} -> zero max loss too`, r.max_loss_usd === 0);
+}
+
+console.log("\nA COSTLY EXIT IS NOT A MECHANICAL ZERO — IT IS THE BOT'S CALL");
+{
+  const dear = rail(evidence({ probe: 8.01 }));   // just over the retired 8% ceiling
+  ok("a round trip past the old ceiling still sizes", dear.position_size_usd > 0,
+    `$${dear.position_size_usd} — ${dear.rail_notes.join("; ")}`);
+  const far = rail(evidence({ probe: 40 }));
+  ok("...and so does one four times past it", far.position_size_usd > 0,
+    `$${far.position_size_usd}`);
+  ok("...though the desk still RECORDS the friction rather than ignoring it",
+    far.max_loss_usd > dear.max_loss_usd / dear.position_size_usd * far.position_size_usd * 0.9,
+    `loss-at-stop carries the measured round trip: $${far.max_loss_usd} on $${far.position_size_usd}`);
 }
 
 console.log("\nA MODEL CANNOT MANUFACTURE ZERO OR DOLLAR ARITHMETIC");

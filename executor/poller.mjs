@@ -1189,8 +1189,22 @@ async function onEntry(ev) {
   });
 
   const takeProfitRule = resolveTakeProfitRule(ev.take_profit_x, CFG.takeProfitX);
-  const fixed = Number(ev.fixed_sol) > 0 ? Math.min(Number(ev.fixed_sol), CFG.maxSolPerTrade) : CFG.fixedSol;
-  const perCall = { ...CFG, ...takeProfitRule, fixedSol: fixed,
+  /* SIZE IS THIS PROCESS'S, NOT THE FEED'S. `ev.fixed_sol` and `ev.size_sol` ride on
+   * every event and are read here for NOTHING.
+   *
+   * This line used to be `Number(ev.fixed_sol) > 0 ? Math.min(Number(ev.fixed_sol),
+   * CFG.maxSolPerTrade) : CFG.fixedSol`, and the min() made it look safe: the desk
+   * could only ever shrink the trade. Restoring it would be a mistake for the same
+   * reason it was removed (owner, 2026-09-07) — a party that can shrink the order is
+   * still choosing the order. The desk decides WHAT and WHEN; the size comes from
+   * FIXED_SOL / MAX_SOL_PER_TRADE and the rails in strategy.mjs, all of which are read
+   * from this machine's own environment and can only be raised by the operator typing
+   * the caps acknowledgement in front of them.
+   *
+   * The tenant who wants a different size changes it HERE, on their own box. That the
+   * server also stores a `fixed_sol` for the floor's screen is now a display fact with
+   * no authority over this wallet. */
+  const perCall = { ...CFG, ...takeProfitRule, fixedSol: CFG.fixedSol,
     networkFeeReserveSol: EXECUTE ? jupiter.cfg.expectedNetworkFeeLamports / LAMPORTS : 0 };
   const normalizedCall = { ...ev, entry_ref: 1, stop: entryReference.stopRatio,
     target: entryReference.targetRatio };

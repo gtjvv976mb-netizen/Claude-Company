@@ -5260,8 +5260,11 @@ window.__grokBoardUpdate = (feed = []) => {
        0.4 SOL) for a real fill of 0.0175 SOL — the paper book wearing the bot's name.
        bot_size_sol is what the bot actually paid; bot_entry_mark is the market mark at
        its fill, so P&L is measured from where the money went in, not from where the
-       desk drew its reference. A row without a bot report keeps the desk's number and
-       says so on the wall: '(paper)'. */
+       desk drew its reference. A row without a bot report used to keep the desk's number
+       and say so on the wall: '(paper)'. Since 2026-09-07 the desk publishes no size, so
+       `c.size_sol` is null on every new row and such a row renders an em-dash instead —
+       which is the truthful answer: no bot has reported, and nobody else knows. The
+       '(paper)' path survives for rows delivered before that date. */
     const real = c.bot_size_sol != null;
     const size = c.bot_size_sol ?? c.size_sol;
     const basis = c.bot_entry_mark ?? entry;
@@ -8456,6 +8459,13 @@ async function loadCalls({ liveOnly = false, hudOnly = false } = {}) {
     window.__botHeartbeat = (() => {
       try { return JSON.parse(body.settings?.executor_heartbeat || "null"); } catch { return null; }
     })();
+    /* WHO SIZES THE TRADE — kept beside the heartbeat because it is READ OFF the
+       heartbeat. The desk no longer chooses a size; it probes the exit at the
+       per-trade cap the bot itself declares, and falls back to a configured default
+       when no bot is reporting. The tenant must be able to see which of the two is
+       happening, so the server's own resolution is stashed here rather than
+       re-derived in the UI, where it could quietly disagree. */
+    window.__probeSizing = body.probeSizing || null;
     updateBotHb?.(body.settings);
     if (hudOnly) {
       /* GROK'S WALL REDRAWS FROM EVERY PATH. It was fed only by the full Calls render,
@@ -8710,8 +8720,12 @@ function paintFeedInto(wrap, feed, settings) {
 
     const why = document.createElement("div");
     why.className = "why";
+    /* NO SIZE IN THE HEADLINE. This read "Your floor: take X SOL", which was an
+       instruction the desk was never entitled to give — and since decide() stopped
+       publishing a size (2026-09-07) `c.size_sol` is null on every new row, so it would
+       have rendered "take null SOL". The reason string already says the bot sizes it. */
     why.textContent = c.verdict === "offered"
-      ? `Your floor: take ${c.size_sol} SOL — ${c.reason}`
+      ? `Your floor: ${c.reason}`
       : `Your floor passed — ${c.reason}`;
     el.appendChild(why);
 
@@ -8768,8 +8782,12 @@ function paintFeedInto(wrap, feed, settings) {
       act.className = "act";
       const buy = document.createElement("button");
       buy.className = "dp-btn"; buy.type = "button";
-      buy.textContent = c.taken ? `Buy again (${c.size_sol} SOL)` : `Buy ${c.size_sol} SOL`;
-      buy.onclick = () => openSwap({ mint: c.mint, symbol: c.symbol, sol: c.size_sol, side: "buy" });
+      /* THE MANUAL BUY BUTTON NAMES NO AMOUNT EITHER. It used to prefill the swap with
+         the desk's delivered size; with none published, the amount is the person's to
+         type in the swap modal — which is the same rule as the bot's, applied to a human
+         pressing a button on their own wallet. */
+      buy.textContent = c.taken ? "Buy again" : "Buy";
+      buy.onclick = () => openSwap({ mint: c.mint, symbol: c.symbol, side: "buy" });
       const link = document.createElement("a");
       link.className = "dp-btn ghost";
       link.href = `https://gmgn.ai/sol/token/${c.mint}?tab=buy`;
@@ -9352,6 +9370,38 @@ function buildControls(settings) {
   row.append(bank, perTrade);
   box.appendChild(row);
   box.appendChild(mk("div", "dp-note", "Left: the SOL your bot is allowed to trade. Right: the SOL that goes into each trade, or 0 to let the team size it from your book. A trade under about 0.02 SOL is refused because Solana's fees would eat it."));
+
+  /* ── THE SIZE IS YOUR BOT'S, AND HERE IS THE NUMBER TO PROVE IT ──────────────
+   * The owner's rule (2026-09-07) is architectural: the trading team decides WHAT to
+   * buy and WHEN to sell, and the bot decides HOW MUCH, from its own configuration.
+   * WALL-ST-E ignores the size on every delivery. That is invisible from a screen
+   * showing only a SOL box, so this states it and shows the one number the desk still
+   * needs a size for — the notional its exit probe measures at — with where that number
+   * came from. A rule nobody can observe is a rule that quietly stops holding. */
+  const ps = window.__probeSizing;
+  const sizeBox = mk("div", "dp-note");
+  sizeBox.style.cssText = "border-left:2px solid var(--amber,#e0ad3d);padding-left:7px;margin-top:6px";
+  if (ps) {
+    const head = mk("div", null, "Your bot decides how much it buys.");
+    head.style.cssText = "font-weight:700";
+    const detail = mk("div", null,
+      "The desk publishes no size at all \u2014 not an instruction, not an estimate. WALL-ST-E sizes " +
+      "every trade from its own caps on your machine. The desk does ask whether a coin can be SOLD, " +
+      "and a quote needs an amount, so it takes a round-trip test quote at $" + ps.probeSizeUsd +
+      ". That is a test amount, not a trade amount, and nothing is sized or capped from it.");
+    detail.style.marginTop = "3px";
+    const src = mk("div", null, (ps.probeFromBot
+      ? "Source: your bot's own heartbeat \u2014 it reports a cap of " + ps.botMaxSolPerTrade + " SOL a trade"
+      : "Source: the stated fallback amount \u2014 " + (ps.probeWhy || "no bot cap to measure")) +
+      " (SOL $" + ps.solUsd + ", " + ps.solUsdSource + ").");
+    src.style.cssText = "margin-top:3px;opacity:.85";
+    sizeBox.append(head, detail, src);
+  } else {
+    sizeBox.textContent = "Your bot decides how much it buys \u2014 WALL-ST-E sizes from its own caps on " +
+      "your machine, and the desk publishes no size to ignore. (The route probe's test amount is " +
+      "unavailable right now.)";
+  }
+  box.appendChild(sizeBox);
 
   box.appendChild(mk("div", "dp-h", "What this floor trades"));
   box.appendChild(mk("div", "dp-note", "Whatever the trading team calls. The desk hunts pump.fun coins across six market-cap bands, from $5k up to $10m, and each band is held for as long as that band deserves — minutes at the bottom, up to a day at the top. There is nothing to pick."));

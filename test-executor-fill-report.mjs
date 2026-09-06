@@ -130,8 +130,19 @@ console.log("\nA BUY IS STORED WITH ITS REAL NUMBERS AND MARKS THE DELIVERY TAKE
   ok("...side, signature, intent", f?.side === "buy" && f?.signature === SIG_BUY && f?.intent_id === "int-1");
   const after = db.prepare("SELECT taken, taken_at FROM deliveries WHERE floor_no=? AND call_id=?").get(FLOOR, call.id);
   ok("the delivery is now taken, with a time", Number(after.taken) === 1 && Number(after.taken_at) > 0, JSON.stringify(after));
+  /* THE DELIVERY'S OWN size_sol IS NOT OVERWRITTEN BY THE FILL, and that is still the
+     property under test — a report of what the bot bought must not be silently rewritten
+     into the delivery row, or the two records stop being independent.
+     It used to assert `> 0 && !== 0.0175`, because the desk delivered a size. Since
+     2026-09-07 the desk publishes none (copy.js decide()), so every new row is null and
+     the assertion is that it STAYS null: the fill's 0.0175 SOL lives on executor_fills,
+     where it belongs, and the delivery says what the desk said, which is nothing. */
   const desk = db.prepare("SELECT size_sol FROM deliveries WHERE floor_no=? AND call_id=?").get(FLOOR, call.id);
-  ok("the desk's own paper size is untouched", Number(desk.size_sol) > 0 && Number(desk.size_sol) !== 0.0175, `size_sol=${desk.size_sol}`);
+  ok("the delivery's size column is not rewritten by the fill",
+    desk.size_sol === null, `size_sol=${desk.size_sol}`);
+  const stored = db.prepare("SELECT sol FROM executor_fills WHERE signature=?").get(SIG_BUY);
+  ok("...and the bot's real SOL is recorded on the fill instead",
+    Number(stored.sol) === 0.0175, `executor_fills.sol=${stored.sol}`);
 }
 
 console.log("\nA RE-POST BY THE SAME SIGNATURE IS AN UPSERT, NEVER A SECOND FILL");

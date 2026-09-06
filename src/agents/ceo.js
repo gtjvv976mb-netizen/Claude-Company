@@ -31,31 +31,11 @@ export const CEOOut = z.object({
  *
  * It never signs and never sends. The signature belongs to the human whose office this is.
  */
-export async function runCEO({ ev, pm, risk, redteam, ticket, compliance }, opts = {}) {
-  const floorNo = runContext.getStore()?.floor ?? null;
-  const evidenceScope = evidenceScopeFor(floorNo);
-  const record = { forwardPerformance: evaluationSummary({
-    evidenceScope,
-    ...(evidenceScope === "tenant" ? { floorNo } : {}),
-    promptManifestHash: decisionManifest().hash,
-    evaluationVersion: EVALUATION_VERSION,
-    policyVersion: POLICY_VERSION,
-    behaviorFingerprint: runtimeBehaviorFingerprint({
-      runKind: opts.lane ?? "cycle",
-      pmProvider: opts.pmProvider ?? "claude",
-    }),
-    // The mandate may publish a HELD/PROPOSE/WATCH winner after every deterministic
-    // safety gate clears. Show the CEO the desk's actual published record, not the
-    // cleaner subset of decisions the CEO previously approved.
-    decisionCohort: "published",
-  }) };
-
-  return ask({
-    seat: "CEO",
-    model: process.env.DESK_MODEL_CEO || "claude-opus-5",
-    effort: "xhigh",
-    schema: CEOOut,
-    system: `You are the CEO of Claude Company, a small Solana research firm. Your desk has
+/* CEO_SYSTEM — hoisted out of the call so the brief is a VALUE the desk can hand to a test.
+   test-desk-says-what-and-when.mjs sweeps every prompt this desk ships for a
+   cost-conditioned imperative; a brief that is only a literal inside a function call
+   cannot be swept, and seven of them were not. */
+export const CEO_SYSTEM = `You are the CEO of Claude Company, a small Solana research firm. Your desk has
 just brought you a trade. You are the final approval, and the capital is yours.
 
 You are NOT re-running the analysis. Five analysts, an adversary, a risk officer and a
@@ -92,18 +72,56 @@ Rulings — and the systematic rule that orders them:
 - DECLINE — for a named, evidenced flaw the desk failed to answer, stated in one
   sentence. Never for generic uncertainty: that was priced into the size already.
 
+HOW MUCH IS BOUGHT IS NOT YOUR QUESTION AND NOT THIS DESK'S. Every call is executed by
+the reader's own bot, from their own wallet, at a size they set on their own machine —
+this desk never learns it and never sets it. So do not reason about dollars, fees,
+slippage, what a round trip costs, or whether a position is worth the costs. Reason about
+the COIN and the LEVEL: is the thesis sound, and where is it wrong? The book equity below
+is the desk's own paper record, kept so the firm can grade itself. It is not a wallet.
+
 Absolute constraint on you, as on every seat: you do not execute. An APPROVE produces an
 order slip that a human being signs in their own wallet. You never hold a key, you never
 sign, and you never send. If you find yourself reasoning about doing so, that is the
 constraint failing, not an edge case to route around.
 
-Book equity: $${cfg.equityUsd}. Ceiling per idea: ${cfg.maxRiskPct}% ($${(cfg.equityUsd * cfg.maxRiskPct / 100).toFixed(2)}).`,
+Book equity: $${cfg.equityUsd}. Ceiling per idea: ${cfg.maxRiskPct}% ($${(cfg.equityUsd * cfg.maxRiskPct / 100).toFixed(2)}).`;
+
+export async function runCEO({ ev, pm, risk, redteam, ticket, compliance }, opts = {}) {
+  const floorNo = runContext.getStore()?.floor ?? null;
+  const evidenceScope = evidenceScopeFor(floorNo);
+  const record = { forwardPerformance: evaluationSummary({
+    evidenceScope,
+    ...(evidenceScope === "tenant" ? { floorNo } : {}),
+    promptManifestHash: decisionManifest().hash,
+    evaluationVersion: EVALUATION_VERSION,
+    policyVersion: POLICY_VERSION,
+    behaviorFingerprint: runtimeBehaviorFingerprint({
+      runKind: opts.lane ?? "cycle",
+      pmProvider: opts.pmProvider ?? "claude",
+    }),
+    // The mandate may publish a HELD/PROPOSE/WATCH winner after every deterministic
+    // safety gate clears. Show the CEO the desk's actual published record, not the
+    // cleaner subset of decisions the CEO previously approved.
+    decisionCohort: "published",
+  }) };
+
+  return ask({
+    seat: "CEO",
+    model: process.env.DESK_MODEL_CEO || "claude-opus-5",
+    effort: "xhigh",
+    schema: CEOOut,
+    system: CEO_SYSTEM,
     prompt:
       `A proposal has reached your door.\n\n` +
       `=== THE FIRM'S RECORD TO DATE ===\n${JSON.stringify(record, null, 2)}\n\n` +
       `=== TOKEN ===\n${ev.symbol} (${ev.mint})\n` +
-      `price $${ev.pair?.priceUsd} · liquidity $${ev.pairs?.totalLiquidityUsd} across ${ev.pairs?.count} venues · ` +
-      `round-trip cost ${ev.exitProbe?.roundTripLossPct ?? "unmeasured"}%\n\n` +
+      /* THE ROUND TRIP WAS A HEADLINE FACT ON THIS LINE and it is gone (owner, 2026-09-07).
+         The CEO's DECLINE ends the candidacy at every level (mandate.js:139-140), so
+         handing this seat a cost — measured at a notional the desk invented — as one of
+         three numbers describing the coin was handing it a money veto in all but name.
+         What is left is what the desk can see at any size: the price, and whether there
+         is a market. The exit probe's completeness already gated the workup upstream. */
+      `price $${ev.pair?.priceUsd} · liquidity $${ev.pairs?.totalLiquidityUsd} across ${ev.pairs?.count} venues\n\n` +
       `=== PM ===\n${JSON.stringify(pm, null, 2)}\n\n` +
       `=== RED TEAM ===\n${JSON.stringify(redteam, null, 2)}\n\n` +
       `=== RISK ===\n${JSON.stringify(risk, null, 2)}\n\n` +

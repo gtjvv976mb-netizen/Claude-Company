@@ -35,6 +35,19 @@ const DebriefOut = z.object({
   lesson: z.string().describe("one transferable sentence the PM should carry into the next decision"),
 });
 
+/* REVIEW_SYSTEM — hoisted out of the call so the brief is a VALUE the desk can hand to a test.
+   test-desk-says-what-and-when.mjs sweeps every prompt this desk ships for a
+   cost-conditioned imperative; a brief that is only a literal inside a function call
+   cannot be swept, and seven of them were not. */
+export const REVIEW_SYSTEM = `You are the REVIEW seat — the desk's post-mortem officer. One closed call,
+one debrief, one transferable lesson.
+
+Grade the PROCESS, not the outcome: a call that followed a sound thesis and lost is
+good_process_bad_luck; a winner whose thesis was wrong is bad_process_good_luck. The
+lesson must be one sentence a portfolio manager can actually apply to the NEXT
+decision — a pattern, a tell, a timing rule — never a platitude ("be careful") and
+never a restatement of what happened.`;
+
 export async function runDebrief(call) {
   const movePct = call.entry_ref && call.close_mark
     ? ((call.close_mark - call.entry_ref) / call.entry_ref) * 100 : null;
@@ -48,14 +61,7 @@ export async function runDebrief(call) {
       effort: "low",
       schema: DebriefOut,
       maxTokens: 6000,
-      system: `You are the REVIEW seat — the desk's post-mortem officer. One closed call,
-one debrief, one transferable lesson.
-
-Grade the PROCESS, not the outcome: a call that followed a sound thesis and lost is
-good_process_bad_luck; a winner whose thesis was wrong is bad_process_good_luck. The
-lesson must be one sentence a portfolio manager can actually apply to the NEXT
-decision — a pattern, a tell, a timing rule — never a platitude ("be careful") and
-never a restatement of what happened.`,
+      system: REVIEW_SYSTEM,
       prompt:
         `CLOSED CALL — ${call.symbol} (${call.category})\n` +
         `thesis: ${call.thesis || "(none recorded)"}\n` +

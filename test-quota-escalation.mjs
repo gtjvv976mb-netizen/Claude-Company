@@ -3,10 +3,19 @@
  *
  * The owner's instruction is that every cycle produces at least three published calls
  * "at any cost, by any means". The constraint that shapes how that was built is a
- * measurement, not a preference: of the last 100 kills, ~60 are safety MECHANICS rather
- * than opinions — 18 cannot_exit (the round-trip probe PROVED the position could not be
- * sold), 16 serial_deployer, 9 post_migration_dump, 5 holder_concentration, 4
- * deployer-has-rugged, 4 thin_liquidity, 2 mintable, 2 freezable, 1 wash_suspect.
+ * measurement, not a preference: most of the last 100 kills are safety MECHANICS rather
+ * than opinions — 15 post_migration_dump, 12 serial_deployer, 6 holder_concentration,
+ * 6 mintable, 5 thin_liquidity, 4 deployer-has-rugged, 3 each freezable / seizable /
+ * transfer_hook / frozen_by_default / unverified_exit, 2 wash_suspect.
+ *
+ * RE-COUNTED 2026-09-07, and the old count led with a number that was never safety at
+ * all: "18 cannot_exit (the round-trip probe PROVED the position could not be sold)".
+ * It proved nothing of the kind — it proved a $75 order was expensive on a desk whose
+ * bot trades about $2, and 12 of those 100 coins died on it with NOTHING else against
+ * them. That gate is deleted (owner's rule: the desk says WHAT and WHEN, never how
+ * much or what it costs) and the cost judgment now runs in the bot at its real size.
+ * The safety floor this file defends is genuinely smaller, and every gate left in it is
+ * a fact about the coin rather than about an order.
  *
  * Filling a quota out of that pool does not produce three trades. It produces three
  * bags — and the quota exists to make the desk TRADE, so filling it that way defeats
@@ -29,12 +38,11 @@ import { escalationPlan, MAX_ESCALATION_LEVEL, CYCLE, cfg, floorsFor,
 import { complianceCheck } from "./src/agents/compliance.js";
 import fs from "node:fs";
 
-/* A fixture size legal under WHATEVER the probe notional currently is. It was a hard-coded
-   50 — fine while the exit probe measured $75, and an automatic size_exceeds_exit_probe veto
-   the day it became $15. The fixture broke, not the code: compliance.js refuses
-   position_size_usd above cfg.targetSizeUsd * 1.001, and risk-rails caps real sizes at that
-   same number, so 80% of it is always inside the bar whatever the probe becomes. */
-const PROBE_SAFE_SIZE_USD = Number((cfg.targetSizeUsd * 0.8).toFixed(2));
+/* A fixture size that clears what compliance STILL checks. It used to track the probe
+   notional (cfg.targetSizeUsd * 0.8) because size_exceeds_exit_probe vetoed anything
+   above it; both the veto and the config key were removed on 2026-09-07. What remains
+   is the desk's own paper-book arithmetic, so this is a plain small number. */
+const PAPER_SIZE_USD = 12;
 
 let pass = 0, fail = 0;
 const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  — " + d : ""}`))
@@ -48,7 +56,7 @@ const clean = (over = {}) => ({
   pm: { decision: "PROPOSE", conviction: 68, thesis: "real ignition", invalidation: "deployer sells" },
   redteam: { verdict: "wounded", headline: "thin on holders" },
   compliance: { pass: true, violations: [] },
-  risk: { position_size_usd: PROBE_SAFE_SIZE_USD, stop_price: 0.00062, max_loss_usd: 20.55 },
+  risk: { position_size_usd: PAPER_SIZE_USD, stop_price: 0.00062, max_loss_usd: 20.55 },
   ceo: { ruling: "APPROVE", order_size_usd: 50 },
   order: { size: 50 },
   ticket: { stop_price: 0.00062, take_profit: [{ price: 0.0019 }] },
@@ -67,8 +75,12 @@ const vetoed = (code) => clean({ compliance: { pass: false, violations: [{ code,
    GATE_CLASS marked SAFETY must appear here — the coverage assertion below enforces it,
    so a new safety gate cannot be added without a case that drives it. */
 const CASES = {
-  // the free screen
-  cannot_exit: screened("cannot_exit"),
+  /* the free screen.
+     `cannot_exit: screened("cannot_exit")` was the first entry and is gone with the gate
+     — it was the round-trip COST ceiling, measured at a notional the desk chose, and it
+     is now the bot's judgment at the bot's own size (executor/jupiter.mjs:1341-1350).
+     `unverified_exit` below is what survived of that probe and is the real safety half:
+     nobody could measure whether this token can be sold at all. */
   unverified_exit: screened("unverified_exit"),
   unverified_mint: screened("unverified_mint"),
   unverified_holders: screened("unverified_holders"),
@@ -107,10 +119,13 @@ const CASES = {
   spike_entry: clean({ ev: { ...clean().ev,
     pair: { ...clean().ev.pair, priceChange: { m5: 44 } } } }),
 };
-/* THE ONE THE EXECUTOR TAUGHT US. Not a separate class — every compliance violation is
-   SAFETY by SOURCE rather than by code list — but it gets its own case because it is
-   the violation a quota is most tempted by: it refuses a coin that looks fine. */
-CASES.stop_inside_costs = vetoed("stop_inside_costs");
+/* A COMPLIANCE VIOLATION, because those are SAFETY by SOURCE rather than by code list
+   and that rule needs driving. This was `vetoed("stop_inside_costs")` — the veto the
+   quota was most tempted by, and one the desk no longer raises: it recomputed the bot's
+   cost guard on a size the desk invented. `stop_above_entry` is a violation compliance
+   still emits, and it is arithmetic rather than money: a stop that is not below the
+   entry zone fires on arrival whatever anyone paid. */
+CASES.stop_above_entry = vetoed("stop_above_entry");
 
 console.log("\nEVERY SAFETY GATE IS DRIVEN — no gate may be classified and then never tested");
 {
@@ -144,7 +159,7 @@ console.log("\nTHE DECISIVE ONE: EVERY SAFETY GATE, REFUSED AT EVERY LEVEL L0-L4
 
 console.log("\nTHE SAFETY CHECK IS NOT EVEN GIVEN THE LEVEL — it cannot bend to a number");
 {
-  for (const gate of ["cannot_exit", "mintable", "serial_deployer", "stop_inside_costs"]) {
+  for (const gate of ["unverified_exit", "mintable", "serial_deployer", "stop_above_entry"]) {
     const verdicts = LEVELS.map((l) => cohortEligibility(CASES[gate], l));
     ok(`${gate}: identical refusal at all five levels`,
       verdicts.every((v) => !v.publishable && v.safety === true && v.gate === gate),
@@ -153,9 +168,9 @@ console.log("\nTHE SAFETY CHECK IS NOT EVEN GIVEN THE LEVEL — it cannot bend t
   ok("a level past the ladder is clamped to L4, never invented",
     escalationPlan(5).level === MAX_ESCALATION_LEVEL && escalationPlan(99).level === MAX_ESCALATION_LEVEL,
     `escalationPlan(5).level=${escalationPlan(5).level}, escalationPlan(99).level=${escalationPlan(99).level}, MAX=${MAX_ESCALATION_LEVEL}`);
-  const l5 = publishCall(CASES.cannot_exit, { escalation: 5, category: "memecoin" });
-  ok("...and an L5 publish of an unsellable coin is still refused",
-    l5.outcome === "unsafe" && l5.gate === "cannot_exit", `outcome=${l5.outcome} gate=${l5.gate} level=${l5.level}`);
+  const l5 = publishCall(CASES.unverified_exit, { escalation: 5, category: "memecoin" });
+  ok("...and an L5 publish of a coin nobody could prove is sellable is still refused",
+    l5.outcome === "unsafe" && l5.gate === "unverified_exit", `outcome=${l5.outcome} gate=${l5.gate} level=${l5.level}`);
 }
 
 console.log("\nTHE LADDER DOES MOVE SOMETHING — otherwise the floor is untested");
@@ -236,33 +251,64 @@ console.log("\nL4 — THE BAND WIDENS; NOT ONE PER-COIN FLOOR MOVES");
     && cfg.screen.maxMarketCapUsd === baseMax, `max back to $${cfg.screen.maxMarketCapUsd.toLocaleString()}`);
 }
 
-console.log("\nTHE STOP-INSIDE-COSTS VETO IS THE ONE A QUOTA IS MOST TEMPTED BY");
+console.log("\nTHE MONEY VETOES ARE GONE, AND THOSE CALLS NOW REACH THE COHORT");
 {
-  /* 2026-09-03: the executor refused four consecutive LIVE calls because the stop sat
-     inside the round-trip costs. A quota that published those would produce calls the
-     bot cannot sign — the quota's purpose destroyed by the act of filling it. */
+  /* This section used to assert the opposite, and it was right to at the time: on
+     2026-09-03 the executor refused four consecutive LIVE calls whose stops sat inside
+     the round-trip costs, so the desk learned to refuse them first. The lesson survived;
+     the SEAT holding it did not.
+     What the desk could never see is that its copy of the guard ran at a notional the
+     desk invented — $75, against a bot whose real clip is about $2 — so it was not a
+     conservative version of the executor's check, it was a differently-wrong one. The
+     original still runs, unconditionally, in executor/poller.mjs:1234-1253, on the exact
+     lamports about to be spent.
+     So the assertion inverts: these three coins now pass compliance, and their fate is
+     decided by the wallet that has to pay for them. */
   for (const [name, stopPct, rt] of [["HeeHaw", 5, 2.26], ["TOAD", 5, 1.09], ["USWS", 6.5, 1.03]]) {
     const stop = 1 - stopPct / 100;
-    /* Sized and costed so that stop_inside_costs is the ONLY violation this coin
-       raises. An earlier draft of this test left position_size_usd out, so compliance
-       ALSO raised zero_size_proposal and the refusal was reported under that code — the
-       test would have passed while proving something adjacent to the claim. Print the
-       whole violation list, and assert on the code by name. */
     const res = complianceCheck({
       pm: { decision: "PROPOSE" },
-      risk: { stop_price: stop, position_size_usd: PROBE_SAFE_SIZE_USD,
-        max_loss_usd: Number((PROBE_SAFE_SIZE_USD * (stopPct / 100 + rt / 100)).toFixed(2)) },
+      /* Loss at stop, off the STOP ALONE — compliance stopped adding the round trip to
+         its recompute on 2026-09-07, so a fixture that still adds it is asserting the
+         old arithmetic and fails as `risk_arithmetic_mismatch`. */
+      risk: { stop_price: stop, position_size_usd: PAPER_SIZE_USD,
+        max_loss_usd: Number((PAPER_SIZE_USD * (stopPct / 100)).toFixed(2)) },
       redteam: { verdict: "survived" },
       ticket: { stop_price: stop, entry_zone_low: 1, entry_zone_high: 1, take_profit: [] },
       ev: { pair: { priceUsd: 1 }, exitProbe: { roundTripLossPct: rt } } });
     const codes = res.violations.map((v) => v.code);
-    const rec = clean({ compliance: { pass: false, violations: res.violations }, finalDecision: "VETOED" });
-    const refusals = LEVELS.map((l) => publishCall(rec, { escalation: l }));
-    ok(`${name} (${stopPct}% stop, ${rt}% round trip) refused at all five levels ON THE STOP`,
-      codes.includes("stop_inside_costs") && refusals.every((r) => r.outcome === "unsafe" &&
-        r.gate === "stop_inside_costs"),
-      `compliance said [${codes.join(", ")}]; refusals: ${refusals.map((r) => `L${r.level}:${r.gate}`).join(" ")}`);
+    const money = codes.filter((c) => ["stop_inside_costs", "edge_below_cost", "size_exceeds_exit_probe"].includes(c));
+    ok(`${name} (${stopPct}% stop, ${rt}% round trip) is no longer refused on cost`,
+      res.pass === true && money.length === 0,
+      `compliance said [${codes.join(", ") || "nothing"}]`);
   }
+  /* AND THE FLOOR DID NOT MOVE. The same coin carrying a genuine safety fact is still
+     refused at every level — proof this section's inversion loosened the money gate and
+     nothing else. */
+  const stillUnsafe = LEVELS.map((l) => publishCall(CASES.mintable, { escalation: l }));
+  ok("a mintable coin with the same bracket is still refused at all five levels",
+    stillUnsafe.every((r) => r.outcome === "unsafe" && r.gate === "mintable"),
+    stillUnsafe.map((r) => `L${r.level}:${r.gate}`).join(" "));
+}
+
+console.log("\nTHE REMOVED GATES LEFT NO DEAD CODES BEHIND");
+{
+  /* A gate removed from the pipeline but left in GATE_CLASS is worse than either state:
+     it reads as a live safety guarantee that nothing can ever fire. Assert the table
+     itself no longer names them. */
+  const removed = ["cannot_exit", "edge_below_cost", "stop_inside_costs", "size_exceeds_exit_probe"];
+  ok("no removed gate is still classified in the table",
+    removed.every((g) => !(g in GATE_CLASS)),
+    removed.filter((g) => g in GATE_CLASS).join(", ") || `${Object.keys(GATE_CLASS).length} codes, none of them`);
+  /* ...and the default still catches them, so a stale record replayed out of the journal
+     is refused rather than waived. Default-deny survives the deletion. */
+  ok("...yet each still defaults to SAFETY if one turns up on an old record",
+    removed.every((g) => gateClass(g) === "SAFETY"),
+    removed.map((g) => `${g}=${gateClass(g)}`).join(" "));
+  const stale = clean({ outcome: "screened_out", fails: [{ code: "cannot_exit", detail: "replayed from a pre-2026-09-07 record" }] });
+  ok("...and such a record is refused at L4, not published",
+    cohortEligibility(stale, 4).publishable === false && cohortEligibility(stale, 4).safety === true,
+    `gate=${cohortEligibility(stale, 4).gate}`);
 }
 
 console.log("\nTHE CLASSIFICATION ITSELF");

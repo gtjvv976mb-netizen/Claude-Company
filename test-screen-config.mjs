@@ -1,53 +1,72 @@
 /**
  * THE SCREEN'S INTERNAL CONSISTENCY.
  *
- * Three numbers have to agree or the desk contradicts itself: the liquidity floor
- * (how thin a pool may be), the probe size (how big a trade we price the exit at),
- * and the round-trip ceiling (how much exit cost is tolerable).
+ * WHAT THIS FILE USED TO RECONCILE. Three numbers had to agree or the desk contradicted
+ * itself: the liquidity floor (how thin a pool may be), the probe size (how big a trade
+ * the exit was priced at), and the round-trip ceiling (how much exit cost was tolerable).
+ * A floor lowered without the probe following meant coins passed `thin_liquidity` and
+ * then died on `cannot_exit` — the desk appearing to loosen while nothing changed.
  *
- * If the floor is lowered without the probe following, coins pass `thin_liquidity`
- * and then die on `cannot_exit` — the desk appears to have loosened while nothing
- * changed, which is the most confusing possible failure. This asserts the arithmetic
- * so that stays impossible.
+ * TWO OF THE THREE ARE GONE (owner, 2026-09-07: the desk says WHAT and WHEN, never how
+ * much or what it costs). cfg.targetSizeUsd and cfg.maxRoundTripSlippagePct were deleted
+ * with the `cannot_exit` kill they fed. This file's own arithmetic was an argument for
+ * why they were hard to keep consistent, and the honest resolution turned out to be that
+ * the desk should not have been holding a cost ceiling at all: it was priced at $75
+ * while the bot's real clip is about $2, and 12 of the last 100 kills died on it alone.
+ *
+ * WHAT STILL NEEDS RECONCILING, and is asserted below. The liquidity floor survives —
+ * `thin_liquidity` is a WHAT (is there a market at all?) rather than a HOW MUCH (what
+ * does leaving cost?) — so it must stay a floor about MARKETS rather than a cost proxy
+ * in disguise. And the route probe still needs an amount to quote at, which must be
+ * large enough that a real pool can answer it and small enough to resemble a real order.
  */
+import fs from "node:fs";
 import { cfg } from "./src/config.js";
+import { ROUTE_PROBE_FALLBACK_USD, MIN_PROBE_USD } from "./src/probe-size.js";
+const probeSrc = fs.readFileSync(new URL("./src/probe-size.js", import.meta.url), "utf8");
 let pass = 0, fail = 0;
 const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  — " + d : ""}`))
                                  : (fail++, console.log(`  FAIL ${n}${d ? "  — " + d : ""}`)); };
 
 const { minLiquidityUsd: LIQ } = cfg.screen;
-const SIZE = cfg.targetSizeUsd, CEIL = cfg.maxRoundTripSlippagePct;
+const SIZE = ROUTE_PROBE_FALLBACK_USD;
 // Constant-product round trip: buying X against a pool of total value L moves price
 // by ~2X/L each way, so a round trip costs ~4X/L.
 const roundTripAtFloor = (4 * SIZE / LIQ) * 100;
 
-console.log(`\nliquidity floor $${LIQ.toLocaleString()} · probe $${SIZE} · ceiling ${CEIL}%`);
-console.log(`worst-case round trip at the floor: ${roundTripAtFloor.toFixed(2)}%\n`);
+console.log(`\nliquidity floor $${LIQ.toLocaleString()} · route probe $${SIZE} (no ceiling — that judgment is the bot's)`);
+console.log(`round trip at the floor, for information only: ${roundTripAtFloor.toFixed(2)}%\n`);
 
-/* THE PROBE MUST STILL COST SOMETHING AT THE FLOOR, or the check is decorative.
-   The bar was a flat `> 0.5%`, written when the probe was $75 (2.50% at the floor).
-   A flat number here is the wrong ruler: what makes the probe worth running is that
-   it prices MORE than the largest clip any single tenant can send, so it is derived
-   from that clip instead. At $15 against a $12,000 pool the probe costs 0.50% where
-   the biggest tenant clip costs 0.33% — a real, strictly larger cost, and the number
-   compliance then derives this coin's stop floor from. */
+console.log("THE TWO COST NUMBERS ARE GONE, NOT JUST UNUSED");
+ok("cfg.targetSizeUsd is gone", cfg.targetSizeUsd === undefined);
+ok("cfg.maxRoundTripSlippagePct is gone", cfg.maxRoundTripSlippagePct === undefined);
+ok("...so the floor can no longer contradict a ceiling that does not exist",
+  cfg.screen.minLiquidityUsd > 0, `only the liquidity floor is left: $${LIQ.toLocaleString()}`);
+
+console.log("\nTHE ROUTE PROBE'S AMOUNT IS STILL A SENSIBLE ONE TO QUOTE");
+/* It is no longer reconciled against a ceiling, because there is no ceiling. What it
+   still has to be is an amount a real pool can meaningfully answer: not dust, where the
+   USDC leg rounds hard enough that a live route fails to quote and reads back as a false
+   honeypot, and not a fantasy order nobody would ever place. */
 const BIGGEST_TENANT_CLIP_USD = 0.05 * 200;   // executor maxSolPerTrade at SOL ~$200
-const roundTripOfBiggestClip = (4 * BIGGEST_TENANT_CLIP_USD / LIQ) * 100;
-ok("the probe still costs more at the floor than one tenant's biggest clip does",
-  roundTripAtFloor > roundTripOfBiggestClip && roundTripAtFloor > 0.1,
-  `${roundTripAtFloor.toFixed(2)}% > ${roundTripOfBiggestClip.toFixed(2)}%`);
-ok("a coin at the liquidity floor still clears the round-trip ceiling",
-  roundTripAtFloor < CEIL, `${roundTripAtFloor.toFixed(2)}% < ${CEIL}%`);
-ok("with headroom, so a marginal coin is not judged by two rulers at once",
-  roundTripAtFloor < CEIL * 0.75, `${roundTripAtFloor.toFixed(2)}% < ${(CEIL * 0.75).toFixed(1)}%`);
-
-// The probe must sit ABOVE a single tenant's clip — that is why we probe at all —
-// but not so far above that it prices an order nobody sends.
-const REAL_TRADE_USD = BIGGEST_TENANT_CLIP_USD;
-ok("the probe is larger than one tenant's biggest clip",
-  SIZE > REAL_TRADE_USD, `$${SIZE} > $${REAL_TRADE_USD}`);
-ok("but within 50x of it, so it prices a real book rather than a fantasy",
-  SIZE <= REAL_TRADE_USD * 50, `$${SIZE} <= $${REAL_TRADE_USD * 50}`);
+ok("the stated fallback is above the dust threshold the probe itself enforces",
+  SIZE >= MIN_PROBE_USD * 5, `$${SIZE} >= $${MIN_PROBE_USD * 5}`);
+ok("...and within 50x of the largest clip a tenant's bot can place",
+  SIZE <= BIGGEST_TENANT_CLIP_USD * 50, `$${SIZE} <= $${BIGGEST_TENANT_CLIP_USD * 50}`);
+/* AND IT PREFERS A MEASUREMENT TO THE CONSTANT. The fallback is the no-bot case; when a
+   bot is reporting, the amount is its own declared cap. That is what stops this number
+   drifting into being a desk opinion again. */
+ok("the fallback is only reached when no bot can be read",
+  /fromBot: false/.test(probeSrc) && /fromBot: true/.test(probeSrc)
+  && !/DESK_TARGET_SIZE_USD/.test(probeSrc.split("\n").filter((l) => !/^\s*(\*|\/\*|\/\/)/.test(l)).join("\n")),
+  "probe-size.js resolves from a live heartbeat first");
+/* THE LIQUIDITY FLOOR IS A MARKET FLOOR, NOT A COST PROXY. This is the property that
+   used to be enforced by reconciling it against the ceiling. With the ceiling gone it is
+   asserted directly: the floor exists so a coin with no market on the other side of any
+   order is refused, and $12,000 is far above the "no market at all" case ($0.65 across
+   two venues, the SAXDUK kill) while being an ordinary pool for a small coin. */
+ok("the liquidity floor is a market floor, comfortably above the no-market case",
+  LIQ >= 1_000 && LIQ <= 100_000, `$${LIQ.toLocaleString()}`);
 
 // FDV/liq: a $1m-market-cap coin sitting exactly on the liquidity floor must not be
 // killed by the ratio ceiling instead — that would just move the goalposts.

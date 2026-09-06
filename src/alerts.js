@@ -180,7 +180,8 @@ export function reconcileMissingEntryAlerts(floorNo, { withinMs = 6 * 3600e3, li
       floorNo, callId: r.call_id, kind: "entry", urgency: "normal",
       title: `New call — ${sym}`,
       body: `${r.thesis || "The desk has published a call."}\n` +
-        `Your floor sized it at ${r.size_sol ?? "?"} SOL. Open your floor's Calls tab for the ticket. ` +
+        `Open your floor's Calls tab for the ticket. Your bot sizes this trade from its ` +
+        `own caps — the desk does not.\n` +
         `This is research; you trade from your own wallet or not at all.`,
       mint: r.mint,
     });
@@ -201,15 +202,24 @@ export async function announceEntry(call) {
   let sent = 0;
   for (const r of rows) {
     const title = `New call — ${sym}`;
+    /* THE SIZE CAME OUT OF THIS SENTENCE ON 2026-09-07. It read "Your floor sized it at
+       X SOL", which was untrue twice over even then — the floor did not size it, the desk
+       did, and the bot ignored the number. With decide() publishing no size, `r.size_sol`
+       is null on every new delivery and the sentence would have read "sized it at ? SOL".
+       An alert is the first thing a tenant sees about a call; it must not be the place a
+       stale field surfaces as a question mark. */
     const body = `${call.thesis || "The desk has published a call."}\n` +
-      `Your floor sized it at ${r.size_sol ?? "?"} SOL. Open your floor's Calls tab for the ticket. ` +
+      `Open your floor's Calls tab for the ticket. Your bot sizes this trade from its ` +
+      `own caps — the desk does not.\n` +
       `This is research; you trade from your own wallet or not at all.`;
     const fresh = raise({ floorNo: r.floor_no, callId: call.id, kind: "entry",
       urgency: "normal", title, body, mint: call.mint });
     if (fresh && r.webhook_url) push(r.webhook_url, title, body).catch(() => {});
     if (fresh) pushExecutor(r.floor_no, { type: "entry", call: { id: call.id, mint: call.mint,
       symbol: call.symbol, side: "buy", entry_ref: call.entry_ref, stop: call.stop,
-      target: call.target, size_sol: r.size_sol ?? null, thesis: call.thesis,
+      /* Still on the wire for older clients; null on everything written since
+         2026-09-07, and non-binding either way (executor/strategy.mjs:247). */
+      target: call.target, size_sol: r.size_sol ?? null, size_binding: false, thesis: call.thesis,
       invalidation: call.invalidation } }).catch(() => {});
     if (fresh) sent++;
   }
@@ -231,7 +241,13 @@ export function exitAlertText(call, exit) {
 /* The urgency each close code was announced with when it fired live: the chain-fact
  * exits are unconditional (calls.evaluateExit), went_dark is urgent (penthouse), and
  * every price exit and thesis_stale is a level. A repaired alert must carry the same
- * urgency the original would have, or the bot would treat a rug like a target. */
+ * urgency the original would have, or the bot would treat a rug like a target.
+ *
+ * `cannot_exit` IS A HISTORICAL CODE. Its trigger was deleted from calls.evaluateExit on
+ * 2026-09-07 (a cost ceiling the desk had no business firing on; see the note at its old
+ * site). Nothing raises it any more, and the entry stays because this table REPAIRS
+ * alerts for exits already in the journal — a live call closed under that code before
+ * the deletion must still announce with the urgency it actually had. */
 const EXIT_URGENCY_BY_CODE = Object.freeze({
   authority_appeared: "unconditional", cannot_exit: "unconditional", liq_collapse: "unconditional",
   went_dark: "urgent",

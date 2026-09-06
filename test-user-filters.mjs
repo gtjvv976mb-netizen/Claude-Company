@@ -38,9 +38,14 @@ settingsFor(F);
 let s = settingsFor(F);
 ok("take profit is auto", Number(s.take_profit_x) === 0, `take_profit_x=${s.take_profit_x}`);
 ok("size is auto", Number(s.fixed_sol) === 0, `fixed_sol=${s.fixed_sol}`);
+/* NOTE ON WHAT "size is auto" MEANS SINCE 2026-09-07. The setting is stored and shown on
+   the tenant's board, and their own bot reads its own FIXED_SOL from its own environment.
+   The DESK derives nothing from it: decide() publishes no size at all. So this row is a
+   preference on a screen, not a dial the desk turns. */
 ok("no sleeve filter stands between the team and the bot", decide(F, call({ mcap_at_call: 9_000 })).verdict === "offered");
 const autoOffer = decide(F, call());
-ok("auto sizing scales with conviction", autoOffer.verdict === "offered" && !/fixed/.test(autoOffer.reason),
+ok("the call is offered, and the desk sizes none of it",
+  autoOffer.verdict === "offered" && autoOffer.sizeSol === null && autoOffer.sizeBinding === false,
   autoOffer.reason);
 
 console.log("\nDIAL 1 — TAKE PROFIT, chosen by the tenant");
@@ -68,12 +73,27 @@ for (const [x, mark] of [[2, 2.0], [10, 2.0], [10, 10.0]]) {
   ok(`at ${x}x rule, a ${mark}x mark => hold (the dial no longer sells)`, d.action === "hold", `${d.action} — ${d.reason}`);
 }
 
-console.log("\nDIAL 2 — FIXED FUND, chosen by the tenant");
+console.log("\nDIAL 2 — FIXED FUND: THE TENANT'S DIAL, ON THE TENANT'S MACHINE");
+/* This asserted that a stored fixedSol of 0.05 came back on every delivery ("every trade
+   is the same size", "regardless of conviction"). The setting still does exactly that —
+   on the bot, from the bot's own FIXED_SOL (executor/strategy.mjs:106, :245) — but the
+   DESK stopped echoing it on 2026-09-07: reading a tenant's own number and re-issuing it
+   as a delivered size made the desk look like the author of it, and any party that can
+   set the number is choosing how much is bought. So the storage and clamping of the dial
+   are asserted here, and the fact that it never appears on a delivery. */
 saveSettings(F, { fixedSol: 0.05 });
+ok("the dial is stored", Number(settingsFor(F).fixed_sol) === 0.05, `fixed_sol=${settingsFor(F).fixed_sol}`);
 const fixedOffer = decide(F, call());
-ok("every trade is the same size", fixedOffer.sizeSol === 0.05, `${fixedOffer.sizeSol} SOL — ${fixedOffer.reason}`);
 const fixedOffer2 = decide(F, call({ conviction: 42 }));
-ok("...regardless of conviction", fixedOffer2.sizeSol === 0.05, `conviction 42 -> ${fixedOffer2.sizeSol} SOL`);
+ok("...and the desk's delivery still carries no size",
+  fixedOffer.sizeSol === null && fixedOffer2.sizeSol === null,
+  `${fixedOffer.sizeSol} / ${fixedOffer2.sizeSol} — ${fixedOffer.reason}`);
+/* THE DIAL STILL WORKS WHERE IT IS SUPPOSED TO. Same number, same call, on the bot. */
+const fixedPlan = planEntry({ call: c2, cfg: { ...DEFAULTS, fixedSol: 0.05, maxSolPerTrade: 0.05 },
+  state: { ...st, equitySol: 2, spendableSol: 2 } });
+ok("...while the BOT sizes to it from its own config",
+  fixedPlan.action === "buy" && fixedPlan.sol <= 0.05 && /operator ceiling 0\.05 SOL/.test(fixedPlan.reason),
+  `${fixedPlan.sol} SOL — ${fixedPlan.reason}`);
 saveSettings(F, { fixedSol: 900 });
 ok("a fixed fund larger than the bankroll is clamped", Number(settingsFor(F).fixed_sol) <= Number(settingsFor(F).bankroll_sol),
   `${settingsFor(F).fixed_sol} SOL vs a ${settingsFor(F).bankroll_sol} SOL bankroll`);

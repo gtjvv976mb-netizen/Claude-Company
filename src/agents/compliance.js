@@ -6,6 +6,48 @@ const FORBIDDEN = /\b(private key|seed phrase|secret key|mnemonic|signTransactio
  * COMPLIANCE — the final veto, and deliberately not a model. The charter's hard rules
  * are enforced by code so that no amount of persuasive reasoning upstream can talk the
  * desk past them. Every violation here is a veto, not a warning.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * WHAT THIS SEAT NO LONGER JUDGES, AND WHY THAT IS A CORRECTION RATHER THAN A LOOSENING
+ *
+ * THE OWNER'S RULE (2026-09-07, stated three times and final): the desk says only WHAT
+ * and WHEN — what to buy, hold or sell, and when. It never says HOW MUCH, and it never
+ * judges fees, costs or balance. Every one of those belongs to the bot, which owns the
+ * wallet.
+ *
+ * Three vetoes lived here and are gone: `size_exceeds_exit_probe`, `edge_below_cost`
+ * and `stop_inside_costs`. All three were the SAME arithmetic the executor already
+ * performs — and the executor performs it correctly, because it runs at the size it is
+ * actually about to sign for, against a live quote, seconds before signing. This seat
+ * ran it against a notional the desk invented.
+ *
+ * THE INCIDENT THAT PROVES THE DUPLICATE WAS THE WORSE COPY. On 2026-09-07 a coin was
+ * refused with "round-trip loss 8.08% > ceiling 8% at $75". The bot's actual trade size
+ * is about $2. The desk had measured the cost of exiting $75 of a coin, found it dear,
+ * and withheld a call the bot would have entered for two dollars. Eleven more of the
+ * last hundred kills read the same way. A veto computed on a fabricated size is not a
+ * conservative veto; it is a wrong one, and its errors are invisible because they look
+ * like caution.
+ *
+ * WHERE EACH ONE LIVES NOW, all in the process that owns the money:
+ *   size_exceeds_exit_probe → executor/strategy.mjs:305 (`want = Math.min(want,
+ *     c.maxSolPerTrade)`), :307-311 (per-name risk, book heat, daily deploy cap,
+ *     spendable balance) and executor/jupiter.mjs:148-149 — the price impact of the
+ *     REAL order, refused above cfg.maxPriceImpactPct before the bytes are signed.
+ *   edge_below_cost → executor/strategy.mjs:161-164, `rNet = (targetFrac - cost) /
+ *     (stopFrac + cost)`, skipping with "costs eat the target" — where `cost` includes
+ *     the round trip measured at the bot's own size (strategy.mjs:155, fed by
+ *     poller.mjs:1254 `measuredRoundTripLossPct`).
+ *   stop_inside_costs → executor/poller.mjs:1234-1253, the identical formula
+ *     (`executableReturnRatio * slippageHaircut - worstFeeRatio <= stopRatio` → throw),
+ *     run on the preflight quote for `preliminaryAmountRaw` — the lamports it is about
+ *     to spend — rather than on a desk constant.
+ *
+ * WHAT STAYS. Everything below is either a coin-quality fact or an internal-consistency
+ * check on the desk's OWN paper record (equity, its stated risk budget, its arithmetic
+ * agreeing with itself). None of it constrains the bot's wallet, and none of it is a
+ * claim about what a trade costs.
+ * ═══════════════════════════════════════════════════════════════════════════════════
  */
 export function complianceCheck({ pm, risk, redteam, ticket, ev }) {
   const violations = [];
@@ -33,20 +75,33 @@ export function complianceCheck({ pm, risk, redteam, ticket, ev }) {
   v(risk?.position_size_usd > cfg.equityUsd, "size_exceeds_equity",
     `position_size_usd=${risk?.position_size_usd} exceeds book equity ${cfg.equityUsd}.`);
 
-  v(risk?.position_size_usd > cfg.targetSizeUsd * 1.001, "size_exceeds_exit_probe",
-    `position_size_usd=${risk?.position_size_usd} exceeds the $${cfg.targetSizeUsd} notional actually exit-probed.`);
+  /* `size_exceeds_exit_probe` WAS HERE. It vetoed a call whose risk-seat size exceeded
+   * the notional the desk's exit probe had been quoted at — "bigger than we proved we
+   * can exit". The sentiment is right and the seat holding it was wrong: the desk's
+   * size is a paper number on a paper book, and the only size that can be too big is
+   * the one about to be signed. The bot bounds that one four ways it can actually
+   * enforce (strategy.mjs:305 operator ceiling and maxSolPerTrade; :307 per-name risk;
+   * :308-311 book heat, daily deploy cap, spendable balance) and then proves it against
+   * the live pool: jupiter.mjs:148-149 refuses the built order outright when its
+   * measured price impact exceeds the cap. See the header for the $75-versus-$2
+   * incident this deletion answers. */
 
-  // Never trust three model-authored numbers to agree. Recompute loss from the actual
-  // entry, stop, size and measured round-trip friction, then compare both the budget
-  // and the claimed figure against that arithmetic.
+  /* Never trust three model-authored numbers to agree. Recompute loss from the actual
+   * entry, stop and recorded paper size, then compare both the budget and the claimed
+   * figure against that arithmetic.
+   *
+   * `rtFrac` — the measured round trip, added to the stop distance as friction — WAS a
+   * term in this and is gone (owner, 2026-09-07). It is a cost, it was measured at a
+   * notional the desk invented, and this consistency check exists only to prove the
+   * desk's own paper record adds up. Priced off the stop alone it matches
+   * risk-rails.js exactly, which is the whole point of recomputing it. */
   const riskPx = Number(ev?.pair?.priceUsd);
   const riskStop = Number(risk?.stop_price);
   const riskSize = Number(risk?.position_size_usd);
-  const rtFrac = Math.max(0, Number(ev?.exitProbe?.roundTripLossPct) || 0) / 100;
   if (riskPx > 0 && riskStop > 0 && riskStop < riskPx && riskSize > 0) {
-    const computedLoss = riskSize * (((riskPx - riskStop) / riskPx) + rtFrac);
+    const computedLoss = riskSize * ((riskPx - riskStop) / riskPx);
     v(computedLoss > maxRisk * 1.01, "computed_risk_budget_breach",
-      `entry/stop/size imply $${computedLoss.toFixed(2)} cost-adjusted loss, above $${maxRisk.toFixed(2)}.`);
+      `entry/stop/size imply $${computedLoss.toFixed(2)} loss at the stop, above $${maxRisk.toFixed(2)}.`);
     v(Math.abs(computedLoss - Number(risk?.max_loss_usd)) > Math.max(0.02, computedLoss * 0.02),
       "risk_arithmetic_mismatch",
       `reported max loss $${risk?.max_loss_usd} does not match recomputed $${computedLoss.toFixed(2)}.`);
@@ -58,89 +113,54 @@ export function complianceCheck({ pm, risk, redteam, ticket, ev }) {
    * only ever existed for a proposal. Under the mandate the execution seat also drafts
    * a contingency ticket for a WATCH, because the cycle may rank that WATCH into being
    * the call and a call needs a stop. Left gated, such a ticket would reach publication
-   * with NONE of this validated: not the edge-versus-cost floor, not the stop sitting
-   * below the entry zone, not the take-profit legs summing under 100%, not the ticket
-   * stop agreeing with the risk seat's. The decision-shaped checks above stay tied to
+   * with NONE of this validated: not the entry zone being a real range, not the stop
+   * sitting below the entry zone, not the take-profit legs summing under 100%, not the
+   * ticket stop agreeing with the risk seat's. The decision-shaped checks above stay tied to
    * PROPOSE; ticket ARITHMETIC is true or false regardless of the verdict behind it. */
   if (ticket) {
     const px = ev?.pair?.priceUsd;
 
-    // The Hummingbot lesson, from their own honestly-published live run (-1.54%
-    // over 334 trades): a target that is not a large multiple of round-trip cost
-    // is a machine for paying the market. We MEASURE that cost; use it.
-    const rt = ev?.exitProbe?.roundTripLossPct;
-    const tp1 = ticket.take_profit?.[0]?.price;
-    if (rt != null && rt > 0 && tp1 > 0 && px > 0) {
-      const edgePct = ((tp1 - px) / px) * 100;
-      v(edgePct < 5 * rt, "edge_below_cost",
-        `first target is ${edgePct.toFixed(1)}% away but the measured round trip costs ${rt}% — edge must be >= 5x cost.`);
-    }
+    /* `edge_below_cost` WAS HERE — the Hummingbot lesson (-1.54% over 334 honestly
+     * published live trades: a target that is not a large multiple of round-trip cost
+     * is a machine for paying the market). The lesson stands. The seat enforcing it
+     * does not, because "5x the round trip" is only meaningful at the size the round
+     * trip was quoted at, and this desk was quoting $75 for a bot that trades $2 —
+     * so it demanded a target five times too far away and passed on the coin.
+     *
+     * The bot runs the same test where the numbers are real: executor/strategy.mjs:161-164
+     * computes R_net = (targetFrac - cost) / (stopFrac + cost) and skips with "costs eat
+     * the target" when it is not positive, with `cost` carrying the round trip measured
+     * on the bot's own lamports (strategy.mjs:155 ← poller.mjs:1254). It also refuses on
+     * the break-even hit rate the bracket implies (strategy.mjs:174-180), which is the
+     * same judgment with the desk's realised record priced in. */
     v(!(ticket.entry_zone_low > 0) || !(ticket.entry_zone_high >= ticket.entry_zone_low),
       "bad_entry_zone", `entry zone ${ticket.entry_zone_low}-${ticket.entry_zone_high} is not a valid range.`);
 
     v(ticket.stop_price > 0 && ticket.stop_price >= ticket.entry_zone_low,
       "stop_above_entry", `stop ${ticket.stop_price} is not below entry low ${ticket.entry_zone_low}.`);
 
-    /* A STOP INSIDE THE ROUND-TRIP COST IS A LOSS THE DESK HAS ALREADY BOOKED.
+    /* `stop_inside_costs` WAS HERE, and it was the largest duplicate of the three.
      *
-     * The executor plans for a worst case near 9% — its slippage tolerance applied to
-     * both legs, a worst-case network fee, and pump.fun's own cut — and refuses to sign
-     * anything whose stop sits inside that, because the costs alone would trigger it. It
-     * refused four consecutive live calls this way on 2026-09-03 (HeeHaw, TOAD, USWS and
-     * a second HeeHaw, stops 5% to 6.5% below entry). The seats are told the floor, but a
-     * prompt is a request; this is the check. Publishing a call the desk's own bot can
-     * prove is already lost wastes the offer and teaches the tenant nothing. */
-    /* THE FLOOR IS THIS COIN'S OWN ARITHMETIC, NOT A FLAT NUMBER.
+     * It reproduced, line for line, the executor's pre-signing guard: take the measured
+     * round trip, apply the slippage tolerance to both legs, subtract a worst-case
+     * network fee, and refuse the call unless what is left still sits above the stop.
+     *   conservative = (1 - roundTrip) * slippageHaircut - feeRatio  >  stopRatio
+     * That guard is correct and it is still enforced — in executor/poller.mjs:1234-1253,
+     * which throws before an entry is ever journaled and names which term dominated. The
+     * difference is the inputs. The bot measures `preflight.lossPct` on
+     * `preliminaryAmountRaw`, the exact lamports it is about to spend, and computes
+     * `worstFeeRatio` as `2 * expectedNetworkFeeLamports / preliminaryAmountRaw` — the
+     * fee share of the REAL order. This copy read cfg.executorSlippageBps and
+     * cfg.executorMaxFeeShareOfStop against a round trip quoted at a notional the desk
+     * chose, which on 2026-09-07 was $75 while the bot's clip was about $2. Fees are a
+     * far larger share of $2 than of $75 and slippage a far smaller one, so the two
+     * calculations did not merely differ in confidence — they disagreed in both
+     * directions at once, and the desk's version had no way to find out.
      *
-     * A single figure cannot be right for every coin, because what the round trip costs
-     * is a fact about the coin. Measured against the desk's eight most recent published
-     * calls, the flat 12% let seven through that the executor then refused — the four
-     * with 5% to 8.5% stops were never tradeable at any size, and even the 12% and 15%
-     * ones failed once conviction had shrunk the position and the fixed fee became a
-     * larger share of it.
-     *
-     * So the floor is now the executor's own guard, run here before publishing:
-     *   conservative = (1 - roundTrip) * slippageHaircut - feeRatio
-     *   the call is refused unless conservative > stopRatio
-     * which rearranges to a minimum stop distance this coin must carry. Publish only
-     * what the bot can take, and every published call is actionable by construction.
-     *
-     * A coin whose honest invalidation level is tighter than that is not a coin this
-     * desk can trade at this size. That is the answer the PM prompt already asks for —
-     * say so and decline, rather than moving the level to fit. */
-    const floorPct = Number(cfg.minStopDistancePct) || 0;
-    if (ticket.stop_price > 0 && ticket.entry_zone_low > 0) {
-      const distPct = (1 - ticket.stop_price / ticket.entry_zone_low) * 100;
-      const rtPct = Number(ev?.exitProbe?.roundTripLossPct);
-      const haircut = (1 - (Number(cfg.executorSlippageBps) || 300) / 10_000) ** 2;
-      /* Fees scale with the stop, matching the executor — and with the EFFECTIVE stop it
-         actually uses, which is the authored distance plus the measured round-trip
-         friction. Using the raw stop here left the desk a third of a percent optimistic
-         and it published calls the bot then refused. */
-      const proposedStopFrac = 1 - ticket.stop_price / ticket.entry_zone_low;
-      const effectiveStopFrac = Math.max(proposedStopFrac, 0.01) +
-        (Number.isFinite(rtPct) ? rtPct / 100 : 0);
-      const feeRatio = (Number(cfg.executorMaxFeeShareOfStop) || 0.25) * effectiveStopFrac;
-      /* Derived only when the round trip was actually measured. An unmeasured coin
-         falls back to the flat floor rather than to a number invented from nothing. */
-      const derivedPct = Number.isFinite(rtPct)
-        ? (1 - ((1 - rtPct / 100) * haircut - feeRatio)) * 100
-        : null;
-      /* The derived figure REPLACES the flat one when it exists; the flat floor is the
-         fallback for an unmeasured coin, not a second opinion to be maxed against a
-         real measurement. */
-      const requiredPct = derivedPct ?? floorPct;
-      v(distPct < requiredPct, "stop_inside_costs",
-        `stop is ${distPct.toFixed(1)}% below entry, but this coin needs at least ` +
-        `${requiredPct.toFixed(1)}%` +
-        (derivedPct != null
-          ? ` — its measured round trip is ${rtPct.toFixed(2)}%, slippage costs ` +
-            `${((1 - haircut) * 100).toFixed(2)}% and fees about ${(feeRatio * 100).toFixed(1)}% ` +
-            `of the position the bot will actually size`
-          : ` (the flat floor; this coin's round trip was not measured)`) +
-        `. A stop inside that is triggered by the costs before the thesis is wrong, and ` +
-        `the executor proves it and refuses to sign.`);
-    }
+     * The seat is also still told the shape of the problem in prose (a stop tighter than
+     * the cost of the round trip is not a stop), because authoring a 5% stop on a coin
+     * that moves 20% in minutes is bad THESIS work, which is the desk's job. What is
+     * gone is code here converting that into a dollar refusal. */
 
     const tpSum = (ticket.take_profit || []).reduce((a, t) => a + (t.pct_to_sell || 0), 0);
     v(tpSum > 100.01, "tp_over_100", `take-profit legs sum to ${tpSum}% of the position.`);

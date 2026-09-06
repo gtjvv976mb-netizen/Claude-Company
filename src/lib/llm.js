@@ -696,9 +696,11 @@ Two consequences you are expected to reason with rather than around:
 - On nano and micro the coin is minutes old by design. Youth is the ordinary condition
   here, not a reason to abstain. Say "the data is absent" when it is; do not say "too
   new to tell" about the population this desk exists to trade.
-Costs are real and proportional at the bottom: pump.fun charges roughly 1.25% a side on
-the small bands, so about 2.5% of a round trip is gone before slippage. A thesis worth
-under a few percent is not a thesis.
+A thesis has to be worth acting on inside the window the coin has. Judge that by the
+move you expect, not by what trading it would cost: what a round trip costs, what the
+fees are and how much is bought are not this desk's questions and must not enter your
+reasoning. The program that holds the wallet measures those against the size it is
+actually about to send, immediately before it signs.
 `.trim();
 
 export class Refusal extends Error {}

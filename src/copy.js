@@ -222,11 +222,13 @@ migrateData("2026-08-31-hq-memecoin-appetite", () => {
  * would call a coin "low" while a tenant's "low" sleeve refused it. One vocabulary,
  * defined once, or the filter a tenant picks does not mean what the desk means by it.
  */
-/* THE AUTO SIZE, for a tenant who states funds but no per-trade number: a percentage of
- * their own bankroll, scaled by the category's risk and the call's conviction. One desk
- * number, because sizing policy is the team's job too — the tenant's lever is the
- * explicit per-trade SOL amount, which overrides this entirely. */
-export const AUTO_RISK_PCT_PER_TRADE = Number(process.env.DESK_AUTO_RISK_PCT || 3);
+/* `AUTO_RISK_PCT_PER_TRADE` (DESK_AUTO_RISK_PCT) WAS HERE. It was the desk's answer to
+ * "a tenant states funds but no per-trade number" — a percentage of their bankroll,
+ * scaled by category and conviction. It was removed with the rest of decide()'s sizing
+ * on 2026-09-07: a tenant who has not chosen a per-trade size has still chosen one,
+ * because their bot has a FIXED_SOL and a MAX_SOL_PER_TRADE on their own machine
+ * (executor/strategy.mjs:106, :246). The desk answering the question for them was the
+ * desk deciding how much is bought, which is the one thing it must never do. */
 
 export const MCAP_TIERS = {
   ...Object.fromEntries(Object.entries(CAP_BANDS).map(([k, b]) => [k, { lo: b.lo, hi: b.hi, note: b.note }])),
@@ -826,94 +828,61 @@ const openCount = (floorNo) => db.prepare(`
  * own band's clock — and not a taste the customer should have to have. */
 export const MAX_OPEN_POSITIONS = Number(process.env.DESK_MAX_OPEN_POSITIONS || 8);
 
-/* WHAT ONE SOL IS WORTH, for the one job in this file that needs it.
- *
- * decide() is deterministic and runs per floor per call, so it cannot ask a price API.
- * The desk already stores a real, chain-observed SOL price on every executor fill
- * (executor_fills.sol_usd, written from the bot's own buy and sell reports), and that
- * is the freshest honest number reachable synchronously. Nothing available? Fall back
- * to cfg.solUsdFallback, which is a stated constant rather than a measurement.
- *
- * The sanity band and the age bound exist because an understated SOL price WIDENS the
- * SOL cap below (cap = $probe / solUsd), which is the unsafe direction: a garbage 0.01
- * would uncap every delivery. Out-of-band or stale prices are refused, not clamped. */
-const SOL_USD_SANE_MIN = 5, SOL_USD_SANE_MAX = 10_000;
-const SOL_USD_MAX_AGE_MS = 7 * 86_400e3;
+/* The SOL price and the probe notional both moved to probe-size.js when the notional
+ * stopped being a desk decision and became a MEASUREMENT of the bot's declared caps.
+ * Re-exported here because this module was their address for a day and several
+ * callers (and tests) know it by that name. */
+export { sizingSolUsd, botProbeNotional } from "./probe-size.js";
+import { botProbeNotional } from "./probe-size.js";
 
-export function sizingSolUsd({ now = Date.now() } = {}) {
-  let row = null;
-  try {
-    row = db.prepare(`SELECT sol_usd, at FROM executor_fills
-      WHERE sol_usd IS NOT NULL ORDER BY at DESC LIMIT 1`).get();
-  } catch { row = null; }
-  const px = Number(row?.sol_usd);
-  const fresh = Number.isFinite(px) && px >= SOL_USD_SANE_MIN && px <= SOL_USD_SANE_MAX &&
-    Number.isFinite(Number(row?.at)) && now - Number(row.at) <= SOL_USD_MAX_AGE_MS;
-  return fresh
-    ? { solUsd: px, source: "the bot's last chain fill" }
-    : { solUsd: Number(cfg.solUsdFallback) || 0, source: "DESK_SOL_USD_FALLBACK" };
-}
+/* `probeSizeCapSol()` AND `probeSizingMismatch()` WERE HERE, and both are gone.
+ *
+ * They converted the exit probe's notional into a SOL ceiling and then applied it to
+ * every delivery — the "probe cap" of bb4ae05, which shipped the same week the owner
+ * ruled that the desk must never determine how much is bought. It was defended as
+ * advisory, and it was still a number the desk chose being written onto a tenant's
+ * board next to the word "capped". `probeSizingMismatch()` existed only to report which
+ * floors had configured more than that ceiling, which is not a question the desk is
+ * entitled to have an opinion about: a tenant's per-trade size is a setting on their own
+ * machine.
+ *
+ * Every ceiling that matters is the bot's and runs on the real order — the operator
+ * ceiling and maxSolPerTrade (executor/strategy.mjs:305), per-name risk, book heat, the
+ * daily deploy cap and the spendable balance (:307-311), and the built order's measured
+ * price impact against the pool (executor/jupiter.mjs:148-149).
+ */
 
 /**
- * THE PROBED NOTIONAL, IN SOL. Never deliver an order larger than the desk proved it
- * could exit.
+ * WHO SIZES THE TRADE — a statement for the floor's screen, and nothing else.
  *
- * cfg.targetSizeUsd is the size the exit probe actually measures the round trip at, and
- * every safety number downstream is derived from THAT measurement: risk-rails treats it
- * as an absolute ceiling on position_size_usd, and compliance derives this coin's
- * minimum stop distance from the round trip at it. Sizing here consulted none of it —
- * it read the floor's fixed_sol (0.4 SOL, ~$41) or its bankroll and delivered that. So
- * on 2026-09-07 the desk was measuring an exit at $75, refusing coins over that cost,
- * and then authorising a delivery ten times the size its own probe had cleared.
- *
- * Lowering the probe to $15 without this cap would have made that worse, not better.
- * The two belong in one change: the probe says what has been proved, and this says
- * nothing bigger may be delivered.
- *
- * FLOORED, never rounded, to 4dp — the same precision decide() sizes at — because a
- * cap that rounds up is a cap that can exceed what was measured.
+ * The owner has to be able to SEE that size is the bot's; a rule nobody can observe is
+ * a rule that quietly stops holding. So this reports the ROUTE-PROBE notional the desk
+ * quoted its exitability test at, whether that came from this floor's own bot or from
+ * the stated fallback, and why. It carries no cap, no advisory size and no ceiling: an
+ * earlier version returned `advisoryCapSol` and that field is deliberately absent, so
+ * there is no number here for a client to mistake for an instruction.
  */
-export function probeSizeCapSol(opts = {}) {
-  const targetSizeUsd = Number(cfg.targetSizeUsd) || 0;
-  const { solUsd, source } = sizingSolUsd(opts);
-  if (!(targetSizeUsd > 0) || !(solUsd > 0))
-    return { known: false, capSol: Infinity, targetSizeUsd, solUsd, source };
-  return { known: true, capSol: Math.floor((targetSizeUsd / solUsd) * 1e4) / 1e4,
-    targetSizeUsd, solUsd, source };
-}
-
-/**
- * WHICH FLOORS HAVE ASKED FOR MORE THAN THE DESK HAS MEASURED AN EXIT FOR.
- *
- * This exact condition — fixed_sol 0.4 SOL against a $75 probe — stalled publishing for
- * a day and was visible only to somebody reading two files side by side. It rides the
- * owner's heartbeat now (office.js, HQ branch) so it is a number on a screen rather
- * than a code reading. Aggregate over floors; the reason string on each delivery tells
- * the individual tenant the same thing in their own words.
- */
-export function probeSizingMismatch() {
-  const cap = probeSizeCapSol();
-  let rows = [];
-  try {
-    rows = db.prepare("SELECT floor_no, fixed_sol FROM copy_settings WHERE fixed_sol > 0").all();
-  } catch { rows = []; }
-  const over = cap.known
-    ? rows.filter((r) => Number(r.fixed_sol) > cap.capSol).map((r) => ({
-        floorNo: r.floor_no,
-        fixedSol: Number(r.fixed_sol),
-        fixedUsd: Number((Number(r.fixed_sol) * cap.solUsd).toFixed(2)),
-      }))
-    : [];
+export function probeSizingForFloor(floorNo, opts = {}) {
+  const probe = botProbeNotional({ ...opts, floorNo });
   return {
-    targetSizeUsd: cap.targetSizeUsd,
-    solUsd: cap.solUsd,
-    solUsdSource: cap.source,
-    capSol: cap.known ? cap.capSol : null,
-    floorsOverProbe: over,
-    note: over.length
-      ? `${over.length} floor${over.length === 1 ? "" : "s"} configured a fixed size larger than the ` +
-        `$${cap.targetSizeUsd} the exit probe measures — each delivery is capped to ${cap.capSol} SOL and says so`
-      : "no floor's fixed size exceeds the probed notional",
+    sizeAuthority: "bot",
+    probeSizeUsd: probe.sizeUsd,
+    probeIsRouteTestOnly: true,
+    probeFromBot: probe.fromBot,
+    probeSource: probe.source,
+    probeWhy: probe.why,
+    botMaxSolPerTrade: probe.botSol,
+    botSeenAt: probe.botSeenAt,
+    solUsd: probe.solUsd,
+    solUsdSource: probe.solUsdSource,
+    note: probe.fromBot
+      ? `Your bot decides how much it buys, and this desk never does. To check a coin can ` +
+        `be SOLD at all it takes a round-trip quote at $${probe.sizeUsd} — ${probe.botSol} SOL, ` +
+        `the per-trade cap your bot reported on its own heartbeat. That is a test amount, ` +
+        `not a trade amount, and nothing the desk publishes is sized from it.`
+      : `Your bot decides how much it buys, and this desk never does. With no bot cap to ` +
+        `measure, its round-trip route test is quoted at $${probe.sizeUsd} (${probe.why}) — ` +
+        `a test amount, not a trade amount.`,
   };
 }
 
@@ -930,137 +899,87 @@ export function probeSizingMismatch() {
  * floor's own bot sat armed for twelve hours while every call it was sent died on one
  * of them.
  *
- * So what remains here is only what is genuinely per-floor: whether the rent is paid,
- * how much of the tenant's own money to put in, and whether that money is enough to
- * clear Solana's fees.
+ * AND SINCE 2026-09-07 IT NO LONGER SIZES ANYTHING. This function used to end by
+ * deriving `sizeSol` from the floor's fixed_sol or a fraction of its bankroll, capping
+ * that to the desk's fraction-of-book, capping THAT to the exit probe's notional, and
+ * refusing the call outright when the result was too small to clear Solana's fees. All
+ * of it is gone. What is left is the only thing a per-floor decision can honestly be
+ * about once size belongs to the bot: is this floor entitled to receive the call, and
+ * does it have room for another position.
  */
 export function decide(floorNo, call) {
-  const s = settingsFor(floorNo);
-
   // Rent unpaid: the floor stops receiving NEW calls. It never stops receiving exits —
   // holding someone in a position over a billing dispute would be indefensible, and
   // exits are published to every floor regardless of what it owes.
   if (inArrears(floorNo))
     return { verdict: "skipped", reason: "rent is overdue — top up $CLAUDECO to resume new calls" };
-  const risk = CATEGORY_RISK[call.category] ?? CATEGORY_RISK.unclear;
 
   const open = openCount(floorNo);
   if (open >= MAX_OPEN_POSITIONS)
     return { verdict: "skipped", reason: `already holding ${open} of a maximum ${MAX_OPEN_POSITIONS}` };
 
-  /* SIZE. Two ways, and the tenant picks: a FIXED fund — the same SOL on every trade,
-   * which makes a young record legible because every outcome is comparable — or auto,
-   * where the desk sizes from the floor's bankroll, the category's risk and the call's
-   * own conviction. Fixed overrides how MUCH; it never overrides the refusals above. */
-  const convScale = call.conviction != null ? Math.min(1, Math.max(0.4, call.conviction / 100)) : 0.6;
-  const autoSize = s.bankroll_sol * (AUTO_RISK_PCT_PER_TRADE / 100) * risk.sizeMultiplier * convScale;
-  const fixed = Number(s.fixed_sol) > 0 ? Number(s.fixed_sol) : null;
-  // NULL is a legacy call with no portable desk cap. Zero is an explicit refusal
-  // and must stay zero all the way downstream; treating both as falsy would revive
-  // a trade the team authorized at no size.
-  const hasDeskCap = call.desk_size_usd != null && Number(call.desk_equity_usd) > 0;
-  const deskRatio = hasDeskCap
-    ? Math.max(0, Number(call.desk_size_usd) || 0) / Number(call.desk_equity_usd) : null;
-  const teamCapSol = deskRatio != null ? s.bankroll_sol * deskRatio : Infinity;
-  const uncapped = fixed ?? autoSize;
-  /* A SIZE THAT CANNOT BE EXECUTED IS NOT AN OFFER.
+  /* ═══════════════════════════════════════════════════════════════════════════════════
+   * THE DESK PUBLISHES NO SIZE. NOT A NUMBER, NOT AN ESTIMATE, NOT AN ADVISORY ONE.
    *
-   * Solana's fixed network fees do not scale with trade size, so below a certain
-   * notional they eat the trade: two worst-case 500k-lamport fees are 66% of a
-   * 0.0015 SOL position and 20% of a 0.005 one. An executor applying any honest
-   * cost check must refuse those, and it did — measured on this desk, every call
-   * for a day was offered between 0.0015 and 0.0092 SOL and every one was correctly
-   * refused as "costs eat the target". The floor was publishing trades that were
-   * arithmetically impossible to take.
+   * FIVE THINGS USED TO HAPPEN BETWEEN HERE AND THE RETURN, and each was a money
+   * decision the desk had no standing to make:
    *
-   * teamCapSol caused it: a tenant's size is scaled to the same fraction-of-book the
-   * desk uses, and the desk's paper book trades ~0.03% per position. On a 5 SOL
-   * bankroll that is 0.0017 SOL. The cap's intent — never outrun the desk's
-   * conviction — is right, but a cap that produces unexecutable sizes is a refusal
-   * dressed as an offer.
+   *   1. `autoSize` — bankroll x AUTO_RISK_PCT_PER_TRADE x the category's multiplier x
+   *      the call's conviction. The desk sizing a stranger's wallet from its own taste.
+   *   2. `fixed` — the floor's configured fixed_sol, echoed back as the delivered size.
+   *      Reading the tenant's own setting and re-issuing it as an instruction adds
+   *      nothing and makes the desk look like the author of a number it did not choose.
+   *   3. `teamCapSol` — the tenant's size clamped to the same fraction-of-book the desk
+   *      allocates on its paper equity. This is what produced a day of offers between
+   *      0.0015 and 0.0092 SOL, every one correctly refused by the bot as unexecutable.
+   *   4. The probe cap (bb4ae05) — clamped to the SOL value of the exit probe's
+   *      notional. A ceiling derived from a size the desk itself invented.
+   *   5. `MIN_EXECUTABLE_SOL` — skipping the call entirely when the resulting size was
+   *      under ~0.02 SOL, "below that, network fees eat the trade". A fee judgment, made
+   *      on a size the desk had just made up, that SUPPRESSED THE CALL: a coin the desk
+   *      liked went unpublished because of arithmetic about somebody else's wallet.
    *
-   * So: below MIN_EXECUTABLE_SOL the call is lifted to it when the bankroll can
-   * genuinely afford that (the risk stays inside the appetite's per-trade budget),
-   * and otherwise refused honestly — saying the bankroll is too small for the fees,
-   * which is a fact the tenant can act on, rather than offering a trade their bot
-   * will silently decline. */
-  const MIN_EXECUTABLE_SOL = Number(process.env.MIN_EXECUTABLE_SOL || 0.02);
-  /* A FIXED SIZE IS THE OPERATOR'S NUMBER. The team's book-allocation cap
-     exists to keep AUTO sizing in proportion to the desk's own conviction; it
-     was also shrinking an explicit fixed order (0.2 SOL) to 0.0006 and then
-     "lifting" it to the 0.02 fee floor — so the operator asked for 0.2 and got
-     0.02 on every trade, with the reason string cheerfully saying both. Fixed
-     means fixed; the refusals above still apply. */
-  const raw = fixed != null
-    ? (deskRatio === 0 ? 0 : fixed)   // an explicit ZERO authorization is never revived by a fixed size
-    : Math.min(uncapped, teamCapSol);
-  /* THE PROBE CAP — the one ceiling that is not a taste. Everything above this line is
-   * somebody's preference (the tenant's fixed size, the appetite, the team's book
-   * allocation); this is the only evidence in the calculation. The desk measured a
-   * round trip at cfg.targetSizeUsd and derived this coin's stop floor from it; an
-   * order larger than that is being sent out on a cost measurement that was never
-   * taken. Applied to fixed and auto alike — "fixed means fixed" settles who chooses
-   * the SIZE, not whether the desk may exceed its own evidence. */
-  const probeCap = probeSizeCapSol();
-  const capBinds = probeCap.known && raw > probeCap.capSol;
-  let sizeSol = Number((capBinds ? probeCap.capSol : raw).toFixed(4));
-  let liftedForFees = false;
-  if (sizeSol > 0 && sizeSol < MIN_EXECUTABLE_SOL) {
-    /* The lift is bounded by the risk the tenant actually chose. An EXPLICIT fixed
-     * size is that choice, stated in SOL; the appetite percentage is the AUTO rule
-     * for tenants who did not state one. This branch used to read only the
-     * percentage, so a floor with fixed_sol = 0.2 was refused with the advice
-     * "...or set a fixed size" — the house floor sat on that contradiction for a day
-     * while an armed bot polled an empty feed. */
-    const perTradeBudget = fixed != null ? fixed : s.bankroll_sol * (AUTO_RISK_PCT_PER_TRADE / 100);
-    /* THE LIFT MAY NOT BREAK THE CAP EITHER. If the fee floor is above the probed
-     * notional there is no size that is both executable and proved exitable, and the
-     * honest answer is to say so rather than lift past the evidence. Not reachable at
-     * today's numbers ($15 / SOL $103 = 0.1456 SOL, seven times the 0.02 fee floor) —
-     * it becomes reachable the moment someone sets DESK_TARGET_SIZE_USD near $2. */
-    if (probeCap.known && MIN_EXECUTABLE_SOL > probeCap.capSol) {
-      return { verdict: "skipped",
-        reason: `a tradeable position needs ~${MIN_EXECUTABLE_SOL} SOL but the desk's exit probe only ` +
-          `measures $${probeCap.targetSizeUsd} (${probeCap.capSol} SOL at SOL $${probeCap.solUsd}, ` +
-          `${probeCap.source}) — raise DESK_TARGET_SIZE_USD so the probe covers a tradeable clip` };
-    }
-    if (MIN_EXECUTABLE_SOL <= perTradeBudget) {
-      sizeSol = MIN_EXECUTABLE_SOL;
-      liftedForFees = true;
-    } else {
-      return { verdict: "skipped",
-        reason: `a tradeable position needs ~${MIN_EXECUTABLE_SOL} SOL (below that, network fees eat the trade) ` +
-          `but this floor's per-trade budget is ${perTradeBudget.toFixed(4)} SOL — raise the bankroll or set a fixed size` };
-    }
-  }
-  if (sizeSol < 0.001) return { verdict: "skipped", reason: "the sized position rounds to nothing on this bankroll" };
-
-  const baseHow = fixed
-    ? `${fixed} SOL a trade, the size you set`
-    : `auto · ${risk.sizeMultiplier}x for ${call.category} · conviction ${Math.round(call.conviction ?? 0)}`;
-  const how = fixed == null && Number.isFinite(teamCapSol) && teamCapSol < uncapped
-    ? `${baseHow} · capped to the team's ${(deskRatio * 100).toFixed(3)}% book allocation`
-    : baseHow;
-  /* SAY IT OUT LOUD WHEN THE CAP BINDS. A tenant who set 0.4 SOL and receives 0.1456
-   * must be able to see why from the delivery alone — a size nobody chose, delivered
-   * silently, is how a product loses the right to be trusted with the next one. The
-   * SOL price and its provenance ride along because the cap is a USD number and the
-   * delivery is a SOL number, and the conversion is the part that can go stale. */
-  const capNote = capBinds
-    ? ` · capped to ${sizeSol} SOL — the desk's exit probe measures a round trip at ` +
-      `$${probeCap.targetSizeUsd} and it has no evidence a larger order can leave at this stop ` +
-      `(SOL $${probeCap.solUsd}, ${probeCap.source})` +
-      (fixed != null && fixed > probeCap.capSol
-        ? `. You set ${fixed} SOL, about $${(fixed * probeCap.solUsd).toFixed(0)} — more than the ` +
-          `desk has measured an exit for. Raise DESK_TARGET_SIZE_USD (and re-probe) to lift this.`
-        : "")
-    : "";
-  return { verdict: "offered", sizeSol,
-    probeCapSol: probeCap.known ? probeCap.capSol : null,
-    probeCapBinds: capBinds,
-    reason: (liftedForFees
-      ? `${how} · lifted to ${sizeSol} SOL so network fees do not eat the trade`
-      : how) + capNote };
+   * (5) is the one worth pausing on, because it shows why "advisory" was never true. A
+   * number that can stop a call being offered is not advisory whatever it is labelled.
+   *
+   * EVERY ONE OF THESE JUDGMENTS EXISTS IN THE BOT, ON REAL INPUTS:
+   *   size at all        executor/strategy.mjs:243-249  (Kelly/flat risk off its OWN equity)
+   *   the fixed fund     executor/strategy.mjs:245      (its own FIXED_SOL, not the feed's)
+   *   the hard ceiling   executor/strategy.mjs:246      (`Math.min(want, c.maxSolPerTrade)`)
+   *   allocation caps    executor/strategy.mjs:307-311  (per-name risk, book heat, the
+   *                                                      24h deploy cap, spendable balance)
+   *   the fee floor      executor/strategy.mjs:232-234 and :313-321 — `feeFloorSol =
+   *                      2 * feeReserve / (maxFeeShareOfStop * stopForFees)`, and a skip
+   *                      when no size clears it. This is (5) done properly: judged
+   *                      against the actual fee reserve, the actual stop and the actual
+   *                      wallet, instead of against a bankroll figure typed into a form.
+   *   can it leave       executor/jupiter.mjs:148-149   (the built order's price impact)
+   *
+   * WHAT ABOUT THE BOARD? The tenant's screen showed "0.0234 SOL" next to each call.
+   * It now shows what the desk actually knows — the coin, the thesis, the levels, the
+   * conviction — and the bot reports what it really bought (the bot_* fields further
+   * down this file, written from its own fills). A real number from the wallet beats an
+   * estimate from a desk that cannot see it.
+   *
+   * `size_sol` stays on the deliveries table as a NULL-able column: rows written before
+   * today carry the number that was offered then, and erasing history to make the new
+   * rule look older than it is would be dishonest. Every row written from here on is
+   * null, and executor/strategy.mjs:247 refuses to read the field regardless.
+   * ═══════════════════════════════════════════════════════════════════════════════════ */
+  /* The category's NOTE, not its sizeMultiplier. The note says what kind of coin this is
+     ("reflexive; the base rate is near zero"), which is a WHAT and belongs on a delivery;
+     the multiplier is a HOW MUCH and is read nowhere in this file any more. */
+  const kind = CATEGORY_RISK[call.category] ?? CATEGORY_RISK.unclear;
+  return { verdict: "offered",
+    /* NO SIZE. Explicitly null rather than absent, so a reader of a delivery row can
+       tell "the desk declined to size this" from "this field was lost". */
+    sizeSol: null,
+    /* Retained and hard-coded false. It is the machine-readable half of the sentence
+       below, and it must survive even if some future caller reintroduces a number. */
+    sizeBinding: false,
+    reason: `${call.category ?? "unclear"} — ${kind.note} · conviction ` +
+      `${Math.round(call.conviction ?? 0)}/100 · your bot sizes this trade from its own ` +
+      `caps; the desk does not size it, cap it, or judge whether it is worth the fees` };
 }
 
 /** Broadcast one call to every leased floor. Deterministic, so this is free. */

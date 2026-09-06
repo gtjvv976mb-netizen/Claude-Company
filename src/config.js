@@ -30,45 +30,55 @@ export const cfg = {
 
   equityUsd: num("DESK_EQUITY_USD", 10000),
   maxRiskPct: num("DESK_MAX_RISK_PCT", 1.0),
-  maxBookRiskPct: num("DESK_MAX_BOOK_RISK_PCT", 4.0),
+  /* `maxBookRiskPct` (DESK_MAX_BOOK_RISK_PCT) WAS HERE and is deleted (owner, 2026-09-07).
+   * It was the ceiling on the desk's PAPER book, and risk-rails.js clamped a new idea's
+   * size to what was left under it. Reproduced: four live calls exhausted it, the size
+   * became 0, and a clean coin was refused at `zero_authorized_size` — a SAFETY gate, so
+   * no escalation level could reach past it. The desk was declining to NAME a coin on a
+   * balance judgment about money it does not hold. The bot keeps its own book heat, its
+   * own rolling deploy cap and its own spendable balance, all against the wallet that
+   * signs (executor/strategy.mjs:308-311), which is the only place the number is real. */
   maxCandidates: num("DESK_MAX_CANDIDATES", 8),
-  /* THE SIZE THE EXIT PROBE MEASURES AT — and it must resemble the size actually
-   * traded, or the desk vetoes coins on a cost nobody pays. It has come down three
-   * times: $500 (chosen against the $10,000 notional book above), $200, $75, now $15.
+  /* `targetSizeUsd` (DESK_TARGET_SIZE_USD) WAS HERE, and its removal is the point of
+   * the 2026-09-07 change rather than a side effect of it.
    *
-   * $75 was the binding constraint on publishing anything. This number is not only the
-   * probe size: risk-rails.js makes it an ABSOLUTE ceiling on position_size_usd ("no
-   * evidence that a larger order can leave at the assumed stop"), and compliance.js
-   * derives the minimum stop distance a coin must carry from the round trip measured
-   * AT IT. Measured 2026-09-07: at $75 the derived floor is ~11.93%, while the desk's
-   * own median published stop across its 55 calls is 11.5% — the desk was below its
-   * own bar and candidates were being withheld as "edge_below_cost, stop_inside_costs".
+   * It began as "the size the exit probe measures at" and it never stayed that. By the
+   * end it was: an ABSOLUTE ceiling on position_size_usd in risk-rails.js; the notional
+   * behind compliance.js's size_exceeds_exit_probe veto; the base of the per-coin
+   * minimum stop distance (stop_inside_costs) and of the 5x-cost edge floor
+   * (edge_below_cost); the SOL cap on every delivery in copy.js; and the amount the
+   * `cannot_exit` screen ran at. One config number, invented by the desk, quietly
+   * deciding how much a stranger's bot was allowed to buy and which coins it was
+   * allowed to hear about.
    *
-   * It was pricing an exit nobody was ever going to pay. The floor's configured
-   * fixed_sol is 0.4 SOL (~$41 at SOL $103), the executor's HARD ceiling is
-   * OPERATOR_MAX.maxSolPerTrade = 0.05 SOL (~$5.17), and the last two live buys were
-   * 0.0175 SOL (~$1.81) and 0.021 SOL (~$2.20). The desk demanded a stop wide enough
-   * to survive exiting $75 while the bot exits under $2.
+   * It came down three times chasing the problem — $500, $200, $75, $15 — which is the
+   * tell. Every reduction made the vetoes slightly less wrong and none of them made the
+   * desk's number equal the bot's, because the desk cannot know the bot's: the bot
+   * reads FIXED_SOL and MAX_SOL_PER_TRADE from the operator's own environment. At $75
+   * it refused a coin for "round-trip loss 8.08% > ceiling 8%" while that bot's real
+   * clip was about $2.
    *
-   * $15 is chosen off the executor's hard ceiling, which is the only number that
-   * cannot be exceeded: 0.05 SOL is ~$5.17 today, so $15 leaves roughly 3x headroom
-   * for SOL appreciation and is still 5x smaller than today's figure. It is not a
-   * measurement of anything — it is a ceiling with margin — so it stays env-overridable
-   * and moves the day the executor's ceiling moves.
+   * Every consumer is deleted. The route probe that still needs an amount to quote gets
+   * one from src/probe-size.js — measured off a live bot's declared cap, with
+   * ROUTE_PROBE_FALLBACK_USD as the stated constant when no bot is reporting — and no
+   * judgment anywhere reads it. It is deliberately NOT an env knob any more: as
+   * DESK_TARGET_SIZE_USD it was a standing invitation to write another veto against it.
    *
-   * THE INVARIANT THAT MAKES LOWERING IT SAFE lives in copy.js: no delivery may be
-   * larger than the notional the probe proved exitable. Lowering the probe alone would
-   * leave the desk authorising a 0.4 SOL delivery it only proved it could exit $15 of. */
-targetSizeUsd: num("DESK_TARGET_SIZE_USD", 15),
+   * `equityUsd` and `maxRiskPct` above survive because they are the desk's own paper
+   * book — what it records that it thought an idea was worth — and nothing derived from
+   * them reaches a wallet (copy.js publishes no size; executor/strategy.mjs:247 and
+   * executor/poller.mjs:1192 refuse the fields that used to carry one). */
 
-  /* WHAT ONE SOL IS WORTH, for the one job that needs it synchronously: converting the
-   * probed notional above into the SOL cap on a delivery (copy.js). decide() is
-   * deterministic per floor per call and must cost nothing, so it cannot call a price
-   * API — it prefers the SOL price the desk's own executor recorded on its last real
-   * chain fill and falls back to this. $103 is the price measured 2026-09-07, the same
-   * anchor the $15 above is derived from (0.05 SOL = $5.17). Understating SOL widens
-   * the SOL cap, which is the unsafe direction, so this is the number to update when
-   * SOL moves and no fill has been reported in a while. */
+  /* WHAT ONE SOL IS WORTH, for the one job that still needs it synchronously: turning
+   * a bot's declared per-trade cap (SOL) into the USD amount the route probe quotes at
+   * (probe-size.js). It prefers the SOL price the desk's own executor recorded on its
+   * last real chain fill and falls back to this. $103 is the price measured 2026-09-07.
+   *
+   * There is no longer an unsafe direction here. This used to widen or narrow a SOL cap
+   * on a delivery, so an understated price was dangerous; deliveries carry no size now,
+   * and the only consequence of a stale figure is that a route test is quoted at a
+   * slightly different amount than intended, which does not change whether a route
+   * exists. Still worth keeping current so the report says something true. */
   solUsdFallback: num("DESK_SOL_USD_FALLBACK", 103),
 
   // Deterministic screen floors. These kill before any token is spent.
@@ -80,10 +90,13 @@ targetSizeUsd: num("DESK_TARGET_SIZE_USD", 15),
      * the OTHER floors (volume $50k, txns 200) were unchanged — and those are what
      * were actually excluding the sub-$1m coins this desk now wants.
      *
-     * At $12,000 a real $3.40 clip round-trips at 0.11% and the $75 probe at 2.5%.
-     * The pool is thin enough to be drained by a determined seller, which is exactly
-     * what liq_collapse, cannot_exit, holder concentration and the freeze-authority
-     * check are for. Those did not move and must not.
+     * At $12,000 a real $3.40 clip round-trips at 0.11% and the $75 probe at 2.5% —
+     * which is the whole 2026-09-07 lesson in one line: the same pool is 23x cheaper to
+     * leave at the size actually traded. The pool is still thin enough to be drained by
+     * a determined seller, which is what liq_collapse, holder concentration and the
+     * freeze-authority check are for. Those did not move and must not. (`cannot_exit`
+     * was named here as a fourth; it was the cost ceiling, and it is deleted — the bot
+     * measures that at its own size, executor/jupiter.mjs:1341-1350.)
      *
      * Note this is DEPTH, not market cap: a $1m-cap coin is a claim about price x
      * supply, while liquidity is the money actually in the pool to sell into. They
@@ -141,39 +154,38 @@ minLiquidityUsd: num("DESK_MIN_LIQUIDITY_USD", 12000),
     set maxMarketCapUsd(v) { this._maxMarketCapUsd = v; },
   },
 
-  // Slippage the desk refuses to accept on a round trip at target size.
-  maxRoundTripSlippagePct: num("DESK_MAX_RT_SLIPPAGE", 8),
+  /* `maxRoundTripSlippagePct` (DESK_MAX_RT_SLIPPAGE) WAS HERE — the round-trip cost
+   * ceiling behind the `cannot_exit` screen kill, risk-rails' mechanical zero and the
+   * red team's confirmable "exit_failure" fact. Removed 2026-09-07 with the rest of the
+   * desk's money judgments.
+   *
+   * It killed 12 of the desk's last 100 coins with nothing else against them, 11 of
+   * them between 8.0% and 9.2% against a ceiling of 8% — marginal calls decided by a
+   * cost measured at $75 for a bot that trades about $2. The same ceiling still exists
+   * and still binds, in the process that knows the size: executor/jupiter.mjs:1341-1350
+   * (`maxEntryRoundTripLossPct`, quoted at the bot's own amountRaw) and
+   * executor/poller.mjs:1234-1253 (that measured loss plus worst-case fees against the
+   * authored stop). Nothing was made unsafe; the judgment was moved to where its
+   * inputs are real. */
 
-    /* THE STOP THAT COSTS ALONE WOULD TRIGGER.
+    /* THREE COST MIRRORS WERE HERE — `minStopDistancePct` (DESK_MIN_STOP_DISTANCE_PCT),
+     * `executorSlippageBps` (EXECUTOR_SLIPPAGE_BPS) and `executorMaxFeeShareOfStop`
+     * (EXECUTOR_MAX_FEE_SHARE_OF_STOP) — and the word "mirrors" was the confession.
      *
-     * A stop closer to entry than the cost of getting in and out is not a stop; it is a
-     * guaranteed exit charged to the book. The executor refuses those before signing,
-     * and on 2026-09-03 it refused four consecutive live calls for exactly this —
-     * HeeHaw, TOAD and USWS carried stops 5% to 6.5% below entry against a conservative
-     * round-trip cost of about 9%. The desk was authoring trades its own bot could
-     * prove were already lost.
+     * They existed so the desk could reproduce the executor's pre-signing cost guard at
+     * publish time and refuse "exactly what the bot would refuse — no more and no less".
+     * That equality was never achievable, because the guard's answer depends on the
+     * order size and the desk's copy ran on a size the desk invented. The history in
+     * this very block records the desk chasing it: executorWorstFeeRatio revised from
+     * 5.7% to 2.5% after a sweep found the desk blocking 8.5%-9.5% stops the bot would
+     * happily have taken. That is a duplicate being tuned toward an original it cannot
+     * reach.
      *
-     * The number: the executor applies its slippage tolerance to BOTH legs
-     * (1 - 0.97^2 = 5.91% at 300bps), adds a worst-case network fee near 2%, and pump.fun
-     * itself takes about 1.25% a side on the small bands. Round to a floor of 12%, which
-     * clears all three with room for the measured round trip on top. */
-    /* The absolute floor, used when a coin's round trip could not be measured. The
-       real floor is derived per coin in compliance.js from the executor's own guard. */
-    minStopDistancePct: num("DESK_MIN_STOP_DISTANCE_PCT", 12),
-    /* Mirrors of the executor's cost model, so the desk refuses exactly what the bot
-       would refuse — no more and no less.
-       executorWorstFeeRatio was 0.057, the fee share of a conviction-shrunk 0.0175 SOL
-       position. That is no longer reachable: the executor's fee floor holds a position
-       at or above the size where the round trip costs maxFeeShareOfTrade, so 2.5% IS
-       the worst case now. Leaving it at 5.7% made the desk refuse calls its own bot
-       would have taken — a sweep found 8.5% to 9.5% stops on clean coins blocked at
-       publish time and tradeable in the executor. Refusing a call the bot wanted is the
-       same waste as publishing one it will not take, pointed the other way. */
-    executorSlippageBps: num("EXECUTOR_SLIPPAGE_BPS", 300),
-    /* The executor caps the round trip's fees at this share of the STOP DISTANCE, not
-       of the position — a wide stop can carry more fee in absolute terms and still be
-       worth taking. The desk assumes the same shape so the two never disagree. */
-    executorMaxFeeShareOfStop: Number(process.env.EXECUTOR_MAX_FEE_SHARE_OF_STOP || 0.25),
+     * The original: executor/strategy.mjs:115 (maxFeeShareOfStop), :232-234 (the fee
+     * floor derived from the REAL fee reserve and the REAL stop), and
+     * executor/poller.mjs:1234-1253 (the slippage haircut and worst-case fee ratio
+     * computed from `preliminaryAmountRaw`, the lamports about to be spent). The desk
+     * now authors the honest invalidation level and says nothing about what it costs. */
 
   /* REWEIGHTED FOR THE MARKET THIS DESK IS ACTUALLY IN.
    *
@@ -304,10 +316,13 @@ minLiquidityUsd: num("DESK_MIN_LIQUIDITY_USD", 12000),
  * ordinary; a $15m coin with $5k of liquidity is a fiction, and the suspicion belongs to
  * the RATIO, which maxFdvToLiqRatio already catches independently.
  *
- * NONE OF THIS TOUCHES SAFETY. The measured exit probe (cannot_exit, round-trip loss
- * against maxRoundTripSlippagePct) is unchanged and absolute, as are honeypot mechanics,
- * live mint and freeze authority, and the unverified-is-not-safe rule. This lowers a
+ * NONE OF THIS TOUCHES SAFETY. Honeypot mechanics, live mint and freeze authority, and
+ * the unverified-is-not-safe rule are unchanged and absolute, and so is the route probe
+ * behind unverified_exit — a token nobody can quote a sell for is refused. This lowers a
  * PROXY so that more small coins reach the real test; it does not lower the real test.
+ * (The cost half of that probe — `cannot_exit` against maxRoundTripSlippagePct — was
+ * removed 2026-09-07. It was never a safety test: it measured what leaving costs at a
+ * notional the desk invented, and the bot measures it at the real one.)
  */
 /* One row per sleeve, and `ageH` is the youngest the desk will look at in that band.
  *
@@ -370,10 +385,16 @@ export const MINTS = {
  * closed. The whole shape of what follows comes from ONE measurement, and it is worth
  * writing down where the knobs live rather than in a commit message:
  *
- *   Of the last 100 kills, ~60 are safety MECHANICS rather than opinions — 18
- *   cannot_exit (the round-trip probe PROVED the position cannot be sold), 16
- *   serial_deployer, 9 post_migration_dump, 5 holder_concentration, 4 deployer-has-
- *   rugged, 4 thin_liquidity, 2 mintable, 2 freezable, 1 wash_suspect.
+ *   Of the last 100 kills, most are safety MECHANICS rather than opinions — 12
+ *   serial_deployer, 15 post_migration_dump, 6 holder_concentration, 6 mintable,
+ *   5 thin_liquidity, 4 deployer-has-rugged, 3 each freezable / seizable /
+ *   transfer_hook / frozen_by_default / unverified_exit, 2 wash_suspect
+ *   (re-counted 2026-09-07).
+ *
+ *   The old count led with "18 cannot_exit (the probe PROVED the position cannot be
+ *   sold)". It proved no such thing. It proved a $75 order was expensive, for a bot
+ *   trading about $2, and 12 of those 100 coins died on it with nothing else against
+ *   them. The gate is gone and those 12 will now publish.
  *
  * Filling a quota out of that pool does not produce three trades. It produces three
  * bags — and an unsellable bag fails the quota's own purpose, which is to have the desk

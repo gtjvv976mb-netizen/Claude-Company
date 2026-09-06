@@ -115,13 +115,26 @@ console.log("\nEVERY RAIL SIZES DOWN, NONE SIZES UP");
   ok("a thin wallet sizes to what it actually has",
     thin.action !== "buy" || thin.sol <= 0.02 - cfg.networkFeeReserveSol + 1e-9,
     `${thin.action} ${thin.sol?.toFixed(4) ?? ""}`);
-  /* A call asking for less than a viable position is refused, not traded tiny — the
-     fees would be a quarter of the stop before the coin moved. A call asking for a
-     viable-but-smaller size is honoured. */
-  ok("a call asking for less than the fee floor is refused", plan({ size_sol: 0.01 }).action === "skip");
+  /* THIS PAIR ASSERTED THE OPPOSITE UNTIL 2026-09-07, and the reversal is the point.
+     They read "a call asking for less than the fee floor is refused" and "a call's own
+     size_sol still caps it when it is viable" — both true of the old
+     `want = Math.min(want, Number(call.size_sol))`, and both a description of the DESK
+     setting this wallet's size. The owner's rule makes size the bot's alone: not the
+     amount, not the ceiling, not the minimum. A min() only ever shrinks, which is why
+     it read as prudence for so long, but shrinking is still deciding — a desk that can
+     set 0.001 can silence the bot as surely as one that can set 10.
+
+     So the same two inputs now prove the inverse, and the sizing they used to control
+     is asserted right above this by the bot's OWN rails, which is where it belongs. */
+  const baseline = plan({});
+  const askedTiny = plan({ size_sol: 0.01 });
+  ok("a desk size under the fee floor no longer refuses the trade",
+    askedTiny.action === "buy" && askedTiny.sol === baseline.sol,
+    `desk 0.01 SOL -> ${askedTiny.sol?.toFixed(4)} SOL (baseline ${baseline.sol?.toFixed(4)})`);
   const capped = plan({ size_sol: 0.042 });
-  ok("...and a call's own size_sol still caps it when it is viable",
-    capped.action === "buy" && capped.sol <= 0.042 + 1e-9, `${capped.sol?.toFixed(4)} SOL`);
+  ok("...and a call's own size_sol no longer caps the bot either",
+    capped.action === "buy" && capped.sol === baseline.sol,
+    `desk 0.042 SOL -> ${capped.sol?.toFixed(4)} SOL (baseline ${baseline.sol?.toFixed(4)})`);
 }
 
 console.log("\nWHEN NO SIZE FITS, IT IS STILL REFUSED");

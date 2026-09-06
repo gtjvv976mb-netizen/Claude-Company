@@ -1,22 +1,35 @@
 /**
- * ANYTHING THE DESK PUBLISHES, THE BOT MUST BE ABLE TO TAKE.
+ * THE DESK PUBLISHES ON COIN QUALITY. THE BOT DECIDES WHETHER IT CAN AFFORD IT.
  *
- * The owner's rule: every published call should be traded. Historically it was not —
- * measured against the desk's eight most recent published calls, the executor would have
- * taken ONE. Four carried stops of 5% to 8.5%, which 300bps of slippage makes
- * unreachable at any size; the rest failed once conviction had shrunk the position and
- * the fixed fee became a larger share of it.
+ * WHAT THIS FILE USED TO ASSERT, and why it was wrong. The old contract was "anything
+ * the desk publishes, the bot must be able to take", enforced by running compliance's
+ * `stop_inside_costs` and the executor's cost guard over the same sweep and demanding
+ * they never disagree. It could not hold, for a reason the file half-admitted in its own
+ * comments: the desk "cannot know what size the bot will pick", so it assumed a worst
+ * case and accepted a "thin conservative band" of calls it refused that the bot would
+ * have taken. The band was the bug, not the price of the guarantee.
  *
- * The fix is not to make the bot accept them. It is to stop the desk offering calls its
- * own bot can prove are already lost. This file is the contract between the two: sweep
- * the space of calls, and assert that COMPLIANCE and the EXECUTOR never disagree.
+ * Measured 2026-09-07: the desk was computing that guard at a $75 notional while the
+ * bot's real clip is about $2. Fees are a large share of $2 and a trivial share of $75;
+ * slippage is the reverse. So the two calculations did not differ by a conservative
+ * margin, they differed in both directions at once and nobody could see which. Twelve of
+ * the desk's last hundred kills died on the round-trip ceiling alone.
  *
- * A disagreement in one direction wastes the offer and teaches the tenant nothing. In
- * the other it means the desk is refusing calls the bot could have traded.
+ * THE NEW CONTRACT, and it is a cleaner one to test because it has no fudge factor:
+ *
+ *   THE DESK'S PUBLISH DECISION IS INDEPENDENT OF EVERY MONEY VARIABLE.
+ *   THE BOT'S TAKE DECISION IS NOT, AND STILL BINDS.
+ *
+ * Independence is a stronger and more checkable property than agreement: sweep the
+ * space, hold the coin fixed, vary only stop distance, round-trip cost and conviction,
+ * and the desk's answer must not move at all. Then sweep the same space through the
+ * executor and prove its answer DOES move — otherwise the money judgment has not been
+ * relocated, it has been lost.
+ *
+ *   node test-published-is-tradeable.mjs
  */
+import fs from "node:fs";
 import { complianceCheck } from "./src/agents/compliance.js";
-import { stopFloorForCoin } from "./src/agents/decision.js";
-import { cfg } from "./src/config.js";
 import { planEntry, DEFAULTS } from "./executor/strategy.mjs";
 
 let pass = 0, fail = 0;
@@ -24,21 +37,27 @@ const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  —
                                  : (fail++, console.log(`  FAIL ${n}${d ? "  — " + d : ""}`)); };
 
 const WALLET = 0.3366, FEE = 500_000;
-const SLIP = (1 - (Number(cfg.executorSlippageBps) || 300) / 10_000) ** 2;
+const SLIP = (1 - 300 / 10_000) ** 2;
 const state = { openCount: 0, realizedTodaySol: 0, deployedTodaySol: 0, bookHeat: 0,
   equitySol: WALLET, spendableSol: WALLET, wins: 0, losses: 0 };
 
-/** Would the desk publish this call? */
+/** Would the desk publish this call? Everything about the COIN is held constant. */
 const publishes = (stopPct, rtPct) => {
   const res = complianceCheck({
-    pm: { decision: "PROPOSE" }, risk: { stop_price: 1 - stopPct / 100 }, redteam: { verdict: "survived" },
-    ticket: { stop_price: 1 - stopPct / 100, entry_zone_low: 1, take_profit: [] },
-    ev: { exitProbe: { roundTripLossPct: rtPct } },
+    pm: { decision: "PROPOSE" }, redteam: { verdict: "survived" },
+    /* Loss at stop, off the STOP ALONE. The `+ rtPct / 100` term here matched the round
+       trip compliance used to fold into its recompute; both went on 2026-09-07, because
+       a friction measured at a notional the desk invented is not the desk's to price. */
+    risk: { stop_price: 1 - stopPct / 100, position_size_usd: 12,
+      max_loss_usd: Number((12 * (stopPct / 100)).toFixed(2)) },
+    ticket: { stop_price: 1 - stopPct / 100, entry_zone_low: 1, entry_zone_high: 1.02,
+      take_profit: [{ price: 1.03, pct_to_sell: 100 }] },
+    ev: { pair: { priceUsd: 1 }, exitProbe: { targetSizeUsd: 15, roundTripLossPct: rtPct } },
   });
-  return !(res.violations || []).some((v) => v.code === "stop_inside_costs");
+  return { pass: res.pass, codes: res.violations.map((v) => v.code) };
 };
 
-/** Would the executor take it? Sizing, then the poller's executable-cost guard. */
+/** Would the executor take it? Its sizing, then the poller's executable-cost guard. */
 const takes = (stopPct, rtPct, conviction) => {
   const sized = planEntry({
     call: { mint: "m", symbol: "T", entry_ref: 1, stop: 1 - stopPct / 100, target: 3, conviction },
@@ -49,95 +68,97 @@ const takes = (stopPct, rtPct, conviction) => {
   return { taken: conservative > (1 - stopPct / 100), why: "cost guard", sol: sized.sol };
 };
 
-console.log("\nTHE CONTRACT: PUBLISHED IMPLIES TRADEABLE");
+const STOPS = []; for (let s = 4; s <= 40; s += 0.5) STOPS.push(s);
+const RTS = [0.2, 0.5, 1, 2, 3, 5, 8, 12, 22.5];
+const CONVICTIONS = [20, 30, 50, 80, 100];
+
+console.log("\nTHE DESK'S ANSWER DOES NOT MOVE WITH ANY MONEY VARIABLE");
 {
-  const disagreements = [];
-  let published = 0, checked = 0;
-  for (let stopPct = 4; stopPct <= 40; stopPct += 0.5) {
-    for (const rtPct of [0.2, 0.5, 1, 2, 3, 5, 8]) {
-      for (const conviction of [20, 30, 50, 80, 100]) {
-        checked++;
-        const pubs = publishes(stopPct, rtPct);
-        if (!pubs) continue;
-        published++;
-        const t = takes(stopPct, rtPct, conviction);
-        if (!t.taken) disagreements.push(`stop ${stopPct}% rt ${rtPct}% conv ${conviction}: ${t.why}`);
-      }
-    }
+  const refusals = [];
+  let checked = 0;
+  for (const stopPct of STOPS) for (const rtPct of RTS) {
+    checked++;
+    const p = publishes(stopPct, rtPct);
+    if (!p.pass) refusals.push(`stop ${stopPct}% rt ${rtPct}%: ${p.codes.join(",")}`);
   }
-  /* TWO KINDS OF REFUSAL, AND ONLY ONE IS A BROKEN CONTRACT.
-   *
-   * A cost-model disagreement means the desk and the executor have drifted apart, and
-   * every one of those is a call wasted. But a wallet that cannot fund the minimum
-   * viable position is a money fact the desk cannot see when it publishes — it does not
-   * know the tenant's balance. At 0.3366 SOL a 2.5% per-name cap on a wide-stop, rough
-   * coin allows 0.0390 SOL where the viable floor is 0.0400, and no cost model can wish
-   * that away. Those are counted and reported, not tolerated silently. */
-  const walletBound = disagreements.filter((d) => /under the .* minimum/.test(d));
-  const modelDisagreements = disagreements.filter((d) => !/under the .* minimum/.test(d));
-  ok("no call is refused because the two cost models disagree",
-    modelDisagreements.length === 0,
-    modelDisagreements.length ? modelDisagreements.slice(0, 3).join(" | ")
-      : `${published} publishable of ${checked} swept`);
-  ok("...and any remaining refusal is the wallet, said plainly",
-    walletBound.every((d) => /round trip is mostly fees/.test(d)),
-    `${walletBound.length} of ${published} need a bigger bankroll than 0.3366 SOL`);
-  ok("...and the desk does publish a useful range, not nothing",
-    published > checked * 0.2, `${published} of ${checked} publishable`);
+  /* THE WHOLE SWEEP PUBLISHES. Not "most of it", not "a useful range" — all of it. The
+     coin is identical in every cell; only the stop distance and the cost of leaving
+     change, and neither is a fact about the coin that the desk is entitled to rule on.
+     The old version of this test could only claim `published > checked * 0.2`. */
+  ok("every stop distance x round trip in the sweep is published",
+    refusals.length === 0, refusals.length ? refusals.slice(0, 3).join(" | ") : `${checked} combinations, none refused`);
+
+  const MONEY = ["stop_inside_costs", "edge_below_cost", "size_exceeds_exit_probe", "cannot_exit"];
+  const moneyCodes = new Set();
+  for (const stopPct of STOPS) for (const rtPct of RTS)
+    for (const c of publishes(stopPct, rtPct).codes) if (MONEY.includes(c)) moneyCodes.add(c);
+  ok("...and no money veto code is reachable at all",
+    moneyCodes.size === 0, [...moneyCodes].join(",") || "none of stop_inside_costs / edge_below_cost / size_exceeds_exit_probe / cannot_exit");
 }
 
-console.log("\nTHE DESK IS NOT REFUSING WHAT THE BOT COULD HAVE TAKEN");
+console.log("\nTHE BOT'S ANSWER DOES MOVE — THE JUDGMENT WAS RELOCATED, NOT DELETED");
 {
-  // The other direction: a call the executor would happily take must not be blocked.
-  const missed = [];
-  for (let stopPct = 4; stopPct <= 40; stopPct += 0.5) {
-    for (const rtPct of [0.2, 1, 2, 5]) {
-      if (publishes(stopPct, rtPct)) continue;
-      // Blocked by the desk — would the bot have taken it at full conviction?
-      if (takes(stopPct, rtPct, 100).taken) missed.push(`stop ${stopPct}% rt ${rtPct}%`);
-    }
-  }
-  /* A THIN CONSERVATIVE BAND IS CORRECT, AND MUST STAY THIN.
-   *
-   * The desk cannot know what size the bot will pick — that depends on conviction, the
-   * wallet and the book — so it must assume the WORST-case fee share the executor's fee
-   * floor permits (2.5%), while the bot pays the actual share for the size it chose
-   * (2.0% at the full ceiling). That half-point gap makes the desk refuse a narrow band
-   * of stops the bot would have taken.
-   *
-   * Closing it by assuming the best case would invert the failure: the desk would
-   * publish calls the bot then refuses, which is the waste this whole contract exists to
-   * end. So the band is accepted and BOUNDED instead — if it ever grows, the two cost
-   * models have drifted apart and that is worth knowing. */
-  const widths = missed.map((m) => Number((m.match(/stop ([\d.]+)%/) || [])[1])).filter(Number.isFinite);
-  const band = widths.length ? Math.max(...widths) - Math.min(...widths) : 0;
-  /* THE BAND IS THE PRICE OF THE GUARANTEE, AND IT IS ONE-DIRECTIONAL.
-   *
-   * The desk must assume the WORST fee share the executor permits — the share at the
-   * minimum viable size — because it cannot know the tenant's wallet, the book, or the
-   * conviction the seats will land on. The bot, sizing at the ceiling on a confident
-   * call, usually pays less. So there is a band of stops the desk refuses that the bot
-   * would have taken at full conviction.
-   *
-   * That direction is the safe one and is chosen deliberately: closing it means
-   * assuming the best case, which publishes calls the bot then refuses — the exact
-   * waste this contract exists to end, pointed the other way. What matters is that it
-   * stays bounded and one-directional, so drift between the two models still shows up
-   * as a failure rather than as quiet lost opportunity. */
-  ok("the band stays bounded",
-    band <= 8, missed.length ? `${missed.length} points spanning ${band.toFixed(1)}pp: ${missed.slice(0, 3).join(", ")}` : "none");
-  ok("...and sits near the floor rather than across the whole range",
-    widths.every((w) => w <= 20), widths.length ? `widest blocked stop ${Math.max(...widths)}%` : "none");
+  const results = [];
+  for (const stopPct of STOPS) for (const rtPct of RTS) for (const conviction of CONVICTIONS)
+    results.push({ stopPct, rtPct, conviction, ...takes(stopPct, rtPct, conviction) });
+  const refused = results.filter((r) => !r.taken);
+  ok("the executor refuses a substantial share of the same sweep",
+    refused.length > 0 && refused.length < results.length,
+    `${refused.length} refused of ${results.length} — the desk refused 0 of them`);
+
+  /* AND IT REFUSES FOR THE RIGHT REASONS, in the right direction. Tight stops and
+     expensive round trips are where the costs bite; wide stops on cheap coins are not.
+     If this ever inverts, the executor's cost model has broken. */
+  const tightExpensive = results.filter((r) => r.stopPct <= 6 && r.rtPct >= 5);
+  const wideCheap = results.filter((r) => r.stopPct >= 25 && r.rtPct <= 1);
+  ok("...every tight stop on an expensive round trip is refused",
+    tightExpensive.every((r) => !r.taken), `${tightExpensive.filter((r) => r.taken).length} taken of ${tightExpensive.length}`);
+  ok("...and every wide stop on a cheap one is taken",
+    wideCheap.every((r) => r.taken), `${wideCheap.filter((r) => !r.taken).length} refused of ${wideCheap.length}`);
+
+  /* CONVICTION STILL SIZES, WHICH IS THE OTHER HALF OF "the bot owns how much". The desk
+     publishes the conviction — a WHAT, its own confidence in the idea — and the bot is
+     the only party that turns it into lamports. */
+  const sizes = CONVICTIONS.map((c) => takes(20, 1, c)).filter((r) => r.taken).map((r) => r.sol);
+  ok("conviction changes the SIZE the bot chooses, and only the bot chooses it",
+    new Set(sizes).size > 1, sizes.map((s) => s.toFixed(4)).join(" / "));
 }
 
-console.log("\nTHE FOUR REAL CALLS THAT WERE WASTED ARE NOW REFUSED AT PUBLISH TIME");
+console.log("\nTHE FOUR CALLS OF 2026-09-03 ARE PUBLISHED, AND REFUSED BY THE WALLET");
 {
-  // HeeHaw 5%/2.26, TOAD 5%/1.09, USWS 6.5%/1.03, HeeHaw 8.5%/2.23 — all offered, all
-  // refused by the bot, all wasted. And FWOG 13%/0.51, which it did take.
-  for (const [name, stopPct, rt] of [["HeeHaw", 5, 2.26], ["TOAD", 5, 1.09], ["USWS", 6.5, 1.03], ["HeeHaw", 8.5, 2.23]])
-    ok(`${name}'s ${stopPct}% stop is no longer published`, !publishes(stopPct, rt),
-      `needs ${stopFloorForCoin({ exitProbe: { roundTripLossPct: rt } }, cfg).toFixed(1)}%`);
-  ok("FWOG's 13% stop still is", publishes(13, 0.51));
+  /* HeeHaw 5%/2.26, TOAD 5%/1.09, USWS 6.5%/1.03, HeeHaw again 8.5%/2.23. Every one was
+     published, then refused by the bot, and the old fix was to stop publishing them.
+     The new answer is that publishing them was never the mistake — the desk had the coin
+     right and no standing on the cost. The tenant now hears about the coin, and their own
+     bot declines to buy it at their own size, with its own reason, on their own machine.
+     A tenant with a larger wallet or a smaller fee reserve may well take it. */
+  for (const [name, stopPct, rt] of [["HeeHaw", 5, 2.26], ["TOAD", 5, 1.09],
+                                     ["USWS", 6.5, 1.03], ["HeeHaw again", 8.5, 2.23]]) {
+    const p = publishes(stopPct, rt), t = takes(stopPct, rt, 100);
+    ok(`${name}: published by the desk, refused by the bot`,
+      p.pass === true && t.taken === false,
+      `desk=[${p.codes.join(",") || "clean"}] bot=${t.why}`);
+  }
+  const fwog = publishes(13, 0.51);
+  ok("FWOG (13% stop, 0.51% round trip) is published too — as it always was",
+    fwog.pass === true && takes(13, 0.51, 100).taken === true, fwog.codes.join(",") || "clean");
+}
+
+console.log("\nAND NOTHING THE DESK SENDS CAN REACH THE BOT'S SIZING");
+{
+  /* The other end of the same rule. Even a desk that published a size could not use it:
+     both call sites that used to read one are gone, and both carry a comment saying not
+     to restore them. Asserted on the SOURCE because these are absences, and an absence
+     cannot be exercised by calling a function. */
+  const strat = fs.readFileSync(new URL("./executor/strategy.mjs", import.meta.url), "utf8");
+  const poller = fs.readFileSync(new URL("./executor/poller.mjs", import.meta.url), "utf8");
+  const live = (src, re) => src.split("\n").some((l) => re.test(l) && !/^\s*(\*|\/\*|\/\/)/.test(l));
+  ok("strategy.mjs reads call.size_sol nowhere in the sizing path",
+    !live(strat, /call\.size_sol/), "executor/strategy.mjs:247");
+  ok("poller.mjs reads ev.fixed_sol nowhere",
+    !live(poller, /ev\.fixed_sol/), "executor/poller.mjs:1192");
+  ok("...and the bot's per-trade ceiling is still its own",
+    live(strat, /want = Math\.min\(want, c\.maxSolPerTrade\)/), "executor/strategy.mjs:305");
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

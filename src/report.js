@@ -44,7 +44,12 @@ export function writeReport(cycle, r) {
   L.push(`| 24h txns | ${n(ev.derived?.txns24h, 0)} |`);
   L.push(`| Avg trade size | $${n(ev.derived?.avgTradeSizeUsd)} |`);
   L.push(`| Pair age | ${n(ev.pair?.ageHours, 1)} h |`);
-  L.push(`| Round-trip cost @ $${ev.exitProbe?.targetSizeUsd} | ${ev.exitProbe?.roundTripLossPct != null ? ev.exitProbe.roundTripLossPct + "%" : "unmeasured — " + (ev.exitProbe?.error ?? "")} |`);
+  /* Labelled as a ROUTE TEST, because that is all it is now. The desk records what the
+     round trip cost at the amount it happened to quote, and judges nobody on it: what
+     leaving costs depends on the order size, and the size is the bot's
+     (executor/jupiter.mjs:1341-1350 measures it at the real one before signing). The
+     line that matters on this row is whether it measured AT ALL. */
+  L.push(`| Sell route (test quote @ $${ev.exitProbe?.targetSizeUsd}) | ${ev.exitProbe?.roundTripLossPct != null ? "route exists; round trip " + ev.exitProbe.roundTripLossPct + "% at that test amount — not a gate" : "NO ROUTE MEASURED — " + (ev.exitProbe?.error ?? "")} |`);
   L.push(`| Token program | ${ev.mintAccount?.program ?? "—"} |`);
   L.push(`| Mint authority | ${ev.mintAccount?.mintAuthority ?? "revoked"} |`);
   L.push(`| Freeze authority | ${ev.mintAccount?.freezeAuthority ?? "revoked"} |`);

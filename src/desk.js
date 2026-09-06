@@ -3,7 +3,7 @@ import { gather, screen, enrichWithXRead } from "./data/evidence.js";
 import { ANALYSTS, runAnalyst, runNarrative } from "./agents/analysts.js";
 import { runScout, runRedTeam, runRisk, runPM, runExecution } from "./agents/decision.js";
 import { complianceCheck } from "./agents/compliance.js";
-import { enforceRiskRails, enforceCeoRails, retainedBookRiskUsd } from "./agents/risk-rails.js";
+import { enforceRiskRails, enforceCeoRails } from "./agents/risk-rails.js";
 import { applyRedTeamBar } from "./agents/redteam-policy.js";
 import { runCEO } from "./agents/ceo.js";
 import { writeOrderSlip } from "./order.js";
@@ -12,7 +12,6 @@ import { OutOfCredit, spend, assertDailyBudget} from "./lib/llm.js";
 import { cfg, escalationPlan } from "./config.js";
 import * as store from "./lib/store.js";
 import { writeReport } from "./report.js";
-import { liveCalls } from "./calls.js";
 import { composite } from "./agents/composite.js";
 import * as evaluation from "./evaluation.js";
 
@@ -329,8 +328,12 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
     ...(redteam.downgraded_from ? { downgradedFrom: redteam.downgraded_from } : {}) });
 
   const modelRisk = await runRisk(ev, analysts, redteam);
-  const openRiskUsd = retainedBookRiskUsd(liveCalls());
-  const risk = enforceRiskRails({ risk: modelRisk, ev, redteam, openRiskUsd });
+  /* NO BOOK-HEAT ARGUMENT. `retainedBookRiskUsd(liveCalls())` used to ride in here as
+     `openRiskUsd` and, once the desk's paper book was "full", zeroed the size and killed
+     a clean coin at the publication gate. Deleted 2026-09-07: how much is at risk is the
+     bot's question, answered against the wallet that signs (executor/strategy.mjs:308-311),
+     not the desk's against a book nobody trades. */
+  const risk = enforceRiskRails({ risk: modelRisk, ev, redteam });
   if (risk.rail_notes?.length) emit("seat:adjusted", { seat: "Risk", mint, symbol: ev.symbol,
     detail: risk.rail_notes.join("; "), modelTier: modelRisk.risk_tier,
     finalSize: risk.position_size_usd });

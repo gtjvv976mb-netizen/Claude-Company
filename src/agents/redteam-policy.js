@@ -43,8 +43,16 @@ function confirmedByBundle(code, evidence, path, actual) {
       return Boolean(evidence?.mintAccount?.mintAuthority || evidence?.mintAccount?.freezeAuthority ||
         flags.some((f) => /mint_authority_live|freeze_authority_live|permanentDelegate|transferHook/i.test(f)));
     case "exit_failure":
+      /* THE ROUTE, NOT THE COST. This also accepted "round trip above
+         cfg.maxRoundTripSlippagePct" as a confirmed fact; that ceiling was retired on
+         2026-09-07 with the rest of the desk's money judgments (it was measured at a
+         $75 notional while the bot trades about $2). What remains is the fact the
+         bundle can actually establish: the probe did not complete, so nobody has shown
+         this token can be sold. A red team arguing that a coin is EXPENSIVE to leave is
+         welcome to say so in prose — it just no longer counts as a confirmed exit
+         failure, because how much it costs depends on a size only the bot knows. */
       return Boolean(evidence?.exitProbe?.error) ||
-        Number(evidence?.exitProbe?.roundTripLossPct) > cfg.maxRoundTripSlippagePct;
+        evidence?.exitProbe?.roundTripLossPct == null;
     case "holder_control":
       return Number(evidence?.holders?.top1Pct) > 50 || evidence?.holders?.bundleSuspect === true;
     case "wash_trading":

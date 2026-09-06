@@ -326,21 +326,24 @@ console.log("\nTHE OWNER CAN SEE THE DEMAND, AND ONLY THE OWNER");
   ok("a signed-out visitor sees no demand count", anon.json?.botOperatorDemand === null,
     `botOperatorDemand=${JSON.stringify(anon.json?.botOperatorDemand)}`);
 
-  /* THE SIZE THE DESK MEASURES AN EXIT AT, vs the size the floors asked for. On
-     2026-09-07 the probe was $75 while the house floor's fixed size was 0.4 SOL (~$41)
-     and the bot's real buys were ~$2 — a mismatch that stalled publishing for a day and
-     was visible only by reading config.js and copy.js side by side. It rides this
-     branch now. Owner-only: it names other floors' configured sizes. */
-  const probe = asBoss2.json?.sizingProbe;
-  ok("the HQ branch carries the exit-probe sizing check",
-    probe != null && probe.targetSizeUsd > 0 && probe.capSol > 0 && Array.isArray(probe.floorsOverProbe),
-    JSON.stringify(probe));
-  ok("...and says which SOL price the SOL cap was converted at",
-    typeof probe?.solUsdSource === "string" && probe.solUsd > 0,
-    `SOL $${probe?.solUsd} via ${probe?.solUsdSource}`);
-  ok("a tenant is not shown other floors' configured sizes",
-    asTenant.json?.sizingProbe === null && anon.json?.sizingProbe === null,
-    `tenant=${JSON.stringify(asTenant.json?.sizingProbe)} anon=${JSON.stringify(anon.json?.sizingProbe)}`);
+  /* `sizingProbe` WAS HERE, and it is deleted along with the ceiling it reported.
+     It listed which floors had configured a per-trade size larger than the desk's exit
+     probe measured — the reading that diagnosed the 2026-09-07 stall (probe $75, house
+     floor 0.4 SOL, the bot's real buys ~$2). The diagnosis was right and the CEILING was
+     the bug: the desk was capping deliveries to a notional it had invented. With no cap,
+     "this tenant asked for more than we measured" is not a discrepancy at all — it is a
+     tenant configuring their own bot, which is the arrangement.
+     The number that made the diagnosis is still on the operator's screen, one payload
+     up: the /screen block publishes routeProbeSizeUsd with its provenance. What is gone
+     is the comparison against other floors' private settings — which, now that it means
+     nothing, is a privacy cost with no benefit. */
+  ok("the retired per-floor sizing comparison is not served to anyone",
+    asBoss2.json?.sizingProbe === undefined && asTenant.json?.sizingProbe === undefined
+    && anon.json?.sizingProbe === undefined,
+    `boss=${JSON.stringify(asBoss2.json?.sizingProbe)} tenant=${JSON.stringify(asTenant.json?.sizingProbe)}`);
+  ok("...and no floor's configured size appears on any branch of the heartbeat",
+    ![asBoss2, asTenant, anon].some((r) => /floorsOverProbe|fixedUsd/.test(JSON.stringify(r.json ?? {}))),
+    "no floorsOverProbe on the owner's branch or anyone else's");
 }
 
 server.close();

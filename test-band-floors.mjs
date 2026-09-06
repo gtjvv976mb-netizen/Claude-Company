@@ -73,9 +73,26 @@ ok("the PAID screen refuses an unreadable pool whose exit CANNOT be measured",
   codes(paidEv({ liq: null, probe: { roundTripLossPct: null, error: "no route" } })).includes("unverified_exit"),
   "unknown depth plus unknown exit is refused — unverified is not safe");
 
-ok("...and refuses one that measures WORSE than the ceiling",
-  codes(paidEv({ liq: null, probe: { roundTripLossPct: cfg.maxRoundTripSlippagePct + 1 } })).includes("cannot_exit"),
-  `round trip over the ${cfg.maxRoundTripSlippagePct}% ceiling`);
+/* THE COST HALF OF THIS PAIR IS GONE (2026-09-07). It read: a round trip over
+   cfg.maxRoundTripSlippagePct is refused as `cannot_exit`. That ceiling was measured at
+   a $75 notional while the bot's real clip is about $2, it killed 12 of the desk's last
+   100 coins with nothing else against them, and the owner's rule is that the desk says
+   WHAT and WHEN and never what a trade costs. The bot enforces it at its own size
+   (executor/jupiter.mjs:1341-1350, executor/poller.mjs:1234-1253).
+   The distinction this section is really about — an unreadable pool is not a thin pool —
+   is untouched, and both surviving halves are asserted: a probe that cannot measure is
+   still refused, and a probe that measures EXPENSIVELY is now the bot's problem. */
+{
+  /* Compared against the CHEAP case rather than against an empty list: this fixture also
+     trips `too_new` (its age lives on derived, not on pair), which is unrelated and would
+     have made a bare "no failures" assertion fail for the wrong reason. What must be true
+     is that a 40% round trip and a 4.53% one are screened IDENTICALLY. */
+  const dear = codes(paidEv({ liq: null, probe: { roundTripLossPct: 40 } }));
+  const cheap = codes(paidEv({ liq: null, probe: { roundTripLossPct: 4.53 } }));
+  ok("...but an expensive round trip is no longer the desk's refusal to make",
+    !dear.includes("cannot_exit") && JSON.stringify(dear) === JSON.stringify(cheap),
+    `40% -> [${dear.join(",")}] is identical to 4.53% -> [${cheap.join(",")}]`);
+}
 
 ok("...but does NOT refuse one that measures fine, merely because depth is unreadable",
   !codes(paidEv({ liq: null, probe: { roundTripLossPct: 4.53 } })).includes("thin_liquidity"),

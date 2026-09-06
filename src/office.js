@@ -132,16 +132,48 @@ export function executorFeedPayload(floorNo, rawAfter = 0) {
     decisions,
     rules: { take_profit_x: floorSettings.take_profit_x ?? 0,
              fixed_sol: floorSettings.fixed_sol ?? 0,
+             /* The bot's size comes from the bot's own FIXED_SOL / MAX_SOL_PER_TRADE,
+                never from this. Kept on the wire for the tenant's screen and for older
+                clients that read it; stated non-binding so no new one honours it. */
+             size_binding: false,
              mcap_tier: floorSettings.mcap_tier ?? "any" },
     events: rows.map((r) => ({
       id: r.id, event_id: `${floorNo}:${r.kind}:${r.id}`, call_id: r.call_id,
       type: r.kind, mint: r.mint, symbol: r.symbol,
       side: r.kind === "entry" ? "buy" : "sell",
+      /* SIZE RIDES ALONG AS AN ESTIMATE AND SAYS SO ON THE WIRE.
+       *
+       * `size_sol` is the desk's advisory number: what the floor's board shows, and what
+       * the desk recorded it thought at publication. WALL-ST-E does not read it when
+       * sizing — executor/strategy.mjs and executor/poller.mjs both refuse it at length
+       * — because the trading team must never determine how much is bought (owner,
+       * 2026-09-07). This flag is here so that a client, a future bot, or the next person
+       * reading this payload does not have to go and find out: the field is labelled
+       * non-binding IN the message rather than in a comment two repositories away.
+       *
+       * `fixed_sol` NO LONGER RIDES ON THE EVENT AT ALL. It was the FLOOR'S configured
+       * per-trade size, copied onto every published ticket — a per-event field whose only
+       * possible reading is "buy this much", sitting inside the one message the bot polls
+       * to decide what to do. Labelling it non-binding was never as good as not sending
+       * it: the desk has no business putting a SOL amount on a call. It survives in the
+       * `rules` block above, where it is the tenant's own screen setting rather than part
+       * of the desk's instruction, and where `size_binding: false` states its status. */
+      size_binding: false,
       size_sol: r.size_sol ?? null, entry_ref: r.entry_ref,
       entry_lo: r.entry_lo, entry_hi: r.entry_hi, stop: r.stop, target: r.target,
       current_mark: r.current_mark, current_mark_at: r.current_mark_at,
       conviction: r.conviction, category: r.category, launchpad: r.launchpad,
-      liq_at_call: r.liq_at_call, rt_loss_at_call: r.rt_loss_at_call,
+      liq_at_call: r.liq_at_call,
+      /* AN OBSERVATION, NOT AN INSTRUCTION. `rt_loss_at_call` is what the desk's exit
+         probe MEASURED at publication time, at a notional the desk chose — kept because
+         it is a genuine record of the book on the day, and because grading a closed call
+         wants it. It is not a cost the bot should honour, compare against, or act on: the
+         bot quotes its own round trip on its own lamports immediately before it signs.
+         Labelled on the wire for the same reason `size_binding` is — so nobody has to
+         read another repository to learn which fields are the desk telling you something
+         and which are the desk telling you what it saw. */
+      rt_loss_at_call: r.rt_loss_at_call,
+      rt_loss_at_call_is_observation: true,
       mcap_at_call: r.mcap_at_call,
       // The band's clock. The bot sells on it whether or not the target printed.
       hold_band: r.hold_band ?? null,
@@ -149,7 +181,6 @@ export function executorFeedPayload(floorNo, rawAfter = 0) {
       hold_max_ms: r.hold_max_ms ?? null,
       policy_version: r.policy_version,
       take_profit_x: floorSettings.take_profit_x ?? 0,
-      fixed_sol: floorSettings.fixed_sol ?? 0,
       code: r.close_reason ?? null, urgency: r.urgency, ts: r.created_at,
       /* THE DESK'S OWN CLOCK RIDES WITH THE EVENT. `ts` is when the ALERT row was
          written, not when the call opened or closed. The bot mirrors the desk's levels
@@ -341,9 +372,11 @@ export function sanitizeExecutorHealth(value) {
  * short anyway, how often the age guard had to force a cohort open. Regularly reaching
  * L3/L4 is evidence that the funnel is too tight or the market is bad — and the correct
  * response to that is to widen the funnel or wait, never to lower the safety floor.
- * Measured on the last 100 kills, ~60 are safety mechanics (18 cannot_exit alone, where
- * the round-trip probe PROVED the position could not be sold), so a quota filled from
- * that pool is three bags rather than three trades.
+ * Measured on the last 100 kills, most are safety mechanics — honeypot controls, the
+ * launch farm, the graduate dead zone — so a quota filled from that pool is three bags
+ * rather than three trades. (Re-measured 2026-09-07: 12 of the 100 died only on
+ * `cannot_exit`, a cost ceiling that has since been deleted, so the safety pool is
+ * smaller than this note used to claim.)
  * ═══════════════════════════════════════════════════════════════════════════════════ */
 
 /** Fewer than this many CLOSED cycles is an anecdote, not a pattern. One bad night on a
@@ -1053,6 +1086,12 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           // own permanent record — never estimated, never decorative.
           const q = (sql) => { try { return db.prepare(sql).get()?.n ?? 0; } catch { return 0; } };
           const rows = (sql) => { try { return db.prepare(sql).all(); } catch { return []; } };
+          /* Resolved once: the screen block below publishes both the route-probe amount
+             and where it came from, and asking twice could straddle a heartbeat.
+             `probeSizeCapSol()` used to be read here and is deleted — it returned a SOL
+             CEILING, and the desk no longer has a ceiling to report (owner, 2026-09-07:
+             the desk says what and when, never how much). */
+          const routeProbe = copy.botProbeNotional();
           return json(200, {
             building: {
               floorsTotal: occupancy.total,   // was hardcoded 50; tower.FLOORS is the truth
@@ -1088,8 +1127,19 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               maxVolToLiqRatio: cfg.screen.maxVolToLiqRatio,
               maxFdvToLiqRatio: cfg.screen.maxFdvToLiqRatio,
               maxMarketCapUsd: cfg.screen.maxMarketCapUsd ?? null,
-              exitProbeSizeUsd: cfg.targetSizeUsd,
-              maxRoundTripPct: cfg.maxRoundTripSlippagePct,
+              /* THE AMOUNT THE ROUTE PROBE QUOTES AT, and its provenance. It is a TEST
+                 amount: the desk asks Jupiter whether this token can be sold at all, and
+                 a quote needs a number. It is measured off a live bot's declared
+                 per-trade cap rather than chosen, and it bounds nothing.
+                 `maxRoundTripPct` was published beside it and is gone with the ceiling
+                 it named — the desk no longer refuses a coin for what leaving it costs
+                 (12 of the last 100 kills died on that ceiling alone, measured at $75
+                 for a bot trading about $2). The bot enforces it at its real size:
+                 executor/jupiter.mjs:1341-1350. */
+              routeProbeSizeUsd: routeProbe.sizeUsd,
+              routeProbeSizeSource: routeProbe.source ?? null,
+              routeProbeFromBot: routeProbe.fromBot === true,
+              routeProbeIsTestOnly: true,
               oneCallAtATime: mandate.SEQUENTIAL,
               maxLiveCalls: mandate.MAX_LIVE_CALLS,
               /* What each seat is actually worth to the composite. Published because
@@ -1395,15 +1445,15 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
                 .map((r) => ({ symbol: r.symbol, verdict: r.verdict, reason: r.reason,
                   sizeSol: r.size_sol, minutesAgo: Math.round((now - r.delivered_at) / 60000) }));
             } catch (e) { return [{ error: String(e.message) }]; } })(),
-            /* THE SIZE THE DESK MEASURES AN EXIT AT vs THE SIZE THE FLOORS ASKED FOR.
-               On 2026-09-07 the desk probed exits at $75, derived every stop floor from
-               that cost, and withheld candidates as "stop_inside_costs" — while the
-               house floor's configured size was 0.4 SOL (~$41) and the executor's hard
-               ceiling was 0.05 SOL (~$5.17), so the bot's last two live buys were $1.81
-               and $2.20. Nothing on any screen said so; it took reading config.js and
-               copy.js together. It is one line here now. Owner-only, like the rest of
-               this branch: it names other floors' configured sizes. */
-            sizingProbe: hqViewer ? copy.probeSizingMismatch() : null,
+            /* `sizingProbe` (copy.probeSizingMismatch) WAS HERE and is deleted with the
+               ceiling it reported. It listed which floors had configured a per-trade
+               size larger than the desk's exit probe measured — a mismatch that only
+               mattered while the desk capped deliveries to its own probe. It does not
+               cap anything now, so "this tenant asked for more than we measured" is no
+               longer a discrepancy; it is a tenant configuring their own bot, which is
+               the arrangement. The reading that made the original diagnosis
+               (probe $75 vs a real clip near $2) is still on the screen above as
+               routeProbeSizeUsd with its provenance. */
             /* HOW MANY FLOORS WANT HQ TO RUN THEIR BOT.
                Put HERE, in the heartbeat's HQ branch, rather than on
                /executor/status: the demand signal is a count across every floor,
@@ -1901,6 +1951,13 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
                level it was published at, so an L3 call cannot look like an L0 one. */
             return json(200, { feed: withEscalation(copy.feedFor(floorNo, queryLimit(url, 25, 200))), settings,
                                appetites: copy.APPETITES, rent: leasing.rentStatus(floorNo),
+                               /* WHO SIZES THE TRADE, ON THE SCREEN RATHER THAN IN A FILE.
+                                  The owner must be able to SEE that size is the bot's and
+                                  what notional the desk is probing at, with its provenance
+                                  — a rule nobody can observe is a rule that quietly stops
+                                  holding. No secret is in here: a per-trade cap and a SOL
+                                  price, both already public on the floor's own board. */
+                               probeSizing: copy.probeSizingForFloor(floorNo),
                                record: perf.recordFor(floorNo) });
           }
           if (!me) return json(401, { error: "sign in with your wallet first" });

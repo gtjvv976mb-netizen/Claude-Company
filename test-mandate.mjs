@@ -10,12 +10,14 @@
  */
 import { eligibility, contenderScore, pickOne, bookState, MAX_LIVE_CALLS } from "./src/mandate.js";
 import { cfg } from "./src/config.js";
-/* A fixture size legal under WHATEVER the probe notional currently is. It was a hard-coded
-   50 — fine while the exit probe measured $75, and an automatic size_exceeds_exit_probe veto
-   the day it became $15. The fixture broke, not the code: compliance.js refuses
-   position_size_usd above cfg.targetSizeUsd * 1.001, and risk-rails caps real sizes at that
-   same number, so 80% of it is always inside the bar whatever the probe becomes. */
-const PROBE_SAFE_SIZE_USD = Number((cfg.targetSizeUsd * 0.8).toFixed(2));
+/* A fixture size that clears what compliance STILL checks. It chased the probe notional
+   for a while (cfg.targetSizeUsd * 0.8) because size_exceeds_exit_probe vetoed anything
+   above it; that veto and that config key were both removed on 2026-09-07 — the desk
+   does not judge how much is bought. What survives is the desk's own paper-book
+   arithmetic (size <= equityUsd, and the recomputed loss inside maxRiskPct of it), so
+   the fixture is now a plain small number that satisfies it and nothing tracks a
+   removed constant. */
+const PAPER_SIZE_USD = 12;
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => {
@@ -33,7 +35,7 @@ const good = (over = {}) => ({
   pm: { decision: "PROPOSE", conviction: 70, thesis: "t", invalidation: "deployer sells" },
   redteam: { verdict: "survives", headline: "h" },
   compliance: { pass: true, violations: [] },
-  risk: { position_size_usd: PROBE_SAFE_SIZE_USD, stop_price: 0.8, max_loss_usd: Number((PROBE_SAFE_SIZE_USD * 0.20).toFixed(2)) },
+  risk: { position_size_usd: PAPER_SIZE_USD, stop_price: 0.8, max_loss_usd: Number((PAPER_SIZE_USD * 0.20).toFixed(2)) },
   ceo: { ruling: "APPROVE", order_size_usd: 50 },
   order: { size: 50 },
   ticket: { stop_price: 0.8, take_profit: [{ price: 1.9 }] },
@@ -183,22 +185,52 @@ console.log("\nSEQUENCING — the book gate");
 console.log("\nCOMPLIANCE — a WATCH ticket must be audited exactly like a PROPOSE ticket");
 {
   const { complianceCheck } = await import("./src/agents/compliance.js");
-  // A ticket whose first target is 4% away while the measured round trip costs 3%:
-  // the "machine for paying the market" the edge_below_cost rule exists to stop.
+  /* A ticket with a STOP ABOVE ITS ENTRY ZONE — arithmetic that is false whatever the
+     verdict behind it, which is the property this section exists to prove is audited on
+     a WATCH and not only on a PROPOSE.
+     It used to be a bad-EDGE ticket (first target 4% away against a 3% round trip, the
+     "machine for paying the market"). That rule — edge_below_cost — was removed on
+     2026-09-07: "5x the round trip" is only meaningful at the size the round trip was
+     quoted at, and the desk was quoting $75 for a bot that trades about $2. The bot
+     makes the same judgment on its own numbers (executor/strategy.mjs:161-164, R_net,
+     "costs eat the target"). The WATCH-is-audited-too claim is unchanged; only the
+     violation used to demonstrate it moved to one the desk still owns. */
   const badEdge = {
     entry_zone_low: 0.9, entry_zone_high: 1.1, stop_price: 0.8,
     take_profit: [{ price: 1.04, pct_to_sell: 100 }], max_slippage_bps: 500,
   };
+  // entry_zone_low 0.9 with a stop at 0.95 => stop_above_entry, on either verdict.
+  badEdge.stop_price = 0.95;
   const ev = { pair: { priceUsd: 1.0 }, exitProbe: { roundTripLossPct: 3 } };
-  const risk = { position_size_usd: PROBE_SAFE_SIZE_USD, stop_price: 0.8, max_loss_usd: Number((PROBE_SAFE_SIZE_USD * 0.23).toFixed(2)) };
+  /* 0.05, not 0.08: loss at stop is (1.0 - 0.95) / 1.0. The old 0.08 carried the 3%
+     round trip that compliance used to add, and that term is gone — the desk prices its
+     own paper record off the stop and nothing else. */
+  const risk = { position_size_usd: PAPER_SIZE_USD, stop_price: 0.95, max_loss_usd: Number((PAPER_SIZE_USD * 0.05).toFixed(2)) };
 
   const asPropose = complianceCheck({ pm: { decision: "PROPOSE" }, risk, redteam: {}, ticket: badEdge, ev });
-  ok("a bad-edge PROPOSE ticket is vetoed (unchanged)", asPropose.pass === false,
+  ok("a broken-arithmetic PROPOSE ticket is vetoed (unchanged)",
+    asPropose.pass === false && asPropose.violations.some((v) => v.code === "stop_above_entry"),
     asPropose.violations.map((v) => v.code).join(","));
 
   const asWatch = complianceCheck({ pm: { decision: "WATCH" }, risk, redteam: {}, ticket: badEdge, ev });
-  ok("a bad-edge WATCH ticket is ALSO vetoed (the hole)", asWatch.pass === false,
+  ok("the same WATCH ticket is ALSO vetoed (the hole this section guards)",
+    asWatch.pass === false && asWatch.violations.some((v) => v.code === "stop_above_entry"),
     asWatch.violations.map((v) => v.code).join(","));
+
+  /* AND THE MONEY VETOES ARE GONE FROM BOTH VERDICTS. A ticket whose first target is
+     4% away against a 3% measured round trip used to be refused as edge_below_cost; it
+     must now reach the reader, because whether 4% is worth chasing depends on a cost
+     that depends on a size this desk does not know. */
+  const thinEdge = { entry_zone_low: 0.9, entry_zone_high: 1.1, stop_price: 0.8,
+    take_profit: [{ price: 1.04, pct_to_sell: 100 }], max_slippage_bps: 500 };
+  for (const decision of ["PROPOSE", "WATCH"]) {
+    const r = complianceCheck({ pm: { decision }, redteam: {}, ticket: thinEdge, ev,
+      risk: { position_size_usd: PAPER_SIZE_USD, stop_price: 0.8,
+        max_loss_usd: Number((PAPER_SIZE_USD * 0.20).toFixed(2)) } });
+    ok(`a thin-edge ${decision} ticket is no longer refused for its cost`,
+      !r.violations.some((v) => ["edge_below_cost", "stop_inside_costs", "size_exceeds_exit_probe"].includes(v.code)),
+      r.violations.map((v) => v.code).join(",") || "no violations");
+  }
 
   // A stop that is not below the entry zone must be caught on a WATCH too.
   const badStop = { ...badEdge, stop_price: 1.2, take_profit: [{ price: 2.0, pct_to_sell: 100 }] };
@@ -210,7 +242,12 @@ console.log("\nCOMPLIANCE — a WATCH ticket must be audited exactly like a PROP
   // And a clean WATCH ticket must still pass — the fix must not veto everything.
   const goodTicket = { entry_zone_low: 0.95, entry_zone_high: 1.05, stop_price: 0.8,
     take_profit: [{ price: 1.6, pct_to_sell: 100 }], max_slippage_bps: 500 };
-  const cleanWatch = complianceCheck({ pm: { decision: "WATCH" }, risk, redteam: {}, ticket: goodTicket, ev });
+  /* Its own risk seat, because `risk` above now carries the 0.95 stop that makes
+     badEdge illegal — reusing it here would fail on stop_mismatch and say nothing about
+     whether a clean ticket passes. */
+  const cleanRisk = { position_size_usd: PAPER_SIZE_USD, stop_price: 0.8,
+    max_loss_usd: Number((PAPER_SIZE_USD * 0.20).toFixed(2)) };
+  const cleanWatch = complianceCheck({ pm: { decision: "WATCH" }, risk: cleanRisk, redteam: {}, ticket: goodTicket, ev });
   ok("a clean WATCH ticket still passes", cleanWatch.pass === true,
     cleanWatch.violations.map((v) => v.code).join(",") || "clear");
 
