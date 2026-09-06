@@ -17,8 +17,19 @@ fs.chmodSync(keyfile, 0o600);
 const PUB = kp.publicKey.toBase58();
 const SECRET = bs58.encode(Buffer.from(kp.secretKey));
 
-const run = (args, env = {}) => spawnSync(process.execPath, [tool, ...args],
-  { encoding: "utf8", env: { ...process.env, KEYPAIR: keyfile, ...env }, cwd: dir });
+/* THE ENVIRONMENT IS PART OF THE FIXTURE. Inheriting process.env made this suite
+   pass on macOS and fail on every systemd host, CI included: a GitHub Actions
+   runner is itself started by systemd, so JOURNAL_STREAM is already in the
+   ambient environment and leaks into every child. The tool then correctly
+   refused to emit key material, and the assertions that were not about that
+   refusal read the wrong message. JOURNAL_STREAM is cleared here and set only by
+   the case that tests it. */
+const run = (args, env = {}) => {
+  const base = { ...process.env, KEYPAIR: keyfile };
+  delete base.JOURNAL_STREAM;
+  return spawnSync(process.execPath, [tool, ...args],
+    { encoding: "utf8", env: { ...base, ...env }, cwd: dir });
+};
 
 let n = 0;
 const ok = (name, fn) => { fn(); n++; console.log(`PASS  ${name}`); };
