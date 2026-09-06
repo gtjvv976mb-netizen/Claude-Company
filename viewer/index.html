@@ -522,7 +522,7 @@ footer.lobby .fine{max-width:100ch}
       </div>
       <p class="lede reveal" data-delay="1">Every sweep starts wide — a few hundred coins, some minutes old — and gets narrower at every gate. The cheapest gate does most of the killing, and it is code, not a model. What survives is worked up by five analysts who <b>cannot read each other</b>, then attacked by a seat whose only job is to refute. Watch a sweep run.</p>
       <div class="funnelwrap reveal" data-delay="2">
-        <canvas id="funnelCanvas" width="1200" height="520" aria-label="An animated sweep: hundreds of coins enter, most are killed at the free screen, the survivors pass five blind analysts, the red team, a compliance veto and the CEO, and one unsigned ticket leaves for the bot." role="img"></canvas>
+        <canvas id="funnelCanvas" width="1200" height="520" aria-label="A ledger of one sweep: 380 coins enter, 80 survive the free screener, 36 the five blind analysts, 7 the red team, 5 compliance and 3 the CEO — about 0.74%. The dead accumulate beneath, and the two gates that kill most cost nothing." role="img"></canvas>
         <div class="fgates">
           <div class="fgate"><span class="kicker">01 · Scout</span><h4>Wide, and only on the launchpad</h4><p>The launch feed and the minute candles behind it, read from the block a coin appears in. Roughly 380 a sweep on Solana; ~20 new PONS pools a minute on Robinhood.</p></div>
           <div class="fgate code"><span class="kicker">02 · Screener · code</span><h4>About 79% die here, for free</h4><p>Liquidity, age, wash ratio, a real buy-then-sell probe that proves an exit exists. No model, no mood, no bill.</p></div>
@@ -532,7 +532,7 @@ footer.lobby .fine{max-width:100ch}
           <div class="fgate"><span class="kicker">12 · CEO → ticket</span><h4>The only seat that makes a call</h4><p>What leaves the building is an unsigned ticket: route, size, stop, targets, the band's clock. Always unsigned. A whole cycle lands around $4.</p></div>
         </div>
       </div>
-      <p class="funnelnote reveal" data-delay="3" id="funnelNote">Dots are coins. Grey ones died at a gate. The one that reaches the right edge is a ticket. <button class="funnelplay" type="button" id="funnelPlay" aria-pressed="false">Play the sweep</button></p>
+      <p class="funnelnote reveal" data-delay="3" id="funnelNote">Six gates, left to right. The band is how many are still alive on a log scale; the solid block inside it is the true share. Below it, the dead, drawn linearly. The two gates that cost nothing do most of the killing. <button class="funnelplay" type="button" id="funnelPlay" aria-pressed="true">Pause the sweep</button></p>
     </div>
   </section>
 
@@ -1124,133 +1124,531 @@ Array.prototype.forEach.call(document.querySelectorAll(".steps"), function(list)
   else { var io = new IntersectionObserver(function(es){ if (es[0].isIntersecting) { light(); io.disconnect(); } }, { threshold: 0.35 }); io.observe(list); }
 });
 
-/* ── THE FUNNEL — a sweep, drawn ───────────────────────────────────────
-   Hundreds of coins enter at the left. At each gate a share dies (turns to ash
-   and settles); the survivors continue. The five analyst lanes are separate
-   channels with walls: nothing crosses. The red team gate strikes; compliance
-   is a bar; the CEO's is a narrow door; one ticket leaves right. The shares are
-   the desk's own published rates (79% at the screen, ~1 in 4 through the
-   analysts, "nine attacked, nine refuted" for the red team is dramatised as a
-   near-total kill), so the picture is honest about how little survives. */
+/* ── THE FUNNEL — one sweep, read as a ledger ──────────────────────────
+   Three registers stacked on one x, and the argument is the vertical disagreement
+   between them: a stepped SURVIVOR ribbon on a declared log scale (top), the DEAD
+   accumulating as a linear ash staircase directly beneath it, and a categorical
+   COST row under that. The ribbon collapses hardest exactly where the cost row is
+   a 2px hairline — the two gates that kill 302 of 380 cost nothing.
+
+   Six bays, centres at 100 + 200i. `.fgates` below is repeat(6,1fr) over the same
+   width, so bay i sits dead on card i on desktop. That alignment is a bonus, not
+   load-bearing: the cards collapse to 3 columns at ≤860px and 2 at ≤520px.
+
+   NOTHING IS SIMULATED. Every mark is a pure function of elapsed time — no particle
+   array, no ash array, no RNG state, no integrated positions. There is therefore no
+   state the loop can stall in, and any single frame is a complete, correct chart.
+
+   AUTOPLAY IS THE DEFAULT, ON PURPOSE. This block does NOT consult `reduced`
+   (owner instruction, 2026-09-06: they run prefers-reduced-motion ON, which is
+   exactly why this chart read as frozen to them). The Pause control is the way to
+   stillness. Do not "restore" a reduced-motion gate here as a courtesy — it was
+   removed deliberately, and the button already offers what the OS setting asks for.
+
+   REGISTRATION OVER ROLLING COUNTS. The picture is drawn TWICE a frame: once dim
+   (the finished ledger) and once at full opacity clipped to x < front (a highlighter
+   walking it). Both passes draw the SAME final numbers, so the two registers are
+   pixel-identical and no bay ever shows a half-lit rolling number over a dim final
+   one. The running total lives in the tape at top right, which has no dim twin.
+
+   COST IS CATEGORICAL, NOT QUANTITATIVE. The repo publishes exactly three cost
+   figures — $1.29–$1.44 a workup and Red Team at 31% of all spend (src/config.js
+   :175-176, measured 2026-08-29), and ~$4 a cycle (card 12 below) — and no per-seat
+   split. Free code gates get a hairline, paid model seats a uniform block: the
+   asymmetry is a difference in SHAPE. Do not invent a per-seat dollar bar. */
 var cv = document.getElementById("funnelCanvas");
 if (cv && cv.getContext) {
   var ctx = cv.getContext("2d");
-  /* The gates below are authored in a fixed 1200x520 space, so keep that as the LOGICAL
-     coordinate system and scale the backing store to device pixels — the fixed 1200
-     buffer was being stretched ~1.78x on a 2x display and the chart read soft next to
-     the type around it. */
-  var W = 1200, H = 520;
-  var DPR = Math.min(window.devicePixelRatio || 1, 2);
-  if (cv.width !== W * DPR) { cv.width = W * DPR; cv.height = H * DPR; }
-  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  var GATES = [
-    { x: 250,  name: "screen",     kill: 0.79, color: "#9fd8de" },
-    { x: 470,  name: "analysts",   kill: 0.55, color: "#e9b158", lanes: 5 },
-    { x: 700,  name: "redteam",    kill: 0.80, color: "#e2634f" },
-    { x: 880,  name: "compliance", kill: 0.35, color: "#9fd8de" },
-    { x: 1040, name: "ceo",        kill: 0.40, color: "#ffd987" },
-  ];
-  var TICKET_X = 1160;
-  var particles = [], ash = [], t0 = null, cycleMs = 14000, running = false, seed = 7;
-  function rnd(){ seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
-  function spawn(){
-    particles = []; ash = []; seed = 7;
-    for (var i = 0; i < 380; i++) {
-      particles.push({ x: 40 + rnd() * 120, y: 60 + rnd() * (H - 120), vy: 0, lane: -1,
-        delay: rnd() * 2600, alive: true, gate: 0, color: rnd() < 0.5 ? "#e9b158" : "#3ee063", r: 1.6 + rnd() * 1.4 });
-    }
+  /* Authored in a fixed 1200x520 LOGICAL space; the backing store is scaled to device
+     pixels so the chart is crisp on Retina. Assigning cv.width RESETS the transform —
+     re-apply setTransform after every assignment. */
+  var W = 1200, H = 520, DPR = 1;
+  var HAS_LS = ("letterSpacing" in ctx);
+
+  /* ── palette: the page's own tokens, read once ─────────────────────────── */
+  var CSSVAR = getComputedStyle(document.documentElement);
+  function tok(name, fallback){ var v = CSSVAR.getPropertyValue(name); v = v ? v.trim() : ""; return v || fallback; }
+  var INK       = tok("--ink", "#f4ecd8"),
+      INK_SOFT  = tok("--ink-soft", "#d9cdb1"),
+      INK_FAINT = tok("--ink-faint", "#a49b86"),
+      ASHC      = tok("--ash", "#6a6470"),
+      RULE      = tok("--floor-rule", "rgba(244,236,216,.12)"),
+      SOL       = tok("--sol", "#e9b158"),
+      SOL2      = tok("--sol-2", "#ffd987"),
+      RH2       = tok("--rh-2", "#3ee063"),
+      DANGER    = tok("--danger", "#e2634f"),
+      CYAN      = "#9fd8de";
+  /* left to right: a live field → free code → brass workup → refutation → free code
+     → one gold ticket. Gold means survived and appears nowhere else. */
+  var HUE = [RH2, CYAN, SOL, DANGER, CYAN, SOL2];
+  function rgbOf(hex){
+    var h = String(hex).trim();
+    if (h.charAt(0) !== "#") return "160,160,160";
+    if (h.length === 4) h = "#" + h.charAt(1) + h.charAt(1) + h.charAt(2) + h.charAt(2) + h.charAt(3) + h.charAt(3);
+    return parseInt(h.substr(1, 2), 16) + "," + parseInt(h.substr(3, 2), 16) + "," + parseInt(h.substr(5, 2), 16);
   }
-  function draw(now){
-    if (t0 === null) t0 = now;   // NOT !t0 — the static path sets t0 = 0, which is falsy
-    var el = (now - t0) % cycleMs;
-    if (el < 30 && particles.length && particles.every(function(p){ return !p.alive || p.x >= TICKET_X; })) spawn();
-    ctx.clearRect(0, 0, W, H);
-    // lanes for the analysts: five channels, walls between
-    var laneTop = 70, laneH = (H - 140) / 5;
-    ctx.save();
-    for (var l = 0; l < 5; l++) {
-      var y = laneTop + l * laneH;
-      ctx.fillStyle = "rgba(233,177,88,0.05)"; ctx.fillRect(GATES[1].x - 60, y + 4, 140, laneH - 8);
-      ctx.fillStyle = "rgba(244,236,216,0.14)"; ctx.fillRect(GATES[1].x - 60, y, 140, 1);
-    }
-    ctx.fillStyle = "rgba(244,236,216,0.14)"; ctx.fillRect(GATES[1].x - 60, laneTop + 5 * laneH, 140, 1);
-    ctx.restore();
-    // gates
-    GATES.forEach(function(g){
-      ctx.save();
-      ctx.strokeStyle = g.color; ctx.globalAlpha = 0.55; ctx.lineWidth = 2;
-      ctx.setLineDash(g.name === "compliance" ? [] : [6, 6]);
-      ctx.beginPath(); ctx.moveTo(g.x, 40); ctx.lineTo(g.x, H - 40); ctx.stroke();
-      ctx.restore();
-    });
-    // the ticket slot
-    ctx.save(); ctx.fillStyle = "rgba(255,217,135,0.12)"; ctx.fillRect(TICKET_X - 6, H / 2 - 40, 12, 80);
-    ctx.strokeStyle = "#ffd987"; ctx.globalAlpha = 0.7; ctx.strokeRect(TICKET_X - 6, H / 2 - 40, 12, 80); ctx.restore();
-    // particles
-    var speed = W / 9000; // px per ms across the width in ~9s
-    particles.forEach(function(p){
-      if (!p.alive) return;
-      var age = el - p.delay; if (age < 0) { drawDot(p, 0.15); return; }
-      var dt = 16;
-      p.x += speed * dt * (1 + (p.gate >= 2 ? 0.35 : 0));
-      // lanes: after the screen, particles settle into one of five channels
-      if (p.gate === 1 && p.lane < 0) p.lane = Math.floor(rnd() * 5);
-      if (p.lane >= 0 && p.x < GATES[2].x) { var ty = laneTop + p.lane * laneH + laneH / 2; p.y += (ty - p.y) * 0.08; }
-      if (p.x >= GATES[2].x) { p.y += (H / 2 - p.y) * 0.05; }
-      var g = GATES[p.gate];
-      if (g && p.x >= g.x) {
-        if (rnd() < g.kill) { p.alive = false; ash.push({ x: p.x, y: p.y, vy: 0.4 + rnd(), a: 0.9, r: p.r, red: g.name === "redteam" }); }
-        else p.gate++;
+  var HUE_RGB = [], ASH_RGB = rgbOf(ASHC), hx;
+  for (hx = 0; hx < 6; hx++) HUE_RGB.push(rgbOf(HUE[hx]));
+  var GRIDC = "rgba(244,236,216,.055)", WALLC = "rgba(244,236,216,.20)",
+      RULE_A = "rgba(244,236,216,.16)", RULE_B = "rgba(244,236,216,.10)";
+
+  /* ── the model. Survivors are round-half-up of 380 × the published rates; the kills
+     are the differences of the ROUNDED values, so 300+44+29+2+2 = 377 and 377+3 = 380
+     exactly. Rates are printed as "N% KILLED" and never as a derived survival ratio —
+     "65% LIVE" at compliance would contradict 5/7 = 71% on the same frame. ───────── */
+  var N    = [380, 80, 36, 7, 5, 3];
+  var KILL = [300, 44, 29, 2, 2];
+  var DEAD = [0, 300, 344, 373, 375, 377];
+  var SUB  = ["380 SWEPT · 100%", "79% KILLED · 21%", "55% KILLED · 9.45%",
+              "80% KILLED · 1.89%", "35% KILLED · 1.23%", "40% KILLED · 0.74%"];
+  var H1   = ["01 · SCOUT", "02 · SCREENER", "03–06 · ANALYSTS", "07 · RED TEAM", "11 · COMPLIANCE", "12 · CEO"];
+  var H2   = ["THE LAUNCHPAD FEED", "CODE · NO MODEL", "FIVE, BLIND TO EACH OTHER",
+              "PAID TO REFUTE", "CODE · A VETO", "THE ONLY SEAT THAT CALLS"];
+  /* Bay 0 is a PAID block: the scout runs a model (src/config.js models.scout).
+     Calling it free would be the one factual error a reader of floor 47 could catch. */
+  var PAID = [1, 0, 1, 1, 0, 1];
+  var CAP  = ["MODEL TIME · NOT PUBLISHED", "$0.00 · CODE", "$1.29–$1.44 A WORKUP",
+              "31% OF THE BILL", "$0.00 · CODE", "MODEL TIME · THE CALL"];
+  var LANES = ["FORENSICS", "LIQUIDITY", "FLOW", "NARRATIVE", "TECHNICAL"];
+  /* SOURCE OF TRUTH: src/bands.js CAP_BANDS. This is a hardcoded copy of live product
+     config and will go stale silently — re-read that file when the ladder moves. */
+  var BANDS = ["BAND · NANO $5k–$20k · HOLD 1 MIN–30 MIN",
+               "BAND · MICRO $20k–$60k · HOLD 20 MIN–1 H",
+               "BAND · LOW $60k–$100k · HOLD 1 H–5 H",
+               "BAND · MEDIUM $100k–$500k · HOLD 1 H–5 H"];
+  var FOOT_L = "BAND IS LOG (GRIDLINES 1–300); THE SOLID BLOCK INSIDE IT IS THE TRUE LINEAR SHARE. THE DEAD BELOW ARE LINEAR.";
+  var V1 = "The free gates kill 302 of 380.", V2 = " Every dollar is spent on what they let through.";
+  var COMPOSE = "0.21 × 0.45 × 0.20 × 0.65 × 0.60  =  0.74%";
+  /* the three published figures, and nothing else */
+  var LED_T = ["≈$4.00 A CYCLE", " · ", "$1.29–$1.44 A WORKUP", " · ", "RED TEAM ALONE IS ", "31%", " OF THE BILL", " · ", "MEASURED 2026-08-29"];
+  var LED_H = [1, 0, 1, 0, 0, 1, 0, 0, 0];
+  var LED_W = new Float32Array(LED_T.length), LED_TOTAL = 0, V1_W = 0;
+
+  /* ── geometry ─────────────────────────────────────────────────────────── */
+  var CX = [100, 300, 500, 700, 900, 1100], HW = 76;
+  var AXIS = 300, PLOT_TOP = 78, ASH_BOT = 370, XL = 24, XR = 1176;
+  var LOG380 = Math.log(380) / Math.LN10;
+  var TOP = new Float32Array(6), CORE = new Float32Array(6);
+  function yLog(n){ return AXIS - 210 * (Math.log(n) / Math.LN10) / LOG380; }
+  for (hx = 0; hx < 6; hx++) { TOP[hx] = yLog(N[hx]); CORE[hx] = 210 * N[hx] / 380; }
+  var GRID = [1, 3, 10, 30, 100, 300];
+  var ATOP = new Float32Array(6);
+  for (hx = 0; hx < 6; hx++) ATOP[hx] = ASH_BOT - 70 * DEAD[hx] / 380;
+
+  /* fixed texture, seeded ONCE — a Float32Array, never a particle pool */
+  var SEED = 7;
+  function rnd(){ SEED = (SEED * 1664525 + 1013904223) >>> 0; return SEED / 4294967296; }
+  var ASH_SPECK = new Float32Array(90 * 2), SPRAY = new Float32Array(40 * 2), si;
+  for (si = 0; si < 90; si++) { ASH_SPECK[si * 2] = XL + rnd() * (XR - XL); ASH_SPECK[si * 2 + 1] = AXIS + rnd() * (ASH_BOT - AXIS); }
+  for (si = 0; si < 40; si++) { SPRAY[si * 2] = rnd() * 2 - 1; SPRAY[si * 2 + 1] = rnd(); }
+
+  /* ── type: exactly two faces, matching the page. Built once per fit(). ── */
+  var F = {}, TIER = 2;
+  function mono(px){ return '500 ' + px + 'px "JetBrains Mono", ui-monospace, monospace'; }
+  function serif(px){ return '400 ' + px + 'px "Instrument Serif", Georgia, serif'; }
+  function buildFonts(){
+    var t = TIER;
+    F.count   = serif(t === 0 ? 56 : 34);
+    F.verdict = serif(t === 0 ? 48 : 21);
+    F.sub     = mono(t === 2 ? 10 : 13);
+    F.sub5    = mono(10);          // bay 5 has 34px of clear space, whatever the tier
+    F.kill    = mono(t === 2 ? 11 : (t === 1 ? 14 : 30));
+    F.head1   = mono(t === 2 ? 9.5 : 12);
+    F.head2   = mono(8);
+    F.grid    = mono(9);
+    F.cap     = mono(9);
+    F.ledger  = mono(t === 2 ? 10.5 : 13);
+    F.foot    = mono(8.5);
+    F.rail    = mono(t === 2 ? 11 : 13);
+    F.lane    = mono(8);
+    F.compose = mono(t === 2 ? 11 : 12);
+    F.showHead1 = t >= 1; F.showHead2 = t === 2; F.showGridLab = t === 2;
+    F.showCaps = t === 2; F.showFoot = t === 2; F.showRail = t >= 1;
+    F.showSub = t >= 1;  F.showLaneNames = t === 2; F.showLedger = t >= 1;
+    F.showCompose = t >= 1;
+    /* Unsupported letterSpacing renders tracked labels TIGHTER than authored, never
+       wider — but measure the longest tier-2 header anyway so bay 2 cannot crowd. */
+    if (F.showHead2) {
+      var px = 8;
+      while (px > 6.4) {
+        ctx.font = mono(px);
+        if (HAS_LS) ctx.letterSpacing = "0.10em";
+        var w = ctx.measureText(H2[2]).width;
+        if (HAS_LS) ctx.letterSpacing = "0px";
+        if (w <= 148) break;
+        px -= 0.25;
       }
-      if (p.x >= TICKET_X) { p.x = TICKET_X; }
-      drawDot(p, 1);
-    });
-    ash.forEach(function(a){ a.y += a.vy; a.a *= 0.985; ctx.globalAlpha = Math.max(0, a.a); ctx.fillStyle = a.red ? "#e2634f" : "#6a6470"; ctx.beginPath(); ctx.arc(a.x, Math.min(H - 12, a.y), a.r, 0, 6.283); ctx.fill(); ctx.globalAlpha = 1; });
-    ash = ash.filter(function(a){ return a.a > 0.03; });
-    // the survivor at the slot glows
-    var arrived = particles.filter(function(p){ return p.alive && p.x >= TICKET_X; }).length;
-    if (arrived) { ctx.save(); ctx.shadowColor = "#ffd987"; ctx.shadowBlur = 18; ctx.fillStyle = "#ffd987"; ctx.beginPath(); ctx.arc(TICKET_X, H / 2, 5, 0, 6.283); ctx.fill(); ctx.restore(); }
-    // labels
-    ctx.save(); ctx.fillStyle = "rgba(244,236,216,0.55)"; ctx.font = "500 11px JetBrains Mono, ui-monospace, monospace"; ctx.textAlign = "center";
-    var labels = ["SCREEN · CODE", "FIVE BLIND ANALYSTS", "RED TEAM", "COMPLIANCE · CODE", "CEO"];
-    GATES.forEach(function(g, i){ ctx.fillText(labels[i], g.x + (i === 1 ? 10 : 0), 26); });
-    ctx.fillText("TICKET", TICKET_X, 26);
-    var alive = particles.filter(function(p){ return p.alive && el > p.delay; }).length;
-    ctx.textAlign = "left"; ctx.fillText("IN SWEEP: " + particles.length + "   ALIVE: " + alive + "   DEAD: " + (particles.length - alive - particles.filter(function(p){ return el <= p.delay; }).length), 40, H - 18);
-    ctx.restore();
-    if (running) requestAnimationFrame(draw);
+      F.head2 = mono(px);
+    }
   }
-  function drawDot(p, alpha){ ctx.globalAlpha = alpha; ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 6.283); ctx.fill(); ctx.globalAlpha = 1; }
-  spawn();
-  /* prefers-reduced-motion sets the DEFAULT, not the ceiling. It means "do not move
-     things at me unasked" — not that a reader who wants the sweep may never have it.
-     So: a correct static frame either way, auto-run only where motion is welcome, and
-     a control so anyone can choose. */
-  var userWants = null;                       // null = follow the OS
-  function wantsMotion(){ return userWants === null ? !reduced : userWants; }
-  function startSweep(){ if (running) return; running = true; t0 = null; requestAnimationFrame(draw); }
-  function staticFrame(){ running = false; t0 = 0; for (var k = 0; k < 600; k++) draw(k * 16); }
+  function measureAll(){
+    var i;
+    ctx.font = F.ledger; if (HAS_LS) ctx.letterSpacing = "0px";
+    LED_TOTAL = 0;
+    for (i = 0; i < LED_T.length; i++) { LED_W[i] = ctx.measureText(LED_T[i]).width; LED_TOTAL += LED_W[i]; }
+    ctx.font = F.verdict;
+    V1_W = ctx.measureText(V1).width;
+  }
+
+  /* ── cached gradients: built once per fit(), never in the hot path ────── */
+  var RIB = [], ASHG = null, SWEEPG = null;
+  function buildGradients(){
+    RIB.length = 0;
+    for (var i = 0; i < 6; i++) {
+      var g = ctx.createLinearGradient(0, TOP[i], 0, AXIS);
+      g.addColorStop(0, "rgba(" + HUE_RGB[i] + ",0.22)");
+      g.addColorStop(1, "rgba(" + HUE_RGB[i] + ",0.05)");
+      RIB.push(g);
+    }
+    ASHG = ctx.createLinearGradient(0, AXIS, 0, ASH_BOT);
+    ASHG.addColorStop(0, "rgba(" + ASH_RGB + ",0.42)");
+    ASHG.addColorStop(1, "rgba(" + ASH_RGB + ",0.13)");
+    /* authored at x 0→93 and translated into place, so the sweep bar allocates nothing */
+    SWEEPG = ctx.createLinearGradient(0, 0, 93, 0);
+    SWEEPG.addColorStop(0, "rgba(233,177,88,0)");
+    SWEEPG.addColorStop(0.968, "rgba(233,177,88,0.30)");
+    SWEEPG.addColorStop(1, "rgba(255,217,135,0.85)");
+  }
+
+  function fit(){
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    DPR = dpr;
+    var bw = Math.round(W * dpr), bh = Math.round(H * dpr);
+    if (cv.width !== bw || cv.height !== bh) { cv.width = bw; cv.height = bh; }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var cwid = cv.clientWidth || 1200;
+    TIER = cwid >= 900 ? 2 : (cwid >= 560 ? 1 : 0);
+    buildFonts(); buildGradients(); measureAll();
+  }
+
+  /* ── drawing helpers ──────────────────────────────────────────────────── */
+  var PA = 1;                                  // the pass alpha; every mark multiplies it
+  function A(a){ ctx.globalAlpha = PA * a; }
+  function T(s, x, y, font, color, align, alpha, ls){
+    ctx.font = font; ctx.textAlign = align; ctx.fillStyle = color;
+    if (HAS_LS) ctx.letterSpacing = ls || "0px";
+    A(alpha === undefined ? 1 : alpha);
+    ctx.fillText(s, x, y);
+    if (HAS_LS) ctx.letterSpacing = "0px";
+  }
+  function line(x0, y0, x1, y1, color, w, alpha){
+    ctx.strokeStyle = color; ctx.lineWidth = w; A(alpha);
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  }
+  /* a 45° hatch clipped ANALYTICALLY to a rect — no save/restore, no clip churn */
+  function hatch(x0, y0, x1, y1, step){
+    var cmin = x0 - y1, cmax = x1 - y0, c, xa, xb;
+    ctx.beginPath();
+    for (c = Math.ceil(cmin / step) * step; c <= cmax; c += step) {
+      xa = Math.max(x0, y0 + c); xb = Math.min(x1, y1 + c);
+      if (xb > xa) { ctx.moveTo(xa, xa - c); ctx.lineTo(xb, xb - c); }
+    }
+    ctx.stroke();
+  }
+  function ashTopAt(x){
+    for (var i = 0; i < 6; i++) {
+      if (x <= CX[i] + HW) {
+        if (i === 0 || x >= CX[i] - HW) return ATOP[i];
+        var r = CX[i - 1] + HW, l = CX[i] - HW;
+        return ATOP[i - 1] + (ATOP[i] - ATOP[i - 1]) * ((x - r) / (l - r));
+      }
+    }
+    return ATOP[5];
+  }
+
+  /* ── one complete pass over the whole picture ─────────────────────────── */
+  function drawAll(pa, lit, front){
+    PA = pa;
+    var i, j, x, y, t, h, bl, br, cxx;
+
+    /* gridlines, declared not hidden */
+    for (i = 0; i < GRID.length; i++) {
+      y = yLog(GRID[i]);
+      line(XL, y, XR, y, GRIDC, 1, 1);
+      /* the low labels would land inside the CEO bay; duck them into the gap to its left */
+      if (F.showGridLab) T(String(GRID[i]), y >= TOP[5] - 6 ? CX[5] - HW - 8 : XR, y - 3, F.grid, ASHC, "right", 1);
+    }
+    line(XL, AXIS, XR, AXIS, RULE_A, 1, 1);
+
+    /* the ribbon: connectors first, then the bays that stop and count */
+    for (i = 0; i < 5; i++) {
+      br = CX[i] + HW; bl = CX[i + 1] - HW;
+      ctx.fillStyle = HUE[i]; A(0.10);
+      ctx.beginPath(); ctx.moveTo(br, TOP[i]); ctx.lineTo(bl, TOP[i + 1]);
+      ctx.lineTo(bl, AXIS); ctx.lineTo(br, AXIS); ctx.closePath(); ctx.fill();
+      line(br, TOP[i], bl, TOP[i + 1], HUE[i], 1, 0.30);
+    }
+    for (i = 0; i < 6; i++) {
+      ctx.fillStyle = RIB[i]; A(1);
+      ctx.fillRect(CX[i] - HW, TOP[i], HW * 2, AXIS - TOP[i]);
+    }
+
+    /* bay 2 — five channels with WALLS. Nothing crosses. */
+    var lw = (HW * 2 - 4 * 6) / 5;
+    for (j = 0; j < 5; j++) {
+      x = CX[2] - HW + j * (lw + 6);
+      ctx.fillStyle = HUE[2]; A(0.10); ctx.fillRect(x, TOP[2], lw, AXIS - TOP[2]);
+    }
+
+    /* bay 3 — refutation, hatched */
+    ctx.strokeStyle = DANGER; ctx.lineWidth = 1; A(0.10);
+    hatch(CX[3] - HW, TOP[3], CX[3] + HW, AXIS, 8.49);
+
+    /* THE DISCLOSURE: the true LINEAR share, inside the log band. Without it the log
+       scale flatters the tail by 23:1 at the CEO. Load-bearing, not decoration. */
+    for (i = 0; i < 6; i++) {
+      ctx.fillStyle = HUE[i]; A(i === 0 ? 0.30 : 0.55);
+      ctx.fillRect(CX[i] - HW, AXIS - CORE[i], HW * 2, CORE[i]);
+      line(CX[i] - HW, AXIS - CORE[i], CX[i] + HW, AXIS - CORE[i], HUE[i], 1, 0.9);
+    }
+
+    /* the six walls of bay 2, over the core */
+    for (j = 0; j <= 5; j++) {
+      x = j === 0 ? CX[2] - HW : (j === 5 ? CX[2] + HW : CX[2] - HW + j * (lw + 6) - 3);
+      line(x, TOP[2], x, AXIS, WALLC, 1, 1);
+    }
+    if (F.showLaneNames) {
+      for (j = 0; j < 5; j++) {
+        x = CX[2] - HW + j * (lw + 6) + lw / 2 + 3;
+        ctx.translate(x, 169); ctx.rotate(-Math.PI / 2);
+        T(LANES[j], 0, 0, F.lane, INK_FAINT, "left", 1);
+        ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      }
+    }
+
+    /* bay 5 — three ticket stubs, perforated. Gold = survived. */
+    var s0 = CX[5] - HW, sw = (HW * 2) / 3;
+    for (j = 0; j < 3; j++) {
+      ctx.strokeStyle = SOL2; ctx.lineWidth = 1; A(0.8);
+      ctx.strokeRect(s0 + j * sw + 0.5, TOP[5] + 0.5, sw - 1, AXIS - TOP[5] - 1);
+    }
+    ctx.setLineDash([3, 3]);
+    for (j = 1; j < 3; j++) line(s0 + j * sw, TOP[5], s0 + j * sw, AXIS, SOL2, 1, 0.55);
+    ctx.setLineDash([]);
+
+    /* the bay top edges, drawn last so they read as one continuous ribbon */
+    for (i = 0; i < 6; i++) line(CX[i] - HW, TOP[i], CX[i] + HW, TOP[i], HUE[i], 1.5, 0.85);
+
+    /* ── the dead, LINEAR on purpose: the log flatters the survivors, this refuses
+       to flatter the dead. The first riser eating 79% of the band in one step IS the
+       picture. ─────────────────────────────────────────────────────────────── */
+    ctx.beginPath(); ctx.moveTo(XL, ASH_BOT); ctx.lineTo(XL, ATOP[0]);
+    for (i = 0; i < 6; i++) { ctx.lineTo(CX[i] - HW, ATOP[i]); ctx.lineTo(CX[i] + HW, ATOP[i]); }
+    ctx.lineTo(XR, ATOP[5]); ctx.lineTo(XR, ASH_BOT); ctx.closePath();
+    ctx.fillStyle = ASHG; A(1); ctx.fill();
+    /* the red team's stratum — a coin killed by refutation died differently, and this
+       is the only place the ash changes colour */
+    ctx.beginPath();
+    ctx.moveTo(CX[2] + HW, ATOP[2]); ctx.lineTo(CX[3] - HW, ATOP[3]); ctx.lineTo(XR, ATOP[3]);
+    ctx.lineTo(XR, ATOP[2]); ctx.closePath();
+    ctx.fillStyle = DANGER; A(0.16); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(XL, ATOP[0]);
+    for (i = 0; i < 6; i++) { ctx.lineTo(CX[i] - HW, ATOP[i]); ctx.lineTo(CX[i] + HW, ATOP[i]); }
+    ctx.lineTo(XR, ATOP[5]);
+    ctx.strokeStyle = ASHC; ctx.lineWidth = 1; A(0.8); ctx.stroke();
+    ctx.fillStyle = ASHC; A(0.65);
+    for (si = 0; si < 90; si++) {
+      x = ASH_SPECK[si * 2]; y = ASH_SPECK[si * 2 + 1];
+      if (y > ashTopAt(x)) ctx.fillRect(x, y, 1.3, 1.3);
+    }
+
+    /* the kill spray — a pure function of the front, no velocity, nothing to leak */
+    if (lit) {
+      for (i = 0; i < 5; i++) {
+        cxx = CX[i] + 100;
+        var q = (front - (cxx - 24)) / 48; q = q < 0 ? 0 : (q > 1 ? 1 : q);
+        if (q <= 0) continue;
+        var rt = (TOP[i] + TOP[i + 1]) / 2, sa = 1.5 - 2.4 * q;
+        if (sa <= 0) continue;
+        ctx.fillStyle = i === 2 ? DANGER : ASHC;
+        for (si = 0; si < 40; si++) {
+          A(sa * 0.85);
+          ctx.fillRect(cxx + SPRAY[si * 2] * 20, rt + SPRAY[si * 2 + 1] * (AXIS - rt) + q * q * 34, 1.5, 1.5);
+        }
+      }
+    }
+
+    /* ── headers ──────────────────────────────────────────────────────── */
+    if (F.showRail) T("ONE SWEEP, GATE BY GATE", XL, 24, F.rail, INK_FAINT, "left", 1, "0.22em");
+    for (i = 0; i < 6; i++) {
+      if (F.showHead1) T(H1[i], CX[i], 56, F.head1, HUE[i], "center", 1, "0.16em");
+      if (F.showHead2) T(H2[i], CX[i], 68, F.head2, HUE[i], "center", 0.8, "0.10em");
+    }
+
+    /* ── the counts, and what they cost to reach ─────────────────────── */
+    for (i = 0; i < 6; i++) {
+      h = AXIS - TOP[i];
+      var inside, cy;
+      if (TIER === 0) { inside = h >= 100; cy = inside ? TOP[i] + 56 : TOP[i] - 38; }
+      else { inside = h >= 70; cy = i === 5 ? TOP[i] - 34 : (inside ? TOP[i] + 40 : TOP[i] - 26); }
+      T(String(N[i]), CX[i], cy, F.count, INK, "center", 1);
+      if (TIER === 0) {
+        /* on a phone the tags land ON the blocks, where ash grey muddies out */
+        if (i > 0) T("−" + KILL[i - 1], CX[i], inside ? cy + 42 : cy - 50, F.kill, INK_FAINT, "center", 1);
+      } else if (F.showSub) {
+        if (i === 5) {
+          T(SUB[5], CX[5], 241.5, F.sub5, INK_FAINT, "center", 1);
+          T("≈3 UNSIGNED TICKETS", CX[5], 254.5, F.sub5, SOL2, "center", 1);
+        } else {
+          T(SUB[i], CX[i], inside ? cy + 18 : TOP[i] - 10, F.sub, INK_FAINT, "center", 1);
+        }
+      }
+    }
+    /* the kill tags sit on the connectors, where the killing happens. "−300" over a
+       cost cell that is a $0.00 hairline is the whole thesis in one glance. */
+    if (TIER > 0) {
+      for (i = 0; i < 5; i++) T("−" + KILL[i], CX[i] + 100, (TOP[i] + TOP[i + 1]) / 2 - 12, F.kill, ASHC, "center", 1);
+    }
+
+    /* ── the verdict, and the arithmetic that produced it ────────────── */
+    line(XL, 380, XR, 380, RULE_B, 1, 1);
+    if (TIER === 0) {
+      T(V1, XL, 396, F.verdict, INK, "left", 1);
+    } else {
+      ctx.font = F.verdict;
+      T(V1, XL, 396, F.verdict, INK, "left", 1);
+      T(V2, XL + V1_W, 396, F.verdict, INK_FAINT, "left", 1);
+    }
+    if (F.showCompose) T(COMPOSE, XR, 396, F.compose, INK_FAINT, "right", 1);
+    line(XL, 406, XR, 406, RULE_B, 1, 1);
+
+    /* ── the cost row. Shape, not quantity: cyan hairline = free. ─────── */
+    for (i = 0; i < 6; i++) {
+      if (PAID[i]) {
+        ctx.fillStyle = HUE[i]; A(0.30); ctx.fillRect(CX[i] - HW, 414, HW * 2, 28);
+        ctx.strokeStyle = HUE[i]; ctx.lineWidth = 1; A(0.7);
+        ctx.strokeRect(CX[i] - HW + 0.5, 414.5, HW * 2 - 1, 27);
+      } else {
+        ctx.fillStyle = CYAN; A(0.9); ctx.fillRect(CX[i] - HW, 440, HW * 2, 2);
+      }
+      if (F.showCaps) T(CAP[i], CX[i], 458, F.cap, PAID[i] ? INK_FAINT : CYAN, "center", 0.95);
+    }
+
+    /* the three figures the repo actually publishes, attributed */
+    if (F.showLedger) {
+      ctx.font = F.ledger; ctx.textAlign = "left";
+      x = 600 - LED_TOTAL / 2;
+      for (i = 0; i < LED_T.length; i++) {
+        ctx.fillStyle = LED_H[i] ? INK_SOFT : INK_FAINT; A(1);
+        ctx.fillText(LED_T[i], x, 480);
+        x += LED_W[i];
+      }
+    }
+    if (F.showFoot) {
+      T(FOOT_L, XL, 504, F.foot, ASHC, "left", 0.85);
+      T(BANDS[SWEEPN % BANDS.length], XR, 504, F.foot, ASHC, "right", 0.85);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /* ── the frame ────────────────────────────────────────────────────────── */
+  var CYCLE = 12000, BUILD = 8600, SWEEPN = 0;
+  function render(el){
+    var p = el / BUILD; if (p > 1) p = 1;
+    var e = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+    var front = 24 + e * 1176;
+    ctx.clearRect(0, 0, W, H);       // never paint a ground: .funnelwrap owns the wash
+
+    drawAll(0.30, false, front);      // the finished ledger, dormant
+    var lit = el > 11300 ? 1 - (el - 11300) / 700 : 1;   // fade out, or the loop flashes
+    if (lit > 0.002) {
+      ctx.save(); ctx.beginPath(); ctx.rect(0, 0, front, H); ctx.clip();
+      drawAll(lit, true, front);      // the highlighter, in perfect registration
+      ctx.restore();
+    }
+    PA = 1;
+
+    /* the tape: the only running total, and it has no dim twin to disagree with */
+    if (F.showRail) {
+      var k = 0, i;
+      for (i = 0; i < 6; i++) if (front >= CX[i] - HW) k = i;
+      var lt = (front - (CX[k] - HW)) / (HW * 2); lt = lt < 0 ? 0 : (lt > 1 ? 1 : lt);
+      var ee = 1 - Math.pow(1 - lt, 3);
+      var pn = k ? N[k - 1] : N[0], pd = k ? DEAD[k - 1] : 0;
+      T("IN 380 · DEAD " + Math.round(pd + (DEAD[k] - pd) * ee) + " · ALIVE " + Math.round(pn + (N[k] - pn) * ee),
+        XR, 24, F.rail, INK_SOFT, "right", 1);
+    }
+
+    /* the ticket, in the hold: a 1.4s gold pass over the three stubs */
+    if (el >= BUILD) {
+      var hl = (el - BUILD) / 1400;
+      if (hl <= 1) {
+        var bx = (CX[5] - HW) + hl * (HW * 2);
+        ctx.fillStyle = SOL2; ctx.globalAlpha = 0.10 * (1 - Math.abs(hl - 0.5) * 0.7);
+        ctx.fillRect(bx - 13, TOP[5], 26, AXIS - TOP[5]);
+        ctx.shadowColor = SOL2; ctx.shadowBlur = 9;
+        ctx.strokeStyle = SOL2; ctx.lineWidth = 1; ctx.globalAlpha = 0.85;
+        var sw2 = (HW * 2) / 3, j2 = Math.min(2, Math.max(0, Math.floor(hl * 3)));
+        ctx.strokeRect(CX[5] - HW + j2 * sw2 + 0.5, TOP[5] + 0.5, sw2 - 1, AXIS - TOP[5] - 1);
+        ctx.shadowBlur = 0;              // a stray shadowBlur costs 8ms a frame
+        ctx.globalAlpha = 1;
+      }
+    } else {
+      ctx.translate(front - 90, 0);
+      ctx.fillStyle = SWEEPG; ctx.globalAlpha = 1;
+      ctx.fillRect(0, PLOT_TOP, 93, ASH_BOT - PLOT_TOP);
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /* ── AUTOPLAY. The clock is ACCUMULATED, never differenced against a fixed origin:
+     that is what removes both the drift and the jump on tab return. Do not "fix" it
+     back to (now - t0) % CYCLE — that pattern produces both. ─────────────────── */
+  var total = 0, lastNow = null, playing = false, raf = 0, paused = false, frames = 0;
+  function frame(now){
+    raf = 0;
+    if (lastNow !== null) total += Math.min(now - lastNow, 100);
+    lastNow = now;
+    frames++;
+    SWEEPN = Math.floor(total / CYCLE);
+    try { render(total % CYCLE); } catch (err) { /* never let one bad frame kill the loop */ }
+    if (playing && !document.hidden) raf = requestAnimationFrame(frame);
+  }
+  function kick(){ if (raf) cancelAnimationFrame(raf); raf = 0; lastNow = null; if (!document.hidden) raf = requestAnimationFrame(frame); }
+  function play(){ if (playing) return; playing = true; kick(); }
+  function stop(){ playing = false; if (raf) { cancelAnimationFrame(raf); raf = 0; } lastNow = null; render(total % CYCLE); }
+
+  fit();
+  render(0);                                   // a correct chart on the very first paint
   var playBtn = document.getElementById("funnelPlay");
-  function syncBtn(){
-    if (!playBtn) return;
-    playBtn.textContent = running ? "Pause the sweep" : "Play the sweep";
-    playBtn.setAttribute("aria-pressed", running ? "true" : "false");
-  }
-  staticFrame();                              // a real picture before anything moves
-  if (hasIO) {
-    new IntersectionObserver(function(es){
-      var on = es[0].isIntersecting;
-      if (on && wantsMotion()) startSweep();
-      else if (!on) running = false;
-      syncBtn();
-    }, { threshold: 0.2 }).observe(cv);
-  } else if (wantsMotion()) startSweep();
   if (playBtn) playBtn.addEventListener("click", function(){
-    userWants = !running;
-    if (userWants) startSweep(); else staticFrame();
-    syncBtn();
+    paused = !paused;
+    if (paused) { total = 10200; SWEEPN = Math.floor(total / CYCLE); stop(); } else play();
+    playBtn.textContent = paused ? "Play the sweep" : "Pause the sweep";
+    playBtn.setAttribute("aria-pressed", paused ? "false" : "true");
   });
-  syncBtn();
+
+  /* hidden is not a user pause: `playing` stays true, only the rAF is cancelled, so
+     idle cost while the tab is away is genuinely zero. */
+  document.addEventListener("visibilitychange", function(){
+    if (document.hidden) { if (raf) { cancelAnimationFrame(raf); raf = 0; } lastNow = null; }
+    else if (playing) kick();   // kick(), not "if (!raf)": a page that LOADED hidden holds a
+  });                           // pending callback the browser may never deliver
+  window.addEventListener("pageshow", function(){        // bfcache fires no visibilitychange
+    if (playing && !document.hidden) kick();
+  });
+  var resizePending = false;
+  window.addEventListener("resize", function(){
+    if (resizePending) return;
+    resizePending = true;
+    requestAnimationFrame(function(){ resizePending = false; fit(); render(total % CYCLE); });
+  });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function(){ fit(); render(total % CYCLE); });
+  /* the "without fail": one integer compare a second recovers the loop from anything
+     that swallows a rAF callback — background throttling, an iOS bfcache restore, a
+     throw caught above. */
+  var seenFrames = -1;
+  setInterval(function(){
+    if (!playing || document.hidden) { seenFrames = frames; return; }
+    if (!raf || frames === seenFrames) kick();   // no rAF, OR a handle that stopped delivering
+    seenFrames = frames;
+  }, 1000);
+  play();                                      // no click, no media query, no observer
+  window.__funnelStats = function(){
+    return { total: total, cycle: CYCLE, frames: frames, playing: playing, paused: paused,
+             raf: raf !== 0, hidden: document.hidden, dpr: DPR, cw: cv.clientWidth, tier: TIER };
+  };
 }
 })();
 </script>
