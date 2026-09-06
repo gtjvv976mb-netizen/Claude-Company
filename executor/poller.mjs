@@ -85,6 +85,22 @@ const MAX_ENTRY_MARK_AGE_MS = Number(process.env.MAX_ENTRY_MARK_AGE_MIN || 15) *
 const MAX_ENTRY_DEVIATION_PCT = Number(process.env.MAX_ENTRY_DEVIATION_PCT || 10);
 const RPC = process.env.SOLANA_RPC || "https://api.mainnet-beta.solana.com";
 const SECONDARY_RPC = process.env.SOLANA_RPC_SECONDARY || "https://api.mainnet-beta.solana.com";
+/* TWO SUBDOMAINS OF ONE PROVIDER ARE ONE PROVIDER. The live gate below compared
+   full hostnames, so us1.alchemy.com and us2.alchemy.com passed as "independent"
+   — and then every cross-check built on that second opinion (the SOL/USD
+   agreement, the independent mint audit, the independent finalized confirmation)
+   was one operator checking itself while all of them still appeared to pass.
+   Independence is judged on the registrable domain. Naive eTLD+1 with the few
+   two-part suffixes that would otherwise collapse to a public suffix. Ported from
+   the Robinhood fork, where this was found and fixed first. */
+const TWO_PART_SUFFIXES = new Set(["co.uk", "org.uk", "ac.uk", "com.au", "co.jp", "co.nz", "com.br", "co.in", "com.sg"]);
+export function registrableDomain(host) {
+  const parts = String(host || "").toLowerCase().replace(/\.$/, "").split(".").filter(Boolean);
+  if (parts.length <= 2) return parts.join(".");
+  const lastTwo = parts.slice(-2).join(".");
+  return TWO_PART_SUFFIXES.has(lastTwo) ? parts.slice(-3).join(".") : lastTwo;
+}
+
 const JUPITER_API_KEY = process.env.JUPITER_API_KEY || "";
 const JUPITER_API_BASE = (process.env.JUPITER_API_BASE || "https://api.jup.ag/swap/v2").replace(/\/$/, "");
 const KEYPAIR_FILE = path.resolve(process.env.KEYPAIR || "./burner.json");
@@ -310,8 +326,8 @@ if (EXECUTE) {
     fatal("both live RPC endpoints must use HTTPS");
   if (primaryHost === "api.mainnet-beta.solana.com" || secondaryHost === "api.mainnet-beta.solana.com")
     fatal("the rate-limited public Solana RPC is not accepted for either live endpoint");
-  if (primaryHost === secondaryHost)
-    fatal("SOLANA_RPC_SECONDARY must use an independent provider hostname");
+  if (primaryHost === secondaryHost || registrableDomain(primaryHost) === registrableDomain(secondaryHost))
+    fatal("SOLANA_RPC_SECONDARY must use an independent provider, not another hostname at the same one");
   if (!JUPITER_API_BASE.startsWith("https://")) fatal("JUPITER_API_BASE must use HTTPS");
   const legacy = path.resolve(process.env.STATE_FILE || "./.cc-state.json");
   if (fs.existsSync(legacy)) {

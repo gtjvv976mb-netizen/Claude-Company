@@ -52,7 +52,14 @@ ok("missing, public, or same-provider secondary RPC rejects live mode", () => {
   for (const [secondary, pattern] of [
     ["", /explicit independent SOLANA_RPC_SECONDARY/],
     ["https://api.mainnet-beta.solana.com", /public Solana RPC/],
-    ["https://primary-private-rpc.invalid/backup", /independent provider hostname/],
+    ["https://primary-private-rpc.invalid/backup", /independent provider/],
+    /* THE CASE THE OLD HOSTNAME TEST LET THROUGH. Two endpoints at one vendor are
+       one vendor: every second opinion bought with the secondary — the SOL/USD
+       agreement, the independent mint audit, the independent finalized
+       confirmation — is then one operator checking itself, and each still reports
+       success. Judged on the registrable domain now. */
+    ["https://us2.primary-private-rpc.invalid/backup", /not another hostname at the same one/],
+    ["https://a.b.c.primary-private-rpc.invalid/", /not another hostname at the same one/],
   ]) {
     const result = run({ SOLANA_RPC_SECONDARY: secondary });
     assert.notEqual(result.status, 0);
@@ -102,7 +109,24 @@ ok("different API-key paths on one RPC provider are not independent", () => {
   const result = run({ SOLANA_RPC: "https://same-rpc.invalid/key-a",
     SOLANA_RPC_SECONDARY: "https://same-rpc.invalid/key-b" });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /independent provider hostname/);
+  assert.match(result.stderr, /independent provider/);
+});
+
+ok("a genuinely independent second provider is still accepted", () => {
+  /* The whole point of tightening this is that it must reject the same VENDOR, not
+     reject everything. Two different registrants must still pass the gate — so this
+     run has to fail somewhere LATER than the RPC check. */
+  const result = run({ SOLANA_RPC: "https://us1.vendor-one.invalid",
+    SOLANA_RPC_SECONDARY: "https://us2.vendor-two.invalid" });
+  assert.doesNotMatch(result.stderr, /independent provider/,
+    "two different vendors must not be refused as one");
+});
+
+ok("two registrants under a two-part public suffix are independent", () => {
+  const result = run({ SOLANA_RPC: "https://rpc.alpha.co.uk",
+    SOLANA_RPC_SECONDARY: "https://rpc.beta.co.uk" });
+  assert.doesNotMatch(result.stderr, /independent provider/,
+    "alpha.co.uk and beta.co.uk are different registrants, not one provider");
 });
 
 ok("the public RPC is rejected in the secondary lane", () => {
