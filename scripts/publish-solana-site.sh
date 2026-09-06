@@ -17,7 +17,9 @@ echo "== build =="
 # uninjected build silently calls its own origin and every panel comes back empty — the
 # apex passes this in its workflow and the first publish here did not.
 API_BASE="${API_BASE:-https://claude-company-api.onrender.com}"
-SITE_URL="https://$DOMAIN" API_BASE="$API_BASE" npm run build >/dev/null 2>&1 || { echo "build FAILED"; exit 1; }
+# WC_PROJECT_ID rides along so this host offers the same wallets the apex does.
+SITE_URL="https://$DOMAIN" API_BASE="$API_BASE" WC_PROJECT_ID="${WC_PROJECT_ID:-}" \
+  npm run build >/dev/null 2>&1 || { echo "build FAILED"; exit 1; }
 echo "  dist rebuilt (API_BASE=$API_BASE)"
 
 if [ ! -d "$SITE/.git" ]; then
