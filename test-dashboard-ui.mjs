@@ -64,6 +64,95 @@ assert.match(html, /\/executor\/status/);
 assert.match(html, /Owner-only local activation · five deliberate steps/);
 assert.match(html, /__CLAUDE_COMPANY_SOURCE_COMMIT__/);
 assert.match(html, /Fund the burner last/);
+
+/* ── STEP 2 IS ONE LINE, AND IT STILL TRADES NOTHING ──────────────────────────
+ * The installer has self-bootstrapped from $STATIC and read every prompt from
+ * /dev/tty for weeks — piping it from curl was ALREADY supported — while this panel
+ * went on demanding a clone, a cd and a detached checkout at a 40-character SHA.
+ * Four exact steps before anything happens is the barrier that stopped ordinary
+ * users, and it was a documentation barrier, not a technical one.
+ *
+ * These pins hold the shape of the fix: the short URL with the floor substituted,
+ * a copy button on it, the clone form kept but folded away, and — the one that
+ * matters most — the promise that a one-click INSTALL is not a one-click trade,
+ * stated beside the command rather than three panels below it. */
+{
+  const setup = html.slice(html.indexOf('const installerSha256 = "'),
+    html.indexOf('setupStep(3, "Run and review paper mode"'));
+  assert.ok(setup.length > 400, "could not locate the WALL-ST-E install step");
+  assert.match(setup,
+    /const oneCommandInstall =\s*\n?\s*"curl -fsSL https:\/\/claudedotcompany\.com\/install\.sh \| bash -s -- --floor " \+ FLOOR_N;/,
+    "the default install is one copyable line at the SHORT path, with this floor's number already in it");
+  assert.match(setup, /dashNode\("pre", "commandbox", oneCommandInstall\)/,
+    "...rendered as the step's own command box");
+  assert.match(setup, /"Copy the one-command install"/, "...with a copy button of its own");
+  assert.match(setup, /copyVisibleCommand\(copyOne, oneCommandInstall\)/,
+    "...that copies that exact line");
+
+  /* THE SAFETY SENTENCE SITS WITH THE COMMAND. A reader about to pipe a URL into
+     bash decides at that moment, not at the panel four steps down. */
+  assert.match(setup, /This installs a dry run: WALL-ST-E watches the feed[\s\S]{0,200}?trades nothing\./,
+    "the page says plainly, next to the command, that the default install trades nothing");
+  assert.match(setup, /It cannot buy or sell until you separately arm it on that machine/,
+    "...and that arming is a separate, deliberate act on the host");
+  assert.match(setup, /The burner key is generated on your host, is never sent anywhere/,
+    "...and that the key never leaves the machine");
+
+  /* VERIFY WHAT YOU ARE ABOUT TO RUN. The digest is a build-time substitution: a
+     committed hash is a hash that is wrong the next time install.sh is touched. */
+  assert.match(html, /const installerSha256 = "__CLAUDE_COMPANY_INSTALLER_SHA256__";/,
+    "the digest is stamped by the build, never committed as a literal");
+  assert.match(setup, /const installerShaKnown = \/\^\[0-9a-f\]\{64\}\$\/i\.test\(installerSha256\)/,
+    "an unsubstituted placeholder is not shown as a checksum");
+  assert.match(setup, /"The installer this site is serving has SHA-256:"/,
+    "the page states the digest of the installer it serves");
+  /* A 64-hex digest has no break opportunity: measured 394px of text in a 294px column,
+     so a .dp-note paragraph painted its last 24 characters outside the panel. A checksum
+     a reader cannot see all of is a checksum nobody compares. .commandbox breaks anywhere. */
+  assert.match(setup, /dashNode\("pre", "commandbox", installerSha256\)/,
+    "...in a box that wraps, not in a paragraph that overflows");
+  assert.match(setup, /"curl -fsSL https:\/\/claudedotcompany\.com\/install\.sh \| shasum -a 256"/,
+    "...and the line that prints it, so the comparison is a paste rather than a chore");
+
+  /* THE CLONE PATH IS DEMOTED, NOT DELETED. Some readers will not pipe a URL into a
+     shell on principle, and the pinned-commit form is a real property, not a ritual. */
+  assert.match(setup, /foldSection\("Prefer to clone it yourself\?"\)/,
+    "the git-clone form survives behind a disclosure");
+  assert.match(setup, /cloneFold\.body\.appendChild\(dashNode\("pre", "commandbox", cloneInstallCommand\)\)/,
+    "...inside the fold, not in the step's main flow");
+  assert.match(setup, /git checkout --detach " \+ executorReleaseCommit/,
+    "...still pinned to the exact reviewed commit");
+  assert.ok(setup.indexOf("oneCommandInstall)") < setup.indexOf("cloneFold.wrap"),
+    "the one-command line must be rendered before the clone disclosure — it is the default path");
+
+  /* AND A PATH FOR PEOPLE WHO WILL NOT OPEN A TERMINAL AT ALL. */
+  assert.match(setup, /"Download the double-click installer \(macOS\)"/,
+    "the launcher is offered beside the copy button");
+  assert.match(setup, /launcherLink\.href = "\/executor\/Install%20WALL-ST-E\.command"/,
+    "...at the path the build publishes it to");
+  assert.match(setup, /launcherLink\.setAttribute\("download", "Install WALL-ST-E\.command"\)/,
+    "...as a download rather than a navigation");
+  /* An <a> is display:inline, so .dp-btn's padding and border painted around a run of
+     underlined text: it read as a sentence that had grown a stray box, not a button. */
+  assert.match(html, /a\.dp-btn\{display:inline-block;text-decoration:none\}/,
+    "an anchor styled as a button must lay out as one");
+}
+
+/* The older copy-settings panel offered the same clone incantation. One surface fixed
+   and one surface stale is how a user ends up back at the git-clone anyway. */
+{
+  const legacyPanel = html.slice(html.indexOf('"Install WALL-ST-E · dry run by default"'),
+    html.indexOf('"Optional · supervised live canary"'));
+  assert.ok(legacyPanel.length > 400, "could not locate the copy-settings install panel");
+  assert.match(legacyPanel,
+    /`curl -fsSL https:\/\/claudedotcompany\.com\/install\.sh \| bash -s -- --floor \$\{FLOOR_N\}`/,
+    "the settings panel leads with the same one-command install");
+  assert.match(legacyPanel, /foldSection\("Prefer to clone it yourself\?"\)/,
+    "...and keeps the clone form behind the same disclosure");
+  assert.match(legacyPanel, /trades nothing until you separately arm it on that machine/,
+    "...and says the default install trades nothing");
+}
+
 assert.match(html, /cannot start, stop, steer, sign for, or fund it/);
 assert.match(html, /Active local cap policy · self-reported/);
 assert.match(html, /rolling realized-loss entry brake/);

@@ -22,6 +22,7 @@ RPC_FILE=""
 SECONDARY_RPC_FILE=""
 SOURCE_DIR=""
 SOURCE_COMMIT="remote-paper"
+BOOTSTRAP_NODE=0
 EXPECTED_COMMIT=""
 API="https://claude-company-api.onrender.com"
 STATIC="https://claudedotcompany.com"
@@ -92,8 +93,110 @@ need_value() {
   fi
 }
 
+# BEGIN SYMLINK_ACTIVATION
+# Swapping the `current` symlink is the moment the new release becomes the running
+# one, so it has to be atomic and it must never follow the link it is replacing.
+# GNU mv spells that `mv -T`. BSD/macOS mv has no such flag and does the opposite:
+# measured on macOS 15, `mv -f next current` where current -> r1 left current still
+# pointing at r1 and moved the new link INSIDE r1. Silent, and it would leave a Mac
+# install running last week's code with no error anywhere.
+#
+# rename(2) is atomic and never dereferences either operand on any Unix, and this
+# installer has already verified a Node it can call. One code path, both platforms.
+activate_symlink() {
+  LINK_FROM="$1" LINK_TO="$2" "${NODE_BIN:-node}" -e \
+    'require("fs").renameSync(process.env.LINK_FROM, process.env.LINK_TO)'
+}
+# END SYMLINK_ACTIVATION
+
+# BEGIN HELP
+# There was no --help at all. The one-line curl install makes that a real hole: a
+# user who pipes an unknown script into bash and cannot ask it what it does has no
+# way to find out except reading 700 lines of shell. The first paragraph therefore
+# answers the only question that matters — does this spend my money — before it
+# lists a single flag. Kept inside 80 columns so it survives a default terminal.
+usage() {
+  cat <<'HELP'
+Usage: bash install.sh --floor N [options]
+
+Installs WALL-ST-E, your floor's self-hosted trading executor, as a supervised
+background service on this machine. Linux hosts get a hardened systemd unit;
+macOS hosts get a per-user launchd LaunchAgent. Everything before that last
+step — Node, the burner wallet, the secret prompt, the staged release — is one
+shared path on both.
+
+THE DEFAULT IS A DRY RUN. Without --live the executor reads your floor's call
+feed and runs the entire local policy WITHOUT signing or submitting anything.
+It trades no money at all. Going live is a separate, deliberate act: --live
+makes you retype the burner wallet's own public key on this terminal before
+the service is armed, and raising any cap makes you type a second sentence.
+
+This installer never funds a wallet. It generates a dedicated burner keypair
+on THIS machine at $HOME/claudeco-executor/burner.json (mode 0600) and never
+transmits it anywhere. Back that file up before you fund it: it exists on this
+disk and nowhere else.
+
+The floor feed secret is NEVER a command-line flag, because argv lands in your
+shell history and in the process list. It is read hidden from /dev/tty, or
+from a mode-0600 file you name with --secret-file.
+
+Options:
+  --floor N             Required. Your floor number, as shown by the panel.
+  --secret-file FILE    Mode-0600 file holding the floor feed secret, for an
+                        unattended install. Otherwise prompted on the tty.
+  --live                Arm real mainnet trading. Not the default. Needs two
+                        independent private RPCs, a Jupiter key, a pinned
+                        local checkout, and a typed acknowledgement.
+  --rpc-file FILE       Mode-0600 file holding the primary Solana RPC URL.
+  --secondary-rpc-file FILE
+                        Mode-0600 file holding a SECOND RPC URL from a
+                        DIFFERENT provider. The executor cross-checks the two
+                        and refuses to act on one provider's word alone.
+  --jupiter-key-file FILE
+                        Mode-0600 file holding your Jupiter API key.
+  --rpc URL             Same values inline. They land in shell history, so a
+  --secondary-rpc URL   live install should prefer the --*-file forms above.
+  --max-sol SOL         Live cap per trade. Canary default 0.005.
+  --daily-cap SOL       Live rolling-24h deployment cap. Default 0.01.
+  --daily-loss-cap SOL  Live rolling-24h realized-loss entry brake. 0.01.
+                        Raising any one of these three requires all three
+                        together plus a second typed acknowledgement.
+  --source-dir DIR      The executor directory of a pinned local checkout.
+                        Required by --live: live never runs downloaded code.
+  --expected-commit SHA The exact 40-character published commit. Required by
+                        --live, and it must match the checkout's HEAD.
+  --bootstrap-node      Accept the private Node install without being asked.
+  --api URL             Claude Company API base.
+  --static URL          Static base for the paper-mode runtime download.
+  --help                Print this and exit 0.
+
+Live install with a terminal and no credential files: the installer walks you
+through each of the primary RPC, the secondary RPC and the Jupiter key. It
+explains each one, reads it hidden from /dev/tty, checks it against the
+provider before accepting it, and stores it mode 0600 under
+$HOME/claudeco-executor so the next run can be unattended.
+
+Node >=22.13 and <25 is required for the durable SQLite journal. If this host
+has no Node in that range, the installer offers to download the pinned build,
+verify it against nodejs.org's own SHASUMS256.txt, and unpack a private copy
+under the install directory. No sudo, no shell profile is edited, and any
+system Node is left exactly as it is.
+
+On macOS the service is a per-user LaunchAgent (com.claudeco.wallste) installed
+and started by the project's own macos-launchagent.sh, which this installer
+invokes rather than reimplementing. No sudo is used anywhere on that path. A
+--live install on a Mac additionally goes through macos-release.sh, which
+stages an immutable, commit-named release and runs its test suite first.
+
+Windows is not supported directly. Install Ubuntu under WSL2 and run this
+inside that Ubuntu shell; see the Windows section of executor/README.md.
+HELP
+}
+# END HELP
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --help|-h) usage; exit 0;;
     --live) MODE="live"; shift;;
     --secret-file) need_value "$@"; SECRET_FILE="$2"; shift 2;;
     --jupiter-key-file) need_value "$@"; JUPITER_KEY_FILE="$2"; shift 2;;
@@ -106,22 +209,277 @@ while [ "$#" -gt 0 ]; do
     --secondary-rpc) need_value "$@"; SECONDARY_RPC="$2"; shift 2;;
     --secondary-rpc-file) need_value "$@"; SECONDARY_RPC_FILE="$2"; shift 2;;
     --source-dir) need_value "$@"; SOURCE_DIR="$2"; shift 2;;
-    --expected-commit) need_value "$@"; EXPECTED_COMMIT="${2,,}"; shift 2;;
+    # ${x,,} is bash 4. macOS ships /bin/bash 3.2, where that expansion is a "bad
+    # substitution" at runtime, so the whole installer would die on a Mac the moment
+    # anyone passed this flag. printf is a builtin and tr sees only its own two
+    # patterns in argv.
+    --expected-commit) need_value "$@"; EXPECTED_COMMIT="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"; shift 2;;
     --api) need_value "$@"; API="$2"; shift 2;;
     --static) need_value "$@"; STATIC="$2"; shift 2;;
+    --bootstrap-node) BOOTSTRAP_NODE=1; shift;;
     *) echo "unknown flag: $1" >&2; exit 1;;
   esac
 done
 
-if [ "$(uname -s)" != "Linux" ] || ! command -v systemctl >/dev/null 2>&1; then
-  echo "install.sh provisions Linux hosts using systemd only" >&2
-  echo "macos-launchagent.sh can supervise an existing configured macOS executor; it is not a fresh-wallet installer" >&2
-  exit 1
-fi
+# BEGIN PLATFORM_GUIDANCE
+# Git Bash, MSYS2 and Cygwin all report a uname of MINGW64_NT-10.0 / MSYS_NT-10.0 /
+# CYGWIN_NT-10.0. They have neither systemd nor launchd, so the generic "Linux hosts
+# using systemd only" line below reads to a Windows user as a broken script rather
+# than as the missing prerequisite it actually is. Name the supported route and the
+# exact commands instead: WSL2 is a supported Linux host, and the same one-liner
+# works verbatim once they are inside the Ubuntu shell.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*|Windows_NT)
+    cat >&2 <<'WSL'
+
+WALL-ST-E cannot run in Git Bash, MSYS2 or Cygwin: it installs a systemd service,
+and Windows has no systemd. Use WSL2 — it is a real Linux host and the installer
+runs there unchanged.
+
+In PowerShell, as Administrator, once:
+
+    wsl --install -d Ubuntu
+
+Reboot if it asks, then open the "Ubuntu" app from the Start menu and run, inside
+that Ubuntu shell (not PowerShell, not Git Bash):
+
+    sudo apt-get update && sudo apt-get install -y curl
+    curl -fsSL https://claudedotcompany.com/install.sh | bash -s -- --floor N
+
+Replace N with your floor number. That install is still a dry run and trades
+nothing. Keep the Ubuntu window open: closing it stops WSL2, and a stopped WSL2
+stops the executor.
+WSL
+    exit 1;;
+esac
+
+# macOS is a first-class target, not a redirect to somebody else's computer. It was
+# refused here until 2026-09-06 even though every piece already existed and shipped:
+# macos-launchagent.sh renders, installs and loads the LaunchAgent, and
+# launchd-runner.mjs validates the environment and runtime it is handed. What was
+# missing was only this orchestration — so PLATFORM selects a supervisor below and
+# everything up to that point (Node, secret, caps, staging, burner, environment) is
+# one shared path with one set of guarantees.
+PLATFORM=""
+case "$(uname -s)" in
+  Linux)
+    if ! command -v systemctl >/dev/null 2>&1; then
+      echo "this Linux host has no systemd; install.sh supervises Linux through systemd" >&2
+      echo "a container or chroot without systemd is not a supported executor host" >&2
+      exit 1
+    fi
+    PLATFORM="linux";;
+  Darwin) PLATFORM="darwin";;
+  *)
+    echo "install.sh supports Linux (systemd) and macOS (launchd); this host reports $(uname -s)" >&2
+    exit 1;;
+esac
+# END PLATFORM_GUIDANCE
+
+# stat(1) is not portable: coreutils spells the permission bits -c '%a' and BSD/macOS
+# spells them -f '%Lp'. GNU stat also ACCEPTS -f (it means "filesystem" there) and
+# exits 0 printing something else entirely, so probing by trial silently returns a
+# wrong mode on Linux. Branch on the platform that was just determined instead.
+file_mode() {
+  if [ "$PLATFORM" = "darwin" ]; then stat -f '%Lp' "$1"; else stat -c '%a' "$1"; fi
+}
 case "$FLOOR" in
   ""|*[!0-9]*) echo "--floor must be a positive integer" >&2; exit 1;;
 esac
 if [ "$FLOOR" -le 0 ]; then echo "--floor must be a positive integer" >&2; exit 1; fi
+
+# These paths used to be defined 200 lines lower, immediately before the Node check.
+# They moved up because two things that now run early need them: the private Node
+# bootstrap unpacks under $INSTALL_DIR, and the credential wizard writes its 0600
+# files there. Nothing here creates anything; only the blocks that need a directory
+# make one.
+INSTALL_DIR="$HOME/claudeco-executor"
+ENV_FILE="$INSTALL_DIR/.cc-executor.env"
+STATE_DB="$INSTALL_DIR/.cc-executor.sqlite"
+LOCK_FILE="${STATE_DB}.lock"
+PAUSE_FILE="$INSTALL_DIR/PAUSE_ENTRIES"
+HARD_STOP_FILE="$INSTALL_DIR/HARD_STOP"
+RELEASES_DIR="$INSTALL_DIR/releases"
+CURRENT_LINK="$INSTALL_DIR/current"
+NODE_RUNTIME_DIR="$INSTALL_DIR/runtime"
+SERVICE_FILE="/etc/systemd/system/cc-executor.service"
+# macos-release.sh owns its own immutable, commit-named release tree and must never
+# share one with the pruner above: prune_releases keeps `current`, the new release and
+# the newest few, and would happily delete a versioned release it does not know about.
+VERSIONED_RELEASES_DIR="$INSTALL_DIR/versioned-releases"
+LAUNCHD_LABEL="com.claudeco.wallste"
+echo "▶ installing WALL-ST-E ($MODE mode) into $INSTALL_DIR"
+if [ "$PLATFORM" = "darwin" ]; then
+  echo "  supervisor: launchd (per-user LaunchAgent $LAUNCHD_LABEL)"
+else
+  echo "  supervisor: systemd (system unit cc-executor)"
+fi
+
+# BEGIN NODE_FETCH
+# Node >=22.13 and <25 is the durable-journal requirement (node:sqlite's
+# DatabaseSync). A host without it used to be a dead end: one line of stderr and an
+# exit, which is where most non-technical owners stopped. Offer a PRIVATE copy
+# instead — official bytes, a pinned version, checksum-verified before anything is
+# unpacked, living under the install directory and used by this executor only.
+# No sudo, no package manager, no profile edited, and nothing piped into a shell.
+NODE_PINNED_VERSION="22.23.2"
+# Pinned deliberately, never resolved through a "latest" alias: an alias lets the far
+# end choose which bytes you end up verifying, and the checksum would then prove only
+# that the download arrived intact. Bumping this is a one-line, reviewable edit.
+# NODE_DIST_BASE is overridable so the regression test can drive this whole function
+# against a local file:// mirror; anyone who can set this process's environment can
+# already replace the script itself, so it grants nothing new.
+NODE_DIST_BASE="${NODE_DIST_BASE:-https://nodejs.org/dist}"
+
+node_version_ok() {
+  "$1" -e 'const [a,b]=process.versions.node.split(".").map(Number); process.stdout.write(String(a<25&&(a>22||(a===22&&b>=13))?1:0))' 2>/dev/null || printf 0
+}
+
+# One digest helper, three possible providers: sha256sum is coreutils (the Linux
+# target), shasum ships with macOS, openssl is the last resort. A host with none of
+# them must not be allowed to silently skip verification.
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v openssl >/dev/null 2>&1; then openssl dgst -sha256 "$1" | awk '{print $NF}'
+  else echo "no sha256 tool (sha256sum, shasum or openssl) is available" >&2; return 1
+  fi
+}
+
+# Downloads, verifies and unpacks exactly one official Node build. The resulting
+# absolute node path goes to stdout; every human-facing line goes to stderr, so the
+# caller can capture the path with a command substitution and still show the work.
+install_private_node() {
+  local version="$1" root="$2"
+  local os arch ext tarball url expected actual work dir
+  case "$(uname -s)" in
+    Linux) os="linux";;
+    Darwin) os="darwin";;
+    *) echo "there is no official Node build for $(uname -s)" >&2; return 1;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64) arch="x64";;
+    aarch64|arm64) arch="arm64";;
+    armv7l) arch="armv7l";;
+    *) echo "there is no official Node build for CPU $(uname -m)" >&2; return 1;;
+  esac
+  # .tar.xz is what nodejs.org leads with and is half the size, but a minimal
+  # container may have no xz. The .gz is listed in the same SHASUMS256.txt and
+  # verifies by exactly the same rule, so falling back costs no assurance.
+  if command -v xz >/dev/null 2>&1; then ext="tar.xz"; else ext="tar.gz"; fi
+  tarball="node-v$version-$os-$arch.$ext"
+  url="$NODE_DIST_BASE/v$version/$tarball"
+  work="$(mktemp -d "$root/.node-download.XXXXXXXX")" || return 1
+  echo "▶ fetching official Node v$version ($os-$arch) from $NODE_DIST_BASE" >&2
+  if ! curl -fsSL "$NODE_DIST_BASE/v$version/SHASUMS256.txt" -o "$work/SHASUMS256.txt"; then
+    echo "could not download SHASUMS256.txt for Node v$version" >&2
+    rm -rf "$work"; return 1
+  fi
+  if ! curl -fsSL "$url" -o "$work/$tarball"; then
+    echo "could not download $tarball" >&2
+    rm -rf "$work"; return 1
+  fi
+  # Lines are "<64 hex><two spaces><filename>". Match the filename field exactly:
+  # a substring match would happily accept the row for node-...tar.gz.asc.
+  expected="$(awk -v want="$tarball" '$2 == want { print $1 }' "$work/SHASUMS256.txt" | head -n 1)"
+  actual="$(sha256_of "$work/$tarball")" || { rm -rf "$work"; return 1; }
+  echo "  published sha256: ${expected:-<no such filename in SHASUMS256.txt>}" >&2
+  echo "  downloaded sha256: $actual" >&2
+  if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+    cat >&2 <<'MISMATCH'
+
+  ✗ CHECKSUM MISMATCH — refusing to install this Node.
+    The bytes that arrived are not the bytes nodejs.org published for this exact
+    version. That is a truncated transfer, a caching proxy serving something else,
+    or a middlebox rewriting the download. Nothing was unpacked and nothing ran.
+    Retry on another network, or install Node yourself from a source you trust.
+MISMATCH
+    rm -rf "$work"; return 1
+  fi
+  echo "  ✓ checksum matches the published SHASUMS256.txt" >&2
+  if ! tar -xf "$work/$tarball" -C "$work"; then
+    echo "could not unpack $tarball" >&2
+    rm -rf "$work"; return 1
+  fi
+  dir="$root/node-v$version-$os-$arch"
+  rm -rf "$dir"
+  if [ ! -x "$work/node-v$version-$os-$arch/bin/node" ]; then
+    echo "the verified archive did not contain node-v$version-$os-$arch/bin/node" >&2
+    rm -rf "$work"; return 1
+  fi
+  mv "$work/node-v$version-$os-$arch" "$dir" || { rm -rf "$work"; return 1; }
+  rm -rf "$work"
+  printf '%s\n' "$dir/bin/node"
+}
+# END NODE_FETCH
+
+NODE_BIN=""
+NODE_PRIVATE=0
+node_ok=0
+if command -v node >/dev/null 2>&1; then
+  NODE_BIN="$(command -v node)"
+  node_ok="$(node_version_ok "$NODE_BIN")"
+fi
+if [ "$node_ok" != "1" ]; then
+  # A previous run of this installer may already have bootstrapped one. Adopt it
+  # rather than downloading it again; the version is pinned, so this is the same
+  # binary the checksum already accepted.
+  for node_candidate in "$NODE_RUNTIME_DIR"/node-v*/bin/node; do
+    if [ -x "$node_candidate" ] && [ "$(node_version_ok "$node_candidate")" = "1" ]; then
+      NODE_BIN="$node_candidate"; NODE_PRIVATE=1; node_ok=1; break
+    fi
+  done
+fi
+if [ "$node_ok" != "1" ]; then
+  node_found="none on PATH"
+  if command -v node >/dev/null 2>&1; then node_found="$(node --version 2>/dev/null || echo unknown)"; fi
+  echo "Node >=22.13 and <25 is required for the durable SQLite journal; this host has: $node_found"
+  node_accept="$BOOTSTRAP_NODE"
+  if [ "$node_accept" != "1" ]; then
+    if [ ! -r /dev/tty ]; then
+      echo "no terminal to ask on; rerun with --bootstrap-node to install a private Node v$NODE_PINNED_VERSION under $NODE_RUNTIME_DIR, or install Node yourself from a package source you trust" >&2
+      exit 1
+    fi
+    cat > /dev/tty <<TTY
+
+  I can install a PRIVATE copy of Node for this executor only:
+    · the official build node-v$NODE_PINNED_VERSION-<your platform> from $NODE_DIST_BASE
+    · verified against nodejs.org's own SHASUMS256.txt before anything is unpacked
+    · unpacked into $NODE_RUNTIME_DIR and used only by this service
+    · no sudo, no package manager, no shell profile edited
+    · any Node already on this machine is left exactly as it is
+TTY
+    printf "  Install that private Node now? [Y/n] " > /dev/tty
+    IFS= read -r node_answer < /dev/tty
+    case "$node_answer" in ""|y|Y|yes|Yes|YES) node_accept=1;; *) node_accept=0;; esac
+  fi
+  if [ "$node_accept" != "1" ]; then
+    echo "declined; install Node >=22.13 and <25 from a package source you trust, then rerun" >&2
+    exit 1
+  fi
+  mkdir -p "$NODE_RUNTIME_DIR"
+  chmod 700 "$INSTALL_DIR" "$NODE_RUNTIME_DIR"
+  NODE_BIN="$(install_private_node "$NODE_PINNED_VERSION" "$NODE_RUNTIME_DIR")" || {
+    echo "private Node bootstrap failed; install Node >=22.13 and <25 yourself and rerun" >&2
+    exit 1
+  }
+  node_ok="$(node_version_ok "$NODE_BIN")"
+  if [ "$node_ok" != "1" ]; then
+    echo "the bootstrapped Node reports $("$NODE_BIN" --version 2>/dev/null) which is outside >=22.13 and <25" >&2
+    exit 1
+  fi
+  NODE_PRIVATE=1
+fi
+if [ "$NODE_PRIVATE" -eq 1 ]; then
+  # Every later node/npm in THIS process must be the runtime systemd's ExecStart will
+  # use — npm ci resolves native builds against the running node. This assignment
+  # lives and dies with this process: no profile, no /usr/local, no login shell, and
+  # nothing on disk outside $INSTALL_DIR is touched.
+  PATH="$(cd "$(dirname "$NODE_BIN")" && pwd -P):$PATH"
+  export PATH
+  echo "  ✓ private Node $("$NODE_BIN" --version) at $NODE_BIN"
+  echo "    Your login PATH and any system Node are untouched."
+fi
 
 read_private_file() {
   local label="$1" file="$2" mode
@@ -129,7 +487,7 @@ read_private_file() {
     echo "$label file is not a readable regular non-symlink file: $file" >&2
     exit 1
   fi
-  mode="$(stat -c '%a' "$file")"
+  mode="$(file_mode "$file")"
   if (( (8#$mode & 8#077) != 0 )); then
     echo "$label file must not be accessible by group/other (chmod 600 $file)" >&2
     exit 1
@@ -218,7 +576,210 @@ case "$SECRET" in
 esac
 if [ "${#SECRET}" -lt 32 ]; then echo "floor secret is unexpectedly short" >&2; exit 1; fi
 
+# BEGIN CREDENTIAL_WIZARD
+# Three absolute paths to files the owner had to create first, from services they had
+# to go and find, is where every non-scripted live install stopped. The flags below
+# still work byte-for-byte for automation; this only fills in what is missing when a
+# human is actually sitting at a terminal. Every value is read hidden, checked
+# against the real provider BEFORE it is accepted, and written 0600 — so the next run
+# of the installer is unattended without the owner ever handling a path by hand.
+CRED_WSOL="So11111111111111111111111111111111111111112"
+CRED_USDC="EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+CRED_JUPITER_BASE="${CRED_JUPITER_BASE:-https://api.jup.ag/swap/v2}"
+
+cred_escape() {
+  # curl's config format takes double-quoted values with backslash escapes.
+  local value="$1"
+  value="${value//\\/\\\\}"
+  printf '%s' "${value//\"/\\\"}"
+}
+
+cred_curl() {
+  # An RPC URL carries its API key in the path, and a Jupiter key is a header. Both
+  # would be world-readable in /proc/PID/cmdline for the life of the request if they
+  # were passed as curl arguments, on exactly the kind of shared host this installs
+  # on. curl --config - takes the whole request on stdin instead, which never becomes
+  # argv. stderr is folded in so the provider's (or curl's) own words survive.
+  local url="$1"; shift
+  local line
+  {
+    printf 'url = "%s"\n' "$(cred_escape "$url")"
+    printf 'silent\nshow-error\nmax-time = "20"\nwrite-out = "\\n%%{http_code}"\n'
+    for line in "$@"; do printf '%s\n' "$line"; done
+  } | curl --config - 2>&1
+}
+
+cred_report() {
+  # The endpoint is never echoed — it IS the credential. Only the far end's answer.
+  local status="$1" body="$2"
+  case "$status" in
+    ''|*[!0-9]*|000) status="no HTTP response";;
+    *) status="HTTP $status";;
+  esac
+  printf '     rejected — %s: %s\n' "$status" \
+    "$(printf '%s' "$body" | tr '\r\n' '  ' | cut -c1-200)" >&2
+}
+
+cred_probe_rpc() {
+  # getLatestBlockhash is the cheapest call that proves all three things at once: the
+  # host answers, the key on it is accepted, and what answers speaks Solana JSON-RPC.
+  # getHealth alone returns a bare "ok" that a misconfigured proxy can also produce.
+  local out status body
+  out="$(cred_curl "$1" 'request = "POST"' 'header = "content-type: application/json"' \
+    'data = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getLatestBlockhash\",\"params\":[{\"commitment\":\"confirmed\"}]}"')"
+  status="$(printf '%s' "$out" | tail -n 1)"
+  body="$(printf '%s' "$out" | sed '$d')"
+  case "$status" in ''|*[!0-9]*) body="$out"; status="";; esac
+  if [ "$status" = "200" ] && printf '%s' "$body" | grep -q '"blockhash"'; then
+    return 0
+  fi
+  cred_report "$status" "$body"
+  return 1
+}
+
+cred_probe_jupiter() {
+  # A taker-less /order is a price quote: it authenticates the key, costs nothing,
+  # names no wallet and cannot be signed. Same host and same header the executor uses.
+  local out status body
+  out="$(cred_curl "$CRED_JUPITER_BASE/order?inputMint=$CRED_WSOL&outputMint=$CRED_USDC&amount=1000000&swapMode=ExactIn&slippageBps=300" \
+    "header = \"x-api-key: $(cred_escape "$1")\"")"
+  status="$(printf '%s' "$out" | tail -n 1)"
+  body="$(printf '%s' "$out" | sed '$d')"
+  case "$status" in ''|*[!0-9]*) body="$out"; status="";; esac
+  if [ "$status" = "200" ] && printf '%s' "$body" | grep -q '"outAmount"'; then
+    return 0
+  fi
+  cred_report "$status" "$body"
+  return 1
+}
+
+cred_check_rpc() {
+  local endpoint="$1" lowered
+  case "$endpoint" in https://*) ;; *) echo "     must be a full https:// URL." >&2; return 1;; esac
+  case "$endpoint" in *$'\n'*|*$'\r'*) echo "     contains a line break." >&2; return 1;; esac
+  # ${x,,} is bash 4 and this block is also driven by the regression test on macOS,
+  # whose /bin/bash is 3.2. printf is a builtin and tr only ever sees its own two
+  # patterns in argv, so the endpoint never becomes another process's argument.
+  lowered="$(printf '%s' "$endpoint" | tr '[:upper:]' '[:lower:]')"
+  case "$lowered" in *api.mainnet-beta.solana.com*)
+    echo "     that is the free public Solana endpoint. It rate-limits precisely when everyone else is also trading, which is when an exit has to go through. Use a private provider." >&2
+    return 1;;
+  esac
+  cred_probe_rpc "$endpoint"
+}
+
+cred_check_jupiter() {
+  [ -n "$1" ] || { echo "     nothing entered." >&2; return 1; }
+  cred_probe_jupiter "$1"
+}
+
+cred_prompt_hidden() {
+  # Hidden, from the controlling terminal, exactly like the feed secret above. Never
+  # echoed, never in argv, and the caller must not print CRED_VALUE either.
+  printf '  %s: ' "$1" > /dev/tty
+  IFS= read -r -s CRED_VALUE < /dev/tty
+  printf '\n' > /dev/tty
+}
+
+cred_collect() {
+  # $1 prompt, $2 validator function, $3 a value to refuse as a duplicate (or "").
+  # Result in CRED_VALUE. Three attempts, then fail closed: an install loop that
+  # never ends is worse than one that stops and tells you what the provider said.
+  local label="$1" validator="$2" forbid="${3:-}" attempt=1
+  CRED_VALUE=""
+  while [ "$attempt" -le 3 ]; do
+    cred_prompt_hidden "$label"
+    if [ -z "$CRED_VALUE" ]; then
+      echo "     nothing entered." >&2
+    elif [ -n "$forbid" ] && [ "$CRED_VALUE" = "$forbid" ]; then
+      echo "     that is the primary endpoint again. A second copy of the first provider cross-checks nothing." >&2
+    elif "$validator" "$CRED_VALUE"; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    if [ "$attempt" -le 3 ]; then echo "     let's try again (attempt $attempt of 3)." >&2; fi
+  done
+  CRED_VALUE=""
+  return 1
+}
+
+cred_store() {
+  # install -m 600 /dev/null creates the file at the final mode BEFORE a single byte
+  # of the credential is in it. Writing first and chmod-ing afterwards leaves a real
+  # window in which the value sits there at whatever the umask happened to be.
+  local file="$1" value="$2"
+  mkdir -p "$INSTALL_DIR"
+  chmod 700 "$INSTALL_DIR"
+  install -m 600 /dev/null "$file"
+  printf '%s\n' "$value" > "$file"
+  chmod 600 "$file"
+}
+# END CREDENTIAL_WIZARD
+
+# BEGIN LIVE_CREDENTIALS
 if [ "$MODE" = "live" ]; then
+  # Announce the wizard only when one is actually about to run. Inline --rpc values
+  # leave RPC_FILE empty yet need no prompt, and a banner with nothing behind it is
+  # how an installer teaches people to stop reading it.
+  if { [ -z "$RPC" ] || [ -z "$SECONDARY_RPC" ] || [ -z "$JUPITER_KEY_FILE" ]; } &&
+     [ -r /dev/tty ]; then
+    cat > /dev/tty <<'WIZARD'
+
+  LIVE CREDENTIALS
+  Three values are needed before this wallet can trade. Each one is read hidden,
+  checked against the provider before it is accepted, and saved mode 0600 under
+  the install directory so you never do this twice. Nothing is displayed back.
+WIZARD
+  fi
+
+  if [ -z "$RPC" ]; then
+    if [ ! -r /dev/tty ]; then
+      echo "--live requires --rpc-file and --secondary-rpc-file so credentials stay out of argv/history, and there is no terminal here for the guided setup" >&2
+      exit 1
+    fi
+    cat > /dev/tty <<'WIZARD'
+
+  1/3  PRIMARY SOLANA RPC
+  How this machine reads the chain and sends transactions. The free public
+  endpoint will not do: it throttles hardest when everyone is trading, which is
+  when an exit has to land. A free private tier is enough to start —
+  helius.dev, quicknode.com, alchemy.com and triton.one all have one.
+  Paste the full https:// URL including its key.
+WIZARD
+    cred_collect "Primary RPC URL (hidden)" cred_check_rpc ||
+      { echo "no working primary RPC after 3 attempts; nothing was installed" >&2; exit 1; }
+    RPC="$CRED_VALUE"
+    RPC_FILE="$INSTALL_DIR/.rpc-primary"
+    cred_store "$RPC_FILE" "$RPC"
+    CRED_VALUE=""
+    echo "  ✓ primary RPC answered getLatestBlockhash · stored 0600 at $RPC_FILE" > /dev/tty
+  fi
+
+  if [ -z "$SECONDARY_RPC" ]; then
+    if [ ! -r /dev/tty ]; then
+      echo "--live requires --rpc-file and --secondary-rpc-file so credentials stay out of argv/history, and there is no terminal here for the guided setup" >&2
+      exit 1
+    fi
+    cat > /dev/tty <<'WIZARD'
+
+  2/3  SECONDARY SOLANA RPC — FROM A DIFFERENT PROVIDER
+  This is not a spare. Before it acts, the executor asks BOTH endpoints and
+  compares the answers: wallet balances, whether a transaction really landed,
+  and what a position is currently worth. If the two disagree it refuses to
+  trade rather than act on one provider's word. One provider serving a stale
+  or wrong answer therefore cannot move your money on its own — which is why a
+  second key from the same company would buy you nothing.
+  Use a different company from the one above. A free tier is fine.
+WIZARD
+    cred_collect "Secondary RPC URL (hidden)" cred_check_rpc "$RPC" ||
+      { echo "no working secondary RPC after 3 attempts; nothing was installed" >&2; exit 1; }
+    SECONDARY_RPC="$CRED_VALUE"
+    SECONDARY_RPC_FILE="$INSTALL_DIR/.rpc-secondary"
+    cred_store "$SECONDARY_RPC_FILE" "$SECONDARY_RPC"
+    CRED_VALUE=""
+    echo "  ✓ secondary RPC answered getLatestBlockhash · stored 0600 at $SECONDARY_RPC_FILE" > /dev/tty
+  fi
+
   if [ -n "$JUPITER_KEY_FILE" ]; then
     read_private_file "Jupiter API key" "$JUPITER_KEY_FILE"
     JUPITER_KEY="$REPLY"
@@ -227,10 +788,23 @@ if [ "$MODE" = "live" ]; then
       echo "live mode needs --jupiter-key-file when no terminal is available" >&2
       exit 1
     fi
-    printf "Jupiter API key (hidden): " > /dev/tty
-    IFS= read -r -s JUPITER_KEY < /dev/tty
-    printf "\n" > /dev/tty
+    cat > /dev/tty <<'WIZARD'
+
+  3/3  JUPITER API KEY
+  Jupiter is the router that prices a swap and builds the transaction this
+  wallet signs. Get a key at portal.jup.ag; the free tier covers a canary.
+  It is checked with a price quote — no wallet is named and nothing can be
+  signed by that call.
+WIZARD
+    cred_collect "Jupiter API key (hidden)" cred_check_jupiter ||
+      { echo "the Jupiter key was not accepted after 3 attempts; nothing was installed" >&2; exit 1; }
+    JUPITER_KEY="$CRED_VALUE"
+    JUPITER_KEY_FILE="$INSTALL_DIR/.jupiter-key"
+    cred_store "$JUPITER_KEY_FILE" "$JUPITER_KEY"
+    CRED_VALUE=""
+    echo "  ✓ Jupiter key returned a live quote · stored 0600 at $JUPITER_KEY_FILE" > /dev/tty
   fi
+
   if [ -z "$JUPITER_KEY" ]; then echo "Jupiter API key is empty" >&2; exit 1; fi
   if [ -z "$RPC_FILE" ] || [ -z "$SECONDARY_RPC_FILE" ]; then
     echo "--live requires --rpc-file and --secondary-rpc-file so credentials stay out of argv/history" >&2
@@ -245,6 +819,7 @@ if [ "$MODE" = "live" ]; then
     exit 1
   fi
 fi
+# END LIVE_CREDENTIALS
 
 # BEGIN LIVE_CAPS_VALIDATOR
 LIVE_CANARY_MAX_SOL="0.005"
@@ -311,36 +886,17 @@ if [ -n "$RPC" ]; then validate_https_endpoint "primary RPC" "$RPC"; fi
 if [ -n "$SECONDARY_RPC" ]; then validate_https_endpoint "secondary RPC" "$SECONDARY_RPC"; fi
 
 if [ "$MODE" = "live" ]; then
-  rpc_lower="${RPC,,}"
-  secondary_lower="${SECONDARY_RPC,,}"
+  # Same bash-3.2 rule as cred_check_rpc above, and for the same two reasons: the
+  # expansion does not exist on a stock Mac, and the endpoint must never become
+  # another process's argv. printf is a builtin; tr only ever sees its patterns.
+  rpc_lower="$(printf '%s' "$RPC" | tr '[:upper:]' '[:lower:]')"
+  secondary_lower="$(printf '%s' "$SECONDARY_RPC" | tr '[:upper:]' '[:lower:]')"
   if [[ "$rpc_lower" =~ api\.mainnet-beta\.solana\.com ]] ||
      [[ "$secondary_lower" =~ api\.mainnet-beta\.solana\.com ]]; then
     echo "public Solana RPC is not accepted for either live endpoint; use two private providers" >&2
     exit 1
   fi
 fi
-
-INSTALL_DIR="$HOME/claudeco-executor"
-ENV_FILE="$INSTALL_DIR/.cc-executor.env"
-STATE_DB="$INSTALL_DIR/.cc-executor.sqlite"
-LOCK_FILE="${STATE_DB}.lock"
-PAUSE_FILE="$INSTALL_DIR/PAUSE_ENTRIES"
-HARD_STOP_FILE="$INSTALL_DIR/HARD_STOP"
-RELEASES_DIR="$INSTALL_DIR/releases"
-CURRENT_LINK="$INSTALL_DIR/current"
-SERVICE_FILE="/etc/systemd/system/cc-executor.service"
-echo "▶ installing WALL-ST-E ($MODE mode) into $INSTALL_DIR"
-
-node_ok=0
-if command -v node >/dev/null 2>&1; then
-  node_ok="$(node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.stdout.write(String(a<25&&(a>22||(a===22&&b>=13))?1:0))')"
-fi
-if [ "$node_ok" != "1" ]; then
-  echo "Node >=22.13 and <25 is required; install it from a package source you trust, then rerun" >&2
-  exit 1
-fi
-node_ok="$(node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.stdout.write(String(a<25&&(a>22||(a===22&&b>=13))?1:0))')"
-if [ "$node_ok" != "1" ]; then echo "Node >=22.13 and <25 is required for the durable SQLite journal" >&2; exit 1; fi
 
 if [ "$MODE" = "live" ]; then
   PRIMARY_RPC="$RPC" SECONDARY_RPC_VALUE="$SECONDARY_RPC" node - <<'NODE'
@@ -356,6 +912,140 @@ if (host(primary) === host(secondary)) {
   process.exit(1);
 }
 NODE
+fi
+
+# BEGIN DARWIN_ACTIVATION
+# The macOS half of the install. Everything above this point is shared with Linux and
+# has already happened in the same order and with the same guarantees: Node verified
+# or privately bootstrapped, the install directory created, the burner generated
+# locally at mode 0600, the feed secret read hidden from /dev/tty, the environment
+# written 0600, the release staged and per-file checked.
+#
+# What is left is adoption, and it is DELEGATED, not reimplemented. macos-release.sh
+# and macos-launchagent.sh are the battle-tested scripts this project already runs in
+# production; they carry validation this installer must not restate in a second,
+# drifting copy. This block's only jobs are to hand them ABSOLUTE paths and to call
+# them in the right order.
+#
+# Absolute paths are not a style preference. macos-release.sh refuses a relative
+# --env-file or --legacy-workdir outright, and the reason it does is an incident in
+# this repo: relative arguments resolved against whatever directory the caller
+# happened to be in, and the "protected environment" that got normalized was not the
+# one anybody meant. Every path below is checked for a leading / before it is passed.
+darwin_require_absolute() {
+  local label="$1" value="$2"
+  case "$value" in
+    /*) ;;
+    *) echo "$label must be an absolute path (got: ${value:-<empty>})" >&2; return 1;;
+  esac
+}
+
+# Read-only. An install that overwrites the protected environment of an executor that
+# is CURRENTLY RUNNING would point a live process at a new wallet and a new journal
+# mid-flight. macos-launchagent.sh refuses to install over a loaded agent, but by then
+# this installer has already replaced the environment file — so the refusal has to
+# happen here, before anything is created. `launchctl` is resolved through PATH rather
+# than as /bin/launchctl so the regression suite can interpose a recorder and prove
+# this installer never reaches the real launchd.
+darwin_preflight_label() {
+  local label="$1"
+  command -v launchctl >/dev/null 2>&1 || return 0
+  if launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1; then
+    cat >&2 <<AGENT
+
+A WALL-ST-E LaunchAgent ($label) is already loaded on this Mac.
+
+Installing over it would repoint a running executor at a new wallet and a new
+journal while it is mid-flight, so nothing has been created or changed. Stop it
+deliberately first, then run this installer again:
+
+    launchctl print gui/\$(id -u)/$label      # see what is running
+    bash ~/claudeco-executor/current/macos-launchagent.sh unload
+
+If that agent is somebody else's install on a shared Mac, do not unload it.
+AGENT
+    return 1
+  fi
+  return 0
+}
+
+darwin_activate() {
+  local release_dir="$1" env_file="$2" workdir="$3" commit="$4" mode="$5"
+  local versioned_dir="$6" source_dir="$7"
+  local controller="$release_dir/macos-launchagent.sh"
+  darwin_require_absolute "the staged release" "$release_dir" || return 1
+  darwin_require_absolute "--env-file" "$env_file" || return 1
+  darwin_require_absolute "--legacy-workdir" "$workdir" || return 1
+  if [ ! -f "$controller" ]; then
+    echo "the staged release does not contain macos-launchagent.sh" >&2
+    return 1
+  fi
+
+  # macos-release.sh is the VERSIONED-UPGRADE path, and it gates on a LIVE
+  # environment. Measured 2026-09-06 by running its validator against a freshly
+  # written dry-run environment, it aborts with exactly:
+  #     versioned live adoption requires EXECUTE=1
+  # and then goes on to demand LIVE_TRADING_ACK, JUPITER_API_KEY, SOLANA_RPC and
+  # SOLANA_RPC_SECONDARY. A default install has none of those by design, and
+  # manufacturing them to satisfy a validator would forge the very ceremony that
+  # keeps one click from becoming one trade. So the dry run adopts the staged
+  # release through the LaunchAgent controller directly, and macos-release.sh is
+  # invoked for exactly the case it was written for: a pinned checkout adopted live.
+  if [ "$mode" = "live" ] && [ -n "$source_dir" ] && [ -f "$source_dir/macos-release.sh" ]; then
+    darwin_require_absolute "--releases-dir" "$versioned_dir" || return 1
+    darwin_require_absolute "the pinned checkout" "$source_dir" || return 1
+    # macos-release.sh checks this too. Checking it first means a malformed commit is
+    # refused before the entry-pause sentinel below is created.
+    if ! [[ "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+      echo "versioned macOS adoption needs the exact 40-character published commit" >&2
+      return 1
+    fi
+    # The entry-pause sentinel is a precondition of the versioned install, not a
+    # decoration: update-upgrade-env runs with requirePaused, so an unpaused host is
+    # refused. Creating it here means the newly adopted release comes up with entries
+    # paused and the operator lifts it as a separate, visible act.
+    install -m 600 /dev/null "$PAUSE_FILE" 2>/dev/null || : > "$PAUSE_FILE"
+    chmod 600 "$PAUSE_FILE"
+    echo "▶ staging and verifying the pinned release with macos-release.sh…"
+    bash "$source_dir/macos-release.sh" stage \
+      --expected-commit "$commit" \
+      --env-file "$env_file" \
+      --legacy-workdir "$workdir" \
+      --releases-dir "$versioned_dir" || return 1
+    echo "▶ binding the stopped executor to that release with macos-release.sh…"
+    bash "$source_dir/macos-release.sh" install \
+      --expected-commit "$commit" \
+      --env-file "$env_file" \
+      --legacy-workdir "$workdir" \
+      --release-dir "$versioned_dir/$commit" || return 1
+    # macos-release.sh install has already run the controller's own install command
+    # against the versioned release, so the agent to load is that one, not the staged
+    # copy this installer built.
+    release_dir="$versioned_dir/$commit/executor"
+    controller="$release_dir/macos-launchagent.sh"
+  else
+    echo "▶ installing the LaunchAgent from the staged release (disabled, not started)…"
+    bash "$controller" install \
+      --executor-dir "$release_dir" \
+      --env-file "$env_file" || return 1
+  fi
+
+  # The rollback boundary, in the same place and for the same reason as the systemd
+  # path's: installing a plist starts nothing, so everything above may still be undone.
+  # `load` starts a process that can reconcile or submit durable chain state, and from
+  # that instant no later shell failure may restore an older journal.
+  ACTIVATION_COMMITTED=1
+  echo "▶ loading the LaunchAgent…"
+  bash "$controller" load \
+    --executor-dir "$release_dir" \
+    --env-file "$env_file" || return 1
+  DARWIN_EXECUTOR_DIR="$release_dir"
+  return 0
+}
+# END DARWIN_ACTIVATION
+
+if [ "$PLATFORM" = "darwin" ]; then
+  darwin_preflight_label "$LAUNCHD_LABEL" || exit 1
 fi
 
 mkdir -p "$INSTALL_DIR" "$RELEASES_DIR"
@@ -396,7 +1086,13 @@ rollback_install() {
   if [ "$status" -ne 0 ] && [ "$ACTIVATION_COMMITTED" -eq 0 ]; then
     echo "installation failed; restoring the previous executor release" >&2
     set +e
-    if [ "$SERVICE_UPDATED" -eq 1 ] || [ "$CURRENT_ACTIVATED" -eq 1 ]; then
+    # macOS never reaches a systemctl or a sudo. The LaunchAgent is loaded by
+    # macos-launchagent.sh as the very last act, and that script carries its own
+    # verified rollback (disable, bootout, confirm) for a load that does not prove
+    # readiness — so there is nothing here for this handler to undo, and calling
+    # launchctl from a failed installer could only fight it.
+    if [ "$PLATFORM" = "linux" ] &&
+       { [ "$SERVICE_UPDATED" -eq 1 ] || [ "$CURRENT_ACTIVATED" -eq 1 ]; }; then
       sudo systemctl stop cc-executor >/dev/null 2>&1
     fi
     if [ "$SERVICE_UPDATED" -eq 1 ]; then
@@ -409,7 +1105,7 @@ rollback_install() {
     if [ "$CURRENT_ACTIVATED" -eq 1 ]; then
       if [ "$CURRENT_HAD_LINK" -eq 1 ]; then
         ln -s "$OLD_CURRENT_TARGET" "$LINK_RESTORE"
-        mv -Tf "$LINK_RESTORE" "$CURRENT_LINK"
+        activate_symlink "$LINK_RESTORE" "$CURRENT_LINK"
       else
         rm -f "$CURRENT_LINK"
       fi
@@ -429,7 +1125,7 @@ rollback_install() {
         rm -f "$STATE_DB" "$STATE_DB-wal" "$STATE_DB-shm"
       fi
     fi
-    sudo systemctl daemon-reload >/dev/null 2>&1
+    if [ "$PLATFORM" = "linux" ]; then sudo systemctl daemon-reload >/dev/null 2>&1; fi
     if [ "$SERVICE_ENABLE_CHANGED" -eq 1 ] && [ "$SERVICE_WAS_ENABLED" -eq 0 ]; then
       sudo systemctl disable cc-executor >/dev/null 2>&1
     fi
@@ -455,6 +1151,16 @@ trap rollback_install EXIT
 echo "▶ fetching the executor and shared policy…"
 RUNTIME_FILES=(poller.mjs burner-backup.mjs journal.mjs jupiter.mjs token2022.mjs balance-verification.mjs entry-quote-guard.mjs exit-trigger.mjs feed-drain.mjs sol-usd-oracle.mjs heartbeat-health.mjs sleep-assertion.mjs monitor.mjs strategy.mjs trade-policy.mjs dexscreener-consensus.mjs desk-mirror.mjs)
 SOURCE_FILES=("${RUNTIME_FILES[@]}" package.json package-lock.json)
+# launchd adopts a DIRECTORY, not a command line: macos-launchagent.sh resolves
+# launchd-runner.mjs and poller.mjs out of the --executor-dir it is handed, and
+# launchd-runner.mjs then validates every runtime file in that directory before it
+# will render a plist. So a macOS release has to carry the lifecycle scripts too, or
+# the staged release is one launchd cannot supervise. macos-release.sh rides along so
+# a later versioned upgrade is available from the installed release itself.
+DARWIN_FILES=(launchd-runner.mjs macos-launchagent.sh macos-release.sh)
+if [ "$PLATFORM" = "darwin" ]; then
+  SOURCE_FILES=("${SOURCE_FILES[@]}" "${DARWIN_FILES[@]}")
+fi
 if [ "$MODE" = "live" ]; then
   echo "▶ staging immutable runtime blobs from commit $SOURCE_COMMIT"
   for file in "${SOURCE_FILES[@]}"; do
@@ -484,6 +1190,17 @@ fi
 for file in "${RUNTIME_FILES[@]}"; do
   node --check "$STAGE_DIR/$file" >/dev/null 2>&1 || { echo "staged $file is not valid JS" >&2; exit 1; }
 done
+if [ "$PLATFORM" = "darwin" ]; then
+  # The launchd runner is the process launchd actually starts. It gets the same
+  # per-file parse check as the trading modules; the two .sh files are checked by
+  # bash -n rather than by node.
+  node --check "$STAGE_DIR/launchd-runner.mjs" >/dev/null 2>&1 ||
+    { echo "staged launchd-runner.mjs is not valid JS" >&2; exit 1; }
+  for file in macos-launchagent.sh macos-release.sh; do
+    bash -n "$STAGE_DIR/$file" >/dev/null 2>&1 ||
+      { echo "staged $file is not valid shell" >&2; exit 1; }
+  done
+fi
 (cd "$STAGE_DIR" && npm ci --ignore-scripts --silent >/dev/null 2>&1)
 RELEASE_DIR="$RELEASES_DIR/$(date -u +%Y%m%dT%H%M%SZ)-${SOURCE_COMMIT:0:12}-$$"
 mv "$STAGE_DIR" "$RELEASE_DIR"
@@ -564,12 +1281,14 @@ chmod 600 "$ENV_NEXT"
 # this point onward every mutation has a rollback copy and the old process is kept
 # stopped until journal initialization, symlink activation and service restart all
 # succeed.
-if systemctl is-active --quiet cc-executor; then
-  SERVICE_WAS_ACTIVE=1
-  sudo systemctl stop cc-executor
-  SERVICE_STOPPED=1
+if [ "$PLATFORM" = "linux" ]; then
+  if systemctl is-active --quiet cc-executor; then
+    SERVICE_WAS_ACTIVE=1
+    sudo systemctl stop cc-executor
+    SERVICE_STOPPED=1
+  fi
+  if systemctl is-enabled --quiet cc-executor 2>/dev/null; then SERVICE_WAS_ENABLED=1; fi
 fi
-if systemctl is-enabled --quiet cc-executor 2>/dev/null; then SERVICE_WAS_ENABLED=1; fi
 if [ -L "$CURRENT_LINK" ]; then
   CURRENT_HAD_LINK=1
   OLD_CURRENT_TARGET="$(readlink "$CURRENT_LINK")"
@@ -578,7 +1297,7 @@ if [ -f "$ENV_FILE" ]; then
   ENV_HAD_FILE=1
   cp -p "$ENV_FILE" "$ENV_BACKUP"
 fi
-if sudo test -f "$SERVICE_FILE"; then
+if [ "$PLATFORM" = "linux" ] && sudo test -f "$SERVICE_FILE"; then
   UNIT_HAD_FILE=1
   sudo cp -p "$SERVICE_FILE" "$UNIT_BACKUP"
 fi
@@ -623,11 +1342,21 @@ chmod 600 "$STATE_DB"
 ln -s "$RELEASE_DIR" "$LINK_NEXT"
 mv -f "$ENV_NEXT" "$ENV_FILE"
 ENV_ACTIVATED=1
-mv -Tf "$LINK_NEXT" "$CURRENT_LINK"
+activate_symlink "$LINK_NEXT" "$CURRENT_LINK"
 CURRENT_ACTIVATED=1
 
-NODE_BIN="$(command -v node)"
+# NODE_BIN was already chosen above — it is either the system node this host
+# already had, or the private, checksum-verified copy under $NODE_RUNTIME_DIR. The
+# unit must start the same binary the release was built and checked against, so this
+# is a fallback for the impossible case, not a re-resolution.
+if [ -z "${NODE_BIN:-}" ]; then NODE_BIN="$(command -v node)"; fi
 SERVICE_USER="$(id -un)"
+DARWIN_EXECUTOR_DIR=""
+
+if [ "$PLATFORM" = "darwin" ]; then
+  darwin_activate "$RELEASE_DIR" "$ENV_FILE" "$INSTALL_DIR" "$SOURCE_COMMIT" "$MODE" \
+    "$VERSIONED_RELEASES_DIR" "$SOURCE_DIR"
+else
 # THIS MUST STAY A SYSTEM UNIT. Converting to `systemctl --user` + linger looks
 # like free ergonomics — sixteen sudo lines to zero, and the unit already runs as
 # User=$SERVICE_USER under $HOME — but systemd.exec(5) is explicit that
@@ -689,19 +1418,21 @@ SERVICE_ENABLE_CHANGED=1
 # supervision; it is never made to forget what may already have happened on chain.
 ACTIVATION_COMMITTED=1
 sudo systemctl restart cc-executor
+fi
 
 # Only now that the new release is the running one: pruning before this point could
 # delete the release a failed start still needs to roll back to.
 prune_releases "$RELEASES_DIR" "$(readlink "$CURRENT_LINK" 2>/dev/null || true)" \
   "$RELEASE_DIR" "${KEEP_RELEASES:-3}"
 
-SECRET=""; JUPITER_KEY=""; LIVE_ACK=""; LIVE_CAPS_ACK=""; CAPS_ACK_EXPECTED=""; REPLY=""
-unset SECRET JUPITER_KEY LIVE_ACK LIVE_CAPS_ACK CAPS_ACK_EXPECTED REPLY
+case "$MODE" in live) MODE_BANNER="LIVE";; *) MODE_BANNER="PAPER";; esac
+SECRET=""; JUPITER_KEY=""; LIVE_ACK=""; LIVE_CAPS_ACK=""; CAPS_ACK_EXPECTED=""; REPLY=""; CRED_VALUE=""
+unset SECRET JUPITER_KEY LIVE_ACK LIVE_CAPS_ACK CAPS_ACK_EXPECTED REPLY CRED_VALUE
 
 cat <<DONE
 
 ════════════════════════════════════════════════════════════════
-  ✓ WALL-ST-E installed for floor $FLOOR in ${MODE^^} mode.
+  ✓ WALL-ST-E installed for floor $FLOOR in $MODE_BANNER mode.
 
   DEDICATED WALLET (PUBLIC ADDRESS):
       $PUBKEY
@@ -709,12 +1440,28 @@ cat <<DONE
   Runtime commit: $SOURCE_COMMIT
   Max $MAX_SOL SOL/trade · $DAILY_CAP SOL/rolling 24h deploy
   Realized-loss entry brake $DAILY_LOSS_CAP SOL/rolling 24h
-  Watch:          sudo journalctl -u cc-executor -f
   Pause entries:  touch $PAUSE_FILE
   Hard stop:      touch $HARD_STOP_FILE
-  Stop process:   sudo systemctl stop cc-executor
   Protected env:  $ENV_FILE
   Durable state:  $STATE_DB
+DONE
+
+if [ "$PLATFORM" = "darwin" ]; then
+cat <<DONE
+  Supervisor:     launchd LaunchAgent $LAUNCHD_LABEL
+  Watch:          tail -f ~/Library/Logs/ClaudeCompany/wallste.stdout.log
+  Status:         bash $DARWIN_EXECUTOR_DIR/macos-launchagent.sh status
+  Stop process:   bash $DARWIN_EXECUTOR_DIR/macos-launchagent.sh unload
+DONE
+else
+cat <<DONE
+  Supervisor:     systemd unit cc-executor
+  Watch:          sudo journalctl -u cc-executor -f
+  Stop process:   sudo systemctl stop cc-executor
+DONE
+fi
+
+cat <<DONE
 
   No wallet was funded by this installer. The private key stays at
   $INSTALL_DIR/burner.json and must never be uploaded or pasted.
@@ -726,3 +1473,28 @@ cat <<DONE
   First feed connection skips historic calls and waits for the next one.
 ════════════════════════════════════════════════════════════════
 DONE
+
+if [ "$MODE" != "live" ]; then
+cat <<DONE
+  THIS IS A DRY RUN. EXECUTE=0. Nothing is signed and nothing is sent, so the
+  wallet above does not need any SOL for this to run. Watch it decide for a
+  while before you consider funding it.
+
+  When you do want it to trade for real, that is a separate command you run on
+  purpose, from a checkout you have reviewed — it is never this one-liner:
+
+      git clone https://github.com/gtjvv976mb-netizen/Claude-Company.git
+      cd Claude-Company && git checkout --detach <PUBLISHED_COMMIT_SHA>
+      bash executor/install.sh --floor $FLOOR --live \\
+        --expected-commit <PUBLISHED_COMMIT_SHA>
+
+  It will walk you through two private RPCs and a Jupiter key, and then make you
+  retype this address on the terminal before it arms:
+
+      $PUBKEY
+
+  Raising a cap costs a second typed sentence. Fund the wallet only once you
+  have decided to do that.
+════════════════════════════════════════════════════════════════
+DONE
+fi

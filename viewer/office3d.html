@@ -366,6 +366,11 @@ body{
 .dp-btn:hover:not(:disabled){background:var(--sol-green);color:#04160e}
 .dp-btn:disabled{opacity:.5;cursor:default}
 .dp-btn.ghost{background:transparent;color:var(--ink-soft);border:1px solid var(--card-line)}
+/* A DOWNLOAD IS AN <a>, AND AN <a> IS display:inline. Measured on the install step:
+   the launcher's 6px/11px padding and 1px border painted around an inline run of text,
+   so it read as an underlined sentence that had grown a stray box — not a button.
+   Buttons are already inline-block by UA default; anchors have to be told. */
+a.dp-btn{display:inline-block;text-decoration:none}
 /* margin:0 — these are <p> elements, so the browser was adding 11.5px ABOVE AND
    BELOW every note in the panel. With flex gaps doing the spacing, that default
    was the invisible air between every row. */
@@ -8344,16 +8349,21 @@ function buildControls(settings) {
     // through /dev/tty so the feed secret never lands in argv or shell history.
     box.appendChild(mk("div", "dp-h", "Install WALL-ST-E · dry run by default"));
     box.appendChild(mk("div", "dp-note",
-      "Clone and inspect the exact release below on a Linux host. The installer reads the executor feed secret privately, stores credentials and the burner key in mode-0600 files, and starts without trading."));
+      "One line on the machine that will run the bot. The installer reads the executor feed secret privately, stores credentials and the burner key in mode-0600 files, and starts without trading."));
     const releaseCommit = "__CLAUDE_COMPANY_SOURCE_COMMIT__";
     const hasPinnedExecutorRelease = /^[0-9a-f]{40}$/i.test(releaseCommit);
-    /* ONE line, one paste. Still pinned to the reviewed release commit — the
-       point of the pin is that you run code someone read, not whatever a URL
-       serves today, and joining the steps with && keeps that while removing
-       three separate pastes. The secret is NOT in here on purpose: the
-       installer prompts for it, so it never reaches shell history or ps. */
+    const installerDigest = "__CLAUDE_COMPANY_INSTALLER_SHA256__";
+    const installerDigestKnown = /^[0-9a-f]{64}$/i.test(installerDigest);
+    /* ONE line, one paste — and now genuinely one line. install.sh has bootstrapped
+       itself from $STATIC and read every prompt from /dev/tty for weeks, so piping it
+       from curl was always the supported path; this panel just kept asking for a clone,
+       a cd and a 40-character SHA first. The pin has not gone away, it has moved: the
+       digest below is of the exact bytes this site serves, and the clone form is one
+       disclosure down for anyone who would rather have git do the pinning.
+       The secret is NOT in here on purpose: the installer prompts for it, so it never
+       reaches shell history or ps. */
     const cmd = hasPinnedExecutorRelease
-      ? `git clone https://github.com/gtjvv976mb-netizen/Claude-Company.git && cd Claude-Company && git checkout --detach ${releaseCommit} && bash executor/install.sh --floor ${FLOOR_N}`
+      ? `curl -fsSL https://claudedotcompany.com/install.sh | bash -s -- --floor ${FLOOR_N}`
       : "Executor installation is unavailable in this local preview. Build a release with an exact EXECUTOR_COMMIT.";
     const box2 = mk("div", "bud-addr");
     box2.style.cssText = "white-space:pre-wrap;word-break:break-all;font-size:10px;line-height:1.5";
@@ -8368,6 +8378,47 @@ function buildControls(settings) {
       setTimeout(() => (copyBtn.textContent = "Copy the command"), 1500);
     };
     box.appendChild(copyBtn);
+    // The promise belongs next to the command, where the decision is actually made.
+    box.appendChild(mk("p", "dp-note",
+      "This installs a dry run: it watches the feed and trades nothing until you separately arm it on that machine."));
+    if (hasPinnedExecutorRelease && installerDigestKnown) {
+      box.appendChild(mk("p", "dp-note",
+        "Check it before you run it: curl -fsSL https://claudedotcompany.com/install.sh | shasum -a 256 "
+        + "should print the digest below."));
+      /* Its own wrapping box for the same reason as the dashboard's: 64 hex characters
+         have no break opportunity and a paragraph simply paints them past the edge. */
+      const digestBox = mk("div", "bud-addr");
+      digestBox.style.cssText = "white-space:pre-wrap;word-break:break-all;font-size:10px;line-height:1.5";
+      digestBox.textContent = installerDigest;
+      box.appendChild(digestBox);
+    }
+    // For the reader who will not open a terminal. Same installer, Finder-friendly wrapper.
+    const launcherDl = mk("a", "dp-btn ghost", "Download the double-click installer (macOS)");
+    launcherDl.href = "/executor/Install%20WALL-ST-E.command";
+    launcherDl.setAttribute("download", "Install WALL-ST-E.command");
+    launcherDl.style.marginTop = "4px";
+    box.appendChild(launcherDl);
+    /* Demoted, not deleted: some readers will not pipe a URL into a shell on principle. */
+    const cloneWays = foldSection("Prefer to clone it yourself?");
+    cloneWays.body.appendChild(mk("p", "dp-note",
+      "Same installer, pinned by git to the exact reviewed commit instead of to this site's current bytes."));
+    const cloneCmd = hasPinnedExecutorRelease
+      ? `git clone https://github.com/gtjvv976mb-netizen/Claude-Company.git && cd Claude-Company && git checkout --detach ${releaseCommit} && bash executor/install.sh --floor ${FLOOR_N}`
+      : "Executor installation is unavailable in this local preview. Build a release with an exact EXECUTOR_COMMIT.";
+    const cloneBox = mk("div", "bud-addr");
+    cloneBox.style.cssText = "white-space:pre-wrap;word-break:break-all;font-size:10px;line-height:1.5";
+    cloneBox.textContent = cloneCmd;
+    cloneWays.body.appendChild(cloneBox);
+    const copyCloneBtn = mk("button", "dp-btn ghost", "Copy the git-clone install");
+    copyCloneBtn.type = "button";
+    copyCloneBtn.disabled = !hasPinnedExecutorRelease;
+    copyCloneBtn.onclick = async () => {
+      try { await navigator.clipboard.writeText(cloneCmd); copyCloneBtn.textContent = "Copied ✓"; }
+      catch { cloneBox.style.userSelect = "all"; copyCloneBtn.textContent = "Select it above"; }
+      setTimeout(() => (copyCloneBtn.textContent = "Copy the git-clone install"), 1500);
+    };
+    cloneWays.body.appendChild(copyCloneBtn);
+    box.appendChild(cloneWays.wrap);
 
     // Step two is a click as well: the installer will ask for this.
     if (settings.executor_secret) {
@@ -9840,9 +9891,36 @@ async function loadWallsteDashboard({ background = false } = {}) {
     const releaseIsPinned = /^[0-9a-f]{40}$/i.test(executorReleaseCommit);
     const runtimeMatchesRelease = releaseIsPinned &&
       String(health?.runtimeCommit || "").toLowerCase() === executorReleaseCommit.toLowerCase();
-    const dryRunCommand = "git clone https://github.com/gtjvv976mb-netizen/Claude-Company.git && " +
+    /* ── THE DEFAULT PATH IS ONE LINE ────────────────────────────────────────────
+     * The installer has self-bootstrapped from $STATIC and read every prompt from
+     * /dev/tty for weeks, which means piping it from curl has ALREADY been the
+     * supported path — this panel simply never said so, and handed over a clone,
+     * a cd, a detached checkout and a 40-character SHA instead. Four things to get
+     * right before anything happens is not an install, it is an exam, and the
+     * measured cost of that exam is every user who does not own a terminal habit.
+     *
+     * WHAT DOES NOT CHANGE: this line installs a DRY RUN. The installer trades
+     * nothing until the owner arms it on that host, through the LIVE_ACK and
+     * LIVE_CAPS_ACK ceremonies, with a burner key generated on that machine. One
+     * click to INSTALL must never become one click to trade real money — so the
+     * short path buys convenience only in step 2, and steps 4 and 5 stay exactly
+     * as deliberate as they were. */
+    const installerSha256 = "__CLAUDE_COMPANY_INSTALLER_SHA256__";
+    /* The build substitutes the digest of the very install.sh it published. Unsubstituted
+       means a local preview, and a digest a reader cannot rely on is worse than none. */
+    const installerShaKnown = /^[0-9a-f]{64}$/i.test(installerSha256);
+    const oneCommandInstall =
+      "curl -fsSL https://claudedotcompany.com/install.sh | bash -s -- --floor " + FLOOR_N;
+    /* Not deleted, demoted. Some readers will not pipe a URL into a shell on principle,
+       and they are not wrong to feel that way — this is the same install, pinned to the
+       exact reviewed commit, for anyone who would rather read it first. */
+    const cloneInstallCommand = "git clone https://github.com/gtjvv976mb-netizen/Claude-Company.git && " +
       "cd Claude-Company && git checkout --detach " + executorReleaseCommit +
       " && bash executor/install.sh --floor " + FLOOR_N;
+    /* Same digest, checked from the terminal: pipe the download into shasum instead of
+       into bash, and compare with the value printed on this page. */
+    const verifyInstallerCommand =
+      "curl -fsSL https://claudedotcompany.com/install.sh | shasum -a 256";
     const reviewCommand = "sudo journalctl -u cc-executor -f";
     const liveCanaryCommand = "bash executor/install.sh --floor " + FLOOR_N +
       " --live --expected-commit " + executorReleaseCommit +
@@ -9876,18 +9954,76 @@ async function loadWallsteDashboard({ background = false } = {}) {
         : "Create the credential above, then copy it only after the privacy confirmation. It authenticates feed reads and outbound heartbeats, never wallet custody.",
       activation.feedCredentialReady === true);
 
-    const installStep = setupStep(2, "Install the exact reviewed release in dry-run mode",
+    const installStep = setupStep(2, "Install WALL-ST-E · one command, dry run by default",
       releaseIsPinned
-        ? "This command detaches the checkout at the published 40-character commit. Dry run is the installer default."
+        ? "Paste this into a terminal on the machine that will run the bot. Dry run is the installer default."
         : "The deployment has not embedded its exact 40-character source commit, so installation copy is locked. Publish the build with the source placeholder replaced first.",
       runtimeMatchesRelease);
-    installStep.appendChild(dashNode("pre", "commandbox", dryRunCommand));
-    const copyDry = dashNode("button", "dp-btn ghost commandcopy", "Copy dry-run install");
-    copyDry.type = "button";
-    copyDry.disabled = !releaseIsPinned;
-    copyDry.title = releaseIsPinned ? "Copy the pinned dry-run command" : "Unavailable until this build contains an exact release commit";
-    copyDry.onclick = () => copyVisibleCommand(copyDry, dryRunCommand);
-    installStep.appendChild(copyDry);
+    installStep.appendChild(dashNode("pre", "commandbox", oneCommandInstall));
+    const copyOne = dashNode("button", "dp-btn ghost commandcopy", "Copy the one-command install");
+    copyOne.type = "button";
+    copyOne.disabled = !releaseIsPinned;
+    copyOne.title = releaseIsPinned ? "Copy the one-command install" : "Unavailable until this build contains an exact release commit";
+    copyOne.onclick = () => copyVisibleCommand(copyOne, oneCommandInstall);
+    installStep.appendChild(copyOne);
+
+    /* SAY IT BESIDE THE COMMAND, NOT THREE PANELS LOWER. A reader about to pipe a URL
+       into bash is entitled to know, at that exact moment, that nothing it installs can
+       spend money on its own. The ceremonies are further down the page; the promise is
+       here, where the decision is being made. */
+    installStep.appendChild(dashNode("p", "dp-note",
+      "This installs a dry run: WALL-ST-E watches the feed, writes what it would have done, and trades nothing. "
+      + "It cannot buy or sell until you separately arm it on that machine — steps 4 and 5 below. "
+      + "The burner key is generated on your host, is never sent anywhere, and no button on this page can arm, sign, or fund it."));
+
+    /* The double-click path, for the readers who will never open a terminal at all. It is
+       the SAME one-liner in a wrapper; a second installer would be a second thing to audit. */
+    const launcherLink = dashNode("a", "dp-btn ghost commandcopy", "Download the double-click installer (macOS)");
+    launcherLink.href = "/executor/Install%20WALL-ST-E.command";
+    launcherLink.setAttribute("download", "Install WALL-ST-E.command");
+    launcherLink.title = "A .command file: it opens Terminal, says what it is about to do, and runs the same line above";
+    installStep.appendChild(launcherLink);
+    installStep.appendChild(dashNode("p", "dp-note",
+      "macOS marks a downloaded .command as quarantined: right-click it and choose Open the first time, "
+      + "or run the line above instead. It installs exactly the same dry run."));
+
+    /* VERIFY WHAT YOU ARE ABOUT TO RUN. Piping a URL into a shell is only as good as the
+       reader's ability to check that the URL served what the publisher says it served, so
+       the page states the digest and the line that prints it. The digest comes from the
+       build that wrote /install.sh, so the two cannot disagree by construction. */
+    if (releaseIsPinned && installerShaKnown) {
+      installStep.appendChild(dashNode("p", "dp-note",
+        "Verify it first if you like. Run the line below and compare its output with the digest, "
+        + "or download the script, read it, and run it by hand."));
+      /* THE DIGEST GETS ITS OWN BOX. In a .dp-note paragraph the 64-hex string has no break
+         opportunity anywhere in it: measured 394px of text in a 294px column, so the last
+         24 characters were simply painted outside the panel. A checksum you cannot read all
+         of is a checksum nobody compares. .commandbox breaks anywhere and is selectable. */
+      installStep.appendChild(dashNode("p", "dp-note",
+        "The installer this site is serving has SHA-256:"));
+      installStep.appendChild(dashNode("pre", "commandbox", installerSha256));
+      installStep.appendChild(dashNode("pre", "commandbox", verifyInstallerCommand));
+      const copyVerify = dashNode("button", "dp-btn ghost commandcopy", "Copy the checksum command");
+      copyVerify.type = "button";
+      copyVerify.onclick = () => copyVisibleCommand(copyVerify, verifyInstallerCommand);
+      installStep.appendChild(copyVerify);
+    }
+
+    /* KEPT, NOT DEFAULT. The clone form pins the exact reviewed commit, which is a real
+       property some readers will insist on; it is simply no longer the first thing an
+       ordinary user is asked to execute. */
+    const cloneFold = foldSection("Prefer to clone it yourself?");
+    cloneFold.body.appendChild(dashNode("p", "dp-note",
+      "Same installer, fetched by git and pinned to the exact reviewed 40-character commit instead of to this site's current bytes. "
+      + "Read it before you run it; that is the point of this path."));
+    cloneFold.body.appendChild(dashNode("pre", "commandbox", cloneInstallCommand));
+    const copyClone = dashNode("button", "dp-btn ghost commandcopy", "Copy the git-clone install");
+    copyClone.type = "button";
+    copyClone.disabled = !releaseIsPinned;
+    copyClone.title = releaseIsPinned ? "Copy the pinned clone-and-install command" : "Unavailable until this build contains an exact release commit";
+    copyClone.onclick = () => copyVisibleCommand(copyClone, cloneInstallCommand);
+    cloneFold.body.appendChild(copyClone);
+    installStep.appendChild(cloneFold.wrap);
 
     const paperStep = setupStep(3, "Run and review paper mode",
       activation.currentPaperMode

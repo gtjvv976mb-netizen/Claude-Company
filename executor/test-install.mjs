@@ -211,13 +211,21 @@ check("live runtime bytes come from immutable Git blobs, not the worktree cache"
 check("a complete release is staged before the running service is stopped",
   installer.indexOf("npm ci --ignore-scripts") < installer.indexOf("systemctl is-active --quiet cc-executor") &&
   installer.includes('RELEASES_DIR="$INSTALL_DIR/releases"'));
+/* The activation used to be `mv -Tf`. GNU's -T is what stops mv following the symlink
+   it is replacing, and BSD/macOS mv has no such flag — measured on macOS 15, plain
+   `mv -f` left `current` pointing at the OLD release and moved the new link inside it,
+   silently. Now that install.sh also provisions macOS, activation goes through
+   rename(2) via activate_symlink, which is atomic and never dereferences either
+   operand on any Unix. What is pinned here is unchanged: activation is one atomic
+   step, and the supervisor runs the symlink rather than a staging directory. */
 check("activation uses an atomic current symlink and systemd never runs staged files",
-  installer.includes('mv -Tf "$LINK_NEXT" "$CURRENT_LINK"') &&
+  installer.includes('activate_symlink "$LINK_NEXT" "$CURRENT_LINK"') &&
+  /renameSync\(process\.env\.LINK_FROM, process\.env\.LINK_TO\)/.test(installer) &&
   installer.includes('WorkingDirectory=$CURRENT_LINK') &&
   installer.includes('ExecStart=$NODE_BIN $CURRENT_LINK/poller.mjs'));
 check("failed upgrades restore the prior unit, symlink, environment and journal",
   installer.includes("rollback_install()") && installer.includes('install -m 0644 "$UNIT_BACKUP"') &&
-  installer.includes('mv -Tf "$LINK_RESTORE" "$CURRENT_LINK"') &&
+  installer.includes('activate_symlink "$LINK_RESTORE" "$CURRENT_LINK"') &&
   installer.includes('mv -f "$ENV_BACKUP" "$ENV_FILE"') &&
   installer.includes('cp -p "$STATE_BACKUP" "$STATE_DB"') &&
   installer.includes("systemctl disable cc-executor"));
@@ -281,6 +289,26 @@ check("installer never pipes a mutable bootstrap script into a privileged shell"
     "burner-backup.mjs"];
   check("installer stages the complete durable execution and monitoring module graph",
     required.every((f) => staged.includes(f)));
+
+  /* launchd adopts a directory, not a command line: macos-launchagent.sh resolves
+     launchd-runner.mjs and poller.mjs out of the --executor-dir it is handed, and the
+     runner then validates every runtime file in it. A macOS release that omits those
+     is a release launchd cannot supervise, and the failure would surface only on a
+     Mac, at load time, after the environment had already been replaced. */
+  const darwin = installer.match(/DARWIN_FILES=\(([^)]*)\)/)?.[1]?.split(/\s+/) ?? [];
+  check("a macOS release also stages the launchd runner and lifecycle scripts",
+    ["launchd-runner.mjs", "macos-launchagent.sh", "macos-release.sh"].every((f) => darwin.includes(f)) &&
+    /SOURCE_FILES=\("\$\{SOURCE_FILES\[@\]\}" "\$\{DARWIN_FILES\[@\]\}"\)/.test(installer),
+    `DARWIN_FILES: ${JSON.stringify(darwin)}`);
+  check("macOS adoption is delegated to the reviewed scripts, not restated in the installer",
+    /bash "\$source_dir\/macos-release\.sh" stage/.test(installer) &&
+    /bash "\$source_dir\/macos-release\.sh" install/.test(installer) &&
+    /bash "\$controller" install/.test(installer) && /bash "\$controller" load/.test(installer) &&
+    !/launchctl (disable|enable|bootstrap|bootout)/.test(installer));
+  check("no sudo is reachable on the macOS path",
+    installer.split("\n").filter((l) => /^\s*sudo /.test(l)).length > 0 &&
+    /if \[ "\$PLATFORM" = "linux" \]; then sudo systemctl daemon-reload/.test(installer) &&
+    /if \[ "\$PLATFORM" = "linux" \] && sudo test -f "\$SERVICE_FILE"/.test(installer));
 }
 const manifest = sources.get("package.json") ? JSON.parse(sources.get("package.json")) : {};
 const lock = sources.get("package-lock.json") ? JSON.parse(sources.get("package-lock.json")) : {};

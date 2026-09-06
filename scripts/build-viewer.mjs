@@ -1,5 +1,6 @@
 // Produce self-contained pages: the published artifact CSP forbids any external fetch,
 // so three.js is inlined rather than served from /vendor.
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -186,6 +187,46 @@ for (const f of EXECUTOR_FILES) {
   fs.copyFileSync(src, path.join(OUT, "executor", f));
 }
 
+/* ── THE SHORT PATH ───────────────────────────────────────────────────────────
+ * /executor/install.sh has served 200 for weeks. That is not the same as being
+ * FINDABLE: a one-command install has to be a line a person can read off a page
+ * and half-remember, and "curl .../executor/install.sh" is already past that.
+ * So the installer is published at /install.sh too.
+ *
+ * TWO URLS, ONE FILE, ONE STATEMENT. Both destinations are written from the same
+ * source path in the loop below, deliberately, because the failure mode of two
+ * copy steps is two DIFFERENT installers on one domain — one of them audited, one
+ * of them stale, and no way for a reader to tell which they piped into bash. The
+ * test asserts the two published bytes are identical; this is why they can be. */
+const INSTALLER_SRC = path.join(ROOT, "executor", "install.sh");
+for (const dest of [path.join(OUT, "install.sh"), path.join(OUT, "executor", "install.sh")]) {
+  fs.copyFileSync(INSTALLER_SRC, dest);
+  fs.chmodSync(dest, 0o755);          // `bash install.sh` does not need it; `./install.sh` does
+}
+/* The digest the site states out loud, so "verify what you are about to run" is a
+   thing a careful reader can actually do: shasum the download, compare to the page.
+   Computed from the very bytes just published — never typed, never carried forward. */
+const INSTALLER_SHA256 = crypto.createHash("sha256").update(fs.readFileSync(INSTALLER_SRC)).digest("hex");
+
+/* The macOS double-click launcher, for the users who will not open a terminal at all.
+   The executable bit is the whole point of the artifact: Finder refuses to run a
+   .command without it, and fs.copyFileSync's mode preservation is not something to
+   bet a download on — so it is set explicitly.
+   MISSING IS A WARNING, NOT A THROW: this file is owned by the installer side of the
+   work and lands separately. A hard failure here would break every build of the site
+   for a button that is allowed to be dark for an afternoon. */
+const LAUNCHER = "Install WALL-ST-E.command";
+const launcherSrc = path.join(ROOT, "executor", LAUNCHER);
+if (fs.existsSync(launcherSrc)) {
+  const launcherOut = path.join(OUT, "executor", LAUNCHER);
+  fs.copyFileSync(launcherSrc, launcherOut);
+  fs.chmodSync(launcherOut, 0o755);
+  console.log(`launcher            ${(fs.statSync(launcherOut).size / 1024).toFixed(1).padStart(6)} KB  mode=${(fs.statSync(launcherOut).mode & 0o777).toString(8)}`);
+} else {
+  console.warn(`WARNING: executor/${LAUNCHER} not found — the site's double-click download will 404 until it lands`);
+}
+console.log(`install.sh sha256   ${INSTALLER_SHA256}`);
+
 // GitHub Pages reads dist/CNAME to bind the custom domain.
 const cnameSrc = path.join(VIEWER, "CNAME");
 if (fs.existsSync(cnameSrc)) fs.copyFileSync(cnameSrc, path.join(OUT, "CNAME"));
@@ -200,6 +241,17 @@ for (const { src: name, out } of PAGES) {
      local release builds must supply EXECUTOR_COMMIT explicitly. Ordinary local builds
      get a non-installable preview sentinel, never a stale or inferred SHA. */
   html = html.replaceAll("__CLAUDE_COMPANY_SOURCE_COMMIT__", EXECUTOR_COMMIT);
+  /* The page states the digest of the installer THIS BUILD published, so the value a
+     reader compares against is the value the same build wrote to /install.sh. The
+     source page carries a placeholder rather than a hash: a committed hash is a hash
+     that is wrong the next time install.sh is touched, and a stale digest teaches
+     people to ignore the check. The viewer tests the shape and hides it if unsubstituted. */
+  html = html.replaceAll("__CLAUDE_COMPANY_INSTALLER_SHA256__", INSTALLER_SHA256);
+  /* The one-command line names an origin, and a build published elsewhere (a staging
+     host, a fork) must not send its readers to the production installer. The canonical
+     URL is what the source file carries — so the test can pin the literal a reader
+     sees — and this rewrites it to whatever origin is actually being built. */
+  html = html.replaceAll("https://claudedotcompany.com/install.sh", `${SITE_URL}/install.sh`);
   const srcClosers = (html.match(/<\/script/gi) || []).length;
 
   if (IMPORT_LINE.test(html)) {
