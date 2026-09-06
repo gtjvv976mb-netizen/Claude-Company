@@ -907,7 +907,17 @@ function enter(k,wallet){
 }
 
 /* ── the two doors ───────────────────────────────────────────────────────── */
-function say(id,msg,cls){var s=document.getElementById(id);s.className="status"+(cls?" "+cls:"");s.innerHTML=msg||"";}
+/* say() WRITES TEXT. It used to write innerHTML, and three of its callers
+   interpolate strings this page does not author: a wallet's name comes from a
+   browser EXTENSION, and an error message can come from the wallet, from the
+   WalletConnect SDK or from the relay. MEASURED: an extension announcing itself
+   as <img src=x onerror="..."> executed that script on the gateway, because
+   offer() connects straight through when it is the only wallet and the status
+   line says "Asking <name>…". Author-written markup — the two empty-state
+   messages, which carry install links — goes through sayHtml instead, and that
+   is the ONLY thing that may. */
+function say(id,msg,cls){var s=document.getElementById(id);s.className="status"+(cls?" "+cls:"");s.textContent=msg||"";}
+function sayHtml(id,html,cls){var s=document.getElementById(id);s.className="status"+(cls?" "+cls:"");s.innerHTML=html||"";}
 function short(a){return a?a.slice(0,4)+"…"+a.slice(-4):"";}
 
 /* ── WALLETS ────────────────────────────────────────────────────────────────
@@ -940,7 +950,8 @@ function walletIcon(w){
 function offer(list, pickId, statusId, connect, emptyMsg){
   var box = document.getElementById(pickId);
   box.innerHTML = ""; box.hidden = true;
-  if(!list.length){ say(statusId, emptyMsg, "err"); return; }
+  /* emptyMsg is a literal from this file at both call sites — the only markup here. */
+  if(!list.length){ sayHtml(statusId, emptyMsg, "err"); return; }
   if(list.length === 1){ connect(list[0]); return; }
   say(statusId, "Found " + list.length + " wallets — pick one.");
   list.forEach(function(w){
@@ -1005,13 +1016,22 @@ async function wcListings(chain){
       .filter(function(w){ return w && w.mobile && (w.mobile.universal || w.mobile.native); });
   }catch(e){ return []; }
 }
-/* WalletConnect's own two link conventions, spelled out rather than guessed at. */
+/* WalletConnect's own two link conventions, spelled out rather than guessed at.
+   Returns null for anything that is not plainly one of them: this string arrives
+   OVER THE NETWORK from the registry, and an href is executable — javascript:,
+   data: and vbscript: all reach the same anchor. A wallet we cannot build a safe
+   link for is simply not offered; the generic wc: link above still works. */
 function wcDeepLink(w, uri){
   var enc = encodeURIComponent(uri);
-  if(w.mobile.universal) return w.mobile.universal.replace(/\/+$/, "") + "/wc?uri=" + enc;
-  var n = w.mobile.native.replace(/\/+$/, "");
-  if(!/:$/.test(n)) n += ":";
-  return n + "//wc?uri=" + enc;
+  if(w.mobile.universal){
+    var u = String(w.mobile.universal);
+    if(!/^https:\/\/[^\s"'<>]+$/i.test(u)) return null;
+    return u.replace(/\/+$/, "") + "/wc?uri=" + enc;
+  }
+  var n = String(w.mobile.native || "").replace(/\/+$/, "").replace(/:$/, "");
+  if(!/^[a-z][a-z0-9+.-]*$/i.test(n)) return null;
+  if(/^(javascript|data|vbscript|file|blob|about)$/i.test(n)) return null;
+  return n + "://wc?uri=" + enc;
 }
 function wcQr(cv, text, qrcode){
   var q = qrcode(0, "M"); q.addData(text); q.make();
@@ -1107,11 +1127,14 @@ function wcSheet(uri, chain, onCancel){
     var reg = document.createElement("div"); reg.className = "wcrow"; card.appendChild(reg);
     wcListings(chain).then(function(list){
       list.slice(0, 12).forEach(function(w){
+        var href = wcDeepLink(w, uri);
+        if(!href) return;
         var a = document.createElement("a");
-        a.href = wcDeepLink(w, uri); a.rel = "noopener";
-        if(w.image_id){
+        a.href = href; a.rel = "noopener";
+        /* image_id is a registry field: encode it, and never let it shape the URL. */
+        if(w.image_id && /^[\w-]{1,64}$/.test(String(w.image_id))){
           var img = document.createElement("img"); img.alt = ""; img.setAttribute("aria-hidden", "true");
-          img.src = "https://explorer-api.walletconnect.com/v3/logo/sm/" + w.image_id
+          img.src = "https://explorer-api.walletconnect.com/v3/logo/sm/" + encodeURIComponent(w.image_id)
                   + "?projectId=" + encodeURIComponent(WC_ID);
           a.appendChild(img);
         }

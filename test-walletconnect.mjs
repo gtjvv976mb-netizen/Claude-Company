@@ -46,6 +46,47 @@ const vendor = new URL("viewer/vendor/wc/", root);
   assert.match(offer, /label\.textContent = w\.name/, "the wallet's name is set as text, never parsed");
 }
 
+/* ── THE STATUS LINE IS NOT AN HTML SINK ──────────────────────────────────────
+ * say() wrote innerHTML, and three callers interpolate strings this page does not
+ * author: a wallet's name comes from a browser EXTENSION, an error message from
+ * the wallet, the SDK or the relay. MEASURED on the live build: an extension
+ * announcing itself as <img src=x onerror="..."> executed that script on the
+ * gateway, because offer() connects straight through when it is the only wallet
+ * and the status reads "Asking <name>…". Only author-written markup may be HTML. */
+{
+  assert.match(html, /function say\(id,msg,cls\)\{[^}]*s\.textContent=msg\|\|"";\}/,
+    "say() writes text");
+  assert.match(html, /function sayHtml\(id,html,cls\)\{[^}]*s\.innerHTML=html\|\|"";\}/,
+    "...and markup has its own, separate door");
+  const sayHtmlCalls = [...html.matchAll(/(?<!function )sayHtml\(([^;]*?)\)/g)].map((m) => m[1]);
+  assert.deepEqual(sayHtmlCalls, ['statusId, emptyMsg, "err"'],
+    "sayHtml has exactly one caller, and its argument is a literal from this file");
+  /* Every remaining innerHTML on this page is either that one function or a clear. */
+  const sinks = [...html.matchAll(/^.*\binnerHTML\b.*$/gm)].map((m) => m[0].trim())
+    .filter((l) => !l.startsWith("/*") && !l.startsWith("*"));
+  for (const line of sinks)
+    assert.ok(/function sayHtml|innerHTML = ""|innerHTML=""/.test(line),
+      `an innerHTML sink that is neither sayHtml nor a clear: ${line.slice(0, 90)}`);
+}
+
+/* ── A REGISTRY STRING IS NOT A LICENCE TO NAVIGATE ───────────────────────────
+ * mobile.native / mobile.universal arrive OVER THE NETWORK and become an href,
+ * which is executable. A wallet we cannot build a safe link for is dropped; the
+ * generic wc: link above it still works for that person. */
+{
+  const fn = html.slice(html.indexOf("function wcDeepLink"), html.indexOf("function wcQr"));
+  assert.match(fn, /if\(!\/\^https:\\\/\\\/\[\^\\s"'<>\]\+\$\/i\.test\(u\)\) return null/,
+    "a universal link must be https and free of quote/bracket characters");
+  assert.match(fn, /javascript\|data\|vbscript\|file\|blob\|about/,
+    "and a native scheme is checked against the executable ones by name");
+  assert.match(fn, /if\(!\/\^\[a-z\]\[a-z0-9\+\.-\]\*\$\/i\.test\(n\)\) return null/,
+    "...as well as by shape");
+  assert.match(html, /var href = wcDeepLink\(w, uri\);\s*\n\s*if\(!href\) return;/,
+    "a wallet with no safe link is skipped, never rendered with a null href");
+  assert.match(html, /w\.image_id && \/\^\[\\w-\]\{1,64\}\$\/\.test/,
+    "the registry's logo id is shape-checked before it shapes a URL");
+}
+
 /* ── A DEAD RELAY MUST SAY SO ─────────────────────────────────────────────────
  * MEASURED: with a project id the relay does not recognise, the socket closes
  * with code 3000 ("Project not found") and the SDK RETRIES FOREVER — connect()
