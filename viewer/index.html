@@ -1124,6 +1124,25 @@ Array.prototype.forEach.call(document.querySelectorAll(".steps"), function(list)
   else { var io = new IntersectionObserver(function(es){ if (es[0].isIntersecting) { light(); io.disconnect(); } }, { threshold: 0.35 }); io.observe(list); }
 });
 
+})();
+</script>
+
+<!-- THE FUNNEL GETS ITS OWN SCRIPT TAG, AND THAT IS THE POINT.
+     It used to be the last statement of the block above — reveals, the lift, the two
+     API-wired sections, the pulse, the vault: ~125 lines that all had to run cleanly
+     before the chart was even LOOKED UP. An uncaught throw at the top level of a
+     classic script aborts THE WHOLE TAG, so any failure up there (a browser missing
+     an API, a DOM node some variant of the page does not have) took floor 48 with it
+     and left nothing to autoplay. Measured: stubbing matchMedia to throw left
+     __funnelStats undefined and the canvas blank. A separate IIFE does NOT fix this —
+     the abort is per-tag, not per-function — so it has to be its own tag.
+     "Constantly, without fail" cannot sit downstream of unrelated code.
+     This block references nothing from the scope above it (reduced, hasIO, API,
+     RH_API, lift, floors, reveals: zero occurrences below), so it stands alone.
+     Do not merge it back up. -->
+<script>
+(function(){
+
 /* ── THE FUNNEL — one sweep, read as a ledger ──────────────────────────
    Three registers stacked on one x, and the argument is the vertical disagreement
    between them: a stepped SURVIVOR ribbon on a declared log scale (top), the DEAD
@@ -1594,7 +1613,22 @@ if (cv && cv.getContext) {
 
   /* ── AUTOPLAY. The clock is ACCUMULATED, never differenced against a fixed origin:
      that is what removes both the drift and the jump on tab return. Do not "fix" it
-     back to (now - t0) % CYCLE — that pattern produces both. ─────────────────── */
+     back to (now - t0) % CYCLE — that pattern produces both.
+
+     NOTHING HERE GATES THE rAF ON document.hidden, AND THAT IS DELIBERATE.
+     document.hidden is a HINT, not the authority. The authority on whether this
+     document is being rendered is whether the browser delivers the callback at all —
+     and it does not deliver one for a document it is not painting. So the "pause
+     while hidden" is already enforced, by the engine, for free: measured in a
+     genuinely hidden tab, an unconditional rAF chain in this very page fired 5 times
+     in 30 seconds instead of ~1800. Gating on the flag buys no idle cost the browser
+     was not already saving, and it costs the whole requirement, because contexts that
+     report hidden while ON SCREEN are real: this repo's own Browser pane holds
+     visibilityState "hidden" permanently, and embedded WebViews, prerendered pages and
+     some capture/remote-desktop sessions do the same. With the flag trusted, floor 48
+     sat at frames:0, raf:false, one identical canvas hash over 3.6s, in a viewport a
+     person was looking at. If it renders, it is visible; if it is not visible, it does
+     not render. Do not re-add the gate. ─────────────────────────────────────────── */
   var total = 0, lastNow = null, playing = false, raf = 0, paused = false, frames = 0;
   function frame(now){
     raf = 0;
@@ -1603,9 +1637,9 @@ if (cv && cv.getContext) {
     frames++;
     SWEEPN = Math.floor(total / CYCLE);
     try { render(total % CYCLE); } catch (err) { /* never let one bad frame kill the loop */ }
-    if (playing && !document.hidden) raf = requestAnimationFrame(frame);
+    if (playing) raf = requestAnimationFrame(frame);
   }
-  function kick(){ if (raf) cancelAnimationFrame(raf); raf = 0; lastNow = null; if (!document.hidden) raf = requestAnimationFrame(frame); }
+  function kick(){ if (raf) cancelAnimationFrame(raf); raf = 0; lastNow = null; raf = requestAnimationFrame(frame); }
   function play(){ if (playing) return; playing = true; kick(); }
   function stop(){ playing = false; if (raf) { cancelAnimationFrame(raf); raf = 0; } lastNow = null; render(total % CYCLE); }
 
@@ -1619,14 +1653,15 @@ if (cv && cv.getContext) {
     playBtn.setAttribute("aria-pressed", paused ? "false" : "true");
   });
 
-  /* hidden is not a user pause: `playing` stays true, only the rAF is cancelled, so
-     idle cost while the tab is away is genuinely zero. */
+  /* Hiding cancels nothing — the engine suspends delivery on its own, and cancelling
+     here is precisely what stranded the loop when the flag lied. Coming BACK still
+     kicks: kick(), not "if (!raf)", because a page that loaded hidden holds a pending
+     callback the browser may never deliver. */
   document.addEventListener("visibilitychange", function(){
-    if (document.hidden) { if (raf) { cancelAnimationFrame(raf); raf = 0; } lastNow = null; }
-    else if (playing) kick();   // kick(), not "if (!raf)": a page that LOADED hidden holds a
-  });                           // pending callback the browser may never deliver
+    if (!document.hidden && playing) kick();
+  });
   window.addEventListener("pageshow", function(){        // bfcache fires no visibilitychange
-    if (playing && !document.hidden) kick();
+    if (playing) kick();
   });
   var resizePending = false;
   window.addEventListener("resize", function(){
@@ -1640,11 +1675,38 @@ if (cv && cv.getContext) {
      throw caught above. */
   var seenFrames = -1;
   setInterval(function(){
-    if (!playing || document.hidden) { seenFrames = frames; return; }
+    if (!playing) { seenFrames = frames; return; }   // only a real pause is exempt
     if (!raf || frames === seenFrames) kick();   // no rAF, OR a handle that stopped delivering
     seenFrames = frames;
   }, 1000);
   play();                                      // no click, no media query, no observer
+
+  /* A CHART THAT RUNS BUT CANNOT BE SEEN HAS STILL FAILED.
+     `.reveal` starts at opacity 0 and is switched on by the reveal observer in the
+     OTHER script tag. Splitting this block out means floor 48 survives that tag dying —
+     but measured, it then animated at 535 frames behind `.funnelwrap{opacity:0}`,
+     running and invisible, which is not what "without fail" means.
+
+     The sentinel is deliberately NOT "has anything on the page revealed yet". I tried
+     that: at scrollY 0 the first screen holds no `.reveal` at all, so on a perfectly
+     healthy page it read as dead and flipped all 46 elements `in` at once, killing
+     every scroll reveal on the site. Measured, and reverted.
+
+     What it asks instead is local and falsifiable: is floor 48 SUBSTANTIALLY IN VIEW
+     and still not revealed? The bar is stricter than the observer's own
+     (threshold 0.08, rootMargin -8% bottom), so on a healthy page the observer has
+     always already fired and this finds nothing to do. It only ever adds the class the
+     observer would have added, and only within #funnel. */
+  var fixVis = setInterval(function(){
+    var wrap = document.querySelector("#funnel .funnelwrap");
+    if (!wrap) { clearInterval(fixVis); return; }
+    if (wrap.classList.contains("in")) { clearInterval(fixVis); return; }   // observer alive
+    var r = wrap.getBoundingClientRect(), vh = window.innerHeight || 800;
+    if (r.top > vh * 0.9 || r.bottom < vh * 0.1) return;                    // not in view yet
+    var els = document.querySelectorAll("#funnel .reveal"), i;
+    for (i = 0; i < els.length; i++) els[i].classList.add("in");
+    clearInterval(fixVis);
+  }, 1000);
   window.__funnelStats = function(){
     return { total: total, cycle: CYCLE, frames: frames, playing: playing, paused: paused,
              raf: raf !== 0, hidden: document.hidden, dpr: DPR, cw: cv.clientWidth, tier: TIER };
