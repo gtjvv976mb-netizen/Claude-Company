@@ -13,8 +13,12 @@ DOMAIN=solana.claudedotcompany.com
 
 cd "$SRC" || exit 1
 echo "== build =="
-npm run build >/dev/null 2>&1 || { echo "build FAILED"; exit 1; }
-echo "  dist rebuilt"
+# The published site MUST carry the desk's API base. Pages cannot run the API, so an
+# uninjected build silently calls its own origin and every panel comes back empty — the
+# apex passes this in its workflow and the first publish here did not.
+API_BASE="${API_BASE:-https://claude-company-api.onrender.com}"
+SITE_URL="https://$DOMAIN" API_BASE="$API_BASE" npm run build >/dev/null 2>&1 || { echo "build FAILED"; exit 1; }
+echo "  dist rebuilt (API_BASE=$API_BASE)"
 
 if [ ! -d "$SITE/.git" ]; then
   rm -rf "$SITE"; git clone -q "$REMOTE" "$SITE" || exit 1
