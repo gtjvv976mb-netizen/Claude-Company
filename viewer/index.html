@@ -989,17 +989,34 @@ var WC_ICON = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBo
   + "<rect width='32' height='32' rx='9' fill='%233B99FC'/>"
   + "<path d='M8.5 14.2a10.6 10.6 0 0 1 15 0' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round'/>"
   + "<path d='M12 18.4a5.7 5.7 0 0 1 8 0' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round'/></svg>";
+/* The PROMISE is cached, not its result: both doors are clickable, and two
+   concurrent callers each saw a null cache and each built a provider. A failed
+   init clears the cache rather than poisoning it forever. */
 var wcp = null;
 function wcEntry(){ return WC_ID ? [{ name:"WalletConnect", icon:WC_ICON, wc:true }] : []; }
-async function wcInit(){
-  if(wcp) return wcp;
-  var m = await import("./vendor/wc/universal-provider.mjs");
-  wcp = await (m.UniversalProvider || m.default).init({
-    projectId: WC_ID,
-    metadata: { name:"Claude Company", description:"The AI trading desk",
-                url: location.origin, icons: [location.origin + "/assets/claudeco-256.png"] },
-  });
+function wcInit(){
+  if(!wcp) wcp = import("./vendor/wc/universal-provider.mjs")
+    .then(function(m){
+      return (m.UniversalProvider || m.default).init({
+        projectId: WC_ID,
+        metadata: { name:"Claude Company", description:"The AI trading desk",
+                    url: location.origin, icons: [location.origin + "/assets/claudeco-256.png"] },
+      });
+    })
+    .catch(function(e){ wcp = null; throw e; });
   return wcp;
+}
+
+/* A session's namespaces are not guaranteed to be keyed by namespace NAME — a
+   wallet may key them per chain. Read the accounts wherever they are. */
+function wcAccounts(session, prefix){
+  var ns = (session && session.namespaces) || {}, out = [];
+  Object.keys(ns).forEach(function(k){
+    (ns[k] && ns[k].accounts || []).forEach(function(a){
+      if(String(a).indexOf(prefix) === 0) out.push(a);
+    });
+  });
+  return out;
 }
 
 /* The wallet list comes from WalletConnect's own registry, not a table typed in
@@ -1165,19 +1182,39 @@ function wcSheet(uri, chain, onCancel){
   return function(){ close(false); };
 }
 
+var wcLive = null;                      // the one attempt allowed to paint
 async function wcConnect(kind){
   var sol = kind === "sol";
   var statusId = sol ? "stSol" : "stRh";
   var b = document.getElementById(sol ? "goSol" : "goRh");
+  /* Starting at the other door abandons this one rather than racing it: there is
+     one provider and one relay session, and two live pairings fight over both. */
+  if(wcLive) wcLive.give_up();
   b.disabled = true; say(statusId, "Opening WalletConnect…");
   var close = null, cancelled = false, onUri = null, p = null, gotUri = false, deadline = null;
+  var me = { give_up: function(){
+    cancelled = true; clearTimeout(deadline);
+    if(close) close();
+    if(p && onUri){ try{ p.off("display_uri", onUri); }catch(e){} }
+    try{ p && p.cleanupPendingPairings && p.cleanupPendingPairings(); }catch(e){}
+    b.disabled = false;
+  } };
+  wcLive = me;
   try{
     p = await wcInit();
+    if(cancelled) return;
     onUri = function(uri){
+      if(cancelled) return;               // a dead attempt paints nothing
       gotUri = true; clearTimeout(deadline);
       close = wcSheet(uri, sol ? SOL_CAIP : "eip155:1", function(){
+        /* MEASURED in the vendored bundle: abortPairingAttempt logs
+           "abortPairingAttempt is deprecated. This is now a no-op." — connect()
+           stays pending forever. So the LISTENER has to come off here; left on,
+           the next attempt's display_uri fired both handlers and stacked two
+           dialogs. A late resolution is ignored by the `cancelled` guard below. */
         cancelled = true;
-        try{ p.abortPairingAttempt && p.abortPairingAttempt(); }catch(e){}
+        if(p && onUri){ try{ p.off("display_uri", onUri); }catch(e){} }
+        try{ p.cleanupPendingPairings && p.cleanupPendingPairings(); }catch(e){}
         b.disabled = false; say(statusId, "WalletConnect closed — the door stays open.");
       });
     };
@@ -1213,15 +1250,14 @@ async function wcConnect(kind){
     if(!session) throw new Error("the wallet closed the session before it opened");
 
     if(sol){
-      var acc = ((session.namespaces.solana || {}).accounts || [])[0];
+      var acc = wcAccounts(session, "solana:")[0];
       var pk = acc && acc.split(":").pop();
       if(!pk) throw new Error("the wallet returned no Solana account");
       say(statusId, "Connected " + short(pk) + " — entering Claude Tower.", "ok");
       enter("sol", { chain:"solana", address:pk, wallet:"WalletConnect" });
       return;
     }
-    var e = session.namespaces.eip155 || {};
-    var accts = e.accounts || [];
+    var accts = wcAccounts(session, "eip155:");
     var addr = (accts[0] || "").split(":").pop();
     if(!addr) throw new Error("the wallet returned no account");
     var onRh = accts.some(function(a){ return a.indexOf("eip155:4663:") === 0; });
@@ -1236,14 +1272,26 @@ async function wcConnect(kind){
         else throw se;
       }
     }
-    say(statusId, "Connected " + short(addr) + " on Robinhood Chain — entering.", "ok");
+    /* The injected path re-reads eth_chainId and refuses to continue if the wallet
+       stayed put. Over WalletConnect the switch request can be accepted, ignored or
+       silently queued, so this ASKS, and when it cannot get an answer it does not
+       pretend: it says connected, not connected-on-Robinhood-Chain. */
+    var cid = null;
+    try{ cid = await p.request({ method:"eth_chainId" },
+                               onRh ? "eip155:4663" : "eip155:1"); }catch(ce){}
+    var onChain = String(cid || "").toLowerCase() === RH_CHAIN.chainId;
+    say(statusId, "Connected " + short(addr)
+      + (onChain ? " on Robinhood Chain" : "")
+      + " — entering." + (onChain ? "" : " Switch your wallet to Robinhood Chain if it asks."), "ok");
     enter("rh", { chain:"robinhood", chainId:4663, address:addr, wallet:"WalletConnect" });
   }catch(err){
     clearTimeout(deadline);
     if(close) close();
     if(cancelled) return;
-    /* Stop the retry loop that is still running behind a timed-out pairing. */
-    if(!gotUri && p){ try{ p.abortPairingAttempt && p.abortPairingAttempt(); }catch(e){} }
+    /* Stop the retry loop still running behind a timed-out pairing. NOT
+       abortPairingAttempt — the vendored bundle says in as many words that it is
+       "deprecated. This is now a no-op." */
+    if(!gotUri && p){ try{ p.cleanupPendingPairings && p.cleanupPendingPairings(); }catch(e){} }
     b.disabled = false;
     say(statusId, err && (err.code === 4001 || /reject|denied|user closed/i.test(err.message || ""))
       ? "Connection declined — the door stays open."

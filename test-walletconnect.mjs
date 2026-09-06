@@ -100,8 +100,40 @@ const vendor = new URL("viewer/vendor/wc/", root);
     "...and a deadline that fires before any QR appears names the cause");
   assert.match(html, /gotUri = true; clearTimeout\(deadline\)/,
     "once the QR is up the reader gets as long as they like to scan");
-  assert.match(html, /if\(!gotUri && p\)\{ try\{ p\.abortPairingAttempt/,
+  assert.match(html, /if\(!gotUri && p\)\{ try\{ p\.cleanupPendingPairings/,
     "a timed-out pairing stops retrying instead of running on behind the error");
+}
+
+/* ── CANCEL HAS TO ACTUALLY CANCEL ───────────────────────────────────────────
+ * MEASURED in the vendored bundle: it contains the literal string
+ * "abortPairingAttempt is deprecated. This is now a no-op." — connect() stays
+ * pending forever after a cancel, so the finally that removes the display_uri
+ * listener never runs and the NEXT attempt fired both handlers and stacked two
+ * dialogs. The listener comes off at cancel time now. Verified after the fix:
+ * cancel leaves 0 sheets, retry leaves exactly 1, and starting the other door
+ * abandons the first instead of racing it. */
+{
+  const bundle = fs.readFileSync(new URL("universal-provider.mjs", vendor), "utf8");
+  assert.ok(bundle.includes("abortPairingAttempt is deprecated"),
+    "if the SDK ever makes this real again, revisit the manual cleanup below");
+  assert.doesNotMatch(html, /p\.abortPairingAttempt/,
+    "nothing may rely on the no-op to end an attempt");
+  assert.match(html, /if\(p && onUri\)\{ try\{ p\.off\("display_uri", onUri\); \}catch\(e\)\{\} \}[\s\S]{0,200}cleanupPendingPairings/,
+    "cancel removes the listener and clears the pairing");
+  assert.match(html, /if\(cancelled\) return;[^\n]*\n\s*gotUri = true/,
+    "a dead attempt paints nothing even if its URI still arrives");
+  assert.match(html, /if\(wcLive\) wcLive\.give_up\(\);/,
+    "one live attempt at a time: two pairings fight over one provider and one session");
+  assert.match(html, /if\(!wcp\) wcp = import\("\.\/vendor\/wc\/universal-provider\.mjs"\)/,
+    "the init PROMISE is cached, so two doors cannot each build a provider");
+  assert.match(html, /\.catch\(function\(e\)\{ wcp = null; throw e; \}\)/,
+    "...and a failed init clears the cache instead of poisoning it");
+  assert.match(html, /function wcAccounts\(session, prefix\)/,
+    "accounts are found wherever the wallet keyed them, not only under the namespace name");
+  assert.match(html, /var onChain = String\(cid \|\| ""\)\.toLowerCase\(\) === RH_CHAIN\.chainId;/,
+    "the Robinhood claim is checked");
+  assert.match(html, /\(onChain \? " on Robinhood Chain" : ""\)/,
+    "...and not made when it could not be checked");
 }
 
 /* ── NO ID, NO OPTION, NOTHING ELSE CHANGES ───────────────────────────────────
