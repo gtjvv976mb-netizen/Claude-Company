@@ -59,15 +59,18 @@ db.prepare("UPDATE floors SET state='hq', owner=? WHERE n=? AND (owner IS NULL O
 export function hqOwnerWallet() {
   return db.prepare("SELECT owner FROM floors WHERE n=?").get(HQ_FLOOR)?.owner || HQ_OWNER_WALLET;
 }
-/* The penthouse answers to the HOUSE: the dev wallet on the deed AND the
-   treasury. The owner asked for both; a later refactor narrowed it to one, and
-   the treasury quietly lost its own floor. Read the treasury from env directly
-   rather than importing leasing — tower is imported by it. */
+/* SOLE OWNERSHIP — THE DEED, AND NOTHING ELSE (owner's call, 2026-09-06).
+   This granted standing to the deed OR the treasury wallet, so two wallets could
+   open the house desk's settings and take its executor secret. office.js already
+   carried a comment declaring "SOLE OWNERSHIP … the deed alone, asserted on every
+   boot" directly above its call to this function, which was simply not what this
+   function did — a justifying comment describing behaviour the code did not have.
+
+   TREASURY_OWNER keeps its real job, which is where lease payments land. Money and
+   identity are different jobs and this is the line where they were confused. */
 export const isHqOwner = (w) => {
   if (!w) return false;
-  if (w === hqOwnerWallet()) return true;
-  const t = (process.env.TREASURY_OWNER || "").trim();
-  return !!t && w === t;
+  return w === hqOwnerWallet();
 };
 
 export function listFloors() {

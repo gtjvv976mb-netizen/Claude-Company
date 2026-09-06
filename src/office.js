@@ -1,14 +1,9 @@
 import http from "node:http";
-/* Floor 50 — the penthouse — belongs to the HOUSE: the treasury wallet always,
-   plus every wallet named in HQ_OWNER (comma-separated — the dev wallet lives
-   here), plus whatever wallet is written on the floor's own deed. */
-/* RETIRED. HQ ownership is the deed on floor 50 and nothing else — see
-   tower.hqOwnerWallet(). Kept only so an old HQ_OWNER env var cannot silently
-   grant standing it no longer carries. */
-const HQ_OWNER_LIST_RETIRED = [
-  ...(process.env.HQ_OWNER || "").split(",").map((w) => w.trim()).filter(Boolean),
-  "3J57tqAJqRmSBn1ZYDu9JpMMyTfBHdcGGwECiPQeiji3",   // the dev wallet — standing owner (owner-stated)
-];
+/* Floor 50 — the penthouse — belongs to ONE wallet: whatever is written on the
+   floor's own deed, which tower.js asserts to HQ_OWNER_WALLET on every boot.
+   A retired HQ_OWNER list used to sit here, unread by anything, still naming a
+   wallet in source. Dead code that names an owner reads like policy; it is gone,
+   and tower.isHqOwner is the only answer to "does this wallet hold the HQ". */
 import fs from "node:fs";
 import path from "node:path";
 import { ROOT } from "./config.js";
