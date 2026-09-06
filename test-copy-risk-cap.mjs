@@ -22,7 +22,7 @@ legacy.exec(`
 legacy.close();
 
 const db = (await import("./src/lib/store.js")).default;
-const { decide, saveSettings, settingsFor } = await import("./src/copy.js");
+const { decide, saveSettings, settingsFor, probeSizeCapSol } = await import("./src/copy.js");
 const { getCall, openCall } = await import("./src/calls.js");
 const { eligibility } = await import("./src/mandate.js");
 
@@ -70,10 +70,23 @@ const offered = decide(50, stored);
 // the owner's call): on the house floor the proportional cap turned an explicit
 // 0.2 SOL into 0.0006 and then "lifted" it to the 0.02 fee floor on every trade.
 // Fixed means fixed; a zero authorization (below) is still never revived.
-ok("a fixed size is honoured above the team's portable allocation",
-  offered.verdict === "offered" && offered.sizeSol === 2,
+//
+// The expected number here was 2 SOL until 2026-09-07. It is now the EXIT PROBE cap
+// (cfg.targetSizeUsd / SOL price = $15 / $103 = 0.1456 SOL), because a delivery may
+// never exceed the notional the desk actually proved it could exit \u2014 see
+// probeSizeCapSol in copy.js. That is a different ceiling from the one this test
+// guards: "fixed means fixed" settles who chooses the SIZE (not the team's 0.5% book
+// allocation), never whether the desk may deliver beyond its own cost evidence. So the
+// assertion keeps its subject \u2014 the team's allocation did not shrink this order to
+// 0.05 \u2014 and adds the ceiling that did bind, and the disclosure of it.
+const probeCap = probeSizeCapSol();
+ok("a fixed size is not shrunk to the team's portable allocation",
+  offered.verdict === "offered" && offered.sizeSol !== 0.05 && offered.sizeSol === probeCap.capSol,
   `${offered.verdict} ${offered.sizeSol} SOL \u2014 ${offered.reason}`);
 ok("the delivery does not claim a cap it did not apply", !/capped to the team's/.test(offered.reason), offered.reason);
+ok("...and the cap that DID bind is the exit probe, disclosed by name",
+  offered.probeCapBinds === true && /exit probe measures a round trip at \$/.test(offered.reason),
+  `probe cap ${probeCap.capSol} SOL at $${probeCap.targetSizeUsd} / SOL $${probeCap.solUsd}`);
 saveSettings(50, { fixedSol: "auto" });
 const autoSized = decide(50, stored);
 saveSettings(50, { fixedSol: 2 });
@@ -87,8 +100,13 @@ const zero = decide(50, { ...stored, desk_size_usd: 0 });
 ok("an explicit zero cap is never revived", zero.verdict === "skipped",
   `${zero.verdict}: ${zero.reason}`);
 const legacyCall = decide(50, { ...stored, desk_size_usd: null, desk_equity_usd: null });
-ok("a legacy call with no cap retains legacy sizing", legacyCall.verdict === "offered" && legacyCall.sizeSol === 2,
-  `${legacyCall.verdict} ${legacyCall.sizeSol} SOL`);
+// Legacy = no portable desk cap on the call, so the team allocation cannot bind. The
+// exit-probe cap still does: it is a property of what this desk has MEASURED, not of
+// what any one call happened to carry, and a legacy row is no reason to deliver more
+// than the probe cleared.
+ok("a legacy call with no cap keeps the tenant's size, bounded only by the probe",
+  legacyCall.verdict === "offered" && legacyCall.sizeSol === probeCap.capSol,
+  `${legacyCall.verdict} ${legacyCall.sizeSol} SOL (asked 2, probe cap ${probeCap.capSol})`);
 
 console.log("\nTHE PUBLICATION GATE ALSO REFUSES ZERO AUTHORIZATION");
 const eligibleRecord = (size) => ({

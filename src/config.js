@@ -33,15 +33,43 @@ export const cfg = {
   maxBookRiskPct: num("DESK_MAX_BOOK_RISK_PCT", 4.0),
   maxCandidates: num("DESK_MAX_CANDIDATES", 8),
   /* THE SIZE THE EXIT PROBE MEASURES AT — and it must resemble the size actually
-   * traded, or the desk vetoes coins on a cost nobody pays. It has come down twice:
-   * $500 (chosen against the $10,000 notional book above), then $200, now $75.
+   * traded, or the desk vetoes coins on a cost nobody pays. It has come down three
+   * times: $500 (chosen against the $10,000 notional book above), $200, $75, now $15.
    *
-   * The executor sizes at ~$3.40 with a hard cap near $10, so $75 still prices about
-   * twenty tenants copying one call at once — which is the reason to probe above your
-   * own clip at all. But it no longer vetoes the micro-caps this desk now hunts: at
-   * the $12,000 liquidity floor below, $75 round-trips at 2.5%, well inside the 8%
-   * ceiling, while a real $3.40 clip costs 0.11%. */
-targetSizeUsd: num("DESK_TARGET_SIZE_USD", 75),
+   * $75 was the binding constraint on publishing anything. This number is not only the
+   * probe size: risk-rails.js makes it an ABSOLUTE ceiling on position_size_usd ("no
+   * evidence that a larger order can leave at the assumed stop"), and compliance.js
+   * derives the minimum stop distance a coin must carry from the round trip measured
+   * AT IT. Measured 2026-09-07: at $75 the derived floor is ~11.93%, while the desk's
+   * own median published stop across its 55 calls is 11.5% — the desk was below its
+   * own bar and candidates were being withheld as "edge_below_cost, stop_inside_costs".
+   *
+   * It was pricing an exit nobody was ever going to pay. The floor's configured
+   * fixed_sol is 0.4 SOL (~$41 at SOL $103), the executor's HARD ceiling is
+   * OPERATOR_MAX.maxSolPerTrade = 0.05 SOL (~$5.17), and the last two live buys were
+   * 0.0175 SOL (~$1.81) and 0.021 SOL (~$2.20). The desk demanded a stop wide enough
+   * to survive exiting $75 while the bot exits under $2.
+   *
+   * $15 is chosen off the executor's hard ceiling, which is the only number that
+   * cannot be exceeded: 0.05 SOL is ~$5.17 today, so $15 leaves roughly 3x headroom
+   * for SOL appreciation and is still 5x smaller than today's figure. It is not a
+   * measurement of anything — it is a ceiling with margin — so it stays env-overridable
+   * and moves the day the executor's ceiling moves.
+   *
+   * THE INVARIANT THAT MAKES LOWERING IT SAFE lives in copy.js: no delivery may be
+   * larger than the notional the probe proved exitable. Lowering the probe alone would
+   * leave the desk authorising a 0.4 SOL delivery it only proved it could exit $15 of. */
+targetSizeUsd: num("DESK_TARGET_SIZE_USD", 15),
+
+  /* WHAT ONE SOL IS WORTH, for the one job that needs it synchronously: converting the
+   * probed notional above into the SOL cap on a delivery (copy.js). decide() is
+   * deterministic per floor per call and must cost nothing, so it cannot call a price
+   * API — it prefers the SOL price the desk's own executor recorded on its last real
+   * chain fill and falls back to this. $103 is the price measured 2026-09-07, the same
+   * anchor the $15 above is derived from (0.05 SOL = $5.17). Understating SOL widens
+   * the SOL cap, which is the unsafe direction, so this is the number to update when
+   * SOL moves and no fill has been reported in a while. */
+  solUsdFallback: num("DESK_SOL_USD_FALLBACK", 103),
 
   // Deterministic screen floors. These kill before any token is spent.
   screen: {

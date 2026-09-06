@@ -29,6 +29,13 @@ import { escalationPlan, MAX_ESCALATION_LEVEL, CYCLE, cfg, floorsFor,
 import { complianceCheck } from "./src/agents/compliance.js";
 import fs from "node:fs";
 
+/* A fixture size legal under WHATEVER the probe notional currently is. It was a hard-coded
+   50 — fine while the exit probe measured $75, and an automatic size_exceeds_exit_probe veto
+   the day it became $15. The fixture broke, not the code: compliance.js refuses
+   position_size_usd above cfg.targetSizeUsd * 1.001, and risk-rails caps real sizes at that
+   same number, so 80% of it is always inside the bar whatever the probe becomes. */
+const PROBE_SAFE_SIZE_USD = Number((cfg.targetSizeUsd * 0.8).toFixed(2));
+
 let pass = 0, fail = 0;
 const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  — " + d : ""}`))
                                  : (fail++, console.log(`  FAIL ${n}${d ? "  — " + d : ""}`)); };
@@ -41,7 +48,7 @@ const clean = (over = {}) => ({
   pm: { decision: "PROPOSE", conviction: 68, thesis: "real ignition", invalidation: "deployer sells" },
   redteam: { verdict: "wounded", headline: "thin on holders" },
   compliance: { pass: true, violations: [] },
-  risk: { position_size_usd: 50, stop_price: 0.00062, max_loss_usd: 20.55 },
+  risk: { position_size_usd: PROBE_SAFE_SIZE_USD, stop_price: 0.00062, max_loss_usd: 20.55 },
   ceo: { ruling: "APPROVE", order_size_usd: 50 },
   order: { size: 50 },
   ticket: { stop_price: 0.00062, take_profit: [{ price: 0.0019 }] },
@@ -243,8 +250,8 @@ console.log("\nTHE STOP-INSIDE-COSTS VETO IS THE ONE A QUOTA IS MOST TEMPTED BY"
        whole violation list, and assert on the code by name. */
     const res = complianceCheck({
       pm: { decision: "PROPOSE" },
-      risk: { stop_price: stop, position_size_usd: 50,
-        max_loss_usd: Number((50 * (stopPct / 100 + rt / 100)).toFixed(2)) },
+      risk: { stop_price: stop, position_size_usd: PROBE_SAFE_SIZE_USD,
+        max_loss_usd: Number((PROBE_SAFE_SIZE_USD * (stopPct / 100 + rt / 100)).toFixed(2)) },
       redteam: { verdict: "survived" },
       ticket: { stop_price: stop, entry_zone_low: 1, entry_zone_high: 1, take_profit: [] },
       ev: { pair: { priceUsd: 1 }, exitProbe: { roundTripLossPct: rt } } });

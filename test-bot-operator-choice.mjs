@@ -325,6 +325,22 @@ console.log("\nTHE OWNER CAN SEE THE DEMAND, AND ONLY THE OWNER");
   const anon = await heartbeat(null);
   ok("a signed-out visitor sees no demand count", anon.json?.botOperatorDemand === null,
     `botOperatorDemand=${JSON.stringify(anon.json?.botOperatorDemand)}`);
+
+  /* THE SIZE THE DESK MEASURES AN EXIT AT, vs the size the floors asked for. On
+     2026-09-07 the probe was $75 while the house floor's fixed size was 0.4 SOL (~$41)
+     and the bot's real buys were ~$2 — a mismatch that stalled publishing for a day and
+     was visible only by reading config.js and copy.js side by side. It rides this
+     branch now. Owner-only: it names other floors' configured sizes. */
+  const probe = asBoss2.json?.sizingProbe;
+  ok("the HQ branch carries the exit-probe sizing check",
+    probe != null && probe.targetSizeUsd > 0 && probe.capSol > 0 && Array.isArray(probe.floorsOverProbe),
+    JSON.stringify(probe));
+  ok("...and says which SOL price the SOL cap was converted at",
+    typeof probe?.solUsdSource === "string" && probe.solUsd > 0,
+    `SOL $${probe?.solUsd} via ${probe?.solUsdSource}`);
+  ok("a tenant is not shown other floors' configured sizes",
+    asTenant.json?.sizingProbe === null && anon.json?.sizingProbe === null,
+    `tenant=${JSON.stringify(asTenant.json?.sizingProbe)} anon=${JSON.stringify(anon.json?.sizingProbe)}`);
 }
 
 server.close();

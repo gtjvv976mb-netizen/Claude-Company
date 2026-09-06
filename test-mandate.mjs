@@ -9,6 +9,13 @@
  *   CLAUDE_CO_DB=/tmp/x.db node test-mandate.mjs
  */
 import { eligibility, contenderScore, pickOne, bookState, MAX_LIVE_CALLS } from "./src/mandate.js";
+import { cfg } from "./src/config.js";
+/* A fixture size legal under WHATEVER the probe notional currently is. It was a hard-coded
+   50 — fine while the exit probe measured $75, and an automatic size_exceeds_exit_probe veto
+   the day it became $15. The fixture broke, not the code: compliance.js refuses
+   position_size_usd above cfg.targetSizeUsd * 1.001, and risk-rails caps real sizes at that
+   same number, so 80% of it is always inside the bar whatever the probe becomes. */
+const PROBE_SAFE_SIZE_USD = Number((cfg.targetSizeUsd * 0.8).toFixed(2));
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => {
@@ -26,7 +33,7 @@ const good = (over = {}) => ({
   pm: { decision: "PROPOSE", conviction: 70, thesis: "t", invalidation: "deployer sells" },
   redteam: { verdict: "survives", headline: "h" },
   compliance: { pass: true, violations: [] },
-  risk: { position_size_usd: 50, stop_price: 0.8, max_loss_usd: 10 },
+  risk: { position_size_usd: PROBE_SAFE_SIZE_USD, stop_price: 0.8, max_loss_usd: Number((PROBE_SAFE_SIZE_USD * 0.20).toFixed(2)) },
   ceo: { ruling: "APPROVE", order_size_usd: 50 },
   order: { size: 50 },
   ticket: { stop_price: 0.8, take_profit: [{ price: 1.9 }] },
@@ -183,7 +190,7 @@ console.log("\nCOMPLIANCE — a WATCH ticket must be audited exactly like a PROP
     take_profit: [{ price: 1.04, pct_to_sell: 100 }], max_slippage_bps: 500,
   };
   const ev = { pair: { priceUsd: 1.0 }, exitProbe: { roundTripLossPct: 3 } };
-  const risk = { position_size_usd: 50, stop_price: 0.8, max_loss_usd: 11.5 };
+  const risk = { position_size_usd: PROBE_SAFE_SIZE_USD, stop_price: 0.8, max_loss_usd: Number((PROBE_SAFE_SIZE_USD * 0.23).toFixed(2)) };
 
   const asPropose = complianceCheck({ pm: { decision: "PROPOSE" }, risk, redteam: {}, ticket: badEdge, ev });
   ok("a bad-edge PROPOSE ticket is vetoed (unchanged)", asPropose.pass === false,

@@ -826,6 +826,97 @@ const openCount = (floorNo) => db.prepare(`
  * own band's clock — and not a taste the customer should have to have. */
 export const MAX_OPEN_POSITIONS = Number(process.env.DESK_MAX_OPEN_POSITIONS || 8);
 
+/* WHAT ONE SOL IS WORTH, for the one job in this file that needs it.
+ *
+ * decide() is deterministic and runs per floor per call, so it cannot ask a price API.
+ * The desk already stores a real, chain-observed SOL price on every executor fill
+ * (executor_fills.sol_usd, written from the bot's own buy and sell reports), and that
+ * is the freshest honest number reachable synchronously. Nothing available? Fall back
+ * to cfg.solUsdFallback, which is a stated constant rather than a measurement.
+ *
+ * The sanity band and the age bound exist because an understated SOL price WIDENS the
+ * SOL cap below (cap = $probe / solUsd), which is the unsafe direction: a garbage 0.01
+ * would uncap every delivery. Out-of-band or stale prices are refused, not clamped. */
+const SOL_USD_SANE_MIN = 5, SOL_USD_SANE_MAX = 10_000;
+const SOL_USD_MAX_AGE_MS = 7 * 86_400e3;
+
+export function sizingSolUsd({ now = Date.now() } = {}) {
+  let row = null;
+  try {
+    row = db.prepare(`SELECT sol_usd, at FROM executor_fills
+      WHERE sol_usd IS NOT NULL ORDER BY at DESC LIMIT 1`).get();
+  } catch { row = null; }
+  const px = Number(row?.sol_usd);
+  const fresh = Number.isFinite(px) && px >= SOL_USD_SANE_MIN && px <= SOL_USD_SANE_MAX &&
+    Number.isFinite(Number(row?.at)) && now - Number(row.at) <= SOL_USD_MAX_AGE_MS;
+  return fresh
+    ? { solUsd: px, source: "the bot's last chain fill" }
+    : { solUsd: Number(cfg.solUsdFallback) || 0, source: "DESK_SOL_USD_FALLBACK" };
+}
+
+/**
+ * THE PROBED NOTIONAL, IN SOL. Never deliver an order larger than the desk proved it
+ * could exit.
+ *
+ * cfg.targetSizeUsd is the size the exit probe actually measures the round trip at, and
+ * every safety number downstream is derived from THAT measurement: risk-rails treats it
+ * as an absolute ceiling on position_size_usd, and compliance derives this coin's
+ * minimum stop distance from the round trip at it. Sizing here consulted none of it —
+ * it read the floor's fixed_sol (0.4 SOL, ~$41) or its bankroll and delivered that. So
+ * on 2026-09-07 the desk was measuring an exit at $75, refusing coins over that cost,
+ * and then authorising a delivery ten times the size its own probe had cleared.
+ *
+ * Lowering the probe to $15 without this cap would have made that worse, not better.
+ * The two belong in one change: the probe says what has been proved, and this says
+ * nothing bigger may be delivered.
+ *
+ * FLOORED, never rounded, to 4dp — the same precision decide() sizes at — because a
+ * cap that rounds up is a cap that can exceed what was measured.
+ */
+export function probeSizeCapSol(opts = {}) {
+  const targetSizeUsd = Number(cfg.targetSizeUsd) || 0;
+  const { solUsd, source } = sizingSolUsd(opts);
+  if (!(targetSizeUsd > 0) || !(solUsd > 0))
+    return { known: false, capSol: Infinity, targetSizeUsd, solUsd, source };
+  return { known: true, capSol: Math.floor((targetSizeUsd / solUsd) * 1e4) / 1e4,
+    targetSizeUsd, solUsd, source };
+}
+
+/**
+ * WHICH FLOORS HAVE ASKED FOR MORE THAN THE DESK HAS MEASURED AN EXIT FOR.
+ *
+ * This exact condition — fixed_sol 0.4 SOL against a $75 probe — stalled publishing for
+ * a day and was visible only to somebody reading two files side by side. It rides the
+ * owner's heartbeat now (office.js, HQ branch) so it is a number on a screen rather
+ * than a code reading. Aggregate over floors; the reason string on each delivery tells
+ * the individual tenant the same thing in their own words.
+ */
+export function probeSizingMismatch() {
+  const cap = probeSizeCapSol();
+  let rows = [];
+  try {
+    rows = db.prepare("SELECT floor_no, fixed_sol FROM copy_settings WHERE fixed_sol > 0").all();
+  } catch { rows = []; }
+  const over = cap.known
+    ? rows.filter((r) => Number(r.fixed_sol) > cap.capSol).map((r) => ({
+        floorNo: r.floor_no,
+        fixedSol: Number(r.fixed_sol),
+        fixedUsd: Number((Number(r.fixed_sol) * cap.solUsd).toFixed(2)),
+      }))
+    : [];
+  return {
+    targetSizeUsd: cap.targetSizeUsd,
+    solUsd: cap.solUsd,
+    solUsdSource: cap.source,
+    capSol: cap.known ? cap.capSol : null,
+    floorsOverProbe: over,
+    note: over.length
+      ? `${over.length} floor${over.length === 1 ? "" : "s"} configured a fixed size larger than the ` +
+        `$${cap.targetSizeUsd} the exit probe measures — each delivery is capped to ${cap.capSol} SOL and says so`
+      : "no floor's fixed size exceeds the probed notional",
+  };
+}
+
 /**
  * What should THIS floor do about THIS call?
  *
@@ -903,7 +994,16 @@ export function decide(floorNo, call) {
   const raw = fixed != null
     ? (deskRatio === 0 ? 0 : fixed)   // an explicit ZERO authorization is never revived by a fixed size
     : Math.min(uncapped, teamCapSol);
-  let sizeSol = Number(raw.toFixed(4));
+  /* THE PROBE CAP — the one ceiling that is not a taste. Everything above this line is
+   * somebody's preference (the tenant's fixed size, the appetite, the team's book
+   * allocation); this is the only evidence in the calculation. The desk measured a
+   * round trip at cfg.targetSizeUsd and derived this coin's stop floor from it; an
+   * order larger than that is being sent out on a cost measurement that was never
+   * taken. Applied to fixed and auto alike — "fixed means fixed" settles who chooses
+   * the SIZE, not whether the desk may exceed its own evidence. */
+  const probeCap = probeSizeCapSol();
+  const capBinds = probeCap.known && raw > probeCap.capSol;
+  let sizeSol = Number((capBinds ? probeCap.capSol : raw).toFixed(4));
   let liftedForFees = false;
   if (sizeSol > 0 && sizeSol < MIN_EXECUTABLE_SOL) {
     /* The lift is bounded by the risk the tenant actually chose. An EXPLICIT fixed
@@ -913,6 +1013,17 @@ export function decide(floorNo, call) {
      * "...or set a fixed size" — the house floor sat on that contradiction for a day
      * while an armed bot polled an empty feed. */
     const perTradeBudget = fixed != null ? fixed : s.bankroll_sol * (AUTO_RISK_PCT_PER_TRADE / 100);
+    /* THE LIFT MAY NOT BREAK THE CAP EITHER. If the fee floor is above the probed
+     * notional there is no size that is both executable and proved exitable, and the
+     * honest answer is to say so rather than lift past the evidence. Not reachable at
+     * today's numbers ($15 / SOL $103 = 0.1456 SOL, seven times the 0.02 fee floor) —
+     * it becomes reachable the moment someone sets DESK_TARGET_SIZE_USD near $2. */
+    if (probeCap.known && MIN_EXECUTABLE_SOL > probeCap.capSol) {
+      return { verdict: "skipped",
+        reason: `a tradeable position needs ~${MIN_EXECUTABLE_SOL} SOL but the desk's exit probe only ` +
+          `measures $${probeCap.targetSizeUsd} (${probeCap.capSol} SOL at SOL $${probeCap.solUsd}, ` +
+          `${probeCap.source}) — raise DESK_TARGET_SIZE_USD so the probe covers a tradeable clip` };
+    }
     if (MIN_EXECUTABLE_SOL <= perTradeBudget) {
       sizeSol = MIN_EXECUTABLE_SOL;
       liftedForFees = true;
@@ -930,10 +1041,26 @@ export function decide(floorNo, call) {
   const how = fixed == null && Number.isFinite(teamCapSol) && teamCapSol < uncapped
     ? `${baseHow} · capped to the team's ${(deskRatio * 100).toFixed(3)}% book allocation`
     : baseHow;
+  /* SAY IT OUT LOUD WHEN THE CAP BINDS. A tenant who set 0.4 SOL and receives 0.1456
+   * must be able to see why from the delivery alone — a size nobody chose, delivered
+   * silently, is how a product loses the right to be trusted with the next one. The
+   * SOL price and its provenance ride along because the cap is a USD number and the
+   * delivery is a SOL number, and the conversion is the part that can go stale. */
+  const capNote = capBinds
+    ? ` · capped to ${sizeSol} SOL — the desk's exit probe measures a round trip at ` +
+      `$${probeCap.targetSizeUsd} and it has no evidence a larger order can leave at this stop ` +
+      `(SOL $${probeCap.solUsd}, ${probeCap.source})` +
+      (fixed != null && fixed > probeCap.capSol
+        ? `. You set ${fixed} SOL, about $${(fixed * probeCap.solUsd).toFixed(0)} — more than the ` +
+          `desk has measured an exit for. Raise DESK_TARGET_SIZE_USD (and re-probe) to lift this.`
+        : "")
+    : "";
   return { verdict: "offered", sizeSol,
-    reason: liftedForFees
+    probeCapSol: probeCap.known ? probeCap.capSol : null,
+    probeCapBinds: capBinds,
+    reason: (liftedForFees
       ? `${how} · lifted to ${sizeSol} SOL so network fees do not eat the trade`
-      : how };
+      : how) + capNote };
 }
 
 /** Broadcast one call to every leased floor. Deterministic, so this is free. */

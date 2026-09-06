@@ -1395,6 +1395,15 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
                 .map((r) => ({ symbol: r.symbol, verdict: r.verdict, reason: r.reason,
                   sizeSol: r.size_sol, minutesAgo: Math.round((now - r.delivered_at) / 60000) }));
             } catch (e) { return [{ error: String(e.message) }]; } })(),
+            /* THE SIZE THE DESK MEASURES AN EXIT AT vs THE SIZE THE FLOORS ASKED FOR.
+               On 2026-09-07 the desk probed exits at $75, derived every stop floor from
+               that cost, and withheld candidates as "stop_inside_costs" — while the
+               house floor's configured size was 0.4 SOL (~$41) and the executor's hard
+               ceiling was 0.05 SOL (~$5.17), so the bot's last two live buys were $1.81
+               and $2.20. Nothing on any screen said so; it took reading config.js and
+               copy.js together. It is one line here now. Owner-only, like the rest of
+               this branch: it names other floors' configured sizes. */
+            sizingProbe: hqViewer ? copy.probeSizingMismatch() : null,
             /* HOW MANY FLOORS WANT HQ TO RUN THEIR BOT.
                Put HERE, in the heartbeat's HQ branch, rather than on
                /executor/status: the demand signal is a count across every floor,

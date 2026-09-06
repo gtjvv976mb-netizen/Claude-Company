@@ -24,8 +24,18 @@ const roundTripAtFloor = (4 * SIZE / LIQ) * 100;
 console.log(`\nliquidity floor $${LIQ.toLocaleString()} · probe $${SIZE} · ceiling ${CEIL}%`);
 console.log(`worst-case round trip at the floor: ${roundTripAtFloor.toFixed(2)}%\n`);
 
-ok("the probe still costs something at the floor (the check is not decorative)",
-  roundTripAtFloor > 0.5, `${roundTripAtFloor.toFixed(2)}%`);
+/* THE PROBE MUST STILL COST SOMETHING AT THE FLOOR, or the check is decorative.
+   The bar was a flat `> 0.5%`, written when the probe was $75 (2.50% at the floor).
+   A flat number here is the wrong ruler: what makes the probe worth running is that
+   it prices MORE than the largest clip any single tenant can send, so it is derived
+   from that clip instead. At $15 against a $12,000 pool the probe costs 0.50% where
+   the biggest tenant clip costs 0.33% — a real, strictly larger cost, and the number
+   compliance then derives this coin's stop floor from. */
+const BIGGEST_TENANT_CLIP_USD = 0.05 * 200;   // executor maxSolPerTrade at SOL ~$200
+const roundTripOfBiggestClip = (4 * BIGGEST_TENANT_CLIP_USD / LIQ) * 100;
+ok("the probe still costs more at the floor than one tenant's biggest clip does",
+  roundTripAtFloor > roundTripOfBiggestClip && roundTripAtFloor > 0.1,
+  `${roundTripAtFloor.toFixed(2)}% > ${roundTripOfBiggestClip.toFixed(2)}%`);
 ok("a coin at the liquidity floor still clears the round-trip ceiling",
   roundTripAtFloor < CEIL, `${roundTripAtFloor.toFixed(2)}% < ${CEIL}%`);
 ok("with headroom, so a marginal coin is not judged by two rulers at once",
@@ -33,7 +43,7 @@ ok("with headroom, so a marginal coin is not judged by two rulers at once",
 
 // The probe must sit ABOVE a single tenant's clip — that is why we probe at all —
 // but not so far above that it prices an order nobody sends.
-const REAL_TRADE_USD = 0.05 * 200;          // executor maxSolPerTrade at SOL ~$200
+const REAL_TRADE_USD = BIGGEST_TENANT_CLIP_USD;
 ok("the probe is larger than one tenant's biggest clip",
   SIZE > REAL_TRADE_USD, `$${SIZE} > $${REAL_TRADE_USD}`);
 ok("but within 50x of it, so it prices a real book rather than a fantasy",
