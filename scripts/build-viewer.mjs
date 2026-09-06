@@ -169,6 +169,12 @@ const EXECUTOR_FILES = [
      DexScreener consensus port and the mirror evaluator are runtime imports of
      poller.mjs, so an install that fetches this list without them dies at boot. */
   "dexscreener-consensus.mjs", "desk-mirror.mjs",
+  /* token2022.mjs is a runtime import of jupiter.mjs (line 37) and the installer has
+     always fetched it — but it was never on this list, so the published site 404'd it
+     and `curl -f ... || exit 1` aborted EVERY remote install. Exactly the failure the
+     note above warns about, in the one file the note did not name. The test below now
+     derives the installer's own list and refuses any drift, so this cannot recur. */
+  "token2022.mjs",
   "package.json", "package-lock.json",
 ];
 for (const f of EXECUTOR_FILES) {
