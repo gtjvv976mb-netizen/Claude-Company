@@ -13,3 +13,7 @@ HARD_STOP
 # the manual round-trip probe keeps its own journal. Neither may ever be staged.
 .cc-executor.env.previous-*
 .roundtrip-test.sqlite*
+
+# Any key filename, not just this desk's burner.json.
+burner.key
+*.key
