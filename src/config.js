@@ -441,14 +441,27 @@ export const CYCLE = {
      3 the CEO held it, 2 the PM proposed it, 1 the PM wanted a trigger first.
      L0/L1 ask for a proposal the PM actually made. */
   minTier: num("CYCLE_MIN_TIER", 2),
-  minConviction: num("CYCLE_MIN_CONVICTION", 55),
+  /* CALIBRATED TO WHAT THIS DESK ACTUALLY SCORES, not to what reads like a high bar.
+   *
+   * It was 55, and 55 was unreachable: across all 58 calls the desk has ever published
+   * the conviction scores run min 20, median 31, MAX 51. A bar of 55 sits above the
+   * highest score the desk has ever assigned to anything, so an L0 or L1 pass could not
+   * publish a call by arithmetic — which is exactly what cycle 19 did, running L0 and
+   * L1 to completion, fully funded, and publishing nothing both times.
+   *
+   * The owner set these numbers on 2026-09-07 against that distribution, with the
+   * quota mandate ("three published calls per cycle") explicitly in force. */
+  minConviction: num("CYCLE_MIN_CONVICTION", 20),
   /* THE FLOOR AT L2 AND BELOW-NOTHING. "Above the line where I would not trade this
-     myself" is the owner's phrasing; 35 with the PM's own WATCH behind it is a coin the
-     team studied and wanted one more trigger on, which is a maybe — not a no. A PM PASS
-     and a CEO DECLINE are the team's explicit no and stay refused at EVERY level, here
-     as in mandate.js: ranking the team's maybes is not overruling the team. */
+     myself" is the owner's phrasing. The floor was 35, above the median of 31: cycle 19
+     refused four coins at 25, 28, 31 and 34 with the quota unmet, and HeeHaw — the only
+     profitable trade this system has made — scored 28 and would have been refused too.
+     A PM PASS and a CEO DECLINE are the team's explicit no and stay refused at EVERY
+     level, here as in mandate.js: ranking the team's maybes is not overruling the team.
+     Conviction is a JUDGMENT gate (calls.js GATE_CLASS); every SAFETY gate is untouched
+     by this and by every rung of the ladder. */
   floorTier: num("CYCLE_FLOOR_TIER", 1),
-  floorConviction: num("CYCLE_FLOOR_CONVICTION", 35),
+  floorConviction: num("CYCLE_FLOOR_CONVICTION", 15),
 };
 
 /**

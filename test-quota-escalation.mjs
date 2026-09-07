@@ -175,9 +175,23 @@ console.log("\nTHE SAFETY CHECK IS NOT EVEN GIVEN THE LEVEL — it cannot bend t
 
 console.log("\nTHE LADDER DOES MOVE SOMETHING — otherwise the floor is untested");
 {
-  // A WATCH at conviction 40: the PM wanted one more trigger. Tier 1, below the L0 bar.
+  /* DERIVED FROM THE CONFIG, NEVER HARDCODED. These fixtures used conviction 40 and 10,
+     chosen when the bars were 55 and 35. The owner recalibrated them to 20 and 15 on
+     2026-09-07 (the old 55 sat above the highest conviction the desk had ever scored),
+     and a 40 that used to be "below L0" became "comfortably above it" — the test broke
+     while the PROPERTY it checks was still true. So the numbers are read from the ladder
+     itself: one conviction strictly between the floor and the L0 bar, and one below the
+     floor. Recalibrate the bars again and this test still proves the same two things. */
+  const L0_BAR = escalationPlan(0).minConviction;
+  const FLOOR = escalationPlan(2).minConviction;
+  if (!(FLOOR < L0_BAR))
+    throw new Error(`the ladder must lower conviction: floor ${FLOOR} is not below the L0 bar ${L0_BAR}`);
+  const BETWEEN = FLOOR + Math.max(1, Math.floor((L0_BAR - FLOOR) / 2));  // refused at L0/L1, accepted at L2
+  const BELOW_FLOOR = Math.max(0, FLOOR - Math.max(1, Math.ceil(FLOOR / 3)));
+
+  // A WATCH between the floor and the L0 bar: the PM wanted one more trigger. Tier 1.
   const watch = clean({ finalDecision: "HELD", ceo: { ruling: "HOLD", order_size_usd: 50 },
-    pm: { decision: "WATCH", conviction: 40, thesis: "t", invalidation: "i" } });
+    pm: { decision: "WATCH", conviction: BETWEEN, thesis: "t", invalidation: "i" } });
   const at = LEVELS.map((l) => cohortEligibility(watch, l));
   ok("L0 refuses it on conviction, and says which bar",
     !at[0].publishable && at[0].gate === "conviction_below_bar" && at[0].safety === false,
@@ -191,8 +205,8 @@ console.log("\nTHE LADDER DOES MOVE SOMETHING — otherwise the floor is unteste
   ok("...and the relaxation is recorded on the verdict, not applied silently",
     (at[2].relaxations || []).some((r) => /^L2:/.test(r)), (at[2].relaxations || []).join(" | "));
   const below = clean({ finalDecision: "HELD", ceo: { ruling: "HOLD", order_size_usd: 50 },
-    pm: { decision: "WATCH", conviction: 10, thesis: "t", invalidation: "i" } });
-  ok("the floor is a FLOOR — conviction 10 is refused even at L4",
+    pm: { decision: "WATCH", conviction: BELOW_FLOOR, thesis: "t", invalidation: "i" } });
+  ok(`the floor is a FLOOR — conviction ${BELOW_FLOOR} is refused even at L4`,
     !cohortEligibility(below, 4).publishable,
     `L4: ${cohortEligibility(below, 4).reason}`);
   // The team's explicit no is not a maybe, at any level.
