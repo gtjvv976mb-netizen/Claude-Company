@@ -1626,7 +1626,7 @@ window.CCModals = (function () {
         <div id="teamcontrolpanel"></div>
         <div class="crewpanel on" id="crewpanel">
           <div class="legend" id="legend"></div>
-          <p class="note">One tile per agent \u2014 select a portrait to open its file. WALL-ST-E is your own bot, not house staff.</p>
+          <p class="note">One tile per agent — select a portrait to open its file. WALL-ST-E is your own bot, not house staff.</p>
         </div>
       </div>
     </section>
@@ -6273,6 +6273,11 @@ function tapeRow(seat, msg, cls, ts) {
 function tape(seat, msg, cls = "", ts = null) {
   const stick = atBottom();
   tapeEl.appendChild(tapeRow(seat, msg, cls, ts));
+  /* THE UNREAD DOT HAD NO JS AT ALL. #tape-dot sat in the dock beside live-dot and
+     whale-dot and nothing ever lit it, so Activity never signalled that something had
+     happened while the reader was on another tab. Lit here when a row lands while the
+     Activity workspace is hidden; cleared when that destination is opened. */
+  if (tapeEl.closest("[hidden]")) document.getElementById("tape-dot")?.classList.add("on");
   // Trim only while the reader is riding the live edge. Someone scrolled up is
   // reading history, and history must not be eaten out from under them.
   if (stick) {
@@ -8481,7 +8486,12 @@ async function loadCalls({ liveOnly = false, hudOnly = false } = {}) {
     // Do not render owner credentials into hidden DOM; the new Team and WALL-ST-E
     // destinations request only the data they need when the owner opens them.
     if (!callsPanel.closest("[hidden]")) renderCalls(body, { liveOnly });
+    /* REPAINT WHAT THE READER IS LOOKING AT. Once the dashboard's Calls view has been
+       chosen, the legacy #callspanel is hidden and renderLive() paints nothing visible —
+       so "Mark as taken" and "Sync my fills", which call loadCalls(), appeared dead for
+       up to the 30s refresh. Route the repaint to the dashboard view instead. */
     if (!window.__dashboardCallsView) renderLive(body);
+    else if (window.__dashboardCallsView !== "candidates") loadDashboardCalls(window.__dashboardCallsView, { force: true });
     window.__grokBoardUpdate?.(body.feed || []);      // Grok's own board, same book
     paintHud({ feed: body.feed, settings: body.settings, budget: BUDGET, rent: body.rent });
   } catch (e) {
@@ -10234,7 +10244,13 @@ window.load_ledger = async () => {
   const el = document.getElementById("ledgerpanel");
   el.innerHTML = "";
   try {
-    const { body } = await call_api(FLOOR_N != null ? `/api/floor/${FLOOR_N}/ledger?limit=300` : "/api/ledger?limit=300");
+    const { status, body } = await call_api(FLOOR_N != null ? `/api/floor/${FLOOR_N}/ledger?limit=300` : "/api/ledger?limit=300");
+    /* A refused or failed request is not an empty book. This threw the status away and
+       painted "No calls published yet." over a 403 or a 500 — the record looked blank
+       instead of unavailable. Say which it was. */
+    if (status !== 200) return empty(el, status === 403
+      ? "This floor's record is private to its tenant."
+      : "The record book could not be loaded (HTTP " + status + "). Try again in a moment.");
     const t = body.totals || {};
     const h = document.createElement("p"); h.className = "dp-note";
     h.textContent = `The record book. House: ${t.house?.calls ?? 0} calls, ${t.house?.live ?? 0} live, ` +
@@ -10644,6 +10660,7 @@ function activateDashboardSubview(group, view, { focus = false } = {}) {
     ? view : buttons[0]?.getAttribute("data-" + group + "-view");
   if (!chosen) return;
   dashboardSubview[group] = chosen;
+  if (group === "activity") document.getElementById("tape-dot")?.classList.remove("on");
   if (group === "calls") window.__dashboardCallsView = chosen;
   for (const button of buttons) {
     const selected = button.getAttribute("data-" + group + "-view") === chosen;
@@ -11797,7 +11814,7 @@ async function loadCalloutsDashboard() {
     const hidden = body.hidden || {};
     const whaleBar = Number(policy.minimumWalletSolUsd) || 0;
     el.append(dashLead("",
-      "Only Pump.fun-verified callers whose own wallet holds at least " + (whaleBar ? dashMoney(whaleBar) : "the bar") + " of SOL. The figure is that wallet's confirmed SOL balance — it is not a claim that they bought this coin.ucted purchase cost.",
+      "Only Pump.fun-verified callers whose own wallet holds at least " + (whaleBar ? dashMoney(whaleBar) : "the bar") + " of SOL. The figure is that wallet's confirmed SOL balance — it is not a claim that they bought this coin.",
       String(matched.length) + " WHALE" + (matched.length === 1 ? "" : "S"), matched.length ? "good" : ""));
     const boundary = dashNode("div", "boundary-note");
     boundary.append(
@@ -12059,7 +12076,7 @@ window.__loadDashboardDestination = (which) => {
 (async () => {
   try {
     const { body } = await call_api("/api/callouts");
-    const newest = Math.max(0, ...coins.flatMap((c) => (c.callouts || []).map((k) => Number(k.ts) || 0)), 0);
+    const newest = Math.max(0, ...(Array.isArray(body.coins) ? body.coins : []).flatMap((c) => (c.callouts || []).map((k) => Number(k.ts) || 0)), 0);
     const hasMatches = Array.isArray(body.coins) && body.coins.some((coin) =>
       Array.isArray(coin?.callouts) && coin.callouts.length > 0);
     if (hasMatches && newest > Number(localStorage.getItem("cc-whales-seen") || 0))
