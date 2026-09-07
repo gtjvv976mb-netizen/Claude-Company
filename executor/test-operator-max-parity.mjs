@@ -25,7 +25,7 @@ const ok = (name, fn) => { fn(); console.log("  ok  ", name); pass++; };
 const num = (src, re, label) => {
   const m = src.match(re);
   assert.ok(m, `could not find ${label} — the parity test must fail loudly, not silently pass`);
-  return Number(m[1]);
+  return Number(String(m[1]).replaceAll("_", ""));
 };
 
 const poller = read("poller.mjs");
@@ -73,6 +73,20 @@ for (const c of CAPS) {
     console.log(`       ${c.label}: ${distinct[0]} SOL in all four`);
   });
 }
+
+ok("the readiness rehearsal can be run AT the per-trade ceiling — the sixth copy", () => {
+  /* jupiter.mjs EXECUTION_READINESS_MAX_AMOUNT_LAMPORTS bounds the no-sign rehearsal, and
+     poller runs that rehearsal at the ACTIVE cap. If this sits below the operator maximum,
+     an executor armed at the ceiling refuses its own probe and reports degraded forever —
+     measured live on 2026-09-07 the minute the owner armed 0.4 SOL. */
+  const jupiter = read("jupiter.mjs");
+  const readinessMax = num(jupiter, /EXECUTION_READINESS_MAX_AMOUNT_LAMPORTS\s*=\s*([\d_]+)/, "jupiter readiness max");
+  const perTrade = num(poller, CAPS[0].poller, "poller per-trade");
+  assert.equal(readinessMax, Math.floor(perTrade * 1_000_000_000),
+    `readiness rehearsal ceiling ${readinessMax} lamports != poller per-trade ceiling ${perTrade} SOL — ` +
+    "a bot armed at the ceiling would refuse its own readiness probe");
+  console.log(`       readiness max: ${readinessMax} lamports = ${perTrade} SOL`);
+});
 
 ok("arm-caps can actually arm the poller's ceiling — the bug that motivated this test", () => {
   const armable = num(runner, CAPS[0].runner, "runner per-trade");

@@ -1230,6 +1230,19 @@ await ok("execution-readiness probe exercises both providers without signing, jo
   const usdcAta = ata(wallet.publicKey, MAINNET_USDC);
   const readinessAmount = EXECUTION_READINESS_MAX_AMOUNT_LAMPORTS;
   const amount = BigInt(readinessAmount);
+  /* DERIVED FROM THE AMOUNT, NOT HAND-BUILT FOR 50M. The stub wallet held 100_000_000
+     and the post-simulation balance was the literal 47_955_720 — i.e. 100M minus a 50M
+     input, the 5,000 signature fee and 2,039,280 of ATA rent. When the readiness ceiling
+     moved to 400M (the owner's 0.4 SOL) the stub still "spent" 50M and the executor
+     correctly refused the mismatch. Every balance now follows the amount:
+       pre  = amount + reserve + 0.1 SOL of headroom
+       post = pre − amount − signature fee − ATA rent */
+  const SIGNATURE_FEE = 5_000;
+  const ATA_RENT = 2_039_280;
+  const WALLET_PRE = readinessAmount + EXECUTION_READINESS_RESERVE_LAMPORTS + 100_000_000;
+  const WALLET_POST = WALLET_PRE - readinessAmount - SIGNATURE_FEE - ATA_RENT;
+  assert.ok(WALLET_POST >= EXECUTION_READINESS_RESERVE_LAMPORTS,
+    "the stub must leave the untouched reserve intact after the rehearsal spend");
   const quoted = 20_000n;
   const route = new TransactionInstruction({
     programId: new PublicKey(JUPITER_V6),
@@ -1311,7 +1324,7 @@ await ok("execution-readiness probe exercises both providers without signing, jo
         return atomicCapabilitySnapshot(tx, options, {
           slot: 702,
           accountFor: (address) => address === wallet.publicKey.toBase58()
-            ? systemAccount(100_000_000) : null,
+            ? systemAccount(WALLET_PRE) : null,
         });
       }
       calls.simulate++;
@@ -1320,7 +1333,7 @@ await ok("execution-readiness probe exercises both providers without signing, jo
       assert.ok(tx.signatures.every((signature) =>
         Buffer.from(signature).every((byte) => byte === 0)));
       return { context: { slot: 702 }, value: { err: null, accounts: [
-        systemAccount(47_955_720, true),
+        systemAccount(WALLET_POST, true),
         null,
         tokenAccount({ tokenMint: MAINNET_USDC, owner: wallet.publicKey,
           amount: quoted, simulated: true }),
@@ -1360,9 +1373,17 @@ await ok("execution-readiness probe exercises both providers without signing, jo
   assert.equal(calls.snapshot, 4,
     "each provider needs one merged pre-state snapshot and one post-simulation snapshot");
   assert.equal(EXECUTION_READINESS_AMOUNT_LAMPORTS, 5_000_000);
-  assert.equal(EXECUTION_READINESS_MAX_AMOUNT_LAMPORTS, 50_000_000);
+  /* The ceiling is the poller's per-trade operator maximum in lamports — read from
+     poller.mjs source rather than pinned, so the property ("the rehearsal may be run AT
+     the cap") survives the next recalibration. test-operator-max-parity.mjs enforces the
+     same equality from the other side. */
+  const pollerSource = fs.readFileSync(new URL("./poller.mjs", import.meta.url), "utf8");
+  const pollerPerTrade = Number(/OPERATOR_MAX = Object\.freeze\(\{\s*maxSolPerTrade:\s*([\d.]+)/.exec(pollerSource)?.[1]);
+  assert.ok(pollerPerTrade > 0, "could not read the poller's per-trade ceiling");
+  assert.equal(EXECUTION_READINESS_MAX_AMOUNT_LAMPORTS, Math.floor(pollerPerTrade * 1_000_000_000),
+    "the readiness ceiling must equal the poller's per-trade ceiling in lamports");
   assert.equal(MAX_GROSS_RENT_LAMPORTS, 4_200_000);
-  assert.ok(100_000_000n > amount + BigInt(EXECUTION_READINESS_RESERVE_LAMPORTS));
+  assert.ok(BigInt(WALLET_PRE) > amount + BigInt(EXECUTION_READINESS_RESERVE_LAMPORTS));
   await assert.rejects(() => executor.probeExecutionReadiness({
     amountLamports: EXECUTION_READINESS_MAX_AMOUNT_LAMPORTS + 1,
   }), /outside the supported live-cap range/);
