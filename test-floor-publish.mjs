@@ -13,6 +13,17 @@
  * the SAME gate rather than around it: a coin that fails a safety check must still be
  * refused when it arrives this way.
  */
+
+/* A DIRECT RUN MUST NOT OPEN THE REAL DATABASE. scripts/test-all.mjs points
+   CLAUDE_CO_DB at a throwaway file, but running this file on its own falls back to
+   ./claude-co.db (src/lib/store.js) — and the resets in these tests DELETE FROM calls,
+   deliveries and call_events. On 2026-09-07 that emptied three tables of the local dev
+   database, which is gitignored and had no backup. The runner's value still wins; this
+   only covers the unguarded direct run. */
+import os from "node:os";
+import path from "node:path";
+process.env.CLAUDE_CO_DB = process.env.CLAUDE_CO_DB ||
+  path.join(os.tmpdir(), "cc-floor-publish-" + process.pid + ".db");
 import db from "./src/lib/store.js";
 import { publishCall } from "./src/penthouse.js";
 import { liveCalls, closeCall } from "./src/calls.js";

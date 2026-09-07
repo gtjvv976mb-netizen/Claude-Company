@@ -622,6 +622,7 @@ export function beginCyclePass({ now = Date.now(), quota = CYCLE.quota } = {}) {
       published: publishedCount(c.id) };
   }
   if (!c) c = openNewCycle({ quota, now });
+  const before = { passes: c.passes, level: c.escalation_level_reached };
   const pass = c.passes + 1;
   const level = Math.min(MAX_ESCALATION_LEVEL, pass - 1);
   db.prepare("UPDATE cycles SET passes=?, escalation_level_reached=?, published_count=? WHERE id=?")
@@ -632,7 +633,45 @@ export function beginCyclePass({ now = Date.now(), quota = CYCLE.quota } = {}) {
       published: publishedCount(c.id), quota: c.quota,
       note: "the open cycle is short of quota — effort and judgement move, the safety floor does not" });
   return { waiting: false, cycle: fresh, level, pass, quota: fresh.quota,
-    published: publishedCount(c.id) };
+    published: publishedCount(c.id), before };
+}
+
+/**
+ * GIVE A RUNG BACK THAT AN OUTAGE TOOK.
+ *
+ * THE LADDER IS THE PASS COUNT, and that is right when a pass is a look at the market:
+ * a level is spent because the market was searched and came back short. It is wrong
+ * when the pass never searched anything. Measured 2026-09-07 with the Anthropic account
+ * empty (HTTP 400 "credit balance is too low"): five scheduled passes each halted at the
+ * first workup having asked ZERO seats and spent $0.0000, and the cohort arrived at L4
+ * exhausted — then recorded a shortfall against a market it had never looked at. The
+ * same market published three the moment the account was funded.
+ *
+ * So a pass that could not think hands its rung back: the counters are restored to
+ * exactly what they were before the pass began, and the next pass runs at the same
+ * level. This RELAXES NOTHING — it is the opposite, since a rung is only ever spent to
+ * relax a standard, and refusing to spend one keeps the desk at the tighter bar. It is
+ * refused outright if anything was published on this pass, and it can never lower the
+ * level below one a published call in the cohort actually ran at.
+ */
+export function abandonCyclePass(cycleId, before = {}, reason = "") {
+  const c = cycleRow(cycleId);
+  if (!c) return null;
+  const priorPasses = Number(before?.passes);
+  if (!Number.isInteger(priorPasses) || priorPasses < 0) return null;
+  // Only ever undo THIS pass, and only if nothing else moved the counter meanwhile.
+  if (c.passes !== priorPasses + 1) return null;
+  const publishedLevel = db
+    .prepare("SELECT MAX(escalation_level) AS lvl FROM calls WHERE cycle_id=?").get(cycleId)?.lvl;
+  const floor = Math.max(0, Number(publishedLevel) || 0);
+  const priorLevel = Number.isInteger(Number(before?.level)) ? Number(before.level) : 0;
+  const level = Math.max(floor, Math.min(priorLevel, c.escalation_level_reached));
+  db.prepare("UPDATE cycles SET passes=?, escalation_level_reached=? WHERE id=?")
+    .run(priorPasses, level, cycleId);
+  emit("cycle:pass_abandoned", { cycleId, passes: priorPasses, level, reason,
+    note: "the pass researched nothing, so it does not spend a rung of the ladder — " +
+      "the next pass runs at the same level, against a market this one never saw" });
+  return cycleRow(cycleId);
 }
 
 /** Count a publication against the open cohort. Recomputed from the calls table, never

@@ -13,6 +13,17 @@
  * sizes, and no key material of any kind. The server publishes rows. The wallet lives
  * on the owner's machine, exactly as it does for a tenant.
  */
+
+/* A DIRECT RUN MUST NOT OPEN THE REAL DATABASE. scripts/test-all.mjs points
+   CLAUDE_CO_DB at a throwaway file, but running this file on its own falls back to
+   ./claude-co.db (src/lib/store.js) — and the resets in these tests DELETE FROM calls,
+   deliveries and call_events. On 2026-09-07 that emptied three tables of the local dev
+   database, which is gitignored and had no backup. The runner's value still wins; this
+   only covers the unguarded direct run. */
+import os from "node:os";
+import path from "node:path";
+process.env.CLAUDE_CO_DB = process.env.CLAUDE_CO_DB ||
+  path.join(os.tmpdir(), "cc-hq-executor-" + process.pid + ".db");
 import db from "./src/lib/store.js";
 import { openCall, closeCall, liveCalls } from "./src/calls.js";
 import { announceEntry } from "./src/alerts.js";

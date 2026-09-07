@@ -1362,6 +1362,16 @@ async function handleDeskExitEvent(ev) {
   try { new PublicKey(ev?.mint); }
   catch { throw new Error("invalid Solana mint in desk exit event"); }
   requirePositiveCallId(ev?.call_id, "desk exit call_id");
+  /* THE IDEA IS OVER, SO THE HELD ENTRY IS OVER. A call whose entry was held while
+     exposure was frozen must never be replayed after the desk has closed it — the exit
+     is the desk's determination that the trade is finished, whether or not this bot ever
+     got into it. Dropping it here also covers the case where the entry is still sitting
+     in the backlog and the exit arrives in a later batch. */
+  try {
+    const retired = journal.dropDeferredEntriesForCall(ev.call_id);
+    if (retired) log(`HELD CALL ${ev.symbol || ev.mint} (call ${ev.call_id}) retired: ` +
+      "the desk closed it before exposure unfroze, so it is not offered again");
+  } catch {}
   const eventId = ev.event_id || `${FLOOR}:${ev.id}`;
   const reason = `desk exit (${ev.code || "exit"})`;
   const pos = S.positions[ev.mint];
@@ -2458,6 +2468,51 @@ async function reconcileHeldCalls() {
  * the sequential cursor pass are unchanged from before; only their position in the tick
  * moved. Every early return here is a feed verdict, not a tick verdict — the caller still
  * runs the custody pass and the mirror afterwards. */
+/**
+ * OFFER BACK THE CALLS THE FREEZE HELD.
+ *
+ * Nothing here is a bypass of anything. Each held event goes through `onEntry`, the same
+ * function the feed calls, so it faces the same gates in the same order against the clock
+ * of the moment it runs — the band's own window (a nano call is past in a minute), the
+ * mark's age and deviation, the book, the pause and hard-stop files, the risk history,
+ * and then the bot's own sizing rails. The freeze is still absolute: if an intent is
+ * unresolved, nothing is offered at all, and if a replay signs a buy the drain stops
+ * there so only one buy is ever in flight.
+ */
+async function drainDeferredEntries() {
+  let held = [];
+  try { held = journal.deferredEntries(); } catch { return; }
+  if (!held.length) return;
+  if (journal.hasBlockingIntent()) return;
+  for (const row of held) {
+    const ev = row.event;
+    const key = String(ev.event_id || `${FLOOR}:${ev.id}`);
+    log(`HELD CALL ${ev.symbol || ev.mint} (call ${ev.call_id}) is offered again — ` +
+      `exposure unfroze ${Math.round((Date.now() - row.deferredAt) / 1000)}s after it was held`);
+    try {
+      await onEntry(ev);
+      journal.dropDeferredEntry(row.eventId);
+    } catch (error) {
+      const intent = journal.getIntent(`entry:${key}`);
+      const undecided = !intent || ["planned", "failed", "expired"].includes(intent.state);
+      if (undecided && isTransientEntryFailure(error) &&
+          journal.bumpDeferredEntryAttempt(row.eventId) <= MAX_ENTRY_RETRIES) {
+        log(`RETRY ${ev.symbol || ev.id} (held call ${ev.call_id}): ${error.message} — ` +
+          `transient, attempt ${row.attempts + 1} of ${MAX_ENTRY_RETRIES}; the call stays held`);
+        continue;
+      }
+      log(`SKIP ${ev.symbol || ev.id} (held call ${ev.call_id}): ${error.message} — ` +
+        "the held call is retired");
+      journal.dropDeferredEntry(row.eventId);
+    }
+    // A replayed entry that signed a buy freezes exposure again, by the same rule.
+    if (journal.hasBlockingIntent()) {
+      log("a held call was acted on and its buy is in flight — the rest stay held");
+      break;
+    }
+  }
+}
+
 async function consumeFeed() {
   try {
     const response = await fetch(`${API}/api/floor/${FLOOR}/executor/feed?after=${S.cursor}`, {
@@ -2519,12 +2574,22 @@ async function consumeFeed() {
         save();
         log(`primed at cursor ${S.cursor} — ${events.length} historic event(s) skipped; trading forward only`);
       } else {
-        // Exit safety is not held hostage by an earlier bad entry. Pre-latch/process
-        // every exit in the validated batch before the sequential cursor pass.
+        /* Exit safety is not held hostage by an earlier bad entry. Pre-latch/process
+         * every exit in the validated batch before the sequential cursor pass.
+         *
+         * AND EXACTLY ONCE. This pass used to hand every exit to handleDeskExitEvent and
+         * then the cursor loop below handed it over a SECOND time: measured 2026-09-07,
+         * 24 exit executions for 12 desk determinations. The second call is a retry, and
+         * a retry is worth keeping — but only for an exit whose first attempt THREW. One
+         * that was handled is remembered here and skipped below, so a determination is
+         * executed once and reads once in the log. */
         let unsafeExitPrepass = false;
+        const prepassed = new Set();
         for (const ev of events.filter((event) => event.type === "exit")) {
           try {
-            await handleDeskExitEvent(ev);
+            const disposition = await handleDeskExitEvent(ev);
+            prepassed.add(String(ev.id));
+            if (disposition === "not-held") log(`EXIT ${ev.symbol} — not held`);
           } catch (error) {
             const positionLatched = S.positions[ev.mint]?.exitExecutionRequired === true;
             let deferred = false;
@@ -2553,15 +2618,48 @@ async function consumeFeed() {
           }
           const nextCursor = advanceFrozenBatchCursor(S.cursor, events);
           if (nextCursor > S.cursor) {
+            /* HOLD THE CALLS THE CURSOR IS ABOUT TO CROSS. DO NOT ABANDON THEM.
+             *
+             * Crossing the batch is a DURABLE decision: the cursor moves past every
+             * entry in it, and an id at or below the cursor is never re-read. Measured
+             * on 2026-09-07 with one signed-but-unconfirmed buy in the journal (the
+             * ordinary consequence of an RPC timeout after signing): three published
+             * calls, feed ids 48, 49 and 50, were crossed — abandoned permanently, and
+             * not one of them appeared in the log by name.
+             *
+             * THE FREEZE ITSELF IS UNTOUCHED, and that matters: no new exposure is
+             * taken while a buy's fate is unknown, which is the whole reason the freeze
+             * exists. What changes is what happens to the CALL. It is written to the
+             * journal's deferred_entries table, verbatim and durably, and offered back
+             * to onEntry once the intent resolves — where it faces every gate again
+             * against the clock of that moment: the band window, the mark's age and
+             * deviation, the book, the pauses, the risk history, the rails. A call that
+             * went stale in the meantime is refused there, by the same rule that refuses
+             * any stale call, and a desk exit for it retires it outright. */
+            const held = events.filter((event) => event.type === "entry");
+            for (const event of held) {
+              try {
+                journal.deferEntryEvent(event);
+                log(`HOLD ${event.symbol || event.mint} (call ${event.call_id}): new exposure is frozen while ` +
+                  `intent ${blockingIntent} is unresolved — the call is held and offered again when it resolves`);
+              } catch (error) {
+                log(`SKIP ${event.symbol || event.mint} (call ${event.call_id}): could not hold the call ` +
+                  `while exposure is frozen — ${error.message}`);
+              }
+            }
             S.cursor = nextCursor;
             save();
             log(`journal intent ${blockingIntent} is unresolved — exits were preprocessed; ` +
-              `new exposure stayed frozen and cursor advanced to ${S.cursor} to expose the next batch`);
+              `new exposure stayed frozen${held.length ? `, ${held.length} entr${held.length === 1 ? "y was" : "ies were"} held for replay` : ""} ` +
+              `and cursor advanced to ${S.cursor} to expose the next batch`);
           } else {
             log(`journal intent ${blockingIntent} is unresolved — exits stay latched and new exposure is frozen`);
           }
           return;
         }
+        /* Exposure is not frozen. Anything the freeze held is offered again BEFORE this
+           batch's own entries, so a call published earlier is decided on earlier. */
+        await drainDeferredEntries();
         for (const ev of events) {
           try {
             if (ev.type === "entry") {
@@ -2569,8 +2667,10 @@ async function consumeFeed() {
               entryRetries.delete(String(ev.event_id || `${FLOOR}:${ev.id}`));
             }
             else if (ev.type === "exit") {
-              const disposition = await handleDeskExitEvent(ev);
-              if (disposition === "not-held") log(`EXIT ${ev.symbol} — not held`);
+              if (!prepassed.has(String(ev.id))) {
+                const disposition = await handleDeskExitEvent(ev);
+                if (disposition === "not-held") log(`EXIT ${ev.symbol} — not held`);
+              }
             } else throw new Error(`unknown event type ${ev.type}`);
             S.cursor = Math.max(S.cursor, Number(ev.id));
             save();

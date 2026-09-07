@@ -2,7 +2,8 @@ import { sweep, classify, CATEGORY_RISK, launchpad } from "./market.js";
 import { gather, screen } from "./data/evidence.js";
 import { workup } from "./desk.js";
 import { openCall, liveCalls, liveCallFor, evaluateExit, closeCall, noteEvent,
-  gateFailures, beginCyclePass, recordCyclePublish, cycleStatus, settleCycles } from "./calls.js";
+  gateFailures, beginCyclePass, abandonCyclePass, recordCyclePublish, cycleStatus,
+  settleCycles } from "./calls.js";
 import { broadcast } from "./copy.js";
 import { announceExit } from "./alerts.js";
 import { listFloors, HQ_FLOOR } from "./tower.js";
@@ -1023,17 +1024,47 @@ export async function runPenthouseCycle({
      moment the pass that could not fill it ends. */
   let cohortEnd = null;
   if (cohort) {
+    /* A PASS THAT COULD NOT THINK DOES NOT SPEND A RUNG.
+     *
+     * `stopped` here is a credit or budget halt. If it arrived before ONE SEAT WAS EVER
+     * ASKED — no model spend at all — and nothing was published, this pass never got the
+     * desk's judgement onto the market, so the rung it took at the top is handed back
+     * and the next pass runs at the same level. Narrow on purpose: a halt that lands
+     * after real research keeps its rung, because that research is what the level buys.
+     *
+     * The test is MONEY, not `workedUp`. Measured while building this: with the account
+     * empty, `workedUp` still counted 2-4 per pass, because a coin the FREE screen kills
+     * returns a verdict without asking anybody. Counting those as research left four
+     * passes out of five still burning a rung during a total outage. Spend is the only
+     * measure that cannot be fooled by a free refusal: no dollars, no seat, no rung. */
+    const outage = stopped && /credit|budget/i.test(String(stopped)) ? String(stopped) : null;
+    const researchless = Boolean(outage) && opened.length === 0 &&
+      spend.usd - startSpend === 0;
+    if (researchless) {
+      const restored = abandonCyclePass(cohort.cycle.id, cohort.before, outage);
+      if (restored) level = restored.escalation_level_reached;
+    }
     const st = cycleStatus();
     cohortEnd = { cycleId: cohort.cycle.id, quota: cohort.quota,
       published: st.open ? st.published : cohort.published + opened.length,
-      level, exhausted: level >= MAX_ESCALATION_LEVEL };
+      level, exhausted: level >= MAX_ESCALATION_LEVEL && !researchless };
     const short = Math.max(0, cohortEnd.quota - cohortEnd.published);
     if (short > 0)
-      emit("cycle:short", { ...cohortEnd, short,
-        note: level >= MAX_ESCALATION_LEVEL
-          ? "the ladder is exhausted at L4 — the cohort publishes what it found and records the shortfall. " +
-            "There is no level that publishes a safety-failed coin."
-          : `still short by ${short}; the next pass runs at L${Math.min(MAX_ESCALATION_LEVEL, level + 1)}` });
+      emit("cycle:short", { ...cohortEnd, short, stopped: stopped ?? null,
+        /* SAY WHICH ONE IT WAS. A shortfall recorded while the account was empty read
+           exactly like a shortfall recorded against a barren market — the same "the
+           ladder is exhausted at L4" sentence — and the two call for opposite actions
+           from the owner: fund the account, or accept the hour. */
+        note: outage
+          ? `THE OUTAGE, NOT THE MARKET: the pass could not research — ${outage}` +
+            (researchless
+              ? " — no seat was reached, so the rung was handed back and this level will be retried"
+              : " — the research it had already paid for stands, and so does the rung") +
+            ". The market this pass could not look at is unjudged."
+          : level >= MAX_ESCALATION_LEVEL
+            ? "the ladder is exhausted at L4 — the cohort publishes what it found and records the shortfall. " +
+              "There is no level that publishes a safety-failed coin."
+            : `still short by ${short}; the next pass runs at L${Math.min(MAX_ESCALATION_LEVEL, level + 1)}` });
   }
   emit("cycle:end", { cycle, count: opened.length, spendUsd: Number(cost.toFixed(4)), stopped,
     cohort: cohortEnd });

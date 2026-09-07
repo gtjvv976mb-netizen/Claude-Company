@@ -24,6 +24,17 @@
  * own bracket gone, every live call with a hold window rides the 45-second lane by
  * default; PENTHOUSE_FAST_ALL_BANDS=0 restores the ratio rule.
  */
+
+/* A DIRECT RUN MUST NOT OPEN THE REAL DATABASE. scripts/test-all.mjs points
+   CLAUDE_CO_DB at a throwaway file, but running this file on its own falls back to
+   ./claude-co.db (src/lib/store.js) — and the resets in these tests DELETE FROM calls,
+   deliveries and call_events. On 2026-09-07 that emptied three tables of the local dev
+   database, which is gitignored and had no backup. The runner's value still wins; this
+   only covers the unguarded direct run. */
+import os from "node:os";
+import path from "node:path";
+process.env.CLAUDE_CO_DB = process.env.CLAUDE_CO_DB ||
+  path.join(os.tmpdir(), "cc-fast-exit-lane-" + process.pid + ".db");
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { evaluateExit } from "./src/calls.js";

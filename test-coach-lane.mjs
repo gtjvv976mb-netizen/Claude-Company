@@ -447,11 +447,16 @@ console.log("\n13. IT FAILS CLOSED — AN UNCHECKABLE COACHING PASS DOES NOT INS
   ok("the sentence under test is ordinary coaching the patterns pass",
     checkInvariants(clean) === null);
 
-  /* THE REAL DEFAULT, with no stub and no API key — which is how the test runner runs and
-     how a dry provider looks in production. The judge throws, and the answer is a
-     refusal, not an install. This is the assertion that decides whether the second gate
-     is a gate at all. */
-  const unreachable = await applyPolicy({ seat: "Macro", guidance: clean, rationale: "n/a" });
+  /* UNREACHABILITY IS INJECTED, NOT BORROWED FROM THE ACCOUNT BALANCE. This used to call
+     the real default and rely on the provider being dry — which it was when the gate was
+     written, so it passed. The moment the owner refilled credit on 2026-09-07 the judge
+     answered, the coaching installed, and this section failed a suite that had proved
+     nothing about the code either way: it was asserting an outage. The property under
+     test is that a judge which CANNOT ANSWER produces a refusal, so make it unable to
+     answer. That the production caller passes no judge and therefore takes the real
+     default is a separate claim, asserted from source in section 14. */
+  const unreachable = await applyPolicy({ seat: "Macro", guidance: clean, rationale: "n/a",
+    judge: async () => { throw new Error("connection reset"); } });
   ok("with no judge reachable, ordinary coaching is REFUSED rather than installed",
     !unreachable.ok && unreachable.gate === "judge-unreachable",
     `${unreachable.gate}: ${String(unreachable.error).slice(0, 100)}`);

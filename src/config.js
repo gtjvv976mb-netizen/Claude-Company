@@ -403,8 +403,9 @@ export const MINTS = {
  * crossed at any level for any quota. There is no level 5.
  *
  * L0 normal      — today's bars, nothing relaxed.
- * L1 widen       — more candidates, more launchpads, a wider search window. PURE
- *                  EFFORT: the cost goes up and not one standard moves.
+ * L1 widen       — more candidates per category, more workups, a longer hunt. PURE
+ *                  EFFORT: the cost goes up and not one standard moves. It does NOT
+ *                  widen the launchpad — see `allLaunchpads`, removed 2026-09-07.
  * L2 conviction  — accept a lower conviction score, down to a floor that stays above
  *                  the "would not trade this myself" line.
  * L3 narrative   — accept a coin the X read calls MANUFACTURED, provided every safety
@@ -412,7 +413,9 @@ export const MINTS = {
  *                  model's opinion about attention, not a mechanic that loses money.
  *                  The other arm of that same seat — "this deployer's own account has
  *                  rugged before" — is a FACT and stays absolute at every level.
- * L4 band        — widen the market-cap band and the age window of the SEARCH.
+ * L4 band        — widen the market-cap band of the SEARCH. (An age-ceiling knob used
+ *                  to be advertised here too; it moved nothing and was removed
+ *                  2026-09-07 — see `searchAgeCeilingMultiplier` below.)
  *
  * Read `minAgeFloorMultiplier` below before assuming "age window" means the screen's
  * minimum pair age. It does not, deliberately.
@@ -468,8 +471,21 @@ export function escalationPlan(level = 0) {
     workupMultiplier: 1,
     perCellMultiplier: 1,
     huntMultiplier: 1,
-    /** L1 stops the cycle skipping coins simply because a launchpad was unfamiliar. */
-    allLaunchpads: false,
+    /* `allLaunchpads` WAS HERE, AND IT WAS A PROMISE THE DESK DID NOT KEEP.
+     *
+     * It was set true at L1 and read by NOTHING (measured 2026-09-07: no module in
+     * src/ mentioned it), while the L1 note "every launchpad" was stamped onto every
+     * call published at that level — 33 of 193 in one simulated run. The relaxations
+     * are the desk's own account of what it did; one that describes work no module
+     * does is a false record on a live call.
+     *
+     * It is REMOVED rather than wired, because wiring it would cross a standing owner
+     * instruction. `selectAcrossBoard` at PENTHOUSE_PAD_QUOTA=1 (the default) filters
+     * the general pass to pump.fun too — "the owner's instruction is to search and
+     * trade pump.fun coins only" (categories.js) — so an L1 that looked off pump.fun
+     * would be the ladder overruling the owner to chase a quota. Whether the quota may
+     * do that is the owner's decision, not this file's. Until they say so, L1 buys more
+     * looks at the pad they chose, and the note says only that. */
     /** JUDGEMENT (L2+). */
     minTier: CYCLE.minTier,
     minConviction: CYCLE.minConviction,
@@ -479,13 +495,17 @@ export function escalationPlan(level = 0) {
     /** OPPORTUNITY (L4). The band the SEARCH considers. Per-coin floors are unmoved. */
     mcapMin: null,
     mcapMax: null,
-    /** L4 widens the search's age CEILING — it will look at older coins. It never
-        lowers the minimum-age floor, which is why this is a multiplier ≥ 1 on the
-        ceiling and there is deliberately no knob for the floor. See openIssues:
-        `too_new` is classified SAFETY because the research behind it ("rugs express
-        inside the first hour") is a claim about losing money, not about opportunity,
-        and an ambiguous gate is classified SAFETY by rule. */
-    searchAgeCeilingMultiplier: 1,
+    /* `searchAgeCeilingMultiplier` WAS HERE, and it was inert for the same reason.
+     *
+     * It advertised "the search's age ceiling to 4x" at L4 and was read by nothing.
+     * There is no age ceiling in the cycle's search to widen: sweep() applies none, and
+     * the only ceiling in the file (48h) belongs to the 5-minute fresh lane, which the
+     * ladder does not drive. The minimum-age floor was never in question — `too_new` is
+     * classified SAFETY because the research behind it ("rugs express inside the first
+     * hour") is a claim about losing money, and `minAgeFloorMultiplier` below stays at
+     * 1 forever so that invariant remains testable. Removing the ceiling knob changes
+     * no behaviour at all; it only stops a published call claiming a widening that
+     * never happened. */
     minAgeFloorMultiplier: 1,        // ALWAYS 1. Present so the invariant is testable.
     relaxations,
   };
@@ -494,8 +514,8 @@ export function escalationPlan(level = 0) {
     plan.workupMultiplier = num("CYCLE_L1_WORKUP_X", 2);
     plan.perCellMultiplier = num("CYCLE_L1_PERCELL_X", 2);
     plan.huntMultiplier = num("CYCLE_L1_HUNT_X", 2);
-    plan.allLaunchpads = true;
-    relaxations.push("L1: more candidates, every launchpad, a wider sweep — effort only, no standard moved");
+    relaxations.push(`L1: ${plan.workupMultiplier}x the workups, ${plan.perCellMultiplier}x the candidates ` +
+      `per category and ${plan.huntMultiplier}x the hunt — effort only, no standard moved, same launchpad`);
   }
   if (L >= 2) {
     plan.minTier = CYCLE.floorTier;
@@ -509,8 +529,7 @@ export function escalationPlan(level = 0) {
   if (L >= 4) {
     plan.mcapMin = num("CYCLE_L4_MCAP_MIN", 1_000);
     plan.mcapMax = num("CYCLE_L4_MCAP_MAX", 40_000_000);
-    plan.searchAgeCeilingMultiplier = num("CYCLE_L4_AGE_X", 4);
-    relaxations.push(`L4: market-cap band widened to $${plan.mcapMin.toLocaleString()}-$${plan.mcapMax.toLocaleString()} and the search's age ceiling to ${plan.searchAgeCeilingMultiplier}x — the minimum-age SAFETY floor is unchanged`);
+    relaxations.push(`L4: the SEARCH's market-cap band widened to $${plan.mcapMin.toLocaleString()}-$${plan.mcapMax.toLocaleString()} — every per-coin floor, the minimum pair age included, is unchanged`);
   }
   return plan;
 }

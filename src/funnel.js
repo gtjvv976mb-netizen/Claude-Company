@@ -44,11 +44,12 @@
  * list than it used to consider.
  */
 import { DatabaseSync } from "node:sqlite";
-import path from "node:path";
-import { ROOT } from "./config.js";
+import { resolveDbFile } from "./lib/db-file.js";
 import { PAD_QUOTA, cellOf } from "./categories.js";
 
-const db = new DatabaseSync(process.env.CLAUDE_CO_DB || path.join(ROOT, "claude-co.db"));
+// Same resolver as lib/store.js: one file per process, and never the live journal from
+// a stray `node test-*.mjs`.
+const db = new DatabaseSync(resolveDbFile());
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS funnel (

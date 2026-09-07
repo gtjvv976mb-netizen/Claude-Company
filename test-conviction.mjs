@@ -7,6 +7,17 @@
  * reading that sentence would say, and — more importantly — that it never pretends to
  * know something it was not told.
  */
+
+/* A DIRECT RUN MUST NOT OPEN THE REAL DATABASE. scripts/test-all.mjs points
+   CLAUDE_CO_DB at a throwaway file, but running this file on its own falls back to
+   ./claude-co.db (src/lib/store.js) — and the resets in these tests DELETE FROM calls,
+   deliveries and call_events. On 2026-09-07 that emptied three tables of the local dev
+   database, which is gitignored and had no backup. The runner's value still wins; this
+   only covers the unguarded direct run. */
+import os from "node:os";
+import path from "node:path";
+process.env.CLAUDE_CO_DB = process.env.CLAUDE_CO_DB ||
+  path.join(os.tmpdir(), "cc-conviction-" + process.pid + ".db");
 import { convictionScore, whaleRoster, whalesOn, convictionBoard,
   CONVICTION_WEIGHTS, HIT_MULTIPLE, MIN_CALLS_FOR_RECORD } from "./src/conviction.js";
 import db from "./src/lib/store.js";
