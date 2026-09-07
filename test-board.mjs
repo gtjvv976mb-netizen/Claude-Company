@@ -25,8 +25,16 @@ console.log("\nCAP BANDS — the owner's six, exactly");
 for (const [mcap, want] of [[10_000, "nano"], [50_000, "micro"], [75_000, "low"],
                             [250_000, "medium"], [750_000, "high"], [5_000_000, "very_high"]])
   ok(`$${mcap.toLocaleString()} -> ${want}`, capBandOf(coin(mcap)) === want, capBandOf(coin(mcap)));
-ok("under $5k is off the board", capBandOf(coin(4_000)) === null, "too little coin to trade");
-ok("over $10m is off the board", capBandOf(coin(50_000_000)) === null, "somebody else's business");
+/* DERIVED FROM CAP_BANDS. These were $4,000 and $50,000,000, chosen when the board ran
+   $5k-$10m; the owner's 2026-09-07 widening moved it to $1k-$50m and $4,000 became an
+   ON-board nano coin. The claim being proved — outside the board is not a band — is
+   unchanged; only the edges are now read from the board itself. */
+const BOARD_LO = Math.min(...Object.values(CAP_BANDS).map((b) => b.lo));
+const BOARD_HI = Math.max(...Object.values(CAP_BANDS).map((b) => b.hi));
+ok(`under $${BOARD_LO.toLocaleString()} is off the board`,
+  capBandOf(coin(BOARD_LO - 1)) === null, "too little coin to trade");
+ok(`at or over $${BOARD_HI.toLocaleString()} is off the board`,
+  capBandOf(coin(BOARD_HI)) === null, "somebody else's business");
 ok("an UNREADABLE cap is never assigned a band",
   capBandOf({ pair: { marketCap: null, fdv: null } }) === null,
   "an unknown number must not be given a drawer it may not belong in");

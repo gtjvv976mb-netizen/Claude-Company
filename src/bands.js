@@ -17,7 +17,7 @@
  * whether or not the target printed. Nothing here is a safety limit; the stop, the
  * liquidity floor and the exit probe are, and they did not move. */
 export const CAP_BANDS = {
-  nano:      { lo: 5_000,     hi: 20_000,     label: "nano",      note: "$5k-$20k — minutes old, decided in minutes",
+  nano:      { lo: 1_000,     hi: 20_000,     label: "nano",      note: "$1k-$20k — minutes old, decided in minutes",
                holdMinMs: 60_000,             holdMaxMs: 30 * 60_000 },
   micro:     { lo: 20_000,    hi: 60_000,     label: "micro",     note: "$20k-$60k — the first re-rate, sharpest rugs",
                holdMinMs: 20 * 60_000,        holdMaxMs: 60 * 60_000 },
@@ -27,7 +27,7 @@ export const CAP_BANDS = {
                holdMinMs: 60 * 60_000,        holdMaxMs: 5 * 60 * 60_000 },
   high:      { lo: 500_000,   hi: 1_000_000,  label: "high",      note: "$500k-$1m — a tape worth reading",
                holdMinMs: 60 * 60_000,        holdMaxMs: 5 * 60 * 60_000 },
-  very_high: { lo: 1_000_000, hi: 10_000_000, label: "very high", note: "$1m-$10m — needs real money to move",
+  very_high: { lo: 1_000_000, hi: 50_000_000, label: "very high", note: "$1m-$50m — needs real money to move",
                holdMinMs: 5 * 60 * 60_000,    holdMaxMs: 24 * 60 * 60_000 },
 };
 

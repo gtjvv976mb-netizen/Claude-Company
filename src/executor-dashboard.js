@@ -17,7 +17,7 @@ export const EXECUTOR_CANARY_DEFAULTS = Object.freeze({
   maxOpenPositions: 4,
 });
 export const EXECUTOR_OPERATOR_MAXIMA = Object.freeze({
-  maxSolPerTrade: 0.1,
+  maxSolPerTrade: 0.05,
   rolling24hDeploySol: 0.5,
   rolling24hRealizedLossBrakeSol: 0.15,
   maxOpenPositions: 4,

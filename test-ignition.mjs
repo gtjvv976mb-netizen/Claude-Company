@@ -107,8 +107,13 @@ for (const [band, b] of Object.entries(CAP_BANDS)) {
   ok(`${band} claims its own floor`, bandOf(b.lo) === band, `$${b.lo.toLocaleString()}`);
   ok(`${band} does not claim its ceiling`, bandOf(b.hi) !== band);
 }
-ok("below the board is not a band", bandOf(4_999) === null);
-ok("above the board is not a band", bandOf(10_000_001) === null);
+/* DERIVED FROM CAP_BANDS. These were 4_999 and 10_000_001, chosen when the board ran
+   $5k-$10m. The owner's 2026-09-07 widening moved it to $1k-$50m and both literals fell
+   INSIDE the board, so each assertion silently stopped testing an edge. */
+const BOARD_LO = Math.min(...Object.values(CAP_BANDS).map((b) => b.lo));
+const BOARD_HI = Math.max(...Object.values(CAP_BANDS).map((b) => b.hi));
+ok("below the board is not a band", bandOf(BOARD_LO - 1) === null, `$${(BOARD_LO - 1).toLocaleString()}`);
+ok("above the board is not a band", bandOf(BOARD_HI + 1) === null, `$${(BOARD_HI + 1).toLocaleString()}`);
 ok("an unreadable cap is not a band", bandOf(null) === null && bandOf(0) === null && bandOf("soon") === null);
 
 console.log("\nONE COIN, READ THE WAY THE REST OF THE DESK READS COINS");
@@ -160,7 +165,7 @@ console.log("\nTHE SHORTLIST SPENDS ATTENTION, AND ONLY ATTENTION");
   const picked = shortlist([
     live,
     make({ mint: "BANNED", banned: true }),
-    make({ mint: "OFFBOARD", mcap: 2_000 }),
+    make({ mint: "OFFBOARD", mcap: BOARD_LO - 1 }),   // derived: $2,000 is ON the board since the $1k widening
     make({ mint: "STALE", lastTradeMin: 45 }),
     make({ mint: "ANCIENT", mcap: 8_000, ageMin: 60 * 24 * 30 }),
   ], { now: NOW, limit: 10 });

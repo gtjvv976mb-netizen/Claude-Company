@@ -63,13 +63,31 @@ const ev = (mcap) => ({
   exitProbe: { roundTripLossPct: 2 }, mintAccount: { flags: [] }, holders: { ok: true, top1Pct: 9 },
 });
 const codes = (m) => screen(ev(m)).fails.map((f) => f.code);
-ok("a $50m coin is screened out as too_big", codes(50_000_000).includes("too_big"),
-  codes(50_000_000).join(",") || "none");
-ok("a $3m coin is not", !codes(3_000_000).includes("too_big"), codes(3_000_000).join(",") || "clean");
+const usd = (n) => "$" + (n / 1e6).toFixed(2) + "m";
+
+/* RE-ANCHORED 2026-09-07. The ceiling moved $10m -> $50m when the owner widened the
+ * screens, and the old fixture was the literal 50_000_000 — which now lands exactly ON
+ * the ceiling, where `too_big` (a strict `mcap > max`) does not fire. It stopped proving
+ * anything. Both fixtures are derived from the live ceiling instead, so the next
+ * recalibration moves them with it: one a dollar over the ceiling, one a tenth of it
+ * (well inside the band and far above the $1k floor, so it cannot fail `too_small`).
+ * The property under test is unchanged: the screen refuses what is too big to re-rate. */
+const CEILING = cfg.screen.maxMarketCapUsd;
+const overCeiling = CEILING + 1;
+const insideBand = Math.round(CEILING / 10);
+
+ok(`a coin $1 over the ${usd(CEILING)} ceiling is screened out as too_big`,
+  codes(overCeiling).includes("too_big"), codes(overCeiling).join(",") || "none");
+ok(`a ${usd(insideBand)} coin (a tenth of the ceiling) is not`, !codes(insideBand).includes("too_big"),
+  codes(insideBand).join(",") || "clean");
+// The ceiling itself is inclusive — the coin AT the ceiling is still the desk's trade.
+// Pinning the boundary here is what the old hardcoded fixture silently stopped doing.
+ok(`a coin exactly AT the ${usd(CEILING)} ceiling is still allowed`,
+  !codes(CEILING).includes("too_big"), codes(CEILING).join(",") || "clean");
 
 // An unreadable number must never become an execution — the same rule the rest of
 // the screen follows for unknown deployers and unreadable flags.
-const noMcap = { ...ev(3_000_000) };
+const noMcap = { ...ev(insideBand) };
 noMcap.pair = { ...noMcap.pair, marketCap: null, fdv: null };
 ok("an UNKNOWN market cap does not fail the ceiling",
   !screen(noMcap).fails.map((f) => f.code).includes("too_big"));

@@ -38,7 +38,7 @@ export const cfg = {
    * balance judgment about money it does not hold. The bot keeps its own book heat, its
    * own rolling deploy cap and its own spendable balance, all against the wallet that
    * signs (executor/strategy.mjs:308-311), which is the only place the number is real. */
-  maxCandidates: num("DESK_MAX_CANDIDATES", 8),
+  maxCandidates: num("DESK_MAX_CANDIDATES", 24),
   /* `targetSizeUsd` (DESK_TARGET_SIZE_USD) WAS HERE, and its removal is the point of
    * the 2026-09-07 change rather than a side effect of it.
    *
@@ -101,15 +101,32 @@ export const cfg = {
      * Note this is DEPTH, not market cap: a $1m-cap coin is a claim about price x
      * supply, while liquidity is the money actually in the pool to sell into. They
      * are routinely an order of magnitude apart. */
-minLiquidityUsd: num("DESK_MIN_LIQUIDITY_USD", 12000),
+/* OWNER OVERRIDE 2026-09-07: THE FIRST GOAL IS THAT COINS GET PUBLISHED AT ALL.
+     *
+     * Measured before this change: of 500 workups, 4 reached PASS and 15 WATCH — a 3.8%
+     * positive rate — against a quota of three calls from a 8-24 coin pass. The free
+     * screen alone killed ~93% (157 considered, 11 viable). Three cycles in a row walked
+     * the whole L0-L4 ladder and published nothing.
+     *
+     * Every floor below is an OPPORTUNITY or QUALITY judgement, not a claim about
+     * whether a position can be left. The liquidity floor is the one that could be
+     * either, and 12000 was calibrated for a much larger clip: the bot trades 0.05 SOL,
+     * about $5, so $2,500 of pool depth is still ~500x the order. The gates that decide
+     * whether a coin can be SOLD AT ALL — freezable, seizable, transfer_hook,
+     * cannot_exit, unverified_exit, no_stop — are SAFETY class and are untouched here
+     * and at every rung of the ladder.
+     *
+     * The owner's instruction was explicit and repeated: allow more coins through,
+     * profitable or not, and adjust from there. */
+    minLiquidityUsd: num("DESK_MIN_LIQUIDITY_USD", 2500),
     // 24h here quietly strangled the sniper lane: the free screen killed every
     // coin the ignition path is FOR. The research's floor is one hour past
     // migration (rugs express inside the first hour); 1.5h keeps a margin.
-    minPairAgeHours: num("DESK_MIN_PAIR_AGE_HOURS", 1.5),
-    minVolume24hUsd: num("DESK_MIN_VOL24_USD", 15000),
-    maxVolToLiqRatio: num("DESK_MAX_VOL_LIQ", 40),   // above this, suspect wash
-    minTxns24h: num("DESK_MIN_TXNS24", 60),
-    maxFdvToLiqRatio: num("DESK_MAX_FDV_LIQ", 250),  // thin float propping a fat FDV
+    minPairAgeHours: num("DESK_MIN_PAIR_AGE_HOURS", 0.25),
+    minVolume24hUsd: num("DESK_MIN_VOL24_USD", 1000),
+    maxVolToLiqRatio: num("DESK_MAX_VOL_LIQ", 250),  // above this, suspect wash
+    minTxns24h: num("DESK_MIN_TXNS24", 10),
+    maxFdvToLiqRatio: num("DESK_MAX_FDV_LIQ", 3000), // thin float propping a fat FDV
 
     /* THE CEILING — $10m, now $3m. This desk hunts the coins that can still re-rate.
      *
@@ -127,7 +144,7 @@ minLiquidityUsd: num("DESK_MIN_LIQUIDITY_USD", 12000),
     /* $5k, the floor of the nano sleeve. It sat at $10k while the nano band starts at
      * $5k, so the smallest half of the band the owner asked for was refused as
      * "too_small" by a number nobody had moved. */
-    _minMarketCapUsd: num("DESK_MIN_MCAP_USD", 5_000),
+    _minMarketCapUsd: num("DESK_MIN_MCAP_USD", 1_000),
     /* THE ONLY TWO NUMBERS THE QUOTA LADDER IS ALLOWED TO MOVE.
      *
      * They are getters, not constants, because L4 of the escalation ladder widens the
@@ -149,7 +166,7 @@ minLiquidityUsd: num("DESK_MIN_LIQUIDITY_USD", 12000),
     /* $10m, matching the top of the very-high sleeve (categories.js). The two numbers
      * are one taxonomy: a ceiling above the last sleeve creates calls no floor can
      * receive, which is the exact failure the sleeve test was written to catch. */
-    _maxMarketCapUsd: num("DESK_MAX_MCAP_USD", 10_000_000),
+    _maxMarketCapUsd: num("DESK_MAX_MCAP_USD", 50_000_000),
     get maxMarketCapUsd() { return _bandWindow?.mcapMax ?? this._maxMarketCapUsd; },
     set maxMarketCapUsd(v) { this._maxMarketCapUsd = v; },
   },
@@ -439,8 +456,15 @@ export const CYCLE = {
 
   /* THE CONVICTION BAR THE LADDER LOWERS. Tier is mandate.js's: 4 the CEO approved it,
      3 the CEO held it, 2 the PM proposed it, 1 the PM wanted a trigger first.
-     L0/L1 ask for a proposal the PM actually made. */
-  minTier: num("CYCLE_MIN_TIER", 2),
+     L0/L1 USED TO ask for a proposal the PM actually made, and that excluded most of
+     what this desk produces: measured over 500 workups, the positive verdicts are 4
+     PASS (tier 2+) against 15 WATCH (tier 1), so a tier-2 bar discarded 79% of the
+     desk's own positive opinions at the first two rungs — the same shape of defect as
+     the conviction bar of 55, one field over. The floor at L2+ was already 1, so this
+     only changes WHEN a WATCH becomes eligible, never WHETHER. A PM PASS and a CEO
+     DECLINE remain the team's explicit no and are refused at every level (mandate.js).
+     Owner set this on 2026-09-07 with the three-calls-per-cycle quota in force. */
+  minTier: num("CYCLE_MIN_TIER", 1),
   /* CALIBRATED TO WHAT THIS DESK ACTUALLY SCORES, not to what reads like a high bar.
    *
    * It was 55, and 55 was unreachable: across all 58 calls the desk has ever published
@@ -541,7 +565,12 @@ export function escalationPlan(level = 0) {
   }
   if (L >= 4) {
     plan.mcapMin = num("CYCLE_L4_MCAP_MIN", 1_000);
-    plan.mcapMax = num("CYCLE_L4_MCAP_MAX", 40_000_000);
+    /* MUST STAY >= the base _maxMarketCapUsd or L4 NARROWS the search it claims to
+       widen. When the owner raised the base ceiling to $50m on 2026-09-07 this was
+       left at $40m, so installing the L4 window cut $10m off the top while every L4
+       call carried the note "the SEARCH's market-cap band widened to $1,000-$40,000,000"
+       — a false record of the kind this file's own comments warn about. */
+    plan.mcapMax = num("CYCLE_L4_MCAP_MAX", 100_000_000);
     relaxations.push(`L4: the SEARCH's market-cap band widened to $${plan.mcapMin.toLocaleString()}-$${plan.mcapMax.toLocaleString()} — every per-coin floor, the minimum pair age included, is unchanged`);
   }
   return plan;

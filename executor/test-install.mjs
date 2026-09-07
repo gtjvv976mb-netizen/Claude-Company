@@ -82,8 +82,15 @@ check("an optional live raise requires all three explicit numeric cap flags",
   /--daily-loss-cap\) need_value/.test(installer) &&
   /MAX_SOL_SET" -ne 1.*DAILY_CAP_SET" -ne 1.*DAILY_LOSS_CAP_SET" -ne 1/.test(installer) &&
   /raising any live cap requires --max-sol, --daily-cap, and --daily-loss-cap together/.test(installer));
+/* DERIVED, NOT HARDCODED. This pinned 0.05 and broke when the owner raised the
+   per-trade ceiling to 0.1 — while the property it checks (installer agrees with the
+   poller) was still true. test-operator-max-parity.mjs proves the four copies agree;
+   this one only has to read the same number they do. */
+const POLLER_MAX_SOL = fs.readFileSync(new URL("./poller.mjs", import.meta.url), "utf8")
+  .match(/OPERATOR_MAX = Object\.freeze\(\{\s*maxSolPerTrade:\s*([\d.]+)/)[1];
+const escapeDecimal = (v) => String(v).replace(".", "\\.");
 check("installer matches the poller's immutable operator maxima and daily/trade relation",
-  /LIVE_OPERATOR_MAX_SOL="0\.05"/.test(installer) &&
+  new RegExp(`LIVE_OPERATOR_MAX_SOL="${escapeDecimal(POLLER_MAX_SOL)}"`).test(installer) &&
   /LIVE_OPERATOR_MAX_DAILY_CAP="0\.5"/.test(installer) &&
   /LIVE_OPERATOR_MAX_DAILY_LOSS_CAP="0\.15"/.test(installer) &&
   /BEGIN \{ exit !\(m <= d\) \}/.test(installer));
@@ -141,7 +148,7 @@ if (capsStart >= 0 && capsEnd > capsStart) {
 
   const roundedBoundaryLiterals = [
     { MAX_SOL: "0.00000099999999999999999999", DAILY_CAP: "0.01", DAILY_LOSS_CAP: "0.01" },
-    { MAX_SOL: "0.050000000000000000000000001", DAILY_CAP: "0.5", DAILY_LOSS_CAP: "0.15" },
+    { MAX_SOL: `${POLLER_MAX_SOL}0000000000000000000000001`, DAILY_CAP: "0.5", DAILY_LOSS_CAP: "0.15" },
     { MAX_SOL: "0.05", DAILY_CAP: "0.500000000000000000000000001", DAILY_LOSS_CAP: "0.15" },
     { MAX_SOL: "0.05", DAILY_CAP: "0.5", DAILY_LOSS_CAP: "0.150000000000000000000000001" },
   ].map((values) => runCaps({
@@ -163,8 +170,10 @@ if (capsStart >= 0 && capsEnd > capsStart) {
   check("a partial live raise fails closed",
     partial.status !== 0 && /requires --max-sol, --daily-cap, and --daily-loss-cap together/.test(partial.stderr));
 
+  // One ulp over whatever the ceiling currently is, not over a remembered 0.05.
+  const justOverMaxSol = `${POLLER_MAX_SOL}0001`;
   const excessive = [
-    { MAX_SOL: "0.050001", DAILY_CAP: "0.5", DAILY_LOSS_CAP: "0.15" },
+    { MAX_SOL: justOverMaxSol, DAILY_CAP: "0.5", DAILY_LOSS_CAP: "0.15" },
     { MAX_SOL: "0.05", DAILY_CAP: "0.500001", DAILY_LOSS_CAP: "0.15" },
     { MAX_SOL: "0.05", DAILY_CAP: "0.5", DAILY_LOSS_CAP: "0.150001" },
   ].map((values) => runCaps({

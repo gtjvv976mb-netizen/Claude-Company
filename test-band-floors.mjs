@@ -45,8 +45,11 @@ ok("an UNREADABLE market cap gets the STRICT flat floor, not the loosest band",
   "an unknown number must never be handed the most permissive treatment");
 
 console.log("\nA POOL THAT CAN BE READ AND IS TOO THIN STILL DIES");
-ok("micro-cap with $1k of depth is refused",
-  wouldSurviveScreen(coin({ mcap: 30_000, liq: 1_000 })) === "thin_liquidity", "$1k < $5k floor");
+/* Depth derived as a quarter of the micro floor — the stated reason used to read
+   "$1k < $5k floor" against a floor that has since been $4,000. */
+ok("micro-cap with a quarter of the band's depth is refused",
+  wouldSurviveScreen(coin({ mcap: 30_000, liq: BAND_FLOORS.micro.liq / 4 })) === "thin_liquidity",
+  `$${BAND_FLOORS.micro.liq / 4} < the $${BAND_FLOORS.micro.liq.toLocaleString()} micro floor`);
 ok("...and a $5m coin with $12k of depth is refused too",
   wouldSurviveScreen(coin({ mcap: 5_000_000, liq: 12_000, vol: 50_000 })) === "thin_liquidity",
   "$12k clears the nano bar four times over and still fails up here — the band bar rises with size");
@@ -99,8 +102,8 @@ ok("...but does NOT refuse one that measures fine, merely because depth is unrea
   "4.53% measured — the exact case the old proxy killed");
 
 ok("and a READABLE pool below the band floor is still refused there",
-  codes(paidEv({ liq: 900, probe: { roundTripLossPct: 4.53 } })).includes("thin_liquidity"),
-  "$900 of depth on a micro-cap, floor $5,000");
+  codes(paidEv({ liq: BAND_FLOORS.micro.liq / 4, probe: { roundTripLossPct: 4.53 } })).includes("thin_liquidity"),
+  `$${BAND_FLOORS.micro.liq / 4} of depth on a micro-cap, floor $${BAND_FLOORS.micro.liq.toLocaleString()}`);
 
 console.log("\nBUT AN UNREADABLE POOL MUST CLEAR A HIGHER BAR OF REAL TRADING");
 ok("unreadable pool with a thin tape is still refused",
@@ -111,22 +114,42 @@ ok("2x the volume floor is the bar for an unreadable pool",
   wouldSurviveScreen(coin({ mcap: 40_000, liq: undefined, vol: BAND_FLOORS.micro.vol * 2 - 1, tx: BAND_FLOORS.micro.txns * 2 + 1 })) === "thin_liquidity",
   `$${BAND_FLOORS.micro.vol * 2} volume and ${BAND_FLOORS.micro.txns * 2} trades`);
 
-console.log("\nEVERY OTHER FLOOR IS UNCHANGED");
+console.log("\nEVERY OTHER FLOOR IS STILL ENFORCED, AT WHEREVER IT NOW SITS");
+/* RE-ANCHORED 2026-09-07. These three fixtures were literals chosen against the OLD
+   numbers, and the owner's "let coins through" pass moved all three underneath them:
+   the cap ceiling $10m -> $50m, the cap floor $5,000 -> $1,000, the wash ratio 40x ->
+   250x. The old $50m coin then sat exactly ON the ceiling (the check is `>`), the old
+   $4,000 coin became an ADMITTED coin, and 41x turnover became ordinary — three tests
+   that passed for years and now proved nothing. Each is derived from the live config
+   as "just past the current line", so the next recalibration does not break them.
+   What is asserted is unchanged: a cap over the ceiling, a cap under the floor and an
+   implausible turnover ratio are each still refused, by name. */
+const overCeiling = cfg.screen.maxMarketCapUsd * 1.1;
 ok("too_big still fires at the ceiling",
-  wouldSurviveScreen(coin({ mcap: 50_000_000, liq: 900_000, vol: 900_000 })) === "too_big");
-/* A cap off the board gets the STRICT flat floors, so this coin is given depth that
-   clears them — otherwise it dies on liquidity and never reaches the cap check. */
+  wouldSurviveScreen(coin({ mcap: overCeiling, liq: overCeiling / 50, vol: overCeiling / 50 })) === "too_big",
+  `$${Math.round(overCeiling).toLocaleString()} is over the $${cfg.screen.maxMarketCapUsd.toLocaleString()} ceiling`);
+/* A cap off the board gets the STRICT flat floors, so this coin is given depth, volume
+   and a trade count that clear them — otherwise it dies on liquidity and never reaches
+   the cap check. Those three are derived from the flat floors for the same reason. */
+const underFloor = cfg.screen.minMarketCapUsd * 0.9;
 ok("too_small still fires below the nano floor",
-  wouldSurviveScreen(coin({ mcap: 4_000, liq: 20_000, vol: 50_000 })) === "too_small",
-  "$4k is under the $5k bottom of the board");
+  wouldSurviveScreen(coin({ mcap: underFloor, liq: cfg.screen.minLiquidityUsd * 4,
+    vol: cfg.screen.minVolume24hUsd * 4, tx: cfg.screen.minTxns24h * 4 })) === "too_small",
+  `$${Math.round(underFloor).toLocaleString()} is under the $${cfg.screen.minMarketCapUsd.toLocaleString()} bottom of the board`);
 /* Still fires — but on the BAND'S clock. A $5m coin half an hour old is refused; a
    $50k one is exactly what the micro sleeve is hunting. */
 ok("too_new still fires on a $5m coin half an hour old",
   wouldSurviveScreen(coin({ mcap: 5_000_000, liq: 20_000, vol: 50_000, age: 0.5 })) === "too_new");
 ok("...and does NOT fire on a micro-cap the same age",
   wouldSurviveScreen(coin({ mcap: 50_000, liq: 9_000, vol: 50_000, age: 0.5 })) !== "too_new");
+/* A micro-cap, so the depth is set 1.5x over the MICRO band floor — it has to survive
+   the depth gate to reach the ratio gate — and the volume is one step past the current
+   turnover ceiling rather than the retired 40x one. */
+const washLiq = BAND_FLOORS.micro.liq * 1.5;
 ok("wash_suspect still fires on an absurd volume/depth ratio",
-  wouldSurviveScreen(coin({ mcap: 50_000, liq: 6_000, vol: 6_000 * 41 })) === "wash_suspect");
+  wouldSurviveScreen(coin({ mcap: 50_000, liq: washLiq,
+    vol: washLiq * (cfg.screen.maxVolToLiqRatio + 1) })) === "wash_suspect",
+  `vol/liq = ${cfg.screen.maxVolToLiqRatio + 1}x, over the ${cfg.screen.maxVolToLiqRatio}x ceiling`);
 
 console.log("\nTHE BONDING-CURVE PENALTY RESTED ON A FALSE FACT");
 /* -30 for being on a curve, justified as "no AMM depth for the exit probe to measure, so

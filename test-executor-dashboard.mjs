@@ -5,7 +5,8 @@ if (!process.env.CLAUDE_CO_DB)
   throw new Error("test runner must provide CLAUDE_CO_DB");
 
 const db = (await import("./src/lib/store.js")).default;
-const { buildExecutorDashboard, EXECUTOR_CANARY_DEFAULTS, EXECUTOR_OPERATOR_MAXIMA } =
+const { buildExecutorDashboard, EXECUTOR_CANARY_DEFAULTS, EXECUTOR_OPERATOR_MAXIMA,
+  EXECUTOR_HEARTBEAT_STALE_MS, EXECUTOR_READINESS_STALE_MS } =
   await import("./src/executor-dashboard.js");
 const { executorStatusPayload, floorFeedSettingsForViewer } = await import("./src/office.js");
 const { settingsFor } = await import("./src/copy.js");
@@ -14,6 +15,38 @@ const { HQ_FLOOR } = await import("./src/tower.js");
 const now = 1_800_000_000_000;
 const wallet = "3J57tqAJqRmSBn1ZYDu9JpMMyTfBHdcGGwECiPQeiji3";
 const mint = "So11111111111111111111111111111111111111112";
+
+/* FIXTURES ARE DERIVED FROM THE DASHBOARD'S OWN CONSTANTS, NOT TYPED IN.
+ *
+ * The per-trade operator ceiling went 0.05 -> 0.1 -> 0.05 inside a week (the published
+ * installer at claudedotcompany.com still serves 0.05, and executor/test-install.mjs
+ * compares against it), and every hand-copied instance of that number in this file went
+ * stale on each move — while the properties under test, "a rehearsal must cover the
+ * ACTIVE cap" and "a wallet must clear the displayed reserve", never changed at all.
+ * So the caps, rehearsal sizes and balances below are all built from the exported
+ * policy. A heartbeat speaks the poller's field names and the dashboard exposes its
+ * own, hence the translation. */
+const LAMPORTS = 1_000_000_000;
+const capsFor = (policy) => ({
+  maxSolPerTrade: policy.maxSolPerTrade,
+  dailySolCap: policy.rolling24hDeploySol,
+  dailyLossLimitSol: policy.rolling24hRealizedLossBrakeSol,
+  maxOpenPositions: policy.maxOpenPositions,
+});
+const CANARY_CAPS = capsFor(EXECUTOR_CANARY_DEFAULTS);
+const OPERATOR_CAPS = capsFor(EXECUTOR_OPERATOR_MAXIMA);
+const CANARY_LAMPORTS = Math.floor(CANARY_CAPS.maxSolPerTrade * LAMPORTS);
+const OPERATOR_LAMPORTS = Math.floor(OPERATOR_CAPS.maxSolPerTrade * LAMPORTS);
+// Validate the ruler before trusting it: every wrong-size-rehearsal case below proves
+// nothing whatsoever if the canary and the raised ceiling are the same size.
+assert.notEqual(CANARY_LAMPORTS, OPERATOR_LAMPORTS,
+  "the canary and operator-ceiling rehearsals must differ in size");
+// The dashboard's displayed readiness reserve: active trade + network-fee ceiling +
+// two-ATA rent ceiling + the untouched SOL reserve, summed in that order.
+const reserveSol = (caps) => caps.maxSolPerTrade + 0.0005 + 0.0042 + 0.01;
+const solBalance = (sol) => ({ ok: true, lamports: Math.round(sol * LAMPORTS), sol });
+const aboveReserve = (caps) => solBalance(reserveSol(caps) + 0.001);
+const belowReserve = (caps) => solBalance(reserveSol(caps) - 0.001);
 
 const dashboard = buildExecutorDashboard({
   floorNo: 50,
@@ -24,13 +57,12 @@ const dashboard = buildExecutorDashboard({
     health: { state: "entries-paused", entriesPaused: true, secret: "nested-must-not-cross",
       executionReadiness: { ready: true, providers: 2,
         lastSuccessAt: now - 20_000, observedAt: now - 20_000,
-        route: "wsol-usdc", amountLamports: 5_000_000 },
-      caps: { maxSolPerTrade: 0.005, dailySolCap: 0.01,
-        dailyLossLimitSol: 0.01, maxOpenPositions: 4 } },
+        route: "wsol-usdc", amountLamports: CANARY_LAMPORTS },
+      caps: { ...CANARY_CAPS } },
     ts: now - 40_000, seenAt: now - 30_000,
     secret: "must-not-cross",
   },
-  balanceResult: { ok: true, lamports: 20_000_000, sol: 0.02, observedAt: now },
+  balanceResult: { ...aboveReserve(CANARY_CAPS), observedAt: now },
   settings: {
     feedCredentialReady: true, appetite: "aggressive", bankrollSol: 2,
     instantDelivery: true, categories: ["memecoin"], launchpads: ["pump.fun"],
@@ -50,33 +82,45 @@ assert.equal(dashboard.activation.walletFunded, true);
 assert.equal(dashboard.boundary.remoteControl, false);
 assert.deepEqual(dashboard.capPolicy.canaryDefaults, EXECUTOR_CANARY_DEFAULTS);
 assert.deepEqual(dashboard.capPolicy.operatorMaxima, EXECUTOR_OPERATOR_MAXIMA);
-assert.equal(dashboard.capPolicy.active.maxSolPerTrade, 0.005);
+assert.equal(dashboard.capPolicy.active.maxSolPerTrade, EXECUTOR_CANARY_DEFAULTS.maxSolPerTrade);
 assert.ok(!JSON.stringify(dashboard).includes("must-not-cross"));
 
 const raisedPulse = {
   mode: "live", wallet, seenAt: now - 1_000,
+  // An executor armed all the way up to the operator ceiling.
   health: {
     state: "entries-paused", entriesPaused: true,
-    caps: { maxSolPerTrade: 0.05, dailySolCap: 0.5,
-      dailyLossLimitSol: 0.15, maxOpenPositions: 4 },
+    caps: { ...OPERATOR_CAPS },
     executionReadiness: { ready: true, providers: 2, route: "wsol-usdc",
-      lastSuccessAt: now - 1_000, observedAt: now - 1_000, amountLamports: 5_000_000 },
+      // ...still carrying the SMALLER default-size rehearsal.
+      lastSuccessAt: now - 1_000, observedAt: now - 1_000, amountLamports: CANARY_LAMPORTS },
   },
 };
+const raisedBalance = { ...aboveReserve(OPERATOR_CAPS), observedAt: now };
 const raisedMismatch = buildExecutorDashboard({ floorNo: 50, nowMs: now,
   heartbeat: raisedPulse,
-  balanceResult: { ok: true, lamports: 100_000_000, sol: 0.1, observedAt: now } });
+  balanceResult: raisedBalance });
 assert.equal(raisedMismatch.activation.executionReadinessReady, false,
   "a raised executor cannot inherit readiness from the smaller default rehearsal");
 assert.equal(raisedMismatch.telemetry.heartbeat.health.state, "degraded",
   "a wrong-size live rehearsal cannot display entries-paused/healthy status");
 const raisedReady = buildExecutorDashboard({ floorNo: 50, nowMs: now,
   heartbeat: { ...raisedPulse, health: { ...raisedPulse.health,
-    executionReadiness: { ...raisedPulse.health.executionReadiness, amountLamports: 50_000_000 } } },
-  balanceResult: { ok: true, lamports: 100_000_000, sol: 0.1, observedAt: now } });
+    executionReadiness: { ...raisedPulse.health.executionReadiness,
+      amountLamports: OPERATOR_LAMPORTS } } },
+  balanceResult: raisedBalance });
+// The dashboard sanitises an implausible rehearsal size to 0, which would turn this
+// whole case into a second copy of the mismatch case above without saying so. Prove the
+// ceiling-size rehearsal survived the sanitiser before reading its readiness verdict.
+assert.equal(raisedReady.telemetry.heartbeat.health.executionReadiness.amountLamports,
+  OPERATOR_LAMPORTS, "the ceiling-size rehearsal must survive the dashboard's sanitiser");
 assert.equal(raisedReady.activation.executionReadinessReady, true);
 assert.equal(raisedReady.activation.walletFunded, true);
-assert.ok(Math.abs(raisedReady.wallet.requiredForReadinessSol - 0.0647) < 1e-12);
+// Was the literal 0.0647 — that sum with a 0.05 per-trade cap. Only the three reserve
+// components stay written out now, so a moved ceiling recalibrates this expectation
+// instead of breaking a claim that is still true.
+assert.ok(Math.abs(raisedReady.wallet.requiredForReadinessSol -
+  reserveSol(OPERATOR_CAPS)) < 1e-12);
 
 const capsMissing = buildExecutorDashboard({ floorNo: 50, nowMs: now,
   heartbeat: { mode: "live", wallet, seenAt: now - 1_000,
@@ -89,41 +133,41 @@ assert.equal(capsMissing.telemetry.heartbeat.health.state, "degraded",
   "a live heartbeat without active-cap evidence cannot display healthy status");
 const capsBelowMinimum = buildExecutorDashboard({ floorNo: 50, nowMs: now,
   heartbeat: { mode: "live", wallet, seenAt: now - 1_000,
-    health: { state: "healthy", caps: { maxSolPerTrade: 0.0000009,
-      dailySolCap: 0.01, dailyLossLimitSol: 0.01, maxOpenPositions: 4 } } } });
+    // Just under the dashboard's 0.000001 SOL dust floor for an active cap.
+    health: { state: "healthy",
+      caps: { ...CANARY_CAPS, maxSolPerTrade: 0.0000009 } } } });
 assert.equal(capsBelowMinimum.capPolicy.active, null);
 assert.equal(capsBelowMinimum.telemetry.heartbeat.health.state, "degraded");
 const readinessMissing = buildExecutorDashboard({ floorNo: 50, nowMs: now,
   heartbeat: { mode: "live", wallet, seenAt: now - 1_000,
-    health: { state: "healthy", caps: { maxSolPerTrade: 0.005,
-      dailySolCap: 0.01, dailyLossLimitSol: 0.01, maxOpenPositions: 4 } } } });
+    health: { state: "healthy", caps: { ...CANARY_CAPS } } } });
 assert.equal(readinessMissing.telemetry.heartbeat.health.state, "degraded",
   "a live heartbeat without readiness evidence cannot display healthy status");
 const readinessStale = buildExecutorDashboard({ floorNo: 50, nowMs: now,
   heartbeat: { mode: "live", wallet, seenAt: now - 1_000,
-    health: { state: "healthy", caps: { maxSolPerTrade: 0.005,
-      dailySolCap: 0.01, dailyLossLimitSol: 0.01, maxOpenPositions: 4 },
+    health: { state: "healthy", caps: { ...CANARY_CAPS },
     executionReadiness: { ready: true, providers: 2, route: "wsol-usdc",
-      lastSuccessAt: now - 300_001, observedAt: now - 300_001,
-      amountLamports: 5_000_000 } } } });
+      // One millisecond past the dashboard's own readiness-staleness horizon.
+      lastSuccessAt: now - (EXECUTOR_READINESS_STALE_MS + 1),
+      observedAt: now - (EXECUTOR_READINESS_STALE_MS + 1),
+      amountLamports: CANARY_LAMPORTS } } } });
 assert.equal(readinessStale.telemetry.heartbeat.health.state, "degraded",
   "stale live readiness cannot display healthy status");
 const manualWithoutReadiness = buildExecutorDashboard({ floorNo: 50, nowMs: now,
   heartbeat: { mode: "live", wallet, seenAt: now - 1_000,
-    health: { state: "manual-action", caps: { maxSolPerTrade: 0.005,
-      dailySolCap: 0.01, dailyLossLimitSol: 0.01, maxOpenPositions: 4 } } } });
+    health: { state: "manual-action", caps: { ...CANARY_CAPS } } } });
 assert.equal(manualWithoutReadiness.telemetry.heartbeat.health.state, "manual-action",
   "missing readiness must not hide a higher-severity operator action state");
 
 const stale = buildExecutorDashboard({
   floorNo: 50, nowMs: now,
-  heartbeat: { mode: "paper", wallet, seenAt: now - 151_000,
+  // A second past the dashboard's own heartbeat-staleness horizon.
+  heartbeat: { mode: "paper", wallet, seenAt: now - (EXECUTOR_HEARTBEAT_STALE_MS + 1_000),
     health: { executionReadiness: { ready: true, providers: 2,
       lastSuccessAt: now - 20_000, observedAt: now - 20_000,
-      route: "wsol-usdc", amountLamports: 50_000_000 },
-      caps: { maxSolPerTrade: 0.05, dailySolCap: 0.5,
-        dailyLossLimitSol: 0.15, maxOpenPositions: 4 } } },
-  balanceResult: { ok: true, lamports: 20_000_000, sol: 0.02 },
+      route: "wsol-usdc", amountLamports: OPERATOR_LAMPORTS },
+      caps: { ...OPERATOR_CAPS } } },
+  balanceResult: belowReserve(OPERATOR_CAPS),
 });
 assert.equal(stale.telemetry.connected, false);
 assert.equal(stale.wallet.state, "below-readiness-reserve",
@@ -158,9 +202,8 @@ db.prepare("UPDATE copy_settings SET appetite='aggressive', bankroll_sol=2, exec
     mode: "live", wallet, cursor: 42, open: 1, held: [{ mint, sol: 0.005 }],
     health: { state: "healthy", executionReadiness: {
       ready: true, lastSuccessAt: now - 1_000, observedAt: now - 2_000,
-      route: "wsol-usdc", providers: 2, amountLamports: 5_000_000,
-    }, caps: { maxSolPerTrade: 0.005, dailySolCap: 0.01,
-      dailyLossLimitSol: 0.01, maxOpenPositions: 4 } },
+      route: "wsol-usdc", providers: 2, amountLamports: CANARY_LAMPORTS,
+    }, caps: { ...CANARY_CAPS } },
     ts: now - 3_000, seenAt: now - 2_000,
   }), HQ_FLOOR);
 let balanceReads = 0;
@@ -188,22 +231,34 @@ assert.match(route, /executorStatusPayload\(floorNo\)/);
 assert.doesNotMatch(route, /readBody|signTransaction|sendTransaction|executor_secret/);
 
 const pollerSource = fs.readFileSync(new URL("./executor/poller.mjs", import.meta.url), "utf8");
+/* The expected numbers come from the dashboard's exported policy rather than being
+ * typed out a second time: what this pins is that the two files AGREE, and a literal
+ * here only re-states one side of that while going stale on every recalibration. The
+ * trailing (?![0-9]) matters — without it `0.05` also matches a poller that says
+ * 0.055. executor/test-operator-max-parity.mjs covers the other two copies of the
+ * ceiling (launchd-runner.mjs and install.sh, which the published installer serves). */
+const numberRe = (value) => `${String(value).replaceAll(".", "\\.")}(?![0-9])`;
 for (const [key, value] of Object.entries({
-  maxSolPerTrade: 0.005,
-  dailySolCap: 0.01,
-  dailyLossLimitSol: 0.01,
-  // A sentinel now, not a policy: risk decides how many memecoins run at once.
+  maxSolPerTrade: EXECUTOR_CANARY_DEFAULTS.maxSolPerTrade,
+  dailySolCap: EXECUTOR_CANARY_DEFAULTS.rolling24hDeploySol,
+  dailyLossLimitSol: EXECUTOR_CANARY_DEFAULTS.rolling24hRealizedLossBrakeSol,
+  // A sentinel now, not a policy: risk decides how many memecoins run at once. The
+  // executor's own default is deliberately NOT the dashboard's displayed 4, so this
+  // single number is written out instead of derived.
   maxOpenPositions: 24,
 })) {
-  assert.match(pollerSource, new RegExp(`${key}:\\s*${String(value).replace(".", "\\.")}`),
+  assert.match(pollerSource, new RegExp(`${key}:\\s*${numberRe(value)}`),
     `dashboard canary default ${key} must stay pinned to the executor's default`);
 }
+const operatorMaxDecl = /const OPERATOR_MAX = Object\.freeze\(\{[^}]*\}\)/.exec(pollerSource)?.[0];
+assert.ok(operatorMaxDecl,
+  "executor/poller.mjs must still declare OPERATOR_MAX as one frozen literal");
 for (const [key, value] of Object.entries({
-  maxSolPerTrade: 0.1,
-  dailySolCap: 0.5,
-  dailyLossLimitSol: 0.15,
+  maxSolPerTrade: EXECUTOR_OPERATOR_MAXIMA.maxSolPerTrade,
+  dailySolCap: EXECUTOR_OPERATOR_MAXIMA.rolling24hDeploySol,
+  dailyLossLimitSol: EXECUTOR_OPERATOR_MAXIMA.rolling24hRealizedLossBrakeSol,
 })) {
-  assert.match(pollerSource, new RegExp(`OPERATOR_MAX[\\s\\S]*${key}:\\s*${String(value).replace(".", "\\.")}`),
+  assert.match(operatorMaxDecl, new RegExp(`${key}:\\s*${numberRe(value)}`),
     `dashboard operator maximum ${key} must stay pinned to the executor policy`);
 }
 assert.match(pollerSource, /I acknowledge WALL-ST-E caps v2/);

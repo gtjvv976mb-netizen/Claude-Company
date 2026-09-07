@@ -44,6 +44,13 @@ import fs from "node:fs";
    is the desk's own paper-book arithmetic, so this is a plain small number. */
 const PAPER_SIZE_USD = 12;
 
+/* The conviction the CLEAN fixture carries: comfortably clear of the L0 bar, and DERIVED
+   from that bar rather than frozen at a literal. It was a bare 68, chosen when the L0 bar
+   was 55; the owner cut the bar to 20 on 2026-09-07 and 68 survived only by luck. The
+   fixture's job is "a coin nobody has any objection to", so it is stated that way — one
+   clear step above whatever the bar is — and it still evaluates to 68 today. */
+const CLEAN_CONVICTION = Math.max(68, escalationPlan(0).minConviction + 5);
+
 let pass = 0, fail = 0;
 const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  — " + d : ""}`))
                                  : (fail++, console.log(`  FAIL ${n}${d ? "  — " + d : ""}`)); };
@@ -53,7 +60,7 @@ const LEVELS = [0, 1, 2, 3, 4];
 const clean = (over = {}) => ({
   mint: "Cln111111111111111111111111111111111111111", symbol: "CLEAN",
   outcome: "decided", finalDecision: "APPROVED", weighted: 71,
-  pm: { decision: "PROPOSE", conviction: 68, thesis: "real ignition", invalidation: "deployer sells" },
+  pm: { decision: "PROPOSE", conviction: CLEAN_CONVICTION, thesis: "real ignition", invalidation: "deployer sells" },
   redteam: { verdict: "wounded", headline: "thin on holders" },
   compliance: { pass: true, violations: [] },
   risk: { position_size_usd: PAPER_SIZE_USD, stop_price: 0.00062, max_loss_usd: 20.55 },
@@ -109,8 +116,8 @@ const CASES = {
   insufficient_coverage: clean({ outcome: "insufficient_coverage" }),
   compliance_veto: clean({ compliance: { pass: false, violations: [] }, finalDecision: "VETOED" }),
   redteam_refuted_unanswered: clean({ redteam: { verdict: "refuted", headline: "the volume is 3 wallets" },
-    pm: { decision: "WATCH", conviction: 68, thesis: "t", invalidation: "i" } }),
-  no_invalidation: clean({ pm: { decision: "PROPOSE", conviction: 68, thesis: "t" } }),
+    pm: { decision: "WATCH", conviction: CLEAN_CONVICTION, thesis: "t", invalidation: "i" } }),
+  no_invalidation: clean({ pm: { decision: "PROPOSE", conviction: CLEAN_CONVICTION, thesis: "t" } }),
   no_stop: clean({ ticket: { stop_price: 0, take_profit: [] } }),
   no_entry_price: clean({ ev: { ...clean().ev, pair: { ...clean().ev.pair, priceUsd: 0 } } }),
   stop_at_or_above_entry: clean({ ticket: { stop_price: 0.002, take_profit: [] } }),
@@ -239,21 +246,51 @@ console.log("\nL3 — THE NARRATIVE GATE, AND THE ARM OF IT THAT NEVER MOVES");
     `L3=${publishCall(CASES.deployer_has_rugged, { escalation: 3 }).gate} L4=${publishCall(CASES.deployer_has_rugged, { escalation: 4 }).gate}`);
 }
 
-console.log("\nL4 — THE BAND WIDENS; NOT ONE PER-COIN FLOOR MOVES");
+console.log("\nL4 — THE BAND WINDOW MOVES; NOT ONE PER-COIN FLOOR MOVES");
 {
   const before = { ...floorsFor(30_000) };
   const flatBefore = { liq: cfg.screen.minLiquidityUsd, vol: cfg.screen.minVolume24hUsd,
     txns: cfg.screen.minTxns24h, age: cfg.screen.minPairAgeHours, rt: cfg.maxRoundTripSlippagePct };
+  const baseMin = cfg.screen.minMarketCapUsd;
   const baseMax = cfg.screen.maxMarketCapUsd;
-  setCycleBandWindow(escalationPlan(4));
+  const plan4 = escalationPlan(4);
+  setCycleBandWindow(plan4);
   const after = { ...floorsFor(30_000) };
   const flatAfter = { liq: cfg.screen.minLiquidityUsd, vol: cfg.screen.minVolume24hUsd,
     txns: cfg.screen.minTxns24h, age: cfg.screen.minPairAgeHours, rt: cfg.maxRoundTripSlippagePct };
-  ok("the search band widened", cfg.screen.maxMarketCapUsd > baseMax,
-    `$${baseMax.toLocaleString()} -> $${cfg.screen.maxMarketCapUsd.toLocaleString()}`);
+  /* RE-ANCHORED 2026-09-07, AND THE DIRECTION CLAIM IS GONE ON PURPOSE — SAY SO OUT LOUD.
+     This read `cfg.screen.maxMarketCapUsd > baseMax`, back when the base band stopped at
+     $10M and the L4 knob reached to $40M. The owner then raised the BASE band to
+     $1,000-$50,000,000 to let more coins through, and left CYCLE_L4_MCAP_MAX at $40M —
+     so L4's window is now NARROWER at the top than the band it replaces, and the note
+     stamped on every L4 call still says "widened". That is a config drift for the owner
+     to settle (it is flagged in the report), not something a test may paper over by
+     asserting the opposite of what the numbers say.
+     What this assertion is FOR is unchanged and is why it cannot simply be dropped: the
+     three byte-identical comparisons below prove nothing unless the window actually took
+     effect. So it now asserts exactly that — the screens read the L4 plan's band, and
+     that band is NOT the base band — derived from the plan so the next recalibration of
+     either number leaves it standing. */
+  ok("the SEARCH band the screens read is the L4 plan's own band, and it is not the base band",
+    cfg.screen.minMarketCapUsd === plan4.mcapMin && cfg.screen.maxMarketCapUsd === plan4.mcapMax
+      && (plan4.mcapMin !== baseMin || plan4.mcapMax !== baseMax),
+    `base $${baseMin.toLocaleString()}-$${baseMax.toLocaleString()} -> L4 ` +
+    `$${cfg.screen.minMarketCapUsd.toLocaleString()}-$${cfg.screen.maxMarketCapUsd.toLocaleString()}`);
+  /* And the account the call carries names the band that was really installed — the
+     `allLaunchpads` defect (a relaxation stamped on 33 live calls that no module did)
+     in its other form: a hardcoded pair of numbers in the note, drifting from the knobs. */
+  ok("...and the L4 note stamped on a published call names the band that was installed",
+    (() => {
+      const note = plan4.relaxations.find((r) => /^L4:/.test(r)) || "";
+      return note.includes(`$${plan4.mcapMin.toLocaleString()}`)
+          && note.includes(`$${plan4.mcapMax.toLocaleString()}`);
+    })(), plan4.relaxations.find((r) => /^L4:/.test(r)) || "no L4 note");
   ok("the coin's own liquidity/volume/txns/age floors are byte-identical",
     JSON.stringify(before) === JSON.stringify(after), `${JSON.stringify(before)} vs ${JSON.stringify(after)}`);
-  ok("and so is every flat safety number, the round-trip ceiling included",
+  /* `rt` is cfg.maxRoundTripSlippagePct, retired with the cannot_exit gate on 2026-09-07
+     (test-screen-config.mjs asserts its absence). It stays in the compared object so that
+     if the key is ever resurrected the band window still may not move it. */
+  ok("and so is every flat safety number the screens read",
     JSON.stringify(flatBefore) === JSON.stringify(flatAfter), JSON.stringify(flatAfter));
   ok("the minimum-AGE floor has no knob at any level — it is a SAFETY gate",
     LEVELS.every((l) => escalationPlan(l).minAgeFloorMultiplier === 1),
@@ -261,8 +298,10 @@ console.log("\nL4 — THE BAND WIDENS; NOT ONE PER-COIN FLOOR MOVES");
   ok("...and too_new is classified SAFETY, so widening cannot reach it",
     gateClass("too_new") === "SAFETY", `too_new=${gateClass("too_new")}, too_big=${gateClass("too_big")}`);
   setCycleBandWindow(null);
-  ok("the window is cleared, not left widened", cycleBandWindow() === null
-    && cfg.screen.maxMarketCapUsd === baseMax, `max back to $${cfg.screen.maxMarketCapUsd.toLocaleString()}`);
+  ok("the window is cleared, not left in force — BOTH ends of the band come back",
+    cycleBandWindow() === null && cfg.screen.maxMarketCapUsd === baseMax
+      && cfg.screen.minMarketCapUsd === baseMin,
+    `band back to $${cfg.screen.minMarketCapUsd.toLocaleString()}-$${cfg.screen.maxMarketCapUsd.toLocaleString()}`);
 }
 
 console.log("\nTHE MONEY VETOES ARE GONE, AND THOSE CALLS NOW REACH THE COHORT");

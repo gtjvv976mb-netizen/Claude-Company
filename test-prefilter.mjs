@@ -30,6 +30,16 @@ const s = cfg.screen;
  * longer applies to the coin it built. */
 const F = floorsFor(800_000);
 
+/* JUST OVER THE CAP CEILING, DERIVED — never written as a literal again.
+ * The screen's ceiling moved $10m -> $50m on 2026-09-07 when the owner opened the
+ * screens up, and two fixtures below had been written as literals against the old
+ * number ($40m for BIGCAP, $50m for the contradiction coin). Both then sailed through
+ * the screen, so both tests were asserting nothing at all — the same failure mode the
+ * band-floor note above records. Derived from the live ceiling, they keep proving
+ * "the screen refuses a coin too big to re-rate" wherever that ceiling next lands.
+ * NOTE this is the ceiling only: no safety gate moved, and none is relaxed here. */
+const OVER_CAP = (s.maxMarketCapUsd || 3e6) + 1;
+
 const coin = (over = {}) => ({
   mint: "m" + Math.round(Math.abs(over.score ?? 1) * 1e6), category: "memecoin",
   score: over.score ?? 50,
@@ -49,8 +59,8 @@ for (const [label, over, code] of [
   ["a pool too thin to exit",      { liq: F.liq - 1 },   "thin_liquidity"],
   ["a coin nobody is trading",     { vol: F.vol - 1 },   "no_volume"],
   ["almost no participants",       { tx: F.txns - 1 },   "no_participants"],
-  ["too big to re-rate",           { mcap: (s.maxMarketCapUsd || 3e6) + 1 }, "too_big"],
-  ["minutes old",                  { age: 0.1 },                   "too_new"],
+  ["too big to re-rate",           { mcap: OVER_CAP },             "too_big"],
+  ["minutes old",                  { age: F.ageH / 2 },            "too_new"],
   ["turnover implausible for depth", { vol: F.liq * 3 * (s.maxVolToLiqRatio + 5) }, "wash_suspect"],
 ]) ok(`${label} is dropped BEFORE a workup is paid for`, wouldSurviveScreen(coin(over)) === code,
       wouldSurviveScreen(coin(over)) ?? "survived");
@@ -59,7 +69,7 @@ console.log("\nTHE SLOTS NOW GO TO COINS THAT CAN REACH A SEAT");
 // The production shape: a handful of high-ranked coins that the screen kills, and one
 // quiet survivor ranked below them. The old code spent all three slots on the corpses.
 const market = [
-  coin({ sym: "BIGCAP", score: 95, mcap: 40_000_000 }),
+  coin({ sym: "BIGCAP", score: 95, mcap: OVER_CAP }),   // was a $40m literal, under today's ceiling
   coin({ sym: "DEAD",   score: 90, vol: 10 }),
   coin({ sym: "THIN",   score: 88, liq: 500 }),
   coin({ sym: "QUIET",  score: 40 }),
@@ -81,7 +91,7 @@ ok("the desk still works up SOMETHING when nothing is viable", fallback.length >
   `${fallback.length} picked from a market of ${allDoomed.length} doomed coins`);
 
 console.log("\nRANK AND SCREEN NO LONGER DISAGREE ABOUT THE SAME COIN");
-const contradiction = coin({ sym: "X", score: 99, mcap: 50_000_000, liq: 900_000 });
+const contradiction = coin({ sym: "X", score: 99, mcap: OVER_CAP, liq: 900_000 });
 ok("a coin rank loves but the screen kills is caught here",
   wouldSurviveScreen(contradiction) === "too_big",
   "the exact contradiction that produced eight barren cycles");

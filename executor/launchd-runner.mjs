@@ -370,6 +370,12 @@ const CANARY_MONEY_CAPS = Object.freeze({
 // DAILY_LOSS_LIMIT_SOL is a rolling realized-loss entry brake threshold. It limits
 // later entry authority; it cannot guarantee a fill/slippage loss ceiling.
 const OPERATOR_MONEY_MAX = Object.freeze({
+  /* MUST EQUAL poller.mjs OPERATOR_MAX.maxSolPerTrade. This is the ceiling `arm-caps`
+     parses against, and it is the ONLY supported way to change a cap — so when
+     ae6fd1c raised the poller's ceiling to 0.1 and left this at 0.05, the raise it
+     enabled could not actually be armed: arm-caps refused 0.1 as out of range while
+     the running process logged "hard maxima 0.1/0.5/0.15". test-operator-max-parity.mjs
+     now asserts all four copies agree. */
   MAX_SOL_PER_TRADE: 0.05,
   DAILY_SOL_CAP: 0.5,
   DAILY_LOSS_LIMIT_SOL: 0.15,

@@ -143,13 +143,55 @@ saveSettings(F, { mcapTier: "any" });
   ok("the sleeves tile the board with no gap",
     bands.slice(0, -1).every((b, i) => MCAP_TIERS[b].hi === MCAP_TIERS[bands[i + 1]].lo),
     bands.join(" -> "));
-  ok("the top sleeve ends exactly at the desk's ceiling", MCAP_TIERS.very_high.hi === ceiling,
-    `very_high tops out at $${Math.round(MCAP_TIERS.very_high.hi).toLocaleString()}`);
-  // A call anywhere on the board must fall in exactly one sleeve.
-  for (const mcap of [10_000, 50_000, 250_000, 750_000, 5_000_000]) {
+  /* RE-ANCHORED 2026-09-07, and the shape of the assertion changed with it.
+   *
+   * This read `MCAP_TIERS.very_high.hi === ceiling`: the sleeve top and the screen
+   * ceiling were one number ($10m), and the equality was the proof that they were one
+   * taxonomy. The owner's widening moved the SCREEN ceiling to $50m so that far more
+   * coins reach a workup at all, and deliberately left the sleeves where they are. The
+   * equality is dead — and an equality was the wrong instrument anyway, because it
+   * broke the instant either number moved while the property it exists to protect was
+   * still intact.
+   *
+   * THE PROPERTY, restated so the next recalibration does not break it: THE BOARD MUST
+   * SIT INSIDE THE SCREEN WINDOW. A sleeve reaching past either end of what the screen
+   * admits is a sleeve that can never receive a call — the 2026-09-03 `mid` bug, which
+   * covered $3m-$30m under a $3m ceiling and left a tenant waiting forever for an
+   * arithmetically impossible delivery. Both ends are checked, both derived from the
+   * live config, and the DIRECTION is the whole assertion: the board may be narrower
+   * than the screen, never wider. */
+  ok("no sleeve reaches above what the screen admits", MCAP_TIERS.very_high.hi <= ceiling,
+    `very_high tops out at $${Math.round(MCAP_TIERS.very_high.hi).toLocaleString()} under a $${ceiling.toLocaleString()} ceiling`);
+  ok("no sleeve reaches below what the screen admits", MCAP_TIERS.nano.lo >= cfg.screen.minMarketCapUsd,
+    `nano starts at $${Math.round(MCAP_TIERS.nano.lo).toLocaleString()} over a $${cfg.screen.minMarketCapUsd.toLocaleString()} floor`);
+
+  /* THE OTHER HALF THE EQUALITY USED TO CARRY, now that the two ends have come apart:
+   * nothing outside the board can become a call. That used to be arithmetic — the
+   * screen stopped exactly where the sleeves stopped, so the question never arose. The
+   * screen is wider than the board at both ends now, so it has to be proven where it
+   * actually holds: cellOf() refuses an off-board cap a cell, and buildBoard drops a
+   * coin with no cell BEFORE `viable` is consulted (categories.js:98). So a $20m coin
+   * clears the $50m ceiling and still cannot be shortlisted, and no published call can
+   * land in no sleeve. Probes are derived from the two boundaries, so they follow them. */
+  const { cellOf } = await import("./src/categories.js");
+  const offBoard = [MCAP_TIERS.very_high.hi, (MCAP_TIERS.very_high.hi + ceiling) / 2,
+                    MCAP_TIERS.nano.lo - 1, cfg.screen.minMarketCapUsd]
+    .filter((m) => m > 0 && (m >= MCAP_TIERS.very_high.hi || m < MCAP_TIERS.nano.lo));
+  ok("a cap the screen admits but no sleeve covers can never be shortlisted",
+    offBoard.length >= 2 && offBoard.every((m) => cellOf({ pair: { marketCap: m } }) === null),
+    offBoard.map((m) => `$${Math.round(m).toLocaleString()}`).join(", ") + " -> no cell");
+
+  /* A call anywhere on the board must fall in exactly one sleeve — one probe per
+   * sleeve, taken from the sleeve's OWN midpoint. The five literals that stood here
+   * were each a boundary waiting to rot, and between them they never once landed in
+   * `low`; midpoints cover all six and move when the bands do. */
+  for (const [band, b] of Object.entries(MCAP_TIERS)) {
+    if (band === "any") continue;
+    const mcap = Math.round((b.lo + b.hi) / 2);
     const hits = Object.entries(MCAP_TIERS)
       .filter(([k, v]) => k !== "any" && mcap >= v.lo && mcap < v.hi).map(([k]) => k);
-    ok(`a $${mcap.toLocaleString()} call lands in exactly one sleeve`, hits.length === 1, hits.join(",") || "NONE");
+    ok(`a $${mcap.toLocaleString()} call lands in exactly one sleeve (${band})`,
+      hits.length === 1 && hits[0] === band, hits.join(",") || "NONE");
   }
 }
 
