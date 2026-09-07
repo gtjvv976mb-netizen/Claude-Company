@@ -244,6 +244,35 @@ export function buildExecutorDashboard({
       browserSigning: false,
       balanceReadOnly: true,
     },
+    /* YOUR KEY, AND WHERE IT ACTUALLY IS.
+     *
+     * Owner, 2026-09-07: "all floors should be able to see and use their burner private
+     * key." They already can — every floor's burner is generated on that floor's own
+     * machine and this server has never received one (the heartbeat carries the public
+     * address and nothing else) — but nothing on the floor SAID so, and a tenant who
+     * cannot find the key reasonably concludes the desk is holding it. So this block
+     * names the address, says where the key lives, and gives the local commands that
+     * reveal, export, verify and import it. Every field here is public or static text.
+     * The secret cannot appear: it is not an input to this function and the process
+     * that builds this page has no path to the file that holds it. The test asserts
+     * that nothing secret-shaped can be in this block. */
+    burnerKey: {
+      address: wallet.address ?? null,
+      heldBy: "tenant-machine-only",
+      onThisServer: false,
+      whereItLives: "burner.json, next to the bot, mode 600, on the machine that runs it — " +
+        "this desk never receives it and cannot show it",
+      howToUse: [
+        { what: "public key and status (safe to run any time)", command: "node burner-backup.mjs" },
+        { what: "write a 0600 recovery file", command: "node burner-backup.mjs --out <file>" },
+        { what: "prove a recovery file restores THIS wallet — do it before you need it",
+          command: "node burner-backup.mjs --verify <file>" },
+        { what: "print the secret to your terminal", command: "node burner-backup.mjs --show --i-understand" },
+      ],
+      importNote: "The recovery file is base58 — the form Phantom, Solflare and Backpack accept " +
+        "under \"import private key\" — so recovery needs no part of this software.",
+      runFrom: "the folder the bot runs in, the one holding burner.json",
+    },
     capPolicy: {
       active: activeCaps,
       activeFresh: connected && Boolean(activeCaps),

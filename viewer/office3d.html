@@ -11204,6 +11204,31 @@ async function loadWallsteDashboard({ background = false } = {}) {
       "Remote control and browser signing are disabled.";
     el.appendChild(boundary);
 
+    /* YOUR KEY, AND WHERE IT ACTUALLY IS (owner, 2026-09-07: "all floors should be able
+       to see and use their burner private key"). Every floor's key is generated on that
+       floor's own machine and this server has never received one — but nothing on the
+       floor SAID so, and a tenant who cannot find the key reasonably concludes the desk
+       is holding it. This names the address, says where the key lives, and gives the
+       local commands that reveal, export, verify and import it. The secret cannot be
+       here: the server that builds this payload has no path to the file that holds it,
+       and the dashboard test asserts nothing secret-shaped can appear in the block. An
+       older server without the block simply renders no panel. */
+    const bk = status.burnerKey;
+    if (bk && typeof bk === "object") {
+      const keyNote = dashNode("div", "boundary-note");
+      const steps = Array.isArray(bk.howToUse) ? bk.howToUse : [];
+      keyNote.innerHTML =
+        "<strong>YOUR KEY \u00b7 ON YOUR MACHINE, NOT HERE.</strong> " +
+        "Address <code>" + esc(bk.address || "not reported yet \u2014 it appears with the first heartbeat") + "</code>. " +
+        "The private key lives in " + esc(bk.whereItLives || "burner.json on the machine that runs the bot") + ". " +
+        "<ul style=\"margin:8px 0 4px 18px;padding:0\">" +
+        steps.map((st) => "<li>" + esc(st.what) + ": <code>" + esc(st.command) + "</code></li>").join("") +
+        "</ul>" +
+        (bk.importNote ? esc(bk.importNote) + " " : "") +
+        (bk.runFrom ? "Run these from " + esc(bk.runFrom) + "." : "");
+      el.appendChild(keyNote);
+    }
+
     const statusGrid = dashNode("div", "dashgrid");
     statusGrid.append(
       dashMetric("Telemetry", connected ? "Connected" : heartbeat ? "Stale" : "No heartbeat",

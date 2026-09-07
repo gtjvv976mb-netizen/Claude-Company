@@ -126,6 +126,31 @@ assert.deepEqual(dashboard.capPolicy.operatorMaxima, EXECUTOR_OPERATOR_MAXIMA);
 assert.equal(dashboard.capPolicy.active.maxSolPerTrade, EXECUTOR_CANARY_DEFAULTS.maxSolPerTrade);
 assert.ok(!JSON.stringify(dashboard).includes("must-not-cross"));
 
+/* THE BURNER-KEY PANEL NAMES THE ADDRESS AND CANNOT CARRY THE SECRET.
+   Every floor's key lives on that floor's own machine; this block exists so the floor is
+   told that, and told how to reveal, export, verify and import it locally. The address
+   is public. The secret is not an input to buildExecutorDashboard and there is no path
+   from this process to the file that holds it — so the strongest thing a test can do is
+   assert the block is present, points at the right wallet, says the key is not here, and
+   contains nothing shaped like a Solana secret: a 64-byte key is ~87-88 base58 chars, or
+   a JSON array of 64 numbers. An address is 32-44 chars and cannot trip either. */
+assert.equal(dashboard.burnerKey.address, wallet, "the panel must name THIS floor's wallet");
+assert.equal(dashboard.burnerKey.onThisServer, false);
+assert.equal(dashboard.burnerKey.heldBy, "tenant-machine-only");
+assert.ok(dashboard.burnerKey.howToUse.some((s) => /--show --i-understand/.test(s.command)),
+  "the reveal command must be given, or the floor cannot 'see' the key");
+assert.ok(dashboard.burnerKey.howToUse.some((s) => /--out/.test(s.command)) &&
+  dashboard.burnerKey.howToUse.some((s) => /--verify/.test(s.command)),
+  "export and verify must both be given — an unverified backup is a guess");
+assert.match(dashboard.burnerKey.importNote, /Phantom/, "the floor must be told the key imports into a normal wallet");
+const burnerJson = JSON.stringify(dashboard.burnerKey);
+assert.doesNotMatch(burnerJson, /[1-9A-HJ-NP-Za-km-z]{80,}/,
+  "nothing base58 long enough to be a secret key may appear in the burner panel");
+assert.doesNotMatch(burnerJson, /\[(\s*\d{1,3}\s*,){63}\s*\d{1,3}\s*\]/,
+  "no 64-byte numeric array may appear in the burner panel");
+assert.doesNotMatch(burnerJson, /secretKey|privateKey|seed/i,
+  "the panel must not even name a secret-bearing field");
+
 const raisedPulse = {
   mode: "live", wallet, seenAt: now - 1_000,
   // An executor armed well above the canary default — at the largest per-trade cap the
