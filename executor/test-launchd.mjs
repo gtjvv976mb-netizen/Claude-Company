@@ -54,6 +54,72 @@ function writeEnvironment(lines, mode = 0o600) {
   fs.chmodSync(envFile, mode);
 }
 
+/* THE CEILING IS READ FROM THE CODE, NEVER RETYPED HERE.
+ *
+ * Every "exactly at" and "one step over" cap fixture below is derived from poller.mjs's
+ * OPERATOR_MAX — the same literals test-operator-max-parity.mjs proves the runner,
+ * install.sh and the dashboard agree with. Hardcoding them was a defect this file kept
+ * re-earning: the fixtures used to be 0.050001 / 0.500001 / 0.150001, each one ulp over
+ * a 0.05 / 0.5 / 0.15 ceiling, and when the owner raised the caps on 2026-09-07
+ * (0.4 SOL per trade, the daily deployment rail parked at 1000 so it cannot bind against
+ * a ~2 SOL wallet, 0.4 SOL realized-loss brake) all three quietly became LEGAL values.
+ * The properties — a cap over the operator maximum is refused, an over-precise literal
+ * cannot round onto the boundary — were still true; the fixtures had simply stopped
+ * pointing at the boundary. Derived fixtures move with the ceiling.
+ *
+ * Read at source level, like the parity test: importing poller.mjs fatal()s on the
+ * environment before it can export anything. */
+const OPERATOR_MAX_PATTERNS = Object.freeze({
+  MAX_SOL_PER_TRADE: /OPERATOR_MAX = Object\.freeze\(\{\s*maxSolPerTrade:\s*([\d.]+)/,
+  DAILY_SOL_CAP: /OPERATOR_MAX = Object\.freeze\(\{[^}]*dailySolCap:\s*([\d.]+)/,
+  DAILY_LOSS_LIMIT_SOL: /OPERATOR_MAX = Object\.freeze\(\{[^}]*dailyLossLimitSol:\s*([\d.]+)/,
+});
+const OPERATOR_MAX = Object.freeze(Object.fromEntries(
+  Object.entries(OPERATOR_MAX_PATTERNS).map(([name, pattern]) => {
+    const found = pattern.exec(fs.readFileSync(path.join(executorDir, "poller.mjs"), "utf8"));
+    // Fail loudly. A missing ceiling must never degrade into a fixture that passes.
+    if (!found) throw new Error(`could not read OPERATOR_MAX.${name} from poller.mjs`);
+    return [name, found[1]];
+  })));
+const ceilingTrade = OPERATOR_MAX.MAX_SOL_PER_TRADE;
+const ceilingDaily = OPERATOR_MAX.DAILY_SOL_CAP;
+const ceilingLoss = OPERATOR_MAX.DAILY_LOSS_LIMIT_SOL;
+
+const SOL_UNITS = 1_000_000_000n;
+/** The executor's own parse: a plain decimal, at most 9 fractional digits, in lamports. */
+function solUnits(raw) {
+  const match = /^(0|[1-9][0-9]*)(?:\.([0-9]{1,9}))?$/.exec(String(raw));
+  if (match === null) throw new Error(`${raw} is not a cap literal the executor can parse`);
+  return BigInt(match[1]) * SOL_UNITS + BigInt((match[2] || "").padEnd(9, "0") || "0");
+}
+function solText(units) {
+  return `${units / SOL_UNITS}.${(units % SOL_UNITS).toString().padStart(9, "0")}`;
+}
+/** One lamport over/under a ceiling: the smallest step the parser can represent, so the
+ *  fixture sits as close to the boundary as the format allows at any ceiling value. */
+const oneLamportOver = (raw) => solText(solUnits(raw) + 1n);
+const oneLamportUnder = (raw) => solText(solUnits(raw) - 1n);
+/** A literal too precise to parse whose float value IS the ceiling — the attempt to
+ *  round onto the boundary through Number(). */
+const roundsOntoCeiling = (raw) =>
+  `${String(raw).includes(".") ? raw : `${raw}.`}${"0".repeat(25)}1`;
+
+// VALIDATE THE RULER BEFORE TRUSTING IT: these three properties are what make the
+// derived fixtures meaningful, and they are cheap to prove at any ceiling.
+check("derived over-ceiling fixtures are strictly above the operator maxima",
+  [ceilingTrade, ceilingDaily, ceilingLoss].every((raw) =>
+    solUnits(oneLamportOver(raw)) === solUnits(raw) + 1n &&
+    solUnits(oneLamportOver(raw)) > solUnits(raw)),
+  `${ceilingTrade}/${ceilingDaily}/${ceilingLoss}`);
+check("derived over-precise fixtures still round onto the operator maxima",
+  [ceilingTrade, ceilingDaily, ceilingLoss].every((raw) =>
+    Number(roundsOntoCeiling(raw)) === Number(raw) &&
+    roundsOntoCeiling(raw) !== String(raw)),
+  [ceilingTrade, ceilingDaily, ceilingLoss].map(roundsOntoCeiling).join(" "));
+check("an over-ceiling per-trade fixture stays coherent under the daily ceiling",
+  solUnits(ceilingDaily) >= solUnits(oneLamportOver(ceilingTrade)),
+  `daily ${ceilingDaily} must not itself refuse ${oneLamportOver(ceilingTrade)}`);
+
 fs.writeFileSync(poller, `import fs from "node:fs";
 fs.writeFileSync(process.env.STATE_FILE, JSON.stringify({
   secret: process.env.CC_SECRET,
@@ -413,8 +479,13 @@ export const batteryEntriesAllowed = (env = process.env) =>
     restored.status === 0 && fs.readFileSync(envFile, "utf8") === originalEnvironment &&
     !fs.existsSync(environmentBackup), restored.stderr.trim());
 
+  /* Re-anchored to the derived ceiling: this case must sit EXACTLY ON the maxima, and
+     they moved (0.05/0.5/0.15 -> 0.4/1000/0.4 on 2026-09-07). At the old literals the
+     check still passed, but as an ordinary mid-range raise — it had stopped proving that
+     the boundary itself is preserved rather than lowered. */
   const validRaisedLines = capEnvironment({
-    trade: "0.05", daily: "0.5", loss: "0.15", ack: capAckV2("0.05", "0.5", "0.15"),
+    trade: ceilingTrade, daily: ceilingDaily, loss: ceilingLoss,
+    ack: capAckV2(ceilingTrade, ceilingDaily, ceilingLoss),
   });
   writeEnvironment(validRaisedLines);
   const validRaisedText = fs.readFileSync(envFile, "utf8");
@@ -429,10 +500,11 @@ export const batteryEntriesAllowed = (env = process.env) =>
       "MAX_SOL_PER_TRADE,DAILY_SOL_CAP,DAILY_LOSS_LIMIT_SOL") &&
     !validRaisedPreview.stdout.includes("canary normalization remains active") &&
     validRaisedUpgrade.status === 0 &&
-    validRaisedUpgradedText.includes("MAX_SOL_PER_TRADE=0.05\n") &&
-    validRaisedUpgradedText.includes("DAILY_SOL_CAP=0.5\n") &&
-    validRaisedUpgradedText.includes("DAILY_LOSS_LIMIT_SOL=0.15\n") &&
-    validRaisedUpgradedText.includes(`LIVE_CAPS_ACK=${quoteEnvironmentValue(capAckV2("0.05", "0.5", "0.15"))}\n`),
+    validRaisedUpgradedText.includes(`MAX_SOL_PER_TRADE=${ceilingTrade}\n`) &&
+    validRaisedUpgradedText.includes(`DAILY_SOL_CAP=${ceilingDaily}\n`) &&
+    validRaisedUpgradedText.includes(`DAILY_LOSS_LIMIT_SOL=${ceilingLoss}\n`) &&
+    validRaisedUpgradedText.includes(
+      `LIVE_CAPS_ACK=${quoteEnvironmentValue(capAckV2(ceilingTrade, ceilingDaily, ceilingLoss))}\n`),
     `${validRaisedPreview.stderr}${validRaisedUpgrade.stderr}`.trim());
   check("raised-cap adoption changes no pause, hard-stop, wallet, journal, or acknowledgement bytes",
     fs.readFileSync(pauseFile, "utf8") === "keep-entry-pause\n" &&
@@ -467,20 +539,26 @@ export const batteryEntriesAllowed = (env = process.env) =>
       trade: "0.05", daily: "0.5", loss: "0.15",
       ack: capAckV2("0.05", "0.5", "0.15"), omit: ["DAILY_LOSS_LIMIT_SOL"],
     },
+    /* Each of the next three breaches exactly ONE ceiling by exactly one lamport — the
+       smallest excess the executor's 9-decimal parser can express — while the other two
+       values sit legally at their own maxima. The old literals (0.050001 / 0.500001 /
+       0.150001) were the same idea calibrated to the 2026-09-07 raise's *previous*
+       ceilings; once those moved to 0.4 / 1000 / 0.4 they described legal caps and these
+       three checks failed. Derived from OPERATOR_MAX, they cannot go stale again. */
     {
       slug: "over-max", label: "out-of-range raised-cap tuple",
-      trade: "0.050001", daily: "0.5", loss: "0.15",
-      ack: capAckV2("0.050001", "0.5", "0.15"),
+      trade: oneLamportOver(ceilingTrade), daily: ceilingDaily, loss: ceilingLoss,
+      ack: capAckV2(oneLamportOver(ceilingTrade), ceilingDaily, ceilingLoss),
     },
     {
       slug: "daily-over-max", label: "out-of-range daily deployment cap",
-      trade: "0.05", daily: "0.500001", loss: "0.15",
-      ack: capAckV2("0.05", "0.500001", "0.15"),
+      trade: ceilingTrade, daily: oneLamportOver(ceilingDaily), loss: ceilingLoss,
+      ack: capAckV2(ceilingTrade, oneLamportOver(ceilingDaily), ceilingLoss),
     },
     {
       slug: "loss-over-max", label: "out-of-range realized-loss brake",
-      trade: "0.05", daily: "0.5", loss: "0.150001",
-      ack: capAckV2("0.05", "0.5", "0.150001"),
+      trade: ceilingTrade, daily: ceilingDaily, loss: oneLamportOver(ceilingLoss),
+      ack: capAckV2(ceilingTrade, ceilingDaily, oneLamportOver(ceilingLoss)),
     },
     {
       slug: "daily-below-trade", label: "daily cap below per-trade cap",
@@ -573,10 +651,17 @@ export const batteryEntriesAllowed = (env = process.env) =>
     }
   }
 
+  /* Over-precise literals whose float value IS the current ceiling. Retyped ones aimed at
+     0.05 / 0.5 / 0.15 and, after the raise, no longer touched a boundary at all — they
+     kept passing on the 9-digit rule alone. roundsOntoCeiling() follows OPERATOR_MAX, and
+     the ruler check above proves each literal really does round back onto it. */
   for (const [capName, capValues] of [
-    ["MAX_SOL_PER_TRADE", { trade: "0.050000000000000000000000001", daily: "0.5", loss: "0.15" }],
-    ["DAILY_SOL_CAP", { trade: "0.05", daily: "0.50000000000000000000000001", loss: "0.15" }],
-    ["DAILY_LOSS_LIMIT_SOL", { trade: "0.05", daily: "0.5", loss: "0.15000000000000000000000001" }],
+    ["MAX_SOL_PER_TRADE",
+      { trade: roundsOntoCeiling(ceilingTrade), daily: ceilingDaily, loss: ceilingLoss }],
+    ["DAILY_SOL_CAP",
+      { trade: ceilingTrade, daily: roundsOntoCeiling(ceilingDaily), loss: ceilingLoss }],
+    ["DAILY_LOSS_LIMIT_SOL",
+      { trade: ceilingTrade, daily: ceilingDaily, loss: roundsOntoCeiling(ceilingLoss) }],
   ]) {
     writeEnvironment(capEnvironment(capValues));
     const before = fs.readFileSync(envFile, "utf8");
@@ -635,12 +720,17 @@ export const batteryEntriesAllowed = (env = process.env) =>
   }).map((line) => line.startsWith("LOCK_FILE=")
     ? "LOCK_FILE=.cc-executor.sqlite.lock"
     : line);
+  /* Arm the tuple the owner actually runs — the operator maxima, read from the code.
+     The retyped 0.05/0.5/0.15 tuple still armed after the raise, so nothing failed here,
+     but every acknowledgement fixture below is built by editing this sentence, and a
+     hardcoded literal in one of those edits turns into a silent no-op the moment a cap
+     moves (a no-op edit yields the CORRECT sentence, which the ceremony accepts). */
   const armArgs = {
     "--env": envFile,
     "--workdir": runtimeDir,
-    "--max-sol": "0.05",
-    "--daily-sol-cap": "0.5",
-    "--daily-loss-cap": "0.15",
+    "--max-sol": ceilingTrade,
+    "--daily-sol-cap": ceilingDaily,
+    "--daily-loss-cap": ceilingLoss,
   };
   const armCliArgs = ["arm-caps", ...Object.entries(armArgs).flat()];
   writeEnvironment(canonicalLiveEnvironment);
@@ -666,7 +756,7 @@ export const batteryEntriesAllowed = (env = process.env) =>
   for (const [label, overrides, expected] of [
     ["over-precise subminimum", { "--max-sol": "0.00000099999999999999999999" },
       "MAX_SOL_PER_TRADE must be a plain decimal with at most 9 fractional digits"],
-    ["over-precise maximum", { "--max-sol": "0.050000000000000000000000001" },
+    ["over-precise maximum", { "--max-sol": roundsOntoCeiling(ceilingTrade) },
       "MAX_SOL_PER_TRADE must be a plain decimal with at most 9 fractional digits"],
     ["exactly incoherent", { "--max-sol": "0.010000001", "--daily-sol-cap": "0.010000000",
       "--daily-loss-cap": "0.01" }, "DAILY_SOL_CAP must be at least MAX_SOL_PER_TRADE"],
@@ -700,13 +790,22 @@ export const batteryEntriesAllowed = (env = process.env) =>
 
   writeEnvironment(canonicalLiveEnvironment);
   const beforeWrongValue = fs.readFileSync(envFile, "utf8");
-  const wrongValueArm = await attemptArm(async (expected) => expected.replace("0.05 SOL", "0.04 SOL"));
+  /* Tamper by one lamport, derived from the armed cap. The literal used to be a typed
+     "0.05 SOL" -> "0.04 SOL"; against any other tuple that replace matches nothing and
+     types the CORRECT sentence, which arms the caps and passes for the wrong reason.
+     `typedAck` is captured so the check can prove the edit actually changed something. */
+  let typedAck = null;
+  const wrongValueArm = await attemptArm(async (expected) =>
+    (typedAck = expected.replace(`${ceilingTrade} SOL per trade`,
+      `${oneLamportUnder(ceilingTrade)} SOL per trade`)));
   check("cap arming rejects an acknowledgement with a changed cap literal",
+    typedAck !== null && typedAck !== capAckV2(ceilingTrade, ceilingDaily, ceilingLoss) &&
     !wrongValueArm.ok && wrongValueArm.error.message.includes("did not match exactly") &&
-    fs.readFileSync(envFile, "utf8") === beforeWrongValue);
+    fs.readFileSync(envFile, "utf8") === beforeWrongValue,
+    typedAck === null ? "acknowledgement was never requested" : typedAck);
 
   const legacyArm = await attemptArm(async () =>
-    legacyCapAck("0.05", "0.5", "0.15"));
+    legacyCapAck(ceilingTrade, ceilingDaily, ceilingLoss));
   check("cap arming rejects the revoked v1 acknowledgement without changing the environment",
     !legacyArm.ok && legacyArm.error.message.includes("did not match exactly") &&
     fs.readFileSync(envFile, "utf8") === beforeWrongValue);
@@ -725,11 +824,11 @@ export const batteryEntriesAllowed = (env = process.env) =>
 
   const exactArm = await attemptArm(async (expected) => expected);
   const armedText = fs.readFileSync(envFile, "utf8");
-  const expectedArmAck = capAckV2("0.05", "0.5", "0.15");
+  const expectedArmAck = capAckV2(ceilingTrade, ceilingDaily, ceilingLoss);
   check("exact TTY v2 acknowledgement atomically arms all three literal cap values",
-    exactArm.ok && armedText.includes('MAX_SOL_PER_TRADE="0.05"\n') &&
-    armedText.includes('DAILY_SOL_CAP="0.5"\n') &&
-    armedText.includes('DAILY_LOSS_LIMIT_SOL="0.15"\n') &&
+    exactArm.ok && armedText.includes(`MAX_SOL_PER_TRADE="${ceilingTrade}"\n`) &&
+    armedText.includes(`DAILY_SOL_CAP="${ceilingDaily}"\n`) &&
+    armedText.includes(`DAILY_LOSS_LIMIT_SOL="${ceilingLoss}"\n`) &&
     armedText.includes(`LIVE_CAPS_ACK=${quoteEnvironmentValue(expectedArmAck)}\n`));
   check("cap arming preserves secrets and safety controls while retaining an owner-only recovery copy",
     exactArm.ok && fs.readFileSync(exactArm.value.backup, "utf8") === beforeWrongValue &&

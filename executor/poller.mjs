@@ -359,7 +359,23 @@ if (EXECUTE) {
  * acknowledgement retained by some old environments. OPERATOR_MAX stays at the
  * evidence-backed configuration that cleared the live preflight, and maxOpenPositions
  * stays frozen because it multiplies every other cap. */
-const OPERATOR_MAX = Object.freeze({ maxSolPerTrade: 0.05, dailySolCap: 0.5, dailyLossLimitSol: 0.15 });
+/* OWNER, 2026-09-07: 0.4 SOL a trade, and NO DAILY DEPLOYMENT CAP.
+ *
+ * dailySolCap is set far above any reachable balance rather than deleted. The rail is
+ * woven through the boot checks (DAILY_SOL_CAP below MAX_SOL_PER_TRADE is fatal), the
+ * typed LIVE_CAPS_ACK sentence, install.sh and the dashboard, and every one of those
+ * wants a number; a sentinel would mean new machinery in four files for a rail that is
+ * already redundant. It cannot bind: the wallet's spendable balance is checked on every
+ * entry and is ~2 SOL, so the daily rail sits three orders of magnitude above the money
+ * that exists. What still bounds a day is the balance itself, the per-name risk cap,
+ * book heat, maxOpenPositions and the realized-loss brake.
+ *
+ * The loss brake moves 0.15 -> 0.4 for a reason, not for symmetry: it is applied as the
+ * TIGHTER of the absolute figure and 20% of the bankroll, so at 0.15 it was the binding
+ * number and stopped the day after roughly two stop-outs on a 0.4 position. At 0.4 the
+ * percentage becomes the binding one (0.399 on this balance), which is the owner's
+ * original "stop after losing 20% of the SOL" rule actually taking effect. */
+const OPERATOR_MAX = Object.freeze({ maxSolPerTrade: 0.4, dailySolCap: 1000, dailyLossLimitSol: 0.4 });
 const capsAckSentence = (wallet, trade, daily, loss) =>
   `I acknowledge WALL-ST-E caps v2 for ${wallet}: ${trade} SOL per trade, ${daily} SOL per day, ${loss} SOL rolling realized-loss entry brake`;
 

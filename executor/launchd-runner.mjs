@@ -376,9 +376,9 @@ const OPERATOR_MONEY_MAX = Object.freeze({
      enabled could not actually be armed: arm-caps refused 0.1 as out of range while
      the running process logged "hard maxima 0.1/0.5/0.15". test-operator-max-parity.mjs
      now asserts all four copies agree. */
-  MAX_SOL_PER_TRADE: 0.05,
-  DAILY_SOL_CAP: 0.5,
-  DAILY_LOSS_LIMIT_SOL: 0.15,
+  MAX_SOL_PER_TRADE: 0.4,
+  DAILY_SOL_CAP: 1000,
+  DAILY_LOSS_LIMIT_SOL: 0.4,
 });
 const MONEY_CAP_NAMES = Object.freeze(Object.keys(CANARY_MONEY_CAPS));
 const capsAckSentence = (wallet, trade, daily, loss) =>

@@ -36,11 +36,52 @@ const capsFor = (policy) => ({
 const CANARY_CAPS = capsFor(EXECUTOR_CANARY_DEFAULTS);
 const OPERATOR_CAPS = capsFor(EXECUTOR_OPERATOR_MAXIMA);
 const CANARY_LAMPORTS = Math.floor(CANARY_CAPS.maxSolPerTrade * LAMPORTS);
-const OPERATOR_LAMPORTS = Math.floor(OPERATOR_CAPS.maxSolPerTrade * LAMPORTS);
+
+/* RE-ANCHORED 2026-09-07, when the per-trade operator maximum went 0.05 -> 0.4 SOL and
+ * the daily deployment cap was effectively removed (0.5 -> 1000).
+ *
+ * The "raised executor" fixture below used to arm at the operator ceiling itself. It
+ * cannot any more, and not because the property changed: buildExecutorDashboard only
+ * compares a rehearsal against the active cap AFTER publicReadiness() has put the
+ * reported size through a plausibility ceiling, and that ceiling did not move with the
+ * caps. A 0.4 SOL rehearsal is sanitised to 0, which would quietly turn every
+ * raised-executor case into a second copy of the mismatch case.
+ *
+ * So the fixture arms at the largest cap the dashboard can still match a rehearsal
+ * against: the operator ceiling where it fits, the sanitiser's ceiling otherwise. Both
+ * halves are read out of the shipped source rather than typed in, so whichever of the
+ * two moves next, this follows it. (That the two now disagree is a finding about
+ * src/executor-dashboard.js, not about this test — an executor armed at the real 0.4
+ * ceiling can never display ready. Raising the sanitiser is a src change, so it is not
+ * made here; the ruler assertions below fail loudly the day it happens.) */
+const dashboardSource = fs.readFileSync(
+  new URL("./src/executor-dashboard.js", import.meta.url), "utf8");
+/* THE SANITISER IS DERIVED NOW, AND THIS ASSERTS THAT IT STAYS DERIVED.
+   It was the literal 50_000_000 while the four declared ceilings moved to 0.4 SOL, so an
+   executor armed at the real ceiling rehearsed at 400,000,000, was zeroed, and could
+   never display ready — the src change this comment used to say was "not made here" has
+   been made. The ruler used to regex the literal out of the source; a literal is exactly
+   the shape that drifted, so the source is now checked for the DERIVATION instead, and
+   the ceiling is computed the same way the dashboard computes it. */
+assert.match(dashboardSource,
+  /amountLamports\s*<=\s*Math\.floor\(EXECUTOR_OPERATOR_MAXIMA\.maxSolPerTrade\s*\*\s*1_000_000_000\)/,
+  "the rehearsal-size sanitiser must derive its ceiling from EXECUTOR_OPERATOR_MAXIMA, not a literal — a literal is how it drifted to 0.05 while the ceiling was 0.4");
+const REHEARSAL_LAMPORT_CEILING = Math.floor(EXECUTOR_OPERATOR_MAXIMA.maxSolPerTrade * LAMPORTS);
+assert.ok(Number.isSafeInteger(REHEARSAL_LAMPORT_CEILING) && REHEARSAL_LAMPORT_CEILING > 0,
+  `the dashboard's rehearsal-size sanitiser ceiling must be a positive lamport count, got ${REHEARSAL_LAMPORT_CEILING}`);
+const RAISED_CAPS = { ...OPERATOR_CAPS, maxSolPerTrade:
+  Math.min(OPERATOR_CAPS.maxSolPerTrade, REHEARSAL_LAMPORT_CEILING / LAMPORTS) };
+const RAISED_LAMPORTS = Math.floor(RAISED_CAPS.maxSolPerTrade * LAMPORTS);
 // Validate the ruler before trusting it: every wrong-size-rehearsal case below proves
-// nothing whatsoever if the canary and the raised ceiling are the same size.
-assert.notEqual(CANARY_LAMPORTS, OPERATOR_LAMPORTS,
-  "the canary and operator-ceiling rehearsals must differ in size");
+// nothing whatsoever if the canary and the raised cap are the same size, and the raised
+// cases prove nothing about a RAISE unless the fixture really does sit above the canary
+// default and inside the operator maximum the dashboard enforces.
+assert.notEqual(CANARY_LAMPORTS, RAISED_LAMPORTS,
+  `the canary and raised-cap rehearsals must differ in size, both were ${RAISED_LAMPORTS}`);
+assert.ok(RAISED_CAPS.maxSolPerTrade > CANARY_CAPS.maxSolPerTrade,
+  `the raised fixture must sit above the canary default ${CANARY_CAPS.maxSolPerTrade}, is ${RAISED_CAPS.maxSolPerTrade}`);
+assert.ok(RAISED_CAPS.maxSolPerTrade <= OPERATOR_CAPS.maxSolPerTrade,
+  `the raised fixture must stay within the operator maximum ${OPERATOR_CAPS.maxSolPerTrade}, is ${RAISED_CAPS.maxSolPerTrade}`);
 // The dashboard's displayed readiness reserve: active trade + network-fee ceiling +
 // two-ATA rent ceiling + the untouched SOL reserve, summed in that order.
 const reserveSol = (caps) => caps.maxSolPerTrade + 0.0005 + 0.0042 + 0.01;
@@ -87,16 +128,17 @@ assert.ok(!JSON.stringify(dashboard).includes("must-not-cross"));
 
 const raisedPulse = {
   mode: "live", wallet, seenAt: now - 1_000,
-  // An executor armed all the way up to the operator ceiling.
+  // An executor armed well above the canary default — at the largest per-trade cap the
+  // dashboard is still able to match a rehearsal against (see RAISED_CAPS above).
   health: {
     state: "entries-paused", entriesPaused: true,
-    caps: { ...OPERATOR_CAPS },
+    caps: { ...RAISED_CAPS },
     executionReadiness: { ready: true, providers: 2, route: "wsol-usdc",
       // ...still carrying the SMALLER default-size rehearsal.
       lastSuccessAt: now - 1_000, observedAt: now - 1_000, amountLamports: CANARY_LAMPORTS },
   },
 };
-const raisedBalance = { ...aboveReserve(OPERATOR_CAPS), observedAt: now };
+const raisedBalance = { ...aboveReserve(RAISED_CAPS), observedAt: now };
 const raisedMismatch = buildExecutorDashboard({ floorNo: 50, nowMs: now,
   heartbeat: raisedPulse,
   balanceResult: raisedBalance });
@@ -107,20 +149,21 @@ assert.equal(raisedMismatch.telemetry.heartbeat.health.state, "degraded",
 const raisedReady = buildExecutorDashboard({ floorNo: 50, nowMs: now,
   heartbeat: { ...raisedPulse, health: { ...raisedPulse.health,
     executionReadiness: { ...raisedPulse.health.executionReadiness,
-      amountLamports: OPERATOR_LAMPORTS } } },
+      amountLamports: RAISED_LAMPORTS } } },
   balanceResult: raisedBalance });
 // The dashboard sanitises an implausible rehearsal size to 0, which would turn this
 // whole case into a second copy of the mismatch case above without saying so. Prove the
-// ceiling-size rehearsal survived the sanitiser before reading its readiness verdict.
+// raised-cap-size rehearsal survived the sanitiser before reading its readiness verdict.
 assert.equal(raisedReady.telemetry.heartbeat.health.executionReadiness.amountLamports,
-  OPERATOR_LAMPORTS, "the ceiling-size rehearsal must survive the dashboard's sanitiser");
+  RAISED_LAMPORTS, "the raised-cap-size rehearsal must survive the dashboard's sanitiser");
 assert.equal(raisedReady.activation.executionReadinessReady, true);
 assert.equal(raisedReady.activation.walletFunded, true);
 // Was the literal 0.0647 — that sum with a 0.05 per-trade cap. Only the three reserve
 // components stay written out now, so a moved ceiling recalibrates this expectation
 // instead of breaking a claim that is still true.
 assert.ok(Math.abs(raisedReady.wallet.requiredForReadinessSol -
-  reserveSol(OPERATOR_CAPS)) < 1e-12);
+  reserveSol(RAISED_CAPS)) < 1e-12,
+  `the displayed reserve must track the active cap, got ${raisedReady.wallet.requiredForReadinessSol} want ${reserveSol(RAISED_CAPS)}`);
 
 const capsMissing = buildExecutorDashboard({ floorNo: 50, nowMs: now,
   heartbeat: { mode: "live", wallet, seenAt: now - 1_000,
@@ -165,9 +208,12 @@ const stale = buildExecutorDashboard({
   heartbeat: { mode: "paper", wallet, seenAt: now - (EXECUTOR_HEARTBEAT_STALE_MS + 1_000),
     health: { executionReadiness: { ready: true, providers: 2,
       lastSuccessAt: now - 20_000, observedAt: now - 20_000,
-      route: "wsol-usdc", amountLamports: OPERATOR_LAMPORTS },
-      caps: { ...OPERATOR_CAPS } } },
-  balanceResult: belowReserve(OPERATOR_CAPS),
+      route: "wsol-usdc", amountLamports: RAISED_LAMPORTS },
+      // A rehearsal that MATCHES these caps, so staleness alone is what closes the
+      // gates below. An over-ceiling size would be sanitised to 0 and the gates would
+      // read false for the wrong reason.
+      caps: { ...RAISED_CAPS } } },
+  balanceResult: belowReserve(RAISED_CAPS),
 });
 assert.equal(stale.telemetry.connected, false);
 assert.equal(stale.wallet.state, "below-readiness-reserve",

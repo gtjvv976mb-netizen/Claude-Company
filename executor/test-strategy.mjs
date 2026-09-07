@@ -20,9 +20,13 @@ let st=freshState(0); st.openCount=DEFAULTS.maxOpenPositions;
 t("the open-position sentinel still blocks entry when reached", planEntry({call,cfg:DEFAULTS,state:st}).action==="skip");
 st=freshState(0); st.openCount=DEFAULTS.maxOpenPositions-1;
 t("...and one below it does not", planEntry({call,cfg:DEFAULTS,state:st}).action!=="skip");
-st=freshState(0); st.realizedTodaySol=-0.2;
+/* DERIVED FROM DEFAULTS. These were -0.2 and 0.4999, chosen against a 0.15 brake and a
+   0.5 daily cap. The owner moved the brake to 0.4 and the daily cap to 1000 (removed in
+   effect) on 2026-09-07, and both literals fell INSIDE the rails — each assertion
+   silently stopped testing the edge it was written for. Read from the rails now. */
+st=freshState(0); st.realizedTodaySol=-(DEFAULTS.dailyLossLimitSol+0.001);
 t("rolling 24h realized-loss brake blocks a later entry", planEntry({call,cfg:DEFAULTS,state:st}).action==="skip");
-st=freshState(0); st.deployedTodaySol=0.4999;
+st=freshState(0); st.deployedTodaySol=DEFAULTS.dailySolCap-0.0001;
 t("rolling 24h deploy cap blocks entry", planEntry({call,cfg:DEFAULTS,state:st}).action==="skip");
 st=freshState(0);
 t("clean state allows entry", planEntry({call,cfg:DEFAULTS,state:st}).action==="buy");

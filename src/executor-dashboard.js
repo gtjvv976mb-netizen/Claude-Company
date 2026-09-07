@@ -17,9 +17,9 @@ export const EXECUTOR_CANARY_DEFAULTS = Object.freeze({
   maxOpenPositions: 4,
 });
 export const EXECUTOR_OPERATOR_MAXIMA = Object.freeze({
-  maxSolPerTrade: 0.05,
-  rolling24hDeploySol: 0.5,
-  rolling24hRealizedLossBrakeSol: 0.15,
+  maxSolPerTrade: 0.4,
+  rolling24hDeploySol: 1000,
+  rolling24hRealizedLossBrakeSol: 0.4,
   maxOpenPositions: 4,
 });
 
@@ -44,8 +44,19 @@ const publicReadiness = (value) => {
     observedAt: timestamp(value.observedAt),
     route: value.route === "wsol-usdc" ? "wsol-usdc" : null,
     providers: Number(value.providers) === 2 ? 2 : 0,
+    /* THE FIFTH COPY OF THE PER-TRADE CEILING, AND THE ONE NOBODY DECLARED.
+     *
+     * This was the literal 50_000_000 — 0.05 SOL — while the four declared copies
+     * (poller OPERATOR_MAX, launchd-runner OPERATOR_MONEY_MAX, install.sh
+     * LIVE_OPERATOR_MAX_*, EXECUTOR_OPERATOR_MAXIMA above) moved to 0.4. An executor
+     * armed at the real ceiling rehearses at 400,000,000 lamports, was zeroed here, and
+     * then could never satisfy readinessCoversActiveCap below, which compares for
+     * EQUALITY with the active cap. The visible effect was a correctly-armed bot
+     * reported as `degraded` forever. Derived from the maxima now, so raising the
+     * ceiling can never strand the readiness check again. */
     amountLamports: Number.isSafeInteger(amountLamports) && amountLamports >= 1 &&
-      amountLamports <= 50_000_000 ? amountLamports : 0,
+      amountLamports <= Math.floor(EXECUTOR_OPERATOR_MAXIMA.maxSolPerTrade * 1_000_000_000)
+      ? amountLamports : 0,
     // Why the rehearsal did not pass, as the bot reported it. "0/2" alone sent an
     // operator to the source to find out whether the probe even existed.
     lastError: typeof value.lastError === "string" ? value.lastError.slice(0, 300) : null,

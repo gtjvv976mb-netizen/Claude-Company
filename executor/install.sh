@@ -826,9 +826,9 @@ LIVE_CANARY_MAX_SOL="0.005"
 LIVE_CANARY_DAILY_CAP="0.01"
 LIVE_CANARY_DAILY_LOSS_CAP="0.01"
 LIVE_MIN_MONEY_CAP="0.000001"
-LIVE_OPERATOR_MAX_SOL="0.05"
-LIVE_OPERATOR_MAX_DAILY_CAP="0.5"
-LIVE_OPERATOR_MAX_DAILY_LOSS_CAP="0.15"
+LIVE_OPERATOR_MAX_SOL="0.4"
+LIVE_OPERATOR_MAX_DAILY_CAP="1000"
+LIVE_OPERATOR_MAX_DAILY_LOSS_CAP="0.4"
 
 if [ -z "$MAX_SOL" ]; then [ "$MODE" = "live" ] && MAX_SOL="$LIVE_CANARY_MAX_SOL" || MAX_SOL="0.05"; fi
 if [ -z "$DAILY_CAP" ]; then [ "$MODE" = "live" ] && DAILY_CAP="$LIVE_CANARY_DAILY_CAP" || DAILY_CAP="0.5"; fi
@@ -854,7 +854,11 @@ if [ "$MODE" = "live" ]; then
       -v mm="$LIVE_OPERATOR_MAX_SOL" -v dm="$LIVE_OPERATOR_MAX_DAILY_CAP" \
       -v lm="$LIVE_OPERATOR_MAX_DAILY_LOSS_CAP" \
       'BEGIN { exit !(m <= mm && d <= dm && l <= lm) }'; then
-    echo "live caps cannot exceed 0.05 SOL per trade, 0.5 SOL daily deploy, or a 0.15 SOL daily realized-loss entry brake" >&2
+    # Interpolated, not spelled out: this sentence said "0.05 SOL per trade, 0.5 SOL
+    # daily deploy, 0.15 SOL brake" for three literals that had already moved to
+    # 0.4/1000/0.4 above it. The enforcement was always correct — only the sentence
+    # lied, telling an operator the ceiling was 8x lower than it is.
+    echo "live caps cannot exceed ${LIVE_OPERATOR_MAX_SOL} SOL per trade, ${LIVE_OPERATOR_MAX_DAILY_CAP} SOL daily deploy, or a ${LIVE_OPERATOR_MAX_DAILY_LOSS_CAP} SOL daily realized-loss entry brake" >&2
     exit 1
   fi
   if awk -v m="$MAX_SOL" -v d="$DAILY_CAP" -v l="$DAILY_LOSS_CAP" \

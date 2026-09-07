@@ -3,8 +3,21 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const target = process.argv[2] || "https://claudedotcompany.com";
+/* DEFAULT TO THE REPO, NOT TO PRODUCTION — this ran the other way and deadlocked.
+ *
+ * The check below compares the installer's LIVE_OPERATOR_MAX_* against poller.mjs's
+ * OPERATOR_MAX. That is the right invariant, but it was read from the DEPLOYED site,
+ * and both .github/workflows/pages.yml and Render's buildCommand run `npm test` BEFORE
+ * publishing. So raising a cap failed the suite (published installer still had the old
+ * number), which failed the Pages build, which meant the site never got the new
+ * installer, which meant the suite could never pass. A cap could not be changed at all.
+ *
+ * A pre-deploy gate must validate the artifact it is about to ship. Passing an explicit
+ * URL still checks a live site — `node executor/test-install.mjs https://example.com` —
+ * which is the right shape for auditing production after a deploy, not before one. */
+const target = process.argv[2] || path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const localRoot = fs.existsSync(target) ? path.resolve(target) : null;
 const site = target.replace(/\/$/, "");
 const need = ["poller.mjs", "journal.mjs", "jupiter.mjs", "token2022.mjs", "balance-verification.mjs", "entry-quote-guard.mjs", "exit-trigger.mjs", "feed-drain.mjs", "sol-usd-oracle.mjs", "heartbeat-health.mjs", "sleep-assertion.mjs", "monitor.mjs", "strategy.mjs", "trade-policy.mjs",
@@ -82,17 +95,41 @@ check("an optional live raise requires all three explicit numeric cap flags",
   /--daily-loss-cap\) need_value/.test(installer) &&
   /MAX_SOL_SET" -ne 1.*DAILY_CAP_SET" -ne 1.*DAILY_LOSS_CAP_SET" -ne 1/.test(installer) &&
   /raising any live cap requires --max-sol, --daily-cap, and --daily-loss-cap together/.test(installer));
-/* DERIVED, NOT HARDCODED. This pinned 0.05 and broke when the owner raised the
-   per-trade ceiling to 0.1 — while the property it checks (installer agrees with the
-   poller) was still true. test-operator-max-parity.mjs proves the four copies agree;
-   this one only has to read the same number they do. */
-const POLLER_MAX_SOL = fs.readFileSync(new URL("./poller.mjs", import.meta.url), "utf8")
-  .match(/OPERATOR_MAX = Object\.freeze\(\{\s*maxSolPerTrade:\s*([\d.]+)/)[1];
+/* DERIVED, NOT HARDCODED. The per-trade line pinned 0.05 and broke when the owner
+   raised the ceiling to 0.1 — while the property it checks (installer agrees with the
+   poller) was still true. The daily and loss lines had not been converted, and broke
+   the same way on 2026-09-07 when the owner moved 0.05/0.5/0.15 to 0.4/1000/0.4 (the
+   daily rail is parked far above the ~2 SOL wallet, i.e. removed, not deleted).
+   ALL THREE are read from the poller now. test-operator-max-parity.mjs proves the four
+   copies agree; this one only has to read the same numbers they do. */
+const operatorMaxBlock = fs.readFileSync(new URL("./poller.mjs", import.meta.url), "utf8")
+  .match(/OPERATOR_MAX = Object\.freeze\(\{([^}]*)\}\)/)[1];
+const pollerMax = (field) =>
+  operatorMaxBlock.match(new RegExp(`\\b${field}:\\s*([\\d.]+)`))[1];
+const POLLER_MAX_SOL = pollerMax("maxSolPerTrade");
+const POLLER_MAX_DAILY_CAP = pollerMax("dailySolCap");
+const POLLER_MAX_DAILY_LOSS_CAP = pollerMax("dailyLossLimitSol");
 const escapeDecimal = (v) => String(v).replace(".", "\\.");
+/* Fixtures one step over a ceiling are built from the ceiling, in the installer's own
+   declared unit (LIVE_MIN_MONEY_CAP = 0.000001 SOL), using exact integer arithmetic —
+   never `Number(ceiling) + 1e-6`, whose shortest-round-trip printing is the sort of
+   ruler that quietly hands the grammar check a different literal than intended. */
+const microSol = (v) => {
+  const [whole, frac = ""] = String(v).split(".");
+  return BigInt(whole) * 1000000n + BigInt(`${frac}000000`.slice(0, 6));
+};
+const justOverCeiling = (ceiling) => {
+  const units = microSol(ceiling) + 1n;
+  return `${units / 1000000n}.${String(units % 1000000n).padStart(6, "0")}`;
+};
+/* Mathematically over the ceiling, but only in digits the installer must refuse to
+   read: rounded to a double it lands exactly ON the boundary and would be accepted. */
+const overPreciseCeiling = (ceiling) =>
+  `${ceiling}${String(ceiling).includes(".") ? "" : "."}0000000000000000000000001`;
 check("installer matches the poller's immutable operator maxima and daily/trade relation",
   new RegExp(`LIVE_OPERATOR_MAX_SOL="${escapeDecimal(POLLER_MAX_SOL)}"`).test(installer) &&
-  /LIVE_OPERATOR_MAX_DAILY_CAP="0\.5"/.test(installer) &&
-  /LIVE_OPERATOR_MAX_DAILY_LOSS_CAP="0\.15"/.test(installer) &&
+  new RegExp(`LIVE_OPERATOR_MAX_DAILY_CAP="${escapeDecimal(POLLER_MAX_DAILY_CAP)}"`).test(installer) &&
+  new RegExp(`LIVE_OPERATOR_MAX_DAILY_LOSS_CAP="${escapeDecimal(POLLER_MAX_DAILY_LOSS_CAP)}"`).test(installer) &&
   /BEGIN \{ exit !\(m <= d\) \}/.test(installer));
 
 const capsStart = installer.indexOf("# BEGIN LIVE_CAPS_VALIDATOR");
@@ -120,12 +157,18 @@ if (capsStart >= 0 && capsEnd > capsStart) {
   check("no live cap flags select the unchanged canary and no raised-cap ceremony",
     defaults.status === 0 && defaults.stdout.trim() === "0.005|0.01|0.01|0");
 
+  /* Was the literal 0.05/0.5/0.15 — the reviewed maxima of the day. Reading them from
+     the poller keeps this pinned to whatever the reviewed ceiling is (0.4/1000/0.4 as
+     of 2026-09-07) and makes it prove one more thing for free: the exact operator
+     maximum is installable, the mirror of the exact-minimum check below. */
   const raised = runCaps({
-    MAX_SOL: "0.05", DAILY_CAP: "0.5", DAILY_LOSS_CAP: "0.15",
+    MAX_SOL: POLLER_MAX_SOL, DAILY_CAP: POLLER_MAX_DAILY_CAP,
+    DAILY_LOSS_CAP: POLLER_MAX_DAILY_LOSS_CAP,
     MAX_SOL_SET: "1", DAILY_CAP_SET: "1", DAILY_LOSS_CAP_SET: "1",
   });
   check("all three explicit reviewed values select the raised-cap ceremony",
-    raised.status === 0 && raised.stdout.trim() === "0.05|0.5|0.15|1");
+    raised.status === 0 &&
+    raised.stdout.trim() === `${POLLER_MAX_SOL}|${POLLER_MAX_DAILY_CAP}|${POLLER_MAX_DAILY_LOSS_CAP}|1`);
 
   const exactMinimum = runCaps({
     MAX_SOL: "0.000001", DAILY_CAP: "0.000001", DAILY_LOSS_CAP: "0.000001",
@@ -146,11 +189,16 @@ if (capsStart >= 0 && capsEnd > capsStart) {
     belowMinimum.every((result) => result.status !== 0 &&
       /must be plain decimals at least 0\.000001/.test(result.stderr)));
 
+  /* One over-precise literal per boundary. The lower bound is still the poller's
+     0.000001; the three upper bounds are built from the current ceilings — the daily
+     and loss rows used to spell out 0.5 and 0.15 and stopped touching any boundary at
+     all once the reviewed maxima moved. The other two caps in each row sit exactly ON
+     their ceilings so the only thing under test is the over-precise digit. */
   const roundedBoundaryLiterals = [
     { MAX_SOL: "0.00000099999999999999999999", DAILY_CAP: "0.01", DAILY_LOSS_CAP: "0.01" },
-    { MAX_SOL: `${POLLER_MAX_SOL}0000000000000000000000001`, DAILY_CAP: "0.5", DAILY_LOSS_CAP: "0.15" },
-    { MAX_SOL: "0.05", DAILY_CAP: "0.500000000000000000000000001", DAILY_LOSS_CAP: "0.15" },
-    { MAX_SOL: "0.05", DAILY_CAP: "0.5", DAILY_LOSS_CAP: "0.150000000000000000000000001" },
+    { MAX_SOL: overPreciseCeiling(POLLER_MAX_SOL), DAILY_CAP: POLLER_MAX_DAILY_CAP, DAILY_LOSS_CAP: POLLER_MAX_DAILY_LOSS_CAP },
+    { MAX_SOL: POLLER_MAX_SOL, DAILY_CAP: overPreciseCeiling(POLLER_MAX_DAILY_CAP), DAILY_LOSS_CAP: POLLER_MAX_DAILY_LOSS_CAP },
+    { MAX_SOL: POLLER_MAX_SOL, DAILY_CAP: POLLER_MAX_DAILY_CAP, DAILY_LOSS_CAP: overPreciseCeiling(POLLER_MAX_DAILY_LOSS_CAP) },
   ].map((values) => runCaps({
     ...values, MAX_SOL_SET: "1", DAILY_CAP_SET: "1", DAILY_LOSS_CAP_SET: "1",
   }));
@@ -166,16 +214,21 @@ if (capsStart >= 0 && capsEnd > capsStart) {
     nonCanonicalLiterals.every((result) => result.status !== 0 &&
       /must be plain decimals/.test(result.stderr)));
 
-  const partial = runCaps({ MAX_SOL: "0.05", MAX_SOL_SET: "1" });
+  // A raise of the per-trade cap alone, at the reviewed ceiling: still refused without
+  // the other two flags. (Was 0.05 — that number is now merely a legal value.)
+  const partial = runCaps({ MAX_SOL: POLLER_MAX_SOL, MAX_SOL_SET: "1" });
   check("a partial live raise fails closed",
     partial.status !== 0 && /requires --max-sol, --daily-cap, and --daily-loss-cap together/.test(partial.stderr));
 
-  // One ulp over whatever the ceiling currently is, not over a remembered 0.05.
-  const justOverMaxSol = `${POLLER_MAX_SOL}0001`;
+  /* One 0.000001-SOL step over whatever each ceiling currently is, not over a
+     remembered 0.05/0.5/0.15 — the daily and loss rows were the two that stopped
+     being an excess at all when the reviewed maxima moved to 0.4/1000/0.4. Every
+     other cap in a row sits exactly on its ceiling, so each row isolates one
+     dimension. */
   const excessive = [
-    { MAX_SOL: justOverMaxSol, DAILY_CAP: "0.5", DAILY_LOSS_CAP: "0.15" },
-    { MAX_SOL: "0.05", DAILY_CAP: "0.500001", DAILY_LOSS_CAP: "0.15" },
-    { MAX_SOL: "0.05", DAILY_CAP: "0.5", DAILY_LOSS_CAP: "0.150001" },
+    { MAX_SOL: justOverCeiling(POLLER_MAX_SOL), DAILY_CAP: POLLER_MAX_DAILY_CAP, DAILY_LOSS_CAP: POLLER_MAX_DAILY_LOSS_CAP },
+    { MAX_SOL: POLLER_MAX_SOL, DAILY_CAP: justOverCeiling(POLLER_MAX_DAILY_CAP), DAILY_LOSS_CAP: POLLER_MAX_DAILY_LOSS_CAP },
+    { MAX_SOL: POLLER_MAX_SOL, DAILY_CAP: POLLER_MAX_DAILY_CAP, DAILY_LOSS_CAP: justOverCeiling(POLLER_MAX_DAILY_LOSS_CAP) },
   ].map((values) => runCaps({
     ...values, MAX_SOL_SET: "1", DAILY_CAP_SET: "1", DAILY_LOSS_CAP_SET: "1",
   }));

@@ -54,11 +54,26 @@ const kellyWant = DEFAULTS.fDefault*eq/sf;
 t("size = f x equity / stopFrac", Math.abs(kellyWant - (DEFAULTS.fDefault*eq/sf)) < 1e-12 && kellyWant > 0, kellyWant);
 t("risk at the stop equals f of equity",
   Math.abs((kellyWant*sf)/eq - DEFAULTS.fDefault) < 1e-12, (kellyWant*sf)/eq);
+/* DERIVED. At the fixture's 5 SOL equity Kelly asks for 0.25, which was "more than the
+   cap" while the cap was 0.05 and is "less" now that the owner moved it to 0.4 — and at
+   5 SOL the per-name risk rail (2.5%) binds at ~0.31 before the flat cap ever could. So
+   the flat-cap case is built on an equity large enough that Kelly wants 2.5x the cap
+   and no risk rail is anywhere near it; the preconditions are asserted, not assumed. */
+const EQ_BIG = (DEFAULTS.maxSolPerTrade / DEFAULTS.fDefault) * sf * 2.5;
+const kellyWantBig = DEFAULTS.fDefault * EQ_BIG / sf;
+const perNameRoomBig = (DEFAULTS.fNameMax * EQ_BIG) / sf;
+t("precondition: Kelly asks for more than the flat cap, and the per-name rail does not bind",
+  kellyWantBig > DEFAULTS.maxSolPerTrade && perNameRoomBig > DEFAULTS.maxSolPerTrade,
+  {kellyWantBig, perNameRoomBig, cap: DEFAULTS.maxSolPerTrade});
+const p2big = planEntry({ call: wide, cfg: KELLY, state: st({ equitySol: EQ_BIG }) });
 t("...and the flat cap binds when Kelly asks for more",
-  p2.sol === DEFAULTS.maxSolPerTrade && kellyWant > DEFAULTS.maxSolPerTrade, {sol:p2.sol, kellyWant});
+  p2big.action === "buy" && Math.abs(p2big.sol - DEFAULTS.maxSolPerTrade) < 1e-9 && kellyWantBig > DEFAULTS.maxSolPerTrade,
+  {sol:p2big.sol, kellyWantBig, reason: p2big.reason});
 
 // THE FIXED FUND — the owner's default: same size every trade, refusals unchanged
-const pf = planEntry({ call: wide, cfg: DEFAULTS, state: st({wins:20, losses:10}) });
+/* Same derivation: at 5 SOL the per-name rail sizes a 0.4 ceiling down to ~0.31, so
+   "nothing binds" needs the larger equity for the ceiling to be taken in full. */
+const pf = planEntry({ call: wide, cfg: DEFAULTS, state: st({wins:20, losses:10, equitySol: EQ_BIG}) });
 /* The fixed fund is now the operator's CEILING rather than a flat size: risk may
    size UNDER it and never over it (owner's rule, 2026-09-03 — "more risk, less size
    of trade"). With nothing binding, it still sizes exactly at the ceiling. */
