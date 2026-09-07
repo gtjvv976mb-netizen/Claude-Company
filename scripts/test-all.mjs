@@ -21,6 +21,19 @@ const tests = [...rootTests, ...executorTests];
 let failed = 0;
 const started = Date.now();
 
+/* A DEPLOY GATE THAT KILLS ITS OWN PROOF. Every test gets 120s; the quota simulation
+ * (SIM B, 60 cohorts through the real cycle, ledger and screen) takes 40s on a 15-core
+ * laptop and 120-160s on the 2-vCPU Actions runner — so it straddled the limit and the
+ * Pages deploy failed on 5 of 8 pushes on 2026-09-07 (runs 34155854543, 34156490978,
+ * 34158751213: "spawnSync node ETIMEDOUT" on test-quota-simulation.mjs, nothing else
+ * red) while the suite was green locally every time. Render's buildCommand runs this
+ * same script and died the same way. Shrinking the simulation for CI would make CI prove
+ * less than local; giving it the time it measurably needs does not. */
+const TEST_TIMEOUT_MS = Object.freeze({
+  "test-quota-simulation.mjs": 360_000,
+});
+const timeoutFor = (test) => TEST_TIMEOUT_MS[path.basename(test)] ?? 120_000;
+
 for (const test of tests) {
   const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "claude-co-test-"));
   const dbFile = path.join(sandbox, "journal.sqlite");
@@ -35,7 +48,7 @@ for (const test of tests) {
     stdio: ["inherit", "inherit", "pipe"],
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
-    timeout: 120_000,
+    timeout: timeoutFor(test),
     env: {
       ...process.env,
       NODE_ENV: "test",
