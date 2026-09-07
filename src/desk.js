@@ -8,7 +8,7 @@ import { applyRedTeamBar } from "./agents/redteam-policy.js";
 import { runCEO } from "./agents/ceo.js";
 import { writeOrderSlip } from "./order.js";
 import { emit } from "./lib/bus.js";
-import { OutOfCredit, spend, assertDailyBudget} from "./lib/llm.js";
+import { OutOfCredit, spend, assertDailyBudget, creditBreakerState } from "./lib/llm.js";
 import { cfg, escalationPlan } from "./config.js";
 import * as store from "./lib/store.js";
 import { writeReport } from "./report.js";
@@ -108,6 +108,32 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
       detail: sc.fails.map((f) => f.code).join(", "), report: rec.reportFile });
     recordEvaluation(rec);
     return rec;
+  }
+
+  /* DO NOT BUY A READ FOR A COIN NOBODY CAN JUDGE.
+   *
+   * The X read is bought here because it can end a workup for $0.13 and save $0.63 of
+   * later analysis. That trade is only good when the analysis it might save can
+   * actually run. While the Anthropic breaker is refusing, it cannot: liquidity, flow
+   * and technical fail as a batch, the workup throws OutOfCredit and the cycle halts —
+   * AFTER the xAI read has already been paid for. Measured 2026-09-07, with the
+   * Anthropic balance empty: 46 reads bought at ~$0.155 while every cycle published
+   * nothing, $7.16 of xAI spend for coins no seat ever looked at.
+   *
+   * The condition is deliberately narrow, because the ONLY thing that closes a credit
+   * breaker is a real call through acquireCredit. Bailing whenever the breaker is
+   * merely non-closed would remove the probe that recovers it and the desk would never
+   * think again. `probeReadyInMs > 0` is exactly the window in which acquireCredit
+   * returns a refusal WITHOUT sending a request — open and still cooling down, or
+   * half_open with another probe already in flight. The moment a probe is due this
+   * check stops firing and the workup proceeds, so recovery is untouched. */
+  const analystCredit = creditBreakerState("anthropic");
+  if (analystCredit.state !== "closed" && analystCredit.probeReadyInMs > 0) {
+    emit("token:end", { mint, symbol: ev.symbol, outcome: "credit_outage",
+      detail: `the analyst seats cannot run for another ${Math.ceil(analystCredit.probeReadyInMs / 1000)}s — ` +
+        "nothing was bought for this coin" });
+    throw new OutOfCredit("the Anthropic balance is empty — the desk cannot think " +
+      "(breaker open, no read bought)");
   }
 
   /* SAFETY CLEARED — only now does the desk buy anything about this coin.
