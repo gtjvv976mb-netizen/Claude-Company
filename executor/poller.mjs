@@ -359,7 +359,7 @@ if (EXECUTE) {
  * acknowledgement retained by some old environments. OPERATOR_MAX stays at the
  * evidence-backed configuration that cleared the live preflight, and maxOpenPositions
  * stays frozen because it multiplies every other cap. */
-const OPERATOR_MAX = Object.freeze({ maxSolPerTrade: 0.05, dailySolCap: 0.5, dailyLossLimitSol: 0.15 });
+const OPERATOR_MAX = Object.freeze({ maxSolPerTrade: 0.1, dailySolCap: 0.5, dailyLossLimitSol: 0.15 });
 const capsAckSentence = (wallet, trade, daily, loss) =>
   `I acknowledge WALL-ST-E caps v2 for ${wallet}: ${trade} SOL per trade, ${daily} SOL per day, ${loss} SOL rolling realized-loss entry brake`;
 

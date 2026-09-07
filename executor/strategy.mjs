@@ -42,7 +42,7 @@ import { POLICY_DEFAULTS, POLICY_VERSION, pricePolicy } from "./trade-policy.mjs
 export { POLICY_VERSION };
 
 export const DEFAULTS = {
-  maxSolPerTrade: 0.05,      // hard ceiling; Kelly may size well under it
+  maxSolPerTrade: 0.1,       // hard ceiling; Kelly may size well under it
   dailySolCap: 0.5,          // total SOL deployed per rolling day
   dailyLossLimitSol: 0.15,   // realized losses that stop new entries for the day
   maxOpenPositions: 24,      // a sentinel; risk decides, not a count (see poller LIVE_LIMITS)
@@ -104,7 +104,7 @@ export const DEFAULTS = {
   /* THE FIXED FUND: the operator's per-trade CEILING (0 = size by Kelly/flat risk).
    * It bounds how much is ever bet on one call; the risk rails below may size UNDER
    * it, and Kelly's skip verdicts still decide whether to bet at all. */
-  fixedSol: 0.02,
+  fixedSol: 0.1,
   /* THE DESK'S CONVICTION IS A REASON TO TAKE A CALL OR TO SKIP IT. IT IS NOT A SIZE
    * DIAL, AND THE MULTIPLIER THAT MADE IT ONE IS GONE ON PURPOSE (2026-09-07).
    *

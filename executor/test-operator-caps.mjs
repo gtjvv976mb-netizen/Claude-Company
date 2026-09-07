@@ -71,7 +71,7 @@ ok("a sentence naming a different wallet is refused", () => {
   assert.match(result.stderr, /typed acknowledgement/);
 });
 for (const [name, values, message] of [
-  ["per-trade", ["0.050001", "0.5", "0.15"], /MAX_SOL_PER_TRADE must be between/],
+  ["per-trade", ["0.100001", "0.5", "0.15"], /MAX_SOL_PER_TRADE must be between/],
   ["daily deploy", ["0.05", "0.500001", "0.15"], /DAILY_SOL_CAP must be between/],
   ["realized-loss brake", ["0.05", "0.5", "0.150001"], /DAILY_LOSS_LIMIT_SOL must be between/],
 ]) ok(`${name} cannot exceed its evidence-backed hard maximum`, () => {
@@ -83,7 +83,7 @@ for (const [name, values, message] of [
 });
 ok("over-precise literals cannot round down onto an operator maximum", () => {
   for (const [trade, daily, loss] of [
-    ["0.050000000000000000000000001", "0.5", "0.15"],
+    ["0.100000000000000000000000001", "0.5", "0.15"],
     ["0.05", "0.50000000000000000000000001", "0.15"],
     ["0.05", "0.5", "0.15000000000000000000000001"],
   ]) {

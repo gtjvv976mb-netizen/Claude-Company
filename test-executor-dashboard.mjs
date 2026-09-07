@@ -199,7 +199,7 @@ for (const [key, value] of Object.entries({
     `dashboard canary default ${key} must stay pinned to the executor's default`);
 }
 for (const [key, value] of Object.entries({
-  maxSolPerTrade: 0.05,
+  maxSolPerTrade: 0.1,
   dailySolCap: 0.5,
   dailyLossLimitSol: 0.15,
 })) {
