@@ -422,6 +422,13 @@ const CFG = {
   fNameMax: number("F_NAME_MAX", process.env.F_NAME_MAX || DEFAULTS.fNameMax, { min: 0.00001, max: 1 }),
   bookHeatMax: number("BOOK_HEAT_MAX", process.env.BOOK_HEAT_MAX || DEFAULTS.bookHeatMax, { min: 0.00001, max: 1 }),
   maxAgeHours: number("MAX_AGE_HOURS", process.env.MAX_AGE_HOURS || DEFAULTS.maxAgeHours, { min: 0.01, max: 720 }),
+  /* THE ONLY THING THE DESK'S CONVICTION CAN DO, AND ONLY BECAUSE A HUMAN HERE ASKED.
+   * A take-it-or-leave-it floor, read from THIS machine's environment. It cannot change
+   * an amount — the position is identical on the taking side — so it is not a way back
+   * to the conviction MULTIPLIER that was removed from strategy.mjs on 2026-09-07.
+   * 0 (the default) means conviction changes nothing in this process at all. */
+  minConviction: number("MIN_CONVICTION", process.env.MIN_CONVICTION || DEFAULTS.minConviction,
+    { min: 0, max: 100 }),
   scaleOutPct: 0,
 };
 if (EXECUTE && configuredDailyCap.units < configuredTradeCap.units)

@@ -43,6 +43,20 @@ import { CEO_SYSTEM } from "./src/agents/ceo.js";
 import { REVIEW_SYSTEM } from "./src/agents/review.js";
 import { SHARED_RULES } from "./src/lib/llm.js";
 import { TUTOR_SYSTEM } from "./src/agents/codex-tutor.js";
+/* THE LANE JUDGE'S OWN BRIEF. It is a prompt the desk ships — it runs on every technique
+   the coach proposes — and it is the one brief that HAS to name fees, slippage and the
+   round trip in order to recognise them. A judge whose own prompt could smuggle a
+   cost-conditioned imperative into the building would be the exact hole it exists to
+   close, so it is swept here with everything else. */
+import { POLICY_JUDGE_SYSTEM } from "./src/lib/policy-judge.js";
+/* THE DETECTOR LIVES IN src/ NOW, and this file imports the same copy the run-time fence
+   imports. It used to be defined a few lines below, inside this test — which was enough
+   while a prompt could only change when a human edited a source file. CODEX BANKS
+   rewrites the seats' standing orders while the desk trades, and a rule that lives in a
+   test protects nothing at run time. desk-policy.js runs THIS function over every
+   candidate technique before it can be stored; sharing one copy is what stops the fence
+   and the proof from ever disagreeing about what the rule is. */
+import { IMPERATIVE, MONEY, NEGATION, windows, costImperatives } from "./src/lib/cost-imperative.js";
 /* Namespaces too: the coverage gate resolves a `system:` identifier to its VALUE. */
 import * as analysts from "./src/agents/analysts.js";
 import * as decision from "./src/agents/decision.js";
@@ -50,6 +64,7 @@ import * as ceo from "./src/agents/ceo.js";
 import * as review from "./src/agents/review.js";
 import * as llm from "./src/lib/llm.js";
 import * as tutor from "./src/agents/codex-tutor.js";
+import * as policyJudge from "./src/lib/policy-judge.js";
 import { planEntry, DEFAULTS } from "./executor/strategy.mjs";
 
 let pass = 0, fail = 0;
@@ -285,40 +300,18 @@ console.log("\n6. THE PROMPT SWEEP — every brief the desk ships, not one seat'
  * call, and this file fails until the new prompt is swept.
  * ═══════════════════════════════════════════════════════════════════════════════════ */
 {
-  /* THE DETECTOR. A cost-conditioned imperative is a veto/target instruction sitting in
-     the same breath as money: "KILL … at an acceptable cost", "the target MUST BE 5x the
-     ROUND TRIP", "slippage MUST be set against the measured cost". Two halves, one
-     window, and the window is a sentence or a bullet — a KILL three paragraphs from the
-     word "fee" is not an instruction about fees.
-
-     The NEGATION arm is what lets the desk still say the rule out loud. "You never kill
-     on cost" and "KILL only when there is no market — never on what leaving costs" are
-     the correction itself; a detector that flagged them would force the prompts to go
-     silent about the very thing they must be explicit about. So a window is exonerated
-     when a negation governs the money term inside it. */
-  /* Case-INSENSITIVE, and that is not a detail: the execution seat shouted its rule in
-     capitals ("THE FIRST TARGET MUST BE AT LEAST 5x THE MEASURED ROUND-TRIP COST"), so a
-     lower-case `must` in this pattern matched nothing and the loudest instruction on the
-     desk swept clean. Verified below by driving the detector with that exact line. */
-  const IMPERATIVE = /\b(kill|kills|killing|reject|rejects|rejected|refuse|refuses|refused|refusing|refusal|decline|declines|declined|disqualif\w*|veto|vetoes|vetoed|must)\b/i;
-  const MONEY = /(round[\s-]?trips?|\bcosts?\b|\bcostly\b|\bfees?\b|slippage|\$\s?\d)/i;
-  const NEGATION = /\b(never|not|nor|regardless|ignore|none)\b/i;
-
-  /** Sentences and bullets. A prompt is prose, so the unit of instruction is a sentence;
-      list items are their own unit even when they do not end in a full stop. */
-  const windows = (text) => text
-    .split(/(?<=[.!?])\s+|\n(?=\s*(?:[-·*]|\d+\.))|\n{2,}/)
-    .map((w) => w.trim()).filter(Boolean);
-
-  /** The offending windows in one prompt, or [] when it is clean. */
-  const costImperatives = (text) => windows(text).filter((w) => {
-    if (!IMPERATIVE.test(w) || !MONEY.test(w)) return false;
-    // Exonerate when a negation governs the money term: everything before the FIRST
-    // money mention in this window is scanned for it, which is where "never on what
-    // leaving costs" and "do not reason about fees" live.
-    const before = w.slice(0, w.search(MONEY));
-    return !NEGATION.test(before);
-  });
+  /* The detector is imported, not defined here: see the note at the import. Its
+     reasoning — the two halves in one window, the sentence-or-bullet window, the
+     negation arm that lets the desk say the rule out loud, and why it is
+     case-INSENSITIVE — is written out in src/lib/cost-imperative.js. What this section
+     still owns is the SWEEP: which prompts are judged, that the registry is complete,
+     and that the detector has teeth. Those are asserted below.
+     IMPERATIVE, MONEY, NEGATION and windows are imported alongside it so a reader can
+     see the regexes themselves from here; the assertions immediately below drive them. */
+  ok("the detector's two halves and its exoneration arm are the shared ones",
+    IMPERATIVE.test("MUST") && MONEY.test("round-trip") && NEGATION.test("never") &&
+    windows("One. Two.").length === 2,
+    "imported from src/lib/cost-imperative.js");
 
   /* EVERY PROMPT THE DESK SHIPS, as VALUES — not as source text, so a brief that is
      assembled or interpolated at run time is swept in the form the model actually sees.
@@ -328,7 +321,7 @@ console.log("\n6. THE PROMPT SWEEP — every brief the desk ships, not one seat'
     ...Object.fromEntries(Object.entries(ANALYSTS).map(([k, a]) => [`ANALYSTS.${k}.system`, a.system])),
     NARRATIVE_SYSTEM,
     SCOUT_SYSTEM, REDTEAM_SYSTEM, RISK_SYSTEM, PM_SYSTEM, EXECUTION_SYSTEM, BESTPICK_SYSTEM,
-    CEO_SYSTEM, REVIEW_SYSTEM, TUTOR_SYSTEM,
+    CEO_SYSTEM, REVIEW_SYSTEM, TUTOR_SYSTEM, POLICY_JUDGE_SYSTEM,
   };
 
   console.log(`  sweeping ${Object.keys(PROMPTS).length} prompts:`);
@@ -361,7 +354,7 @@ console.log("\n6. THE PROMPT SWEEP — every brief the desk ships, not one seat'
      would be satisfied by any const with a plausible name. So the identifier is looked up
      in the module it lives in and its STRING is compared against what was actually swept.
      Rename a brief and nothing breaks; ship one this sweep never read and it fails. */
-  const namespaces = [analysts, decision, ceo, review, llm, tutor];
+  const namespaces = [analysts, decision, ceo, review, llm, tutor, policyJudge];
   const sweptValues = new Set(Object.values(PROMPTS).map(String));
   const resolve = (id) => { for (const ns of namespaces) if (typeof ns[id] === "string") return ns[id]; return null; };
   // `a.system` is the ANALYSTS table's own dispatch and every row of it is swept above;

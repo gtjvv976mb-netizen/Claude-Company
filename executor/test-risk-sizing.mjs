@@ -4,13 +4,18 @@
  * Two defects, one rule. Every size rail was a `return skip`, so a fixed size one basis
  * point over the per-name risk cap threw the whole call away instead of buying slightly
  * less. Measured in the live log: "SKIP NATIX: actual stop risk 3.22% exceeds per-name
- * cap 2.50%" — a trade the bot could have taken at 78% of the size. And every call
- * already carried the desk's conviction out of 100, which the bot had never once read.
+ * cap 2.50%" — a trade the bot could have taken at 78% of the size.
  *
  * The operator's fixed size is now a CEILING rather than an instruction: the rails may
  * size under it and never over it. What must stay true, and is asserted throughout: no
  * rail may ever make a position LARGER, the operator's ceiling is absolute, and when no
  * size fits the trade is still refused.
+ *
+ * AND NO FIELD THE DESK AUTHORS TOUCHES THE AMOUNT. This file used to assert that the
+ * desk's `conviction` multiplied the position (0.35x to 1.0x, a 2.9x range on the live
+ * 20-51 spread). That was the last size dial the desk held after 9eee450 took size_sol
+ * and fixed_sol out of the path, and it is deleted: section two below proves the same
+ * inputs now buy one identical amount.
  */
 import { planEntry, DEFAULTS } from "./strategy.mjs";
 
@@ -47,45 +52,93 @@ console.log("\nA WIDER STOP IS MORE RISK, SO IT BUYS LESS");
     `stop risk ${(wide.f * 100).toFixed(2)}% vs cap ${(DEFAULTS.fNameMax * 100).toFixed(2)}%`);
 }
 
-console.log("\nTHE TEAM'S CONFIDENCE IS PRICED IN");
+console.log("\nTHE TEAM'S CONFIDENCE MOVES NO MONEY");
 {
+  /* THE LAST CHANNEL, AND IT IS CLOSED NOW (2026-09-07).
+   *
+   * This section asserted the OPPOSITE until today, and the reversal is the whole point.
+   * It read "a confident call trades bigger than a lukewarm one" and measured a haircut
+   * of `Math.max(0.35, min(1, conviction/100))` applied straight to the position. Every
+   * other desk field had already been taken out of the sizing path by 9eee450 —
+   * size_sol and fixed_sol are read NOWHERE — and this one survived because "price the
+   * team's uncertainty into the size" reads as risk management rather than as a size
+   * instruction.
+   *
+   * It was a size instruction. Live conviction runs 20 to 51 out of 100, so the desk
+   * was moving this wallet's stake across a 2.9x range through a number the desk writes
+   * about itself, and anything that could raise a seat's conviction score — a coach
+   * rewriting a seat's standing orders included — raised the amount without ever
+   * writing the word size. The owner's rule does not have a wording exemption: the desk
+   * says WHAT and WHEN, and this process decides HOW MUCH.
+   *
+   * So the same inputs now prove the inverse. */
   const sure = plan({ conviction: 100 });
-  const unsure = plan({ conviction: 30 });
+  const unsure = plan({ conviction: 20 });
   const silent = plan({});
-  /* THE HAIRCUT HAS ALMOST NO ROOM AT A 0.05 SOL CEILING, and that is a finding rather
-     than a bug. Fees are fixed, so a position cannot be shrunk below the size where
-     they dominate — 0.04 SOL at a 0.0005 SOL round-trip fee and a 2.5% share. Between
-     that floor and the 0.05 ceiling there is a 20% band for conviction to work in, and
-     once the per-name risk cap binds first there is none at all. Measured against the
-     desk's own calls, letting conviction size past that floor cut the bot from taking
-     four of eight to taking one. So the property is asserted where the rule can
-     actually operate — a ceiling with room above the fee floor. */
+  ok("a lukewarm call and a confident one buy exactly the same amount",
+    sure.action === "buy" && sure.sol === unsure.sol,
+    `conviction 100 -> ${sure.sol?.toFixed(4)} SOL, conviction 20 -> ${unsure.sol?.toFixed(4)} SOL`);
+  ok("...and so does a call that states no conviction at all",
+    silent.sol === sure.sol, `${silent.sol?.toFixed(4)} SOL`);
+
+  /* THE CASE THE OLD HAIRCUT WAS TUNED FOR. At the live 0.05 ceiling the fee floor left
+     conviction only a 20% band to work in, so a test run only there could pass on a
+     rounding accident. This is the roomy ceiling the old section used to demonstrate
+     the scale working — where it had a full 0.35x-to-1.0x range — and the two sizes are
+     now identical there too. */
   const roomy = (over) => planEntry({ call: call(over),
     state: { ...state, equitySol: 4, spendableSol: 4 },
     cfg: { ...cfg, fixedSol: 0.2, maxSolPerTrade: 0.2 } });
-  ok("a confident call trades bigger than a lukewarm one, where there is room to scale",
-    roomy({ conviction: 100 }).sol > roomy({ conviction: 30 }).sol,
-    `${roomy({ conviction: 100 }).sol.toFixed(4)} vs ${roomy({ conviction: 30 }).sol.toFixed(4)} SOL`);
-  /* At the live 0.05 ceiling the band is 0.05 down to the 0.04 fee floor — conviction
-     can cut a fifth off a position and no more. That is the honest shape of "less size"
-     on a bankroll this small, and it is why letting it size past the floor cost the bot
-     three of the four calls it could otherwise take. */
-  ok("...and at the live 0.05 ceiling the band is only down to the fee floor",
-    unsure.sol >= 0.0399 && unsure.sol < sure.sol,
-    `${sure.sol.toFixed(4)} -> ${unsure.sol.toFixed(4)} SOL, a ${((1 - unsure.sol / sure.sol) * 100).toFixed(0)}% band`);
+  ok("...including with a ceiling roomy enough for the old 0.35x haircut to show",
+    roomy({ conviction: 100 }).sol === roomy({ conviction: 20 }).sol,
+    `${roomy({ conviction: 100 }).sol.toFixed(4)} vs ${roomy({ conviction: 20 }).sol.toFixed(4)} SOL`);
+
+  /* THE WHOLE RANGE, INCLUDING THE OUT-OF-CONTRACT VALUES A HOSTILE FEED WOULD SEND.
+     One distinct size across all of them is the property: not "it does not scale UP",
+     not "it is floored" — it does not participate in the arithmetic at all. */
+  const sweep = [null, 0, 1, 20, 30, 50, 51, 80, 99, 100, 999, -40, "70", NaN];
+  const sizes = new Set(sweep.map((v) => {
+    const r = planEntry({ call: { ...call(), ...(v === null ? {} : { conviction: v }) }, cfg, state });
+    return r.action === "buy" ? r.sol : `skip:${r.reason}`;
+  }));
+  ok(`all ${sweep.length} conviction values — absent, zero, negative, string, NaN, 999 — buy one single size`,
+    sizes.size === 1, [...sizes].map(String).join(" | "));
+  ok("...and the plan's own reason never mentions conviction",
+    !/conviction/i.test(String(sure.reason)), sure.reason);
+  ok("...and nothing in the answer reports a conviction scale any more",
+    sure.convictionScale === undefined && !("convictionScale" in sure),
+    Object.keys(sure).join(","));
+  ok("the engine ships no convictionFloor to scale by", DEFAULTS.convictionFloor === undefined,
+    String(DEFAULTS.convictionFloor));
+
+  /* WHAT CONVICTION MAY STILL DO: nothing, unless the OPERATOR turns it on, and then
+     only take-it-or-leave-it. A gate that cannot change an amount cannot set one. */
+  ok("the operator's conviction floor is OFF by default, so a stock install never reads it",
+    DEFAULTS.minConviction === 0, String(DEFAULTS.minConviction));
+  const gated = (conviction) => planEntry({ call: call({ conviction }),
+    cfg: { ...cfg, minConviction: 50 }, state });
+  ok("an operator who sets a floor gets a refusal under it",
+    gated(30).action === "skip", gated(30).reason);
+  ok("...named as the OPERATOR's, so it can never read as the desk sizing",
+    /operator/.test(gated(30).reason || ""), gated(30).reason);
+  ok("...and a call over the floor is taken at the untouched size, not a scaled one",
+    gated(80).action === "buy" && gated(80).sol === sure.sol,
+    `${gated(80).sol?.toFixed(4)} vs ungated ${sure.sol?.toFixed(4)} SOL`);
+  ok("...so the gate has exactly two outcomes: this size, or no trade",
+    new Set([gated(50).sol, gated(80).sol, gated(100).sol]).size === 1
+    && gated(49).action === "skip",
+    `${gated(50).sol?.toFixed(4)} / ${gated(80).sol?.toFixed(4)} / ${gated(100).sol?.toFixed(4)}, 49 -> ${gated(49).action}`);
+
+  /* The fee floor itself is unchanged and still shapes every size, so keep the two
+     properties the deleted haircut used to be asserted alongside. */
   const feeFloorFor = (stopFrac) =>
     (2 * cfg.networkFeeReserveSol) / (DEFAULTS.maxFeeShareOfStop * (stopFrac + cfg.measuredRoundTripLossPct / 100));
-  ok("a position is never shrunk into its own fees",
-    unsure.sol >= feeFloorFor(0.15) - 1e-9,
-    `${unsure.sol.toFixed(4)} SOL, floor ${feeFloorFor(0.15).toFixed(4)} at a 15% stop`);
+  ok("no position is opened inside its own fees",
+    sure.sol >= feeFloorFor(0.10) - 1e-9,
+    `${sure.sol.toFixed(4)} SOL, floor ${feeFloorFor(0.10).toFixed(4)} at a 10% stop`);
   ok("...and that floor FALLS as the stop widens, so a wide stop may run smaller",
     feeFloorFor(0.30) < feeFloorFor(0.10),
     `${feeFloorFor(0.10).toFixed(4)} at 10% vs ${feeFloorFor(0.30).toFixed(4)} at 30%`);
-  ok("the haircut is floored, not proportional all the way down",
-    unsure.convictionScale === DEFAULTS.convictionFloor, `${unsure.convictionScale}`);
-  ok("conviction 50 sizes to half", plan({ conviction: 50 }).convictionScale === 0.5);
-  ok("a call with no conviction is not scaled on the desk's silence", silent.convictionScale === 1);
-  ok("...and conviction never sizes a trade UP", plan({ conviction: 999 }).sol <= cfg.fixedSol + 1e-9);
 }
 
 console.log("\nEVERY RAIL SIZES DOWN, NONE SIZES UP");

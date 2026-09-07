@@ -44,7 +44,16 @@ console.log("\nRISK DECIDES HOW MANY MEMECOINS RUN AT ONCE, NOT A COUNT");
   ok("...and it is RISK that stops it, not the position sentinel",
     !/of max/.test(book.stoppedBy), book.stoppedBy.slice(0, 70));
   const old = fillBook(cfg({ bookHeatMax: 0.08, maxOpenPositions: 4 }));
-  ok("the old settings stopped at four", old.n === 4, `${old.n} positions`);
+  /* THREE, NOT FOUR, SINCE 2026-09-07 — and the reason is worth writing down rather than
+     loosening the assertion around. This fixture opens every position at conviction 50,
+     which used to be multiplied straight into the size (`want *= max(0.35, 50/100)`), so
+     each position carried half the risk and four of them fitted inside an 8% heat budget.
+     The conviction multiplier is deleted: the desk no longer sizes anything, positions
+     open at the bot's own full size, and three of THOSE fill the same budget. The
+     property under test never moved — risk binds before the count does — only the
+     arithmetic did. */
+  ok("the old settings bind at three full-size positions, on heat rather than the count",
+    old.n === 3 && !/of max/.test(old.stoppedBy), `${old.n} positions — ${old.stoppedBy.slice(0, 60)}`);
   ok("the new settings open strictly more", book.n > old.n, `${old.n} -> ${book.n}`);
   // The sentinel must still exist as a backstop, even though risk binds first.
   ok("the sentinel still refuses when actually reached",

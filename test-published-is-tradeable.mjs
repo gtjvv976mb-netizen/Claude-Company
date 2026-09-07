@@ -116,12 +116,24 @@ console.log("\nTHE BOT'S ANSWER DOES MOVE — THE JUDGMENT WAS RELOCATED, NOT DE
   ok("...and every wide stop on a cheap one is taken",
     wideCheap.every((r) => r.taken), `${wideCheap.filter((r) => !r.taken).length} refused of ${wideCheap.length}`);
 
-  /* CONVICTION STILL SIZES, WHICH IS THE OTHER HALF OF "the bot owns how much". The desk
-     publishes the conviction — a WHAT, its own confidence in the idea — and the bot is
-     the only party that turns it into lamports. */
+  /* CONVICTION SIZES NOTHING — AND THIS ASSERTION SAID THE OPPOSITE UNTIL 2026-09-07.
+     It read "conviction changes the SIZE the bot chooses, and only the bot chooses it".
+     The second clause was the mistake: the bot APPLIED the number, the desk CHOSE it.
+     `want *= max(0.35, min(1, conviction/100))` let a field the desk authors about itself
+     move this wallet's stake over a 2.9x range, so anything that could inflate a seat's
+     conviction — a coach rewriting that seat's standing orders included — inflated the
+     amount without ever writing the word size. The desk's confidence is a WHAT. */
   const sizes = CONVICTIONS.map((c) => takes(20, 1, c)).filter((r) => r.taken).map((r) => r.sol);
-  ok("conviction changes the SIZE the bot chooses, and only the bot chooses it",
-    new Set(sizes).size > 1, sizes.map((s) => s.toFixed(4)).join(" / "));
+  ok("conviction moves the bot's size by nothing across the whole live range",
+    new Set(sizes).size === 1 && sizes.length === CONVICTIONS.length,
+    sizes.map((x) => x.toFixed(4)).join(" / "));
+
+  /* AND THE OTHER HALF STILL HOLDS: the answer moves, on the bot's own inputs. If it did
+     not, this section would be passing because sizing stopped working. */
+  const byStop = [8, 14, 20, 30, 40].map((stopPct) => takes(stopPct, 1, 50))
+    .filter((r) => r.taken).map((r) => r.sol);
+  ok("...while the bot's own risk-at-stop still moves it, so the sizing is alive",
+    new Set(byStop).size > 1, byStop.map((x) => x.toFixed(4)).join(" / "));
 }
 
 console.log("\nTHE FOUR CALLS OF 2026-09-03 ARE PUBLISHED, AND REFUSED BY THE WALLET");

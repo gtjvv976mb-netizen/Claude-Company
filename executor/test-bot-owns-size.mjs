@@ -70,6 +70,137 @@ const garbage = sizeOf({ ...wide, size_sol: "0.0001" });
 t("a desk size arriving as a STRING is inert too (JSON off the wire)",
   garbage.action === "buy" && garbage.sol === base.sol, `${garbage.sol} SOL`);
 
+console.log("\nCONVICTION WAS THE LAST SIZE DIAL, AND IT IS GONE");
+/* THE CHANNEL 9eee450 MISSED. size_sol and fixed_sol were taken out of the sizing path,
+ * and the sweep above proves it. `call.conviction` was NOT, and it survived precisely
+ * because it did not look like a size instruction:
+ *
+ *     const convictionScale = Number.isFinite(conviction) && conviction > 0
+ *       ? Math.max(c.convictionFloor, Math.min(1, conviction / 100)) : 1;   // floor 0.35
+ *     ...
+ *     want = want * convictionScale;
+ *
+ * Live conviction runs 20 to 51 out of 100, so the desk moved this wallet's stake over a
+ * 2.9x range through a number the desk writes about ITSELF. Anything that could raise a
+ * seat's conviction — a coach rewriting that seat's standing orders included — raised
+ * the amount without ever writing the word size. That is laundering, not risk
+ * management, and the multiplier is deleted (2026-09-07). */
+const convicted = (conviction) => sizeOf({ ...wide, conviction });
+const noConviction = sizeOf(wide);
+t("the desk's lowest conviction buys what its highest buys",
+  convicted(1).sol === convicted(100).sol && convicted(1).action === "buy",
+  `1/100 -> ${convicted(1).sol} SOL, 100/100 -> ${convicted(100).sol} SOL`);
+t("...and both buy what a call stating no conviction buys",
+  convicted(50).sol === noConviction.sol, `${convicted(50).sol} vs ${noConviction.sol} SOL`);
+t("...across the whole live range and past both ends of it",
+  new Set([1, 20, 30, 51, 80, 100, 999, -10, 0, "45"].map((v) => convicted(v).sol)).size === 1,
+  [...new Set([1, 20, 30, 51, 80, 100, 999, -10, 0, "45"].map((v) => convicted(v).sol))].join(","));
+t("the plan no longer reports a conviction scale, because there is none",
+  !("convictionScale" in convicted(30)), Object.keys(convicted(30)).join(","));
+t("...and DEFAULTS ships no convictionFloor for one to be built from",
+  DEFAULTS.convictionFloor === undefined, String(DEFAULTS.convictionFloor));
+
+/* WHAT CONVICTION MAY STILL DO. The operator, on their own box, may refuse calls the
+ * desk is lukewarm about. It is a gate, not a dial: identical size on the taking side,
+ * no trade on the other, and OFF unless a human here set it. */
+t("the operator's conviction floor is off by default", DEFAULTS.minConviction === 0,
+  String(DEFAULTS.minConviction));
+const gate = { ...CFG, minConviction: 60 };
+t("...and when the operator sets one it refuses, at nobody's chosen size",
+  sizeOf({ ...wide, conviction: 30 }, gate).action === "skip",
+  sizeOf({ ...wide, conviction: 30 }, gate).reason);
+t("...while a call above it is taken at the same amount as an ungated one",
+  sizeOf({ ...wide, conviction: 90 }, gate).sol === noConviction.sol,
+  `${sizeOf({ ...wide, conviction: 90 }, gate).sol} vs ${noConviction.sol} SOL`);
+
+console.log("\nEVERY FIELD THE DESK AUTHORS, SWEPT — ONLY THE BRACKET MOVES THE AMOUNT");
+/* THE PROOF THAT MATTERS, and it is a sweep rather than an argument. The poller spreads
+ * the WHOLE feed event into the call it plans on (`normalizedCall = { ...ev, ... }`), so
+ * every column the desk writes genuinely reaches planEntry. This drives each of them
+ * with hostile values and asserts the SOL amount does not move by one lamport.
+ *
+ * Three fields are excluded and named, because they DO move it and must: entry_ref, stop
+ * and target are the bracket, and risk-at-stop sizing is a function of the stop by
+ * construction. They are bounded on both sides by this process's own numbers — see the
+ * assertions under them — which is what makes them a level the bot sizes AGAINST rather
+ * than a size the desk hands over. */
+const DESK_FIELDS = {
+  conviction: [1, 51, 100, 999, -5, "80", null],
+  size_sol: [0, 0.0001, 10, -1, "0.003", null],
+  fixed_sol: [0, 0.0001, 10, "0.5", null],
+  desk_size_usd: [1, 15, 100_000, null],
+  desk_risk_usd: [0.5, 50, 9_999, null],
+  desk_equity_usd: [10, 10_000, 1e9, null],
+  liq_at_call: [500, 200_000, null],
+  rt_loss_at_call: [0.1, 8.08, 90, null],
+  mcap_at_call: [5_000, 9_000_000, null],
+  entry_lo: [0.1, 0.99, 5, null],
+  entry_hi: [1.01, 3, null],
+  hold_band: ["nano", "very high", null],
+  hold_min_ms: [1, 86_400_000, null],
+  hold_max_ms: [1, 86_400_000, null],
+  take_profit_x: [0, 1.5, 50, null],
+  policy_version: ["p-genesis", "p-2026-09-07-abcdef", null],
+  escalation_level: [0, 4, null],
+  cycle_id: [1, 9_999, null],
+  category: ["memecoin", "bluechip", null],
+  launchpad: ["pump.fun", "other", null],
+  symbol: ["T", "ZZZ"],
+  thesis: ["a long thesis about the coin", null],
+  invalidation: ["the deployer sells", null],
+  flags_at_call: ["[]", '["mint_authority"]', null],
+  image_url: ["https://example.invalid/a.png", null],
+  source_floor: [1, 48, null],
+  status: ["live", "closed"],
+  risk_tier: ["full", "half", "probe", null],
+  ts: [1, Date.now(), null],
+  opened_at: [1, Date.now(), null],
+  call_id: [1, 77],
+  event_id: ["e1", "e2"],
+};
+const BRACKET = ["entry_ref", "stop", "target"];
+const movers = [];
+let swept = 0;
+for (const [field, values] of Object.entries(DESK_FIELDS)) {
+  for (const value of values) {
+    swept++;
+    const r = sizeOf({ ...wide, [field]: value });
+    if (r.action !== "buy" || r.sol !== base.sol)
+      movers.push(`${field}=${JSON.stringify(value)} -> ${r.action} ${r.sol ?? r.reason}`);
+  }
+}
+t(`${swept} hostile values across ${Object.keys(DESK_FIELDS).length} desk-authored fields move the amount by nothing`,
+  movers.length === 0, movers.slice(0, 4).join(" | ") || `every one still ${base.sol} SOL`);
+t("...and the sweep covers every column the desk writes onto a call except the bracket",
+  BRACKET.every((f) => !(f in DESK_FIELDS)) && Object.keys(DESK_FIELDS).length >= 30,
+  `bracket held out: ${BRACKET.join(", ")}`);
+
+/* THE THREE THAT DO MOVE IT, STATED HONESTLY RATHER THAN SWEPT UNDER. A wider stop is
+ * more risk per SOL, so risk-at-stop buys less of it — that is the bot's own rule
+ * applied to the desk's level, not the desk naming an amount. What bounds it is that
+ * the bot owns BOTH ends: no stop however tight can lift the trade past the operator's
+ * ceiling, and no stop however wide can push it under the bot's own minimum without
+ * being refused outright. */
+// A 0.5 SOL burner with the ceiling lifted clear, so the RISK path is what answers and
+// the stop's effect is visible rather than hidden behind maxSolPerTrade.
+const byStop = (stop, cfg = { ...CFG, maxSolPerTrade: 0.5 }) =>
+  sizeOf({ ...wide, stop }, cfg, st({ equitySol: 0.5, spendableSol: 0.5 }));
+t("a tighter stop does buy more — the bracket is the one desk input that moves size",
+  byStop(0.9).sol > byStop(0.5).sol, `${byStop(0.9).sol} at a 10% stop vs ${byStop(0.5).sol} at 50%`);
+t("...and it is risk-at-stop doing it: the RISK taken is the same at both widths",
+  Math.abs(byStop(0.9).f - byStop(0.5).f) < 1e-9,
+  `${(byStop(0.9).f * 100).toFixed(2)}% vs ${(byStop(0.5).f * 100).toFixed(2)}% of equity at stop`);
+const ceilinged = (stop) => byStop(stop, { ...CFG, maxSolPerTrade: 0.04 });
+t("...but no stop, however tight, lifts the trade past the bot's own ceiling",
+  [0.999, 0.99, 0.95, 0.9].every((stop) => ceilinged(stop).action !== "buy" || ceilinged(stop).sol <= 0.04 + 1e-9),
+  [0.999, 0.99, 0.95, 0.9].map((x) => `${x}:${ceilinged(x).sol ?? "skip"}`).join(" "));
+t("...and a stop wide enough to size under the bot's own minimum is refused, not shrunk",
+  [0.2, 0.1, 0.02].every((stop) => {
+    const r = sizeOf({ ...wide, stop }, { ...CFG, networkFeeReserveSol: 0.0005 },
+      st({ equitySol: 0.05, spendableSol: 0.05 }));
+    return r.action === "skip" || r.sol >= DEFAULTS.minSolPerTrade;
+  }), "no dust position at any stop width");
+
 console.log("\nTHE BOT'S OWN LIMITS STILL BIND, EXACTLY AS BEFORE");
 // The operator's per-trade ceiling.
 const capped = sizeOf(wide, { ...CFG, maxSolPerTrade: 0.01 });

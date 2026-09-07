@@ -76,6 +76,15 @@ const ALLOWED_ENV = new Set([
   "MAX_EXIT_TRIGGER_AGE_MS", "MAX_EXIT_TX_ATTEMPTS", "MAX_FUTURE_SKEW_MIN",
   "MAX_JUPITER_FEE_BPS", "MAX_NETWORK_FEE_LAMPORTS", "MAX_NETWORK_FEE_PCT",
   "MAX_OPEN_POSITIONS", "MAX_PRICE_IMPACT_PCT", "MAX_QUOTE_SHORTFALL_PCT",
+  /* THE OPERATOR'S CONVICTION FLOOR (2026-09-07). Below this stated conviction the bot
+     does not take the call at all. It is a REFUSAL, not a size: the position is
+     byte-identical on the taking side, so it cannot be used to dial a stake. It exists
+     because the conviction MULTIPLIER was deleted from strategy.mjs the same day — the
+     desk was scaling this wallet's stake 0.35x to 1.0x through a field it authors about
+     itself — and this is the one thing conviction may still do, only from this machine's
+     own environment. 0 (the default) means conviction is not consulted at all.
+     Bounded 0-100 in poller.mjs. */
+  "MIN_CONVICTION",
   "MAX_RENT_LAMPORTS", "MAX_SOL_PER_TRADE", "MAX_TX_ATTEMPTS", "PAUSE_ENTRIES_FILE",
   "POLL_MS",
   /* How long the no-sign readiness rehearsal may run before it is abandoned. It gates

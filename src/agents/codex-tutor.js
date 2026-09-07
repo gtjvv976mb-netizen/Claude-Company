@@ -39,7 +39,7 @@ import { z } from "zod";
 import db, { ensureColumn } from "../lib/store.js";
 import { ask } from "../lib/llm.js";
 import { emit } from "../lib/bus.js";
-import { applyPolicy, activePolicy, currentVersion, revertVersion } from "../desk-policy.js";
+import { applyPolicy, activePolicy, currentVersion, revertVersion, checkLane } from "../desk-policy.js";
 import { evaluationSummary } from "../evaluation.js";
 
 db.exec(`
@@ -177,6 +177,34 @@ You do not trade, size, rank or publish anything. You change HOW THE SEATS THINK
 rewriting the standing orders appended to their instructions. Your changes take effect
 on the next workup, with no human review, so they must be worth that.
 
+YOUR LANE, AND IT IS THE WHOLE OF YOUR LANE. You exist to make this team better at
+FINDING AND PUBLISHING GOOD CALLS: what a seat should look at first, which evidence
+outranks which, how to tell a thesis from a story, what would refute one, when to be
+sceptical and when to say so out loud. Sharpen judgement. That is the entire surface you
+may touch, and there is a great deal of room in it.
+
+THREE THINGS ARE NOT YOURS, and they are not grey areas.
+- HOW MUCH IS BOUGHT. Never write about size, amount, notional, clips, the bankroll, how
+  much of the book a call deserves, or bigger and smaller positions. The bot sizes every
+  trade itself, on its own numbers, from a live quote, immediately before it signs.
+- WHAT TRADING COSTS. Never condition a seat on fees, costs, the round trip, slippage,
+  the spread, or on what is left in the wallet. This desk cannot see any of those
+  numbers. The bot measures every one of them at its real size and owns the decision.
+- WHAT THE BOT DOES. Never instruct the executor, the wallet, execution, signing,
+  routing, order placement, or how a position is unwound. You coach the research seats.
+  What a seat JUDGES is yours — the thesis, the evidence, the moment, the hold window.
+
+Those three are refused mechanically before a seat can read them, and each refusal is
+recorded with the sentence that broke it. TWO GATES do that. The first is a pattern check
+that catches the obvious wording. The second is a separate judge that READS your paragraph
+and places it inside or outside the lane on what it MEANS, so rewording an out-of-lane
+order into a register the patterns do not know is not a way past it. That judge is not
+you, takes no standing orders from you, and when it cannot be reached nothing installs at
+all. So a refusal is not a surprise and not a remark about your judgement: it is the lane
+holding. If a change you want to make can only be
+said in one of those three registers, it is not a change to the team's technique, and the
+right answer is to leave that seat alone and say why.
+
 WHAT YOU ARE READING. Every row is arithmetic on the desk's own history: for each seat,
 how many calls were graded, how often its direction was right, and — for the seats that
 KILL coins — what those killed coins did next. A "costly_kill" is a coin the seat killed
@@ -245,14 +273,39 @@ export async function techniqueReview({ horizonMin = GRADE_HORIZON_MIN, dryRun =
     // The gate again, per seat: the coach may only touch a seat he has evidence on.
     const row = eligible.find((s) => s.seat.toLowerCase() === c.seat.toLowerCase());
     if (!row) { applied.push({ seat: c.seat, ok: false, error: "seat is under the sample gate" }); continue; }
-    if (dryRun) { applied.push({ seat: c.seat, ok: true, dryRun: true, guidance: c.guidance }); continue; }
-    const r = applyPolicy({ seat: row.seat, guidance: c.guidance, rationale: c.rationale,
+    if (dryRun) {
+      /* A dry run that skipped the fence would show an operator a size instruction as an
+         accepted change. BOTH gates are checked here, through the same checkLane() the
+         live pass uses — including the semantic judge, which means a rehearsal costs the
+         same model call and reports the same refusal. Calling checkInvariants alone here
+         would have made a rehearsal look cleaner than the pass it rehearses, which is the
+         one thing a rehearsal may never do. */
+      const broke = await checkLane(c.guidance);
+      applied.push(broke
+        ? { seat: c.seat, ok: false, dryRun: true, invariant: broke.invariant, gate: broke.gate,
+            why: broke.why, sentence: broke.sentence }
+        : { seat: c.seat, ok: true, dryRun: true, guidance: c.guidance });
+      continue;
+    }
+    /* NO `judge` ARGUMENT. The production caller takes applyPolicy's default, which is
+       the real model judge; the parameter exists as a test seam and an operator escape
+       hatch, and test-coach-lane.mjs asserts this line never passes one. */
+    const r = await applyPolicy({ seat: row.seat, guidance: c.guidance, rationale: c.rationale,
       evidence: row, author: "codex" });
     applied.push({ seat: row.seat, ...r });
   }
+  /* REFUSALS RIDE ON THE REVIEW EVENT TOO. applyPolicy emits one policy:refused per
+     attempt, but an operator reading the coach's shift wants them in the shift's own
+     summary — how many changes he reached for, which invariant stopped which seat, and
+     the sentence itself. A coach quietly proposing size instructions every three hours
+     is a thing somebody has to be able to SEE. */
+  const refused = applied.filter((a) => !a.ok)
+    .map((a) => ({ seat: a.seat, invariant: a.invariant ?? null, gate: a.gate ?? null,
+      why: a.why ?? a.error, sentence: a.sentence ?? null }));
+  if (refused.length) emit("tutor:refused", { refused });
   emit("tutor:review", { seats: eligible.length, proposed: (out.changes || []).length,
-    applied: applied.filter((a) => a.ok).length, note: out.no_change_reason ?? null });
-  return { ok: true, changes: applied, note: out.no_change_reason ?? null };
+    applied: applied.filter((a) => a.ok).length, refused, note: out.no_change_reason ?? null });
+  return { ok: true, changes: applied, refused, note: out.no_change_reason ?? null };
 }
 
 /**
