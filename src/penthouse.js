@@ -9,7 +9,7 @@ import { announceExit } from "./alerts.js";
 import { listFloors, HQ_FLOOR } from "./tower.js";
 import { emit, runFor, runForEvidence } from "./lib/bus.js";
 import db from "./lib/store.js";
-import { spend, OutOfCredit, spendSince } from "./lib/llm.js";
+import { spend, OutOfCredit, spendSince, creditBreakerState } from "./lib/llm.js";
 import * as jup from "./data/jupiter.js";
 import { callouts, whaleScore } from "./whales.js";
 import { recordWhaleCallout } from "./identity.js";
@@ -764,8 +764,28 @@ export async function runPenthouseCycle({
   const picks = [];
   let workedUp = 0;
   let stopped = null;
-  const CONCURRENCY = Math.max(1, Math.min(6,
+  /* PARALLELISM IS WORTHLESS WHILE A PROVIDER IS DOWN, AND IT COSTS REAL MONEY.
+   *
+   * Every worker checks the credit guard in workup() and then buys the xAI reputation
+   * read, which takes ~70s to come back. Three workers starting in the same instant all
+   * pass that check honestly — the breaker really was closed — and all three have paid
+   * before the first one's seats discover the balance is empty and reopen it. Measured
+   * 2026-09-07 at 06:21:26: world, DRIP and FOMO bought three reads together, $0.47,
+   * and not one of them reached an analyst.
+   *
+   * So the width of the batch is narrowed to one while the analyst provider is not
+   * healthy. One worker can still lose a single read to that race, which is the floor
+   * for any check-then-spend scheme, but the batch can no longer lose three. Nothing
+   * about the breaker, the budget or the seats changes, and a healthy desk runs at the
+   * configured width exactly as before — this only ever narrows, and only during an
+   * outage the desk is already failing through. */
+  const configuredConcurrency = Math.max(1, Math.min(6,
     Number(process.env.PENTHOUSE_WORKUP_CONCURRENCY || 3)));
+  const analystHealthy = creditBreakerState("anthropic").state === "closed";
+  const CONCURRENCY = analystHealthy ? configuredConcurrency : 1;
+  if (!analystHealthy && configuredConcurrency > 1)
+    emit("cycle:narrowed", { from: configuredConcurrency, to: 1,
+      note: "the analyst provider is not healthy — a wide batch would only buy reads nobody can judge" });
   let cursor = 0;
   const studyOne = async (c) => {
     const hook = `house scan · ${c.category}${c.launchpad ? ` · ${c.launchpad}` : ""}`;
