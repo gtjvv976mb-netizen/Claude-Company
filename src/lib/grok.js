@@ -184,8 +184,44 @@ export async function grokAsk({ seat, system, prompt, shape, validate, maxTokens
  * Returns deterministic-shaped evidence for the bundle; the seats do the
  * judging. Fails open: no key, no signal, no drama.
  */
+/* ONE PAID READ PER COIN PER HALF HOUR. The read is about the coin's creator and its
+ * attention — how old the account is, whether they have rugged before, whether the reach
+ * is bought. None of that changes between two workups ten minutes apart, yet every
+ * workup bought a fresh one: there was no cache anywhere on this path. Measured on
+ * 2026-09-07: 319 same-mint re-starts in a day across the fresh, house, hunt and trend
+ * lanes, each buying a ~$0.15 read whenever it cleared the free screen. Keyed on MINT and
+ * not on hook: the hook is context text and the question is the same account. Failures
+ * are never cached — a transient refusal must be retried, and the credit breaker already
+ * stops a dead account from being hammered. Hits emit xread:cached rather than
+ * seat:verdict so nothing that counts reads mistakes a replay for a purchase. */
+const XREAD_CACHE_MS = Math.max(0, Number(process.env.DESK_XREAD_CACHE_MINUTES ?? 30)) * 60_000;
+const XREAD_CACHE_MAX = 500;
+const XREAD_CACHE = new Map();   // mint -> { at, read, citations }
+export function xreadCacheGet(mint, now = Date.now()) {
+  if (!XREAD_CACHE_MS || !mint) return null;
+  const hit = XREAD_CACHE.get(mint);
+  if (!hit) return null;
+  if (now - hit.at > XREAD_CACHE_MS) { XREAD_CACHE.delete(mint); return null; }
+  return hit;
+}
+export function xreadCachePut(mint, read, citations, now = Date.now()) {
+  if (!XREAD_CACHE_MS || !mint || !read) return;
+  XREAD_CACHE.delete(mint);                       // re-insert so eviction order is by recency
+  XREAD_CACHE.set(mint, { at: now, read, citations: Array.isArray(citations) ? citations : [] });
+  while (XREAD_CACHE.size > XREAD_CACHE_MAX) XREAD_CACHE.delete(XREAD_CACHE.keys().next().value);
+}
+export function xreadCacheReset() { XREAD_CACHE.clear(); }
+export const XREAD_CACHE_TTL_MS = XREAD_CACHE_MS;
+
 export async function grokXRead({ symbol, mint, hook = "", handle = null, lore = null }) {
   if (!hasGrok()) return { ok: false, error: "no key" };
+  const cached = xreadCacheGet(mint);
+  if (cached) {
+    const ageMin = Math.round((Date.now() - cached.at) / 60000);
+    emit("xread:cached", { mint, symbol, ageMin,
+      detail: `${cached.read?.verdict ?? "?"} · ${cached.read?.mentions_level ?? "?"} attention, ${cached.read?.velocity ?? "?"} (read ${ageMin}m ago, not re-bought)` });
+    return { ok: true, read: cached.read, citations: cached.citations, cached: true };
+  }
   const r = await xai("/responses", {
     model: GROK_MODEL,
     max_output_tokens: 8000,
@@ -307,6 +343,7 @@ export async function grokXRead({ symbol, mint, hook = "", handle = null, lore =
   if (!obj) return { ok: false, error: "x-read returned no parseable JSON" };
   const citations = (r.data?.citations ?? []).slice(0, 8);
   emit("seat:verdict", { seat: "XRead", symbol, detail: `${obj.verdict ?? "?"} · ${obj.mentions_level ?? "?"} attention, ${obj.velocity ?? "?"}` });
+  xreadCachePut(mint, obj, citations);
   return { ok: true, read: obj, citations };
 }
 

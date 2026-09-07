@@ -1530,6 +1530,22 @@ export async function freshScan({ minScore = 45 } = {}) {
       top: top ? { symbol: top.pair?.baseSymbol, score: top.score } : null });
     if (!top || top.score < minScore) return { young: young.length, workedUp: 0 };
 
+    /* THE FRESH LANE MUST NOT PAY TO RE-ASK. store.recentlyJudged's own docstring says
+       this lane "runs every few minutes; without this it would pay to re-ask the SAME
+       question about the same coin each pass" — and this lane never called it. Measured
+       2026-09-07: 151 mints started, 52 of them three or more times, 319 re-starts in a
+       day; FgJReZ…pump alone was worked up 25 times by this lane and the house scan and
+       never published. Every re-start that clears the free screen buys a fresh ~$0.15 X
+       read. The cohort, the hunt, promote and trends all gate on this; now so does fresh.
+       A WATCH promotion still bypasses it by design — its rules holding IS the change. */
+    const prior = store.recentlyJudged(top.mint);
+    if (prior) {
+      emit("fresh:skipped_repeat", { mint: top.mint, symbol: top.pair?.baseSymbol ?? null,
+        seat: prior.seat, verdict: prior.verdict, agoMin: Math.round((Date.now() - prior.ts) / 60000),
+        note: "judged within 6h — the fresh lane does not pay to re-ask" });
+      return { young: young.length, workedUp: 0, skipped: "recently_judged" };
+    }
+
     const hook = `fresh scan \u00b7 ignition \u00b7 ${top.category}${top.launchpad ? ` \u00b7 ${top.launchpad}` : ""}` +
       (top.race ? ` \u00b7 WINNING A NAMING RACE: ${top.race.size} fresh launches share "${top.race.theme}" \u2014 ` +
         `establish which X event fired this race and whether THIS is the canonical token for it; ` +
