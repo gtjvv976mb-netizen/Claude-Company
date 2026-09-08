@@ -288,6 +288,8 @@ body{
 .tape-tools{position:sticky;top:0;z-index:2;display:flex;gap:6px;padding:6px 0 8px;background:var(--panel)}
 .tape-tools .dashbadge{cursor:pointer}
 .tape-tools .dashbadge[aria-pressed="true"]{color:var(--good);border-color:color-mix(in srgb,var(--good) 48%,var(--card-line))}
+.hint{transition:opacity .6s ease}
+.hint.faded{opacity:0;pointer-events:none}
 /* A metric grid sizes itself to what it is inside. Three hard columns are right across
    the full panel and wrong inside the WALL-ST-E split, where they left each cell about
    85px wide and broke "Clear" into "Cle / ar" and "65s ago" into "65s / ag / o". */
@@ -1554,7 +1556,7 @@ window.CCModals = (function () {
       <div class="t">Opening the floor…</div>
       <div class="s">Claude Company</div>
     </div>
-    <div class="hint" id="hint">Drag to orbit · right-drag or WASD to pan · double-click to travel · scroll to zoom · R resets</div>
+    <div class="hint" id="hint">Drag to look around · scroll to zoom · double-click to travel</div>
     <aside class="dossier" id="dossier" role="dialog" aria-modal="false" aria-labelledby="d-name">
       <div class="dhead">
         <button class="dclose" id="d-close" aria-label="Close">✕</button>
@@ -1770,13 +1772,21 @@ let followSeat = null;   // seat id the pivot is glued to, or null
 let glide = null;        // {x,z} the pivot is easing toward, or null
 
 const hintEl = document.getElementById("hint");
+/* Three verbs a newcomer needs; the rest (WASD, R) lives in Settings. Once the reader
+   has touched the room the hint steps aside, and stays aside on later visits. */
+const hintSeen = () => { try { return localStorage.getItem("cc_hint_seen") === "1"; } catch { return false; } };
 function updateHint() {
   if (!hintEl) return;
   hintEl.textContent = followSeat
     ? "Following " + ((STAFF.find((s) => s.id === followSeat) || {}).name || followSeat)
       + " · drag to circle them · pan or R to let go"
-    : "Drag to orbit · right-drag or WASD to pan · double-click to travel · scroll to zoom · R resets";
+    : "Drag to look around · scroll to zoom · double-click to travel";
+  hintEl.classList.toggle("faded", !followSeat && hintSeen());
 }
+if (hintEl && stageEl) stageEl.addEventListener("pointerdown", () => {
+  try { localStorage.setItem("cc_hint_seen", "1"); } catch {}
+  setTimeout(updateHint, 1500);
+}, { once: true });
 
 function panCamera(dxPx, dyPx) {
   if (followSeat) { followSeat = null; updateHint(); }
@@ -6471,7 +6481,39 @@ window.__showChatter = (() => { try { return localStorage.getItem("cc_detailed")
   const chip = Object.freeze({ open: "OPEN", closedUp: "CLOSED · UP", closedDown: "CLOSED · DOWN", dryRun: "DRY RUN",
     live: "LIVE", offline: "OFFLINE", notSetUp: "NOT SET UP", tenantsOnly: "TENANTS ONLY", ownerOnly: "OWNER ONLY",
     working: "WORKING", paused: "PAUSED", holding: "HOLDING", vacant: "VACANT" });
-  window.PLAIN = Object.freeze({ role, reason, decision, closeReason, plainDetail, event, chip, fallback, eventTypes: Object.keys(EVENT) });
+  const plainAge = (ms) => { const sec = Math.max(0, Math.round(Number(ms) / 1000)); if (sec < 90) return sec + "s";
+    const m = Math.round(sec / 60); if (m < 90) return m + "m"; const h = Math.round(m / 60); if (h < 36) return h + "h"; return Math.round(h / 24) + "d"; };
+  /* THE DESK, in a word: working, holding, paused. The reason is only ever sent to the
+     HQ floor, and it passes through plainDetail like everything else. */
+  const deskState = (pulse) => {
+    const p = pulse || {}; const st = String(p.state || "");
+    if (st === "RUNNING" || st === "ACTIVE") return { chip: "WORKING", cls: "good", sentence: "The desk is working." };
+    if (!st) return { chip: "\u2014", cls: "", sentence: "The desk has not reported yet." };
+    if (/HOLD/i.test(st)) return { chip: "HOLDING", cls: "warn", sentence: "The desk is holding a call and starts the next round when it closes." };
+    return { chip: "PAUSED", cls: "warn", sentence: "The desk is paused" + (p.reason ? " \u2014 " + plainDetail(p.reason) : "") + "." };
+  };
+  const heldSentence = (h) => { const n = Number(h?.open ?? (Array.isArray(h?.held) ? h.held.length : 0)) || 0; return n ? " and holds " + plural(n, "coin") : ""; };
+  /* YOUR BOT, in one of seven states, with the one thing to do next. What needs a
+     human comes first, whatever else is true: a hard stop outranks a stale check-in,
+     which outranks an empty wallet. `action` names the single button the page shows. */
+  const botState = ({ heartbeat = null, ageMs = null, connected = null, runnerChoice = null, readiness = null } = {}) => {
+    const h = heartbeat || null, health = h?.health || null;
+    const fresh = connected === true || (ageMs != null && ageMs < 150000);
+    const live = String(h?.mode || "").toLowerCase() === "live";
+    const needs = (sentence, action) => ({ chip: "NEEDS YOU", cls: "bad", sentence, action });
+    if (!h && !runnerChoice) return { chip: "NO TRACK", cls: "warn", sentence: "Choose who runs your bot: you, on your own machine, or the house.", action: "choose" };
+    if (!h) return { chip: "NOT SET UP", cls: "warn", sentence: "Your bot has never checked in. Install it with one command; it starts as a dry run.", action: "install" };
+    if (health?.hardStop === true) return needs("Your bot hit its hard stop and will not buy again until you clear it on your machine.", "hardstop");
+    if (health?.exitBlocked || health?.manualAction) return needs("Your bot holds a coin it could not sell. Sell it by hand from your wallet.", "sell");
+    if (!fresh) return { chip: "OFFLINE" + (ageMs != null ? " \u00b7 " + plainAge(ageMs) : ""), cls: "bad",
+      sentence: "Your bot has not checked in" + (ageMs != null ? " for " + plainAge(ageMs) : "") + ". It is not trading. Start it on your machine.", action: "restart" };
+    if (health && (Number(health.consecutiveFeedFailures) >= 3 || health.feedRollback === true)) return needs("Your bot is running but cannot reach the desk's feed. Check its connection on your machine.", "feed");
+    if (readiness && readiness.ready === false && /balance|insufficient|fund|lamports/i.test(String(readiness.lastError || "")))
+      return { chip: (live ? "LIVE" : "DRY RUN") + " \u00b7 UNFUNDED", cls: "warn", sentence: "Your bot is running but its wallet holds too little SOL to place a trade. Send SOL to its address.", action: "fund" };
+    if (live) return { chip: "LIVE", cls: "good", sentence: "Your bot is running with real money" + heldSentence(h) + ".", action: null };
+    return { chip: "DRY RUN", cls: "good", sentence: "Your bot is running and only pretending to trade" + heldSentence(h) + ".", action: null };
+  };
+  window.PLAIN = Object.freeze({ role, reason, decision, closeReason, plainDetail, event, chip, fallback, plainAge, deskState, botState, eventTypes: Object.keys(EVENT) });
 })();
 /* PLAIN:END */
 
@@ -9879,17 +9921,21 @@ async function pollPulse() {
     /* A tenant is sent ACTIVE or INACTIVE and no reason; the HQ floor is sent the real
        state and why. Both render here, so the pill has to accept either vocabulary. */
     const live = body.state === "RUNNING" || body.state === "ACTIVE";
-    pill.textContent = body.state === "ACTIVE" ? "ACTIVE"
-      : body.state === "INACTIVE" ? "INACTIVE" : body.state;
+    /* "Desk working", not RUNNING; "Desk paused", not INACTIVE. The words come from
+       PLAIN so the strip, the Overview and the bot page agree. */
+    const desk = window.PLAIN ? window.PLAIN.deskState(body) : null;
+    pill.textContent = desk ? "Desk " + desk.chip.toLowerCase() : (live ? "Desk working" : "Desk paused");
     pill.className = "pill " + (live ? "run" : "paused");
     const age = body.lastEventTs ? Math.max(0, Math.round((Date.now() - body.lastEventTs) / 1000)) : null;
     const t = body.today || {};
+    const detailed = typeof window.__detailedView === "function" && window.__detailedView();
     document.getElementById("pulse-nums").innerHTML =
-      `today <b>${t.workups ?? 0}</b> workups · <b>${t.kills ?? 0}</b> kills · <b>${t.watches ?? 0}</b> watches` +
-      ` · $<b>${(t.spendUsd ?? 0).toFixed(2)}</b>/${t.capUsd ?? "?"}` +
-      (age != null ? ` · last event ${age < 90 ? age + "s" : Math.round(age / 60) + "m"} ago` : "");
-    document.getElementById("pulse-reason").textContent = body.reason || "";
-    document.getElementById("pulse-reason").title = body.reason || "";
+      `<b>${t.workups ?? 0}</b> coins studied today · <b>${t.kills ?? 0}</b> turned down · <b>${t.watches ?? 0}</b> on watch` +
+      (detailed ? ` · $<b>${(t.spendUsd ?? 0).toFixed(2)}</b> of $${t.capUsd ?? "?"} research` : "") +
+      (age != null ? ` · last move ${age < 90 ? age + "s" : Math.round(age / 60) + "m"} ago` : "");
+    const why = body.reason && window.PLAIN ? window.PLAIN.plainDetail(body.reason) : (body.reason || "");
+    document.getElementById("pulse-reason").textContent = why;
+    document.getElementById("pulse-reason").title = why;
   } catch {}
 }
 pollPulse();
@@ -10917,37 +10963,49 @@ for (const group of ["calls", "activity", "performance"]) {
 async function loadOverviewDashboard() {
   const el = document.getElementById("overviewbody");
   if (!el) return;
+  /* By dataset, not by an attribute selector: the dashboard test counts the tabs'
+     destination attribute across the whole file and expects exactly eight. */
+  const goTo = (dest) => [...document.querySelectorAll(".dtab")].find((t) => t.dataset.destination === dest)?.click();
+  const HOW_THE_DESK_WORKS = "Every few minutes the desk pulls the newest pump.fun coins and screens them for free: "
+    + "size, age, whether they can be sold, whether the trading looks real. The few that pass are studied by a team of "
+    + "analysts \u2014 contract, exit, demand, chart, story \u2014 argued against by a devil's advocate, and judged by the CEO. "
+    + "A call is one the desk would trade itself, with an entry, a stop and a target. Open means the desk is tracking it, "
+    + "not that anyone holds it: your bot decides for itself whether to buy.";
   if (FLOOR_N == null) {
     el.innerHTML = "";
-    /* A visitor with no floor open used to get a blank panel and an instruction. The
-     * house desk is public, so show what it is doing right now — the numbers a
-     * visitor came for — and keep the instruction as one line underneath. */
-    el.append(dashLead("The house desk", "Open a floor from the tower to see its own dashboard.", "VIEW ONLY", "warn"));
-    /* THE CURRENT CYCLE, FIRST. A visitor with no floor open still sees what the house
-       desk is doing, and the quota is the first thing it is doing. */
-    const visitorCycleSlot = dashNode("div");
-    el.appendChild(visitorCycleSlot);
-    paintCycleSurface(visitorCycleSlot, { history: false });
+    /* THE VISITOR'S OVERVIEW: one sentence, three numbers, one button. What the desk is
+       and what it did today; the round and the numbers sit under Details. */
     const [pulseR, statsR] = await Promise.all([call_api("/api/heartbeat"), call_api("/api/stats/overview")]);
     const pulse = pulseR?.body || {};
     const building = statsR?.body?.building || {};
     const openCalls = Array.isArray(pulse.pnl?.openCalls) ? pulse.pnl.openCalls.length : null;
+    const desk = window.PLAIN.deskState(pulse);
+    el.append(plainLead("The house desk studies new pump.fun coins all day and publishes the few it would trade. Here is today.",
+      { sub: "Open a floor from the tower to see that floor's own page.", info: HOW_THE_DESK_WORKS, infoTitle: "How the desk works" }));
+    el.append(chipRow([
+      { label: "Desk", value: desk.chip + (pulse.lastEventTs ? " \u00b7 last move " + window.PLAIN.plainAge(Date.now() - pulse.lastEventTs) + " ago" : ""), cls: desk.cls, title: desk.sentence },
+      { label: "Open calls", value: openCalls == null ? "\u2014" : String(openCalls) },
+      { label: "Today", value: String(pulse.today?.workups ?? 0) + " studied \u00b7 " + String(pulse.today?.kills ?? 0) + " turned down" },
+    ]));
+    el.append(leadButton("See the calls", () => goTo("calls")));
+    const details = detailsFold("Details \u00b7 the round and the numbers");
+    const visitorCycleSlot = dashNode("div");
+    details.body.appendChild(visitorCycleSlot);
+    paintCycleSurface(visitorCycleSlot, { history: false });
     const metrics = dashNode("div", "dashgrid");
     metrics.append(
       /* Working, or not working. A tenant cannot act on the desk's API keys, its daily
          budget or its build failures, and naming them reads as instability rather than
          as candour. The server sends the reason only to the HQ floor, so this shows
          one only when it was actually given one. */
-      dashMetric("Desk state",
-        pulse.state === "RUNNING" ? "ACTIVE" : (pulse.state || "\u2014"),
-        pulse.reason ? String(pulse.reason).slice(0, 60)
-          : (pulse.state === "RUNNING" || pulse.state === "ACTIVE" ? "the desk is working" : "")),
-      dashMetric("House calls", openCalls == null ? "\u2014" : String(openCalls) + " live",
+      dashMetric("Desk state", desk.chip, pulse.reason ? window.PLAIN.plainDetail(pulse.reason).slice(0, 60) : desk.sentence),
+      dashMetric("House calls", openCalls == null ? "\u2014" : String(openCalls) + " open",
         String(building.houseCalls ?? 0) + " published all-time"),
-      dashMetric("Today", String(pulse.today?.workups ?? 0) + " workups",
-        String(pulse.today?.kills ?? 0) + " killed at the screen"),
+      dashMetric("Today", String(pulse.today?.workups ?? 0) + " coins studied",
+        String(pulse.today?.kills ?? 0) + " turned down at the first screen"),
     );
-    el.appendChild(metrics);
+    details.body.appendChild(metrics);
+    el.appendChild(details.wrap);
     return;
   }
   dashLoading(el, "Opening the floor dashboard…");
@@ -10972,40 +11030,62 @@ async function loadOverviewDashboard() {
   try { heartbeat = room.executorHeartbeat ? JSON.parse(room.executorHeartbeat) : null; } catch {}
   const heartbeatAge = heartbeat?.seenAt ? Date.now() - heartbeat.seenAt : null;
   const floorName = identity.floorName || room.settings?.desk_name || room.floorLabel || ("Floor " + FLOOR_N);
-  const ownerBadge = room.isMine ? "OWNER VIEW" : room.lease ? "OBSERVING" : "VACANT";
-  el.appendChild(dashLead(floorName,
-    room.isMine
-      ? "Your floor at a glance. Open a destination for the full record or its owner controls."
-      : "A read-only view of this floor. Private calls and controls remain with its tenant.",
-    ownerBadge, room.isMine ? "good" : "warn"));
+  /* ONE SENTENCE FOR THIS READER. The tenant hears about their floor, their bot and
+     their calls; a visitor hears whose floor it is and where the public desk lives.
+     Everything the old six-tile grid said is still here, under Details. */
+  const desk = window.PLAIN.deskState(pulse);
+  const bot = window.PLAIN.botState({ heartbeat, ageMs: heartbeatAge,
+    runnerChoice: room.settings?.runner_choice ?? room.settings?.runnerChoice ?? room.runnerChoice ?? "unknown" });
+  const deskChip = { label: "Desk", value: desk.chip + (pulse.lastEventTs ? " \u00b7 last move " + window.PLAIN.plainAge(Date.now() - pulse.lastEventTs) + " ago" : ""), cls: desk.cls, title: desk.sentence };
+  if (room.isMine) {
+    el.append(plainLead("Your floor. The desk has " + (feedPrivate ? "its calls" : live.length + " open call" + (live.length === 1 ? "" : "s"))
+      + "; your bot is " + bot.chip.toLowerCase() + ".", { sub: bot.sentence, info: HOW_THE_DESK_WORKS, infoTitle: "How the desk works" }));
+    el.append(chipRow([
+      { label: "Your bot", value: bot.chip, cls: bot.cls, title: bot.sentence },
+      deskChip,
+      { label: "Open calls", value: feedPrivate ? "private" : String(live.length) + (offered.length ? " \u00b7 " + offered.length + " for you" : "") },
+    ]));
+    el.append(leadButton(bot.action ? "Open your bot" : offered.length ? "See your calls" : "See the calls",
+      () => goTo(bot.action ? "wallste" : "calls")));
+  } else {
+    el.append(plainLead(room.lease
+      ? floorName + " is leased. Its calls and controls are private to its tenant; the house desk is public on floor 50."
+      : "Nobody leases " + floorName + " yet. The house desk is public on floor 50.",
+      { sub: room.lease ? "You are visiting." : "Lease it from the tower to run your own desk here.", info: HOW_THE_DESK_WORKS, infoTitle: "How the desk works" }));
+    el.append(chipRow([
+      { label: room.lease ? "Visitor" : "Vacant", value: "", cls: "warn" },
+      deskChip,
+      { label: "Open calls", value: feedPrivate ? "private" : String(live.length) },
+    ]));
+  }
 
-  /* THE CURRENT CYCLE SITS ABOVE THE METRICS GRID, on purpose. Whether the quota is
-     healthy or straining is the owner's main instrument; a tile among six tiles is not
+  /* THE CURRENT ROUND SITS ABOVE THE DETAILS, on purpose. Whether the quota is healthy
+     or straining is the owner's main instrument; a tile among six tiles is not
      prominent. The slot is attached now and filled when the route answers, so an await
      cannot shuffle the panel underneath it. */
   const cycleSlot = dashNode("div");
   el.appendChild(cycleSlot);
   paintCycleSurface(cycleSlot, { history: false });
+  const details = detailsFold("Details \u00b7 the numbers");
+  el.appendChild(details.wrap);
 
   const metrics = dashNode("div", "dashgrid");
   metrics.append(
-    dashMetric("Desk state", pulse.state || (room.busy ? "WORKING" : "—"),
-      pulse.reason || (pulse.lastEventTs ? "last event " + dashAge(Date.now() - pulse.lastEventTs) : "central desk pulse")),
-    dashMetric("Published live", feedPrivate ? "PRIVATE" : String(live.length),
-      feedPrivate ? "the tenant call sheet is not visible in this session"
-        : room.isMine ? String(offered.length) + " offered to this floor" : "paper call sheet"),
-    dashMetric("WALL-ST-E", heartbeatAge != null && heartbeatAge < 150000
-      ? String(heartbeat.mode || "connected").toUpperCase() : heartbeat ? "STALE" : "NOT LINKED",
-      heartbeatAge == null ? "no self-reported heartbeat" : "self-reported " + dashAge(heartbeatAge)),
+    dashMetric("Desk state", desk.chip,
+      pulse.reason ? window.PLAIN.plainDetail(pulse.reason) : (pulse.lastEventTs ? "last move " + dashAge(Date.now() - pulse.lastEventTs) : desk.sentence)),
+    dashMetric("Open calls", feedPrivate ? "PRIVATE" : String(live.length),
+      feedPrivate ? "this floor's calls are private to its tenant"
+        : room.isMine ? String(offered.length) + " for you" : "the desk's own calls"),
+    dashMetric("Your bot", bot.chip, bot.sentence),
     dashMetric("Settled P&L", feedPrivate ? "PRIVATE" : money(feedR?.body?.record?.netPnlUsd ?? 0),
       feedPrivate ? "the tenant performance record is unavailable in this session"
         : String(feedR?.body?.record?.settled ?? 0) + " settled trades"),
     dashMetric("Building", String(building.floorsLeased ?? "—") + " floors leased",
       String(building.houseCalls ?? 0) + " house calls published"),
-    dashMetric("Today", String(pulse.today?.workups ?? 0) + " workups",
-      String(pulse.today?.kills ?? 0) + " killed · " + String(pulse.today?.watches ?? 0) + " watched")
+    dashMetric("Today", String(pulse.today?.workups ?? 0) + " coins studied",
+      String(pulse.today?.kills ?? 0) + " turned down · " + String(pulse.today?.watches ?? 0) + " on watch")
   );
-  el.appendChild(metrics);
+  details.body.appendChild(metrics);
 
   if (room.isMine && budgetR?.status === 200) {
     const budget = budgetR.body || {};
@@ -11027,27 +11107,27 @@ async function loadOverviewDashboard() {
         room.settings?.mode === "grind" ? "team is grinding" : "team is on a break")
     );
     section.appendChild(row);
-    el.appendChild(section);
+    details.body.appendChild(section);
   }
 
   const recent = dashNode("div", "dashsection");
-  recent.appendChild(dashNode("h4", "", "Recent published calls"));
+  recent.appendChild(dashNode("h4", "", "Recent calls"));
   if (!feed.length) recent.appendChild(dashNode("p", "dp-note",
     feedR?.status === 403 ? "The tenant's call sheet is private." : feedR?.status === 200 ? "No calls have been published yet." : "The call sheet did not load (" + (feedR?.status ?? "no response") + ") \u2014 retrying in 30s."));
-  if (feed.length > 3) recent.appendChild(dashNode("p", "dp-note", "Showing 3 of " + feed.length + " delivered calls \u2014 the full sheet is under Calls \u2192 Published."));
+  if (feed.length > 3) recent.appendChild(dashNode("p", "dp-note", "Showing 3 of " + feed.length + " calls \u2014 all of them are under Calls."));
     for (const call of feed.slice(0, 3)) {
     /* WHEREVER CALLS ARE LISTED. This summary is a list of calls, so it carries the
        level too \u2014 a reader must not be able to find a view of the book where an L3 and
        an L0 are indistinguishable. */
     const row = drow([
       ["b grow", call.symbol || String(call.mint || "").slice(0, 6)],
-      ["span", call.status === "live" ? "live" : String(call.close_reason || "closed").replace(/_/g, " ")],
+      ["span", call.status === "live" ? "open" : window.PLAIN.closeReason(call.close_reason || "closed")],
       ["faint", (dashWhen(call.delivered_at) || (call.delivered_at ? ago(call.delivered_at) : "")) + (call.status !== "live" && call.closed_at ? " \u00b7 closed " + dashWhen(call.closed_at) : "")],
     ]);
     row.appendChild(cycleLevelChip(call.escalation_level));
     recent.appendChild(row);
   }
-  el.appendChild(recent);
+  details.body.appendChild(recent);
 }
 
 const CANDIDATE_BANDS = [
@@ -11382,10 +11462,15 @@ async function loadWallsteDashboard({ background = false } = {}) {
 
     const mode = heartbeat?.mode ? String(heartbeat.mode).toUpperCase() : "NOT REPORTED";
     const connected = telemetry.connected === true;
+    /* ONE CHIP FOR THE BOT, everywhere it is named: the HUD strip, the Overview and
+       this page all read window.PLAIN.botState, so a bot cannot be OFFLINE on one
+       screen and STALE on another. */
+    const botNow = window.PLAIN.botState({ heartbeat, ageMs: telemetry.ageMs ?? null, connected, runnerChoice,
+      readiness: health?.executionReadiness || null });
+    window.__botState = botNow;
     const lead = dashLead("",
-      "Your autotrader. This page observes its outbound heartbeat and confirmed public balance; it cannot start, stop, steer, sign for, or fund it.",
-      connected ? mode + " · CONNECTED" : heartbeat ? mode + " · STALE" : "NOT LINKED",
-      connected ? "good" : heartbeat ? "bad" : "warn");
+      botNow.sentence + " This page can see your bot; it cannot start, stop, steer, sign for, or fund it.",
+      botNow.chip, botNow.cls);
     /* THE TRACK RIDES IN THE HEADER, BESIDE THE MODE. A tenant must never have to
        reason about which of the two arrangements they are on: it is stated wherever
        the bot's state is stated. "NOT RUNNING" is part of the HQ badge on purpose. */

@@ -93,6 +93,47 @@ ok("SWEEP: every event type in the table yields a sentence with no shouted code,
   console.log(`       ${seen} event kinds rendered, ${P.eventTypes.length - seen} hidden by design`);
 });
 
+console.log("\nYOUR BOT — the NEEDS-YOU ladder, what needs a human first");
+const hb = (over = {}, health = {}) => ({ mode: "live", open: 0, held: [], health: { hardStop: false, exitBlocked: false, manualAction: false, consecutiveFeedFailures: 0, ...health }, ...over });
+ok("no heartbeat and no track → NO TRACK; no heartbeat with a track → NOT SET UP", () => {
+  assert.equal(P.botState({}).chip, "NO TRACK");
+  assert.equal(P.botState({ runnerChoice: "self" }).chip, "NOT SET UP");
+});
+ok("a hard stop is NEEDS YOU even when the check-in is stale", () => {
+  const r = P.botState({ heartbeat: hb({}, { hardStop: true }), ageMs: 3_600_000, runnerChoice: "self" });
+  assert.equal(r.chip, "NEEDS YOU"); assert.equal(r.action, "hardstop"); assert.match(r.sentence, /hard stop/);
+});
+ok("a coin that could not be sold outranks going offline", () => {
+  const r = P.botState({ heartbeat: hb({}, { exitBlocked: true }), ageMs: 900_000, runnerChoice: "self" });
+  assert.equal(r.action, "sell"); assert.match(r.sentence, /Sell it by hand/);
+});
+ok("a stale check-in is OFFLINE with the age, in words", () => {
+  const r = P.botState({ heartbeat: hb(), ageMs: 14 * 60_000, runnerChoice: "self" });
+  assert.equal(r.chip, "OFFLINE · 14m"); assert.equal(r.action, "restart"); assert.match(r.sentence, /not trading/);
+});
+ok("three feed failures on a fresh bot is NEEDS YOU", () => {
+  const r = P.botState({ heartbeat: hb({}, { consecutiveFeedFailures: 3 }), connected: true, runnerChoice: "self" });
+  assert.equal(r.chip, "NEEDS YOU"); assert.equal(r.action, "feed");
+});
+ok("an unfunded wallet is named as such, in the bot's own mode", () => {
+  const r = P.botState({ heartbeat: hb(), connected: true, runnerChoice: "self", readiness: { ready: false, lastError: "insufficient balance: 95300000 lamports" } });
+  assert.equal(r.chip, "LIVE · UNFUNDED"); assert.equal(r.action, "fund");
+  assert.doesNotMatch(r.sentence, /lamports|\d{6,}/);
+});
+ok("a fresh live bot is LIVE and says what it holds; a paper bot is DRY RUN", () => {
+  assert.equal(P.botState({ heartbeat: hb({ open: 2 }), connected: true, runnerChoice: "self" }).sentence, "Your bot is running with real money and holds 2 coins.");
+  assert.equal(P.botState({ heartbeat: hb({ mode: "paper" }), connected: true, runnerChoice: "hq" }).chip, "DRY RUN");
+});
+ok("the desk is WORKING / HOLDING / PAUSED, and its reason is plain", () => {
+  assert.equal(P.deskState({ state: "RUNNING" }).chip, "WORKING"); assert.equal(P.deskState({ state: "ACTIVE" }).chip, "WORKING");
+  assert.equal(P.deskState({ state: "INACTIVE" }).chip, "PAUSED"); assert.equal(P.deskState({ state: "HOLDING" }).chip, "HOLDING");
+  const r = P.deskState({ state: "PAUSED", reason: "out_of_credit: team 7fce2f04-3025-4e0c-9f1d-4722ee3cb8ac" });
+  assert.doesNotMatch(r.sentence, UUID); assert.doesNotMatch(r.sentence, /_/);
+});
+ok("ages read like a person says them", () => {
+  assert.equal(P.plainAge(42_000), "42s"); assert.equal(P.plainAge(7 * 60_000), "7m"); assert.equal(P.plainAge(5 * 3_600_000), "5h"); assert.equal(P.plainAge(3 * 86_400_000), "3d");
+});
+
 console.log("\nINTEGRATION, AT SOURCE LEVEL");
 ok("fmtTape delegates to PLAIN and hides chatter unless asked", () => {
   const i = html.indexOf("function fmtTape(e) {"); assert.ok(i > 0, "fmtTape exists");
@@ -112,6 +153,25 @@ ok("memoNode paints the decision chip from the table", () => {
 ok("the anatomy primitives and the Detailed-view gate exist and openDialog is shared", () => {
   for (const s of ["const readerOf = ", "const detailedView = ", "const plainLead = ", "const chipRow = ", "const leadButton = ", "const detailsFold = ", "window.openDialog = openDialog;", ".plainlead{", ".chiprow{", ".info-btn{"])
     assert.ok(html.includes(s), s);
+});
+
+ok("the Overview, the pulse strip and the hint speak plainly", () => {
+  const i = html.indexOf("async function loadOverviewDashboard"); const ov = html.slice(i, html.indexOf("const CANDIDATE_BANDS", i));
+  for (const t of ["studies new pump.fun coins all day", "Your floor. The desk has ", "window.PLAIN.botState(", "detailsFold(", "plainLead(", "chipRow(", "leadButton("])
+    assert.ok(ov.includes(t), `Overview must contain ${t}`);
+  for (const t of ["\" workups\"", "paper call sheet", "self-reported", "OWNER VIEW", "NOT LINKED"])
+    assert.ok(!ov.includes(t), `Overview must not say ${t}`);
+  assert.ok(ov.includes('dashMetric("Settled P&L", feedPrivate ? "PRIVATE"'), "the private-record tile survives under Details");
+  const j = html.indexOf("async function pollPulse"); const pulse = html.slice(j, html.indexOf("pollPulse();", j));
+  /* t.workups is the server's field name and may stay; the WORD "workups" must not reach the strip. */
+  assert.ok(pulse.includes("coins studied today") && pulse.includes("turned down") && !/<\/b> workups| workups ·|workups`/.test(pulse), "the strip counts coins studied, not workups");
+  assert.ok(pulse.includes('"Desk " + desk.chip.toLowerCase()'), "the pill says Desk working / Desk paused");
+  assert.ok(html.includes("Drag to look around · scroll to zoom · double-click to travel") && html.includes("cc_hint_seen"), "the hint has three verbs and steps aside");
+});
+ok("the bot page's lead chip is the shared bot state", () => {
+  const i = html.indexOf("async function loadWallsteDashboard"); const w = html.slice(i, i + 12000);
+  assert.ok(w.includes("window.PLAIN.botState({ heartbeat, ageMs: telemetry.ageMs"), "lead reads botState");
+  assert.ok(!w.includes('mode + " · STALE"') && !w.includes('"NOT LINKED"'), "the old three-way badge is gone");
 });
 
 console.log(`\n${pass} passed — one vocabulary, executed\n`);
