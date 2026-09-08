@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { emit, runContext } from "./bus.js";
-import { CHARTER, cfg } from "../config.js";
+import { CHARTER, cfg, CYCLE_BUDGET_DEFAULT_USD } from "../config.js";
 import db, { ensureColumn } from "./store.js";
 // No cycle: desk-policy reaches only store, bus and canonical, never back into llm.
 import { withPolicy } from "../desk-policy.js";
@@ -511,8 +511,11 @@ export function assertDailyBudget(capUsd, { lane = "cycle" } = {}) {
      * while looking, from outside, like a quiet market.
      *
      * Read from the same env var penthouse.js reads rather than imported from it;
-     * llm.js is below penthouse in the graph and must not reach back up. */
-    const cycleBudget = Number(process.env.PENTHOUSE_CYCLE_BUDGET_USD || 4);
+     * llm.js is below penthouse in the graph and must not reach back up. The DEFAULT
+     * is now shared through config.js (which is below both), because these two reads
+     * had drifted apart: llm.js said 4 while penthouse.js enforced 8, so the floor
+     * protected a cycle half the size of the one that ran. Same env var, one default. */
+    const cycleBudget = Number(process.env.PENTHOUSE_CYCLE_BUDGET_USD || CYCLE_BUDGET_DEFAULT_USD);
     const hourCap = Math.max((capUsd / 24) * HOURLY_BURST, cycleBudget * 1.25);
     const spentHour = spendSince(Date.now() - 3600e3,
       { evidenceScope: "house", includeUnattributed: true }).usd;

@@ -45,7 +45,7 @@ import { registerHooks } from "node:module";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
-import { cfg } from "./src/config.js";
+import { cfg, CYCLE_BUDGET_DEFAULT_USD } from "./src/config.js";
 import os from "node:os";
 
 const REPO = path.dirname(new URL(import.meta.url).pathname);
@@ -62,7 +62,11 @@ process.env.PENTHOUSE_WHALE_BUDGET_MS ??= "2000";
    this run only: fifty cycles inside one wall-clock minute would trip the pace brake
    on cycle 3 and measure the brake instead of the quota. Called out in the report. */
 process.env.DESK_DAILY_BUDGET_USD = "1000000";
-process.env.PENTHOUSE_CYCLE_BUDGET_USD ??= "8";
+/* Read from config.js rather than pinned at "8", which is what "left at its shipped
+   default" meant when it was written and stopped meaning on 2026-09-08 when the
+   default moved to 16. A literal here would quietly measure a cycle the desk no
+   longer runs. */
+process.env.PENTHOUSE_CYCLE_BUDGET_USD ??= String(CYCLE_BUDGET_DEFAULT_USD);
 
 /* ═══ THE STUB LAYER ══════════════════════════════════════════════════════════════ */
 
@@ -753,10 +757,19 @@ let ladderCycleId = null;
     /* The spec fills the whole population deliberately: a census filler could contribute
        a coin the ladder legitimately reaches (a "manufactured" narrative is publishable
        at L3), and this scenario is about a market with NOTHING in it. */
+    /* SIZED TO THE PASS, NOT TO A LITERAL. This read `4` of each fate and a total of 32,
+       which was 4x the EIGHT workups a pass bought when it was written. A pass now buys
+       24 (config.js WORKUPS_DEFAULT; 48 at L1+), and the shortlist plus its reserve
+       bench consumed all 32 coins before the mandate hunt could reach one — CLAIM 4's
+       drive is the hunt lane, so it went vacuous at L0-L2 (0 refusals, "none reached")
+       while the property it asserts was never in question. The RATIO is what this
+       scenario needs — a barren market bigger than one pass can study — so it derives
+       from the config now and cannot go stale the next time the config moves. */
+    const each = Math.max(4, Math.round(WORKUPS_PER_CYCLE / 2));
     const coins = population({
-      mintable: 4, holder_concentration: 4, unverified_exit: 4, rugger: 4,
-      analyst_kill: 4, serial_deployer: 4, post_migration_dump: 4, freezable: 4,
-    }, 32, 100 + p);
+      mintable: each, holder_concentration: each, unverified_exit: each, rugger: each,
+      analyst_kill: each, serial_deployer: each, post_migration_dump: each, freezable: each,
+    }, each * 8, 100 + p);
     const { r, events } = await cyclePass(coins);
     if (p < 5) {
       levels.push(r.level);

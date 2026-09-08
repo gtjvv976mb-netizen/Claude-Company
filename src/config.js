@@ -520,6 +520,31 @@ export const CYCLE = {
   floorConviction: num("CYCLE_FLOOR_CONVICTION", 15),
 };
 
+/* ═══ HOW HARD ONE PASS IS ALLOWED TO WORK — the defaults, in ONE place ══════════════
+ *
+ * These are DEFAULTS, not resolved values: each consumer still reads its own env var at
+ * its own time, so a test or an operator can pin any of them exactly as before. They
+ * live here because three modules were carrying private copies and two of them
+ * disagreed — llm.js defaulted the per-cycle budget to 4 while penthouse.js enforced 8,
+ * so the hourly-pace FLOOR (`max(cap/24*burst, cycleBudget*1.25)`) was sized to protect
+ * a cycle half as large as the one that actually ran. At the live $200 cap the floor is
+ * now max(200/24*3, 16*1.25) = $25/h.
+ *
+ * WHY THE NUMBERS MOVED (2026-09-08). Measured over 500 workups: the positive-verdict
+ * rate is 3.8% (4 PASS + 15 WATCH), a fully-worked coin costs ~$1.30 and the free screen
+ * kills ~93% at $0. Three published calls therefore need ~79 paid workups in expectation
+ * at the blended rate (~21 at the 14.3% PM-positive rate) — so eight workups against an
+ * $8 cap could not reach a cohort by arithmetic, and cycle 19 spent $21.68 for 0 calls
+ * with the hunt doing most of the spending outside the cap. The owner may want any of
+ * these back: set the env var named beside each one to the OLD default. */
+/** env PENTHOUSE_WORKUPS — was 8. L1+ doubles it (CYCLE_L1_WORKUP_X), so 48 at L1+. */
+export const WORKUPS_DEFAULT = 24;
+/** env PENTHOUSE_CYCLE_BUDGET_USD — was 8 in penthouse.js and 4 in llm.js. */
+export const CYCLE_BUDGET_DEFAULT_USD = 16;
+/** env PENTHOUSE_HUNT_BUDGET_MS — was 240_000, which timeboxed the hunt after 1-3 of
+ *  its own workups at the measured 8.6-minute median. 900s buys at least three. */
+export const HUNT_BUDGET_DEFAULT_MS = 900_000;
+
 /**
  * What the desk is allowed to do differently at each level.
  *

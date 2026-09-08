@@ -7,14 +7,15 @@ import { openCall, liveCalls, liveCallFor, evaluateExit, closeCall, noteEvent,
 import { broadcast } from "./copy.js";
 import { announceExit } from "./alerts.js";
 import { listFloors, HQ_FLOOR } from "./tower.js";
-import { emit, runFor, runForEvidence } from "./lib/bus.js";
+import { emit, runFor, runForEvidence, bus } from "./lib/bus.js";
 import db from "./lib/store.js";
 import { spend, OutOfCredit, spendSince, creditBreakerState } from "./lib/llm.js";
 import * as jup from "./data/jupiter.js";
 import { callouts, whaleScore } from "./whales.js";
 import { recordWhaleCallout } from "./identity.js";
 import { regime } from "./data/regime.js";
-import { cfg, floorsFor, CYCLE, MAX_ESCALATION_LEVEL, escalationPlan, setCycleBandWindow } from "./config.js";
+import { cfg, floorsFor, MINTS, CYCLE, MAX_ESCALATION_LEVEL, escalationPlan, setCycleBandWindow,
+  WORKUPS_DEFAULT, CYCLE_BUDGET_DEFAULT_USD, HUNT_BUDGET_DEFAULT_MS } from "./config.js";
 import * as store from "./lib/store.js";
 import * as shadow from "./shadow.js";
 import { buildBoard, selectAcrossBoard, CAP_BANDS, COIN_TYPES, bandForMarketCap } from "./categories.js";
@@ -40,13 +41,25 @@ import { linkPublishedCall } from "./evaluation.js";
  * worth trading appears every half hour, that is a narrow net. Eight per cycle on a
  * faster clock roughly quadruples the looks. The daily money cap still governs the
  * total, so this widens the net without removing the brake. */
-export const WORKUPS_PER_CYCLE = Number(process.env.PENTHOUSE_WORKUPS || 8);
+/* 8 -> 24 (2026-09-08). Eight was still too narrow to be arithmetic: measured over 500
+ * workups the positive-verdict rate is 3.8% (4 PASS + 15 WATCH), so a cohort of three
+ * needs ~79 paid workups in expectation — ~21 even at the 14.3% PM-positive rate. Eight
+ * a pass could not reach three calls however good the market was. Set PENTHOUSE_WORKUPS
+ * to 8 to restore the old default; the default itself lives in config.js. */
+export const WORKUPS_PER_CYCLE = Number(process.env.PENTHOUSE_WORKUPS || WORKUPS_DEFAULT);
 /** Hard ceiling per cycle. Without it one bad night empties the account. */
 /* $10 was more than the hourly pace allowed ($40/24 x 3 = $5), so every cycle was cut
  * off mid-hunt and none could complete. Four fits inside the pace with room to spare,
  * and at the measured $0.126 a workup it still buys ~32 of them — a shortlist of three
  * plus a deep mandate hunt. Smaller cycles running often beat large ones that die. */
-export const CYCLE_BUDGET_USD = Number(process.env.PENTHOUSE_CYCLE_BUDGET_USD || 8);
+/* 8 -> 16 (2026-09-08), because a workup is no longer $0.126: a fully-worked coin
+ * measures ~$1.30, so an $8 cap ended a FUNDED pass after roughly six of them — the
+ * loop stops at `used + reserved >= cap` — while 24 workups plus a hunt were queued
+ * behind it. At the live $200 daily cap the hourly pace floor is max($200/24x3,
+ * 16x1.25) = $25/h, so 16 still fits inside one hour's allowance. Set
+ * PENTHOUSE_CYCLE_BUDGET_USD to 8 to restore the old default (which config.js owns,
+ * so llm.js's pace floor reads the same number this cap is enforced at). */
+export const CYCLE_BUDGET_USD = Number(process.env.PENTHOUSE_CYCLE_BUDGET_USD || CYCLE_BUDGET_DEFAULT_USD);
 export const TOP_N = Number(process.env.PENTHOUSE_TOP_N || 5);
 /* How many candidates the board shortlists per cell — the owner's "at least 5 per
  * category". Shortlisting is free; only what selectAcrossBoard picks gets paid for. */
@@ -427,13 +440,70 @@ export async function ignitionUniverse({ solUsd = null, tapes = 40 } = {}) {
   }
 }
 
-export async function warmFunnel() {
-  const [swept, igniting] = await Promise.all([sweep(), ignitionUniverse()]);
+/**
+ * THE SOL MARK THE CURVE IS PRICED IN, read once per pass.
+ *
+ * A pump.fun row reports its curve in lamports, so without a SOL/USD price
+ * asCandidate cannot fill `curveLiquidityUsd` and every on-curve coin arrives with
+ * `pair.liquidityUsd = null`. That is not free: an unreadable pool takes the DOUBLE-bar
+ * path in wouldSurviveScreen (2x volume and 2x participation on the minute tape) — the
+ * strictness reserved for a coin whose depth genuinely cannot be read, applied to a coin
+ * whose depth is sitting in the row. One keyless Jupiter request answers it for the
+ * whole universe. Unreachable falls back to cfg.solUsdFallback (DESK_SOL_USD_FALLBACK,
+ * $103), a stated constant, exactly as probe-size.js does.
+ */
+async function curveSolUsd() {
+  try {
+    const p = await jup.price([MINTS.SOL]);
+    const px = Number(p?.[MINTS.SOL]?.usdPrice);
+    if (px > 0) return { solUsd: px, source: "jupiter" };
+  } catch { /* a price that did not answer is not a reason to skip the launch feed */ }
+  return { solUsd: Number(cfg.solUsdFallback) || 0, source: "DESK_SOL_USD_FALLBACK" };
+}
+
+/**
+ * THE UNIVERSE BOTH PASSES WORK OVER — the keyword sweep AND the live launch feed.
+ *
+ * The cohort pass used to see `sweep()` alone: ~108 DexScreener keyword hits whose
+ * median age measured twenty-five days, which one ladder walk exhausts inside the 6h
+ * recentlyJudged window (store.js) — that is what `cycle:topped_up` is. Meanwhile the
+ * pump.fun listing the free warm pass already reads (up to 420 rows and 40 minute tapes,
+ * keyless) reached nothing the cohort could spend a seat on.
+ *
+ * One builder, used by BOTH passes, on purpose. The funnel remembers by mint and the
+ * cycle can only act on a mint its own `bySweep` resolves, so a warm pass that observed
+ * ignition rows while the cohort pass could not see them would file coins the cohort
+ * must then skip — memory the desk cannot spend. Same universe in, same universe out.
+ *
+ * It degrades to nothing: if pump.fun is unreachable both passes run on the sweep alone,
+ * exactly as they did before.
+ */
+export async function cohortUniverse({ tapes = 40 } = {}) {
+  const { solUsd, source: solUsdSource } = await curveSolUsd();
+  const [swept, igniting] = await Promise.all([sweep(), ignitionUniverse({ solUsd, tapes })]);
   /* Ignition first so its richer row — the one carrying the minute tape — wins the
      dedupe against the same coin arriving from the keyword sweep. */
   const merged = new Map();
   for (const c of [...igniting, ...swept]) if (c?.mint && !merged.has(c.mint)) merged.set(c.mint, c);
-  const universe = [...merged.values()];
+  /* THE LAUNCH FEED'S ROWS GO IN THE SNAPSHOT LEDGER TOO. sweep() records its own
+     (market.js); nothing recorded the ignition rows, so the two gates that read the
+     ledger — post_migration_dump ("what price did WE first see") and
+     liquidity_did_not_hold — were structurally unfirable for a coin that only ever
+     arrived through pump.fun. Best-effort, like the sweep's own write. */
+  if (igniting.length) {
+    try { (await import("./data/snapshots.js")).record(igniting); }
+    catch (e) { emit("snapshots:record_failed", { error: String(e?.message || e) }); }
+  }
+  // ignitionOnly = merged - swept, which reduces to igniting minus the overlap: the
+  // number that says whether the lane is ADDING market or re-finding the sweep's.
+  emit("universe:merged", { merged: merged.size, swept: swept.length, igniting: igniting.length,
+    ignitionOnly: merged.size - swept.length, solUsd, solUsdSource,
+    note: "the keyword sweep plus what pump.fun is trading right now, deduped by mint" });
+  return { universe: [...merged.values()], swept, igniting, solUsd, solUsdSource };
+}
+
+export async function warmFunnel() {
+  const { universe, igniting } = await cohortUniverse();
   const scored = [];
   for (const c of universe) {
     if (liveCallFor(c.mint)) continue;
@@ -462,6 +532,104 @@ export async function warmFunnel() {
   });
   return { swept: universe.length, screenPassed: passed, screenHeld: held,
            screened: shape.screened, ready: shape.ready, expired };
+}
+
+/** Measured on the live desk: $135.71 of model spend across 323 workups in 24 hours. */
+export const TYPICAL_WORKUP_USD = Number(process.env.PENTHOUSE_TYPICAL_WORKUP_USD || 0.42);
+/* WHAT A SURVIVOR COSTS, which is not what the average coin costs. $0.42 is the mean
+ * over ALL workups, and most of them die free at the paid screen (~93% at $0) or at the
+ * reputation read. A coin that reaches the analysts has bought the whole seat stack —
+ * Red Team $0.37 + Narrative $0.21 + PM $0.18 + Risk $0.07 + Forensics $0.06 + Flow
+ * $0.06 + Execution $0.05 + Liquidity $0.03 on the measured per-seat medians, ~$1.30 all
+ * in — so reserving the mean for it under-reserves by ~$0.9 EACH, and three workers
+ * carrying survivors overshot the cap by ~$2.3. Reserved at $1.00 from the moment the
+ * analysis stage fires, which is the last free moment to notice. */
+export const SURVIVOR_WORKUP_USD = Number(process.env.PENTHOUSE_SURVIVOR_WORKUP_USD || 1.0);
+
+/**
+ * THE WORKUP POOL — the one scheduler BOTH paid lanes run through.
+ *
+ * It was two loops. The shortlist pass ran CONCURRENCY workers against the cycle cap;
+ * the mandate hunt underneath it was a plain serial `for` that checked neither the cap
+ * nor `stopped`, so a pass that had already been cut off at its budget went straight on
+ * to buy workups outside it — cycle 19 spent $21.68 against an $8 cap and published
+ * nothing. One pool, used twice, is what makes "the budget binds" a property of the
+ * cycle rather than of whichever loop happened to be reading it.
+ *
+ * THE RESERVATION IS STAGE-AWARE. Spend lands only when a workup FINISHES, so workers
+ * checking a bare accumulator each start one more against a cap nothing in flight has
+ * charged yet — the flat reservation (TYPICAL_WORKUP_USD) is what fixed that. But the
+ * flat figure is the mean over mostly-free deaths, so it under-reserves the coins that
+ * actually cost money. desk.js emits `stage: "analysis"` for a mint exactly when the
+ * cheap gates are behind it and the seat stack is about to be bought, so that event
+ * raises this coin's reservation to SURVIVOR_WORKUP_USD. The bound the cycle can claim
+ * is the honest one: an overshoot of at most ONE survivor.
+ *
+ * Injectable throughout (usedUsd, stop/isStopped, events) so the scheduler can be driven
+ * against a scripted workup without a market.
+ */
+export function makeWorkupPool({
+  concurrency = 1,
+  budgetUsd = CYCLE_BUDGET_USD,
+  usedUsd = () => 0,
+  typicalUsd = TYPICAL_WORKUP_USD,
+  survivorUsd = SURVIVOR_WORKUP_USD,
+  isStopped = () => null,
+  stop = () => {},
+  events = bus,
+} = {}) {
+  /* One entry per RUNNING workup. Keyed by an opaque slot rather than by mint so two
+     lanes (or a queue that repeated a coin) can never release each other's money. */
+  let slotSeq = 0;
+  const reserved = new Map();                     // slot -> { mint, usd }
+  const reservedUsd = () => { let t = 0; for (const r of reserved.values()) t += r.usd; return t; };
+  let peak = 0;
+  const mark = () => { peak = Math.max(peak, reservedUsd()); };
+  const onEvent = (ev) => {
+    if (ev?.type !== "stage" || ev.stage !== "analysis" || !ev.mint) return;
+    for (const r of reserved.values()) if (r.mint === ev.mint && r.usd < survivorUsd) {
+      r.usd = survivorUsd;
+      emit("cycle:reserved_up", { mint: ev.mint, fromUsd: typicalUsd, toUsd: survivorUsd,
+        reservedUsd: Number(reservedUsd().toFixed(4)),
+        note: "this one reached the seats — reserve what a survivor costs, not what the average coin costs" });
+    }
+    mark();
+  };
+
+  async function run({ take, study }) {
+    events.on("event", onEvent);
+    let started = 0;
+    try {
+      const worker = async () => {
+        while (!isStopped()) {
+          // Spend already charged, PLUS a reservation for every workup still running.
+          const used = usedUsd();
+          const res = reservedUsd();
+          if (used + res >= budgetUsd) {
+            stop(`budget: $${used.toFixed(2)} of $${budgetUsd}`);
+            emit("cycle:budget", { usedUsd: Number(used.toFixed(4)), capUsd: budgetUsd,
+              inFlight: reserved.size, reservedUsd: Number(res.toFixed(4)) });
+            return;
+          }
+          /* take() IS CALLED SYNCHRONOUSLY, AND MUST STAY SYNCHRONOUS. An await between
+             the cap check and the reservation below would let every worker pass the
+             same unreserved cap in the same tick, which is the exact defect the
+             reservation exists to prevent. */
+          const coin = take();
+          if (!coin) return;                      // the lane has nothing more to offer
+          const slot = ++slotSeq;
+          reserved.set(slot, { mint: coin.mint, usd: typicalUsd });
+          mark();
+          started++;
+          try { await study(coin); } finally { reserved.delete(slot); }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.max(1, concurrency) }, worker));
+    } finally { events.off("event", onEvent); }
+    return { started, peakReservedUsd: peak };
+  }
+
+  return { run, reservedUsd, peakReservedUsd: () => peak, concurrency };
 }
 
 export async function runPenthouseCycle({
@@ -576,8 +744,15 @@ export async function runPenthouseCycle({
   const wx = await regime();
   emit("seat:verdict", { seat: "Regime", detail: `${wx.regime} · SOL ${wx.solRet25d}% / BTC ${wx.btcRet25d}% (25d)` });
 
-  // 1-3. Everything free: sweep, classify, screen.
-  const universe = await sweep();
+  // 1-3. Everything free: sweep, the live launch feed, classify, screen.
+  /* THE VOLUME LEVER L1-L4 LACKED. The ladder could widen the band, buy more workups and
+     hunt longer, and still be walking the same ~108 keyword hits it had walked an hour
+     earlier — every rung spending more money on a market that had not changed. This is
+     the same universe the free warm pass builds (cohortUniverse above), so a coin the
+     funnel screened while a position was open is a coin `bySweep` can now resolve. The
+     younger arrivals mostly die FREE at the paid screen's h24 floors (evidence.js,
+     SAFETY, untouched) — and a paid-screen kill is bench-replaced, never re-rulered. */
+  const { universe, swept, igniting } = await cohortUniverse();
   const scored = [];
   const repeats = [];
   for (const c of universe) {
@@ -803,9 +978,11 @@ export async function runPenthouseCycle({
    * which is the same bound the strictly-serial loop always had and the best any
    * check-then-spend scheme can offer. The daily budget and hourly pace brakes in
    * llm.js are untouched and absolute. Set PENTHOUSE_WORKUP_CONCURRENCY to 1 to
-   * restore the old behaviour exactly. */
-  /** Measured on the live desk: $135.71 of model spend across 323 workups in 24 hours. */
-  const TYPICAL_WORKUP_USD = Number(process.env.PENTHOUSE_TYPICAL_WORKUP_USD || 0.42);
+   * restore the old behaviour exactly.
+   *
+   * The scheduler itself is makeWorkupPool() above, because the mandate hunt below now
+   * runs through the SAME pool — a lane that spends outside the cap is not bounded by
+   * it. The reservation is stage-aware there too. */
   const picks = [];
   let workedUp = 0;
   let stopped = null;
@@ -892,30 +1069,25 @@ export async function runPenthouseCycle({
     return "studied";
   };
 
-  let inFlight = 0;
-  const worker = async () => {
-    while (!stopped) {
-      // Spend already charged, PLUS a reservation for every workup still running. The
-      // reservation is what stops N workers from each starting one more against a cap
-      // that nothing in flight has charged yet.
-      const usedSoFar = spend.usd - startSpend;
-      if (usedSoFar + inFlight * TYPICAL_WORKUP_USD >= CYCLE_BUDGET_USD) {
-        stopped = `budget: $${usedSoFar.toFixed(2)} of $${CYCLE_BUDGET_USD}`;
-        emit("cycle:budget", { usedUsd: Number(usedSoFar.toFixed(4)), capUsd: CYCLE_BUDGET_USD,
-          inFlight, reservedUsd: Number((inFlight * TYPICAL_WORKUP_USD).toFixed(4)) });
-        return;
-      }
-      // The queue grows while it is being walked: a free failure pushes a replacement
-      // from the bench, and the cursor must see it.
-      if (cursor >= queue.length) return;
-      const coin = queue[cursor++];
-      inFlight++;
-      try { await studyOne(coin); } finally { inFlight--; }
-    }
-  };
-  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+  /* ONE POOL FOR THE WHOLE PASS — the shortlist walk here, the mandate hunt below.
+     `stopped` stays owned by the cycle: the pool sets it on the cap, studyOne sets it on
+     a credit halt, and every worker in both lanes reads the same flag. */
+  const pool = makeWorkupPool({
+    concurrency: CONCURRENCY,
+    budgetUsd: CYCLE_BUDGET_USD,
+    usedUsd: () => spend.usd - startSpend,
+    isStopped: () => stopped,
+    stop: (reason) => { stopped = reason; },
+  });
+  // The queue grows while it is being walked: a free failure pushes a replacement from
+  // the bench, and the cursor must see it.
+  await pool.run({
+    take: () => (cursor < queue.length ? queue[cursor++] : null),
+    study: studyOne,
+  });
   if (CONCURRENCY > 1)
     emit("cycle:concurrency", { workers: CONCURRENCY, studied: workedUp,
+      peakReservedUsd: Number(pool.peakReservedUsd().toFixed(4)),
       note: "coins are independent of one another; the budget cap is re-read per coin" });
 
   /* 5. THE COHORT PICK — choose, then publish up to `want`. The whole step is
@@ -947,27 +1119,51 @@ export async function runPenthouseCycle({
      *
      * A cycle that ends without a call is a fine outcome and the record already says
      * so. A cycle that never ends says nothing at all. */
+    /* 240s -> 900s (PENTHOUSE_HUNT_BUDGET_MS, old default 240_000). At the measured
+       8.6-minute median per workup the old timebox expired after ONE to THREE of them,
+       so the lane that carries the mandate was cut off first and almost always. 900s is
+       three full workups at the median, and the hunt now runs CONCURRENCY of them at a
+       time, so the clock buys several more looks than it did serially. */
     const huntDeadline = Date.now() +
-      Number(process.env.PENTHOUSE_HUNT_BUDGET_MS || 240_000) * plan.huntMultiplier;
+      Number(process.env.PENTHOUSE_HUNT_BUDGET_MS || HUNT_BUDGET_DEFAULT_MS) * plan.huntMultiplier;
     const huntMax = Math.round(Number(process.env.PENTHOUSE_HUNT_MAX || 12) * plan.huntMultiplier);
-    for (const c of scored) {
-      if (opened.length >= want) break;
-      if (hunted >= huntMax) {
-        emit("cycle:hunt_capped", { hunted, note: `stopped after ${huntMax} candidates — the cycle must end` });
-        break;
+    /* THE HUNT RUNS THROUGH THE SAME POOL AS THE SHORTLIST WALK.
+     *
+     * It was a serial `for` that read neither `stopped` nor the cycle cap, so a pass
+     * already cut off at its budget carried straight on spending — $21.68 against an $8
+     * cap on cycle 19, for zero calls. Everything that made this loop cheap is still
+     * here and still free (the already-tried set, the live-call check, recentlyJudged,
+     * the risk-off veto and the free screen); it has simply moved into `take`, which the
+     * pool calls one worker at a time before it reserves anything. */
+    let ended = null;                       // hunt_capped / hunt_timeboxed, emitted once
+    let huntCursor = 0;
+    const takeHuntCoin = () => {
+      while (huntCursor < scored.length) {
+        if (opened.length >= want) return null;
+        if (hunted >= huntMax) {
+          if (!ended) { ended = "capped";
+            emit("cycle:hunt_capped", { hunted, note: `stopped after ${huntMax} candidates — the cycle must end` }); }
+          return null;
+        }
+        if (Date.now() > huntDeadline) {
+          if (!ended) { ended = "timeboxed";
+            emit("cycle:hunt_timeboxed", { hunted, note: "out of time — a cycle that never ends reports nothing" }); }
+          return null;
+        }
+        const c = scored[huntCursor++];
+        if (alreadyTried.has(c.mint) || liveCallFor(c.mint) || store.recentlyJudged(c.mint)) continue;
+        if (wx.regime === "risk_off" && c.category === "established") continue;
+        // The screen is free and already knows the answer for most of these. Paying a
+        // gather() round trip to rediscover it is the loop's whole cost.
+        const doomed = wouldSurviveScreen(c);
+        if (doomed) continue;
+        hunted++;
+        emit("cycle:hunting", { symbol: c.pair?.baseSymbol, score: c.score, hunted });
+        return c;
       }
-      if (Date.now() > huntDeadline) {
-        emit("cycle:hunt_timeboxed", { hunted, note: "out of time — a cycle that never ends reports nothing" });
-        break;
-      }
-      if (alreadyTried.has(c.mint) || liveCallFor(c.mint) || store.recentlyJudged(c.mint)) continue;
-      if (wx.regime === "risk_off" && c.category === "established") continue;
-      // The screen is free and already knows the answer for most of these. Paying a
-      // gather() round trip to rediscover it is the loop's whole cost.
-      const doomed = wouldSurviveScreen(c);
-      if (doomed) continue;
-      hunted++;
-      emit("cycle:hunting", { symbol: c.pair?.baseSymbol, score: c.score, hunted });
+      return null;
+    };
+    const huntOne = async (c) => {
       let rec;
       try {
         rec = await runFor(null, () => workup(cycle,
@@ -977,19 +1173,25 @@ export async function runPenthouseCycle({
         if (e instanceof OutOfCredit) {
           stopped = e.constructor.name === "BudgetExhausted" ? "daily budget reached mid-hunt" : "out of credit mid-hunt";
           emit("cycle:halted", { reason: "hunt_budget" });
-          break;
+          return;
         }
         emit("cycle:error", { mint: c.mint, error: String(e.message) });
-        continue;
+        return;
       }
       // The hunt counts paid workups too: a paid-screen kill reached no seat (see the
       // worker above), so it neither counts nor goes to publishCall to be refused.
-      if (!rec || rec.outcome === "no_data" || rec.outcome === "screened_out") continue;
+      if (!rec || rec.outcome === "no_data" || rec.outcome === "screened_out") return;
       workedUp++;
+      /* THE QUOTA IS CHECKED AGAIN HERE, not only in `take`. Several hunt workups are in
+         flight at once now, so two could finish behind a `want` that the first of them
+         filled. publishCall is synchronous, so this check and the publish cannot be
+         interleaved: the pass publishes exactly `want` and no more. */
+      if (opened.length >= want) return;
       const pub = publishCall(rec, { category: c.category, launchpad: c.launchpad, wx,
         escalation: cohort ? level : null, cycleId: cohort?.cycle.id ?? null });
       if (pub.callId) opened.push({ id: pub.callId, symbol: rec.symbol });
-    }
+    };
+    await pool.run({ take: takeHuntCoin, study: huntOne });
     if (!opened.length && !stopped)
       emit("cycle:hunt_dry", { hunted, note: "the ranked market offered no coin that cleared the SAFETY gauntlet — " +
         "the mandate ranks conviction, it never overrides a measured fact, so a market of honeypots ends in no call" });
@@ -1056,6 +1258,9 @@ export async function runPenthouseCycle({
      rather than at the next tick. */
   if (cohort) { try { settleCycles(); } catch {} }
   return { cycle, considered: universe.length, ranked: scored.length,
+    // The split, because "considered 108" and "considered 108 of which 40 the sweep
+    // never sees" are different reports and only one of them says the lane is alive.
+    sweptCount: swept.length, ignitingCount: igniting.length,
     workedUp, approved: picks.length, opened: opened.length, replacedUnreadable: replaced, replacedScreened,
     costUsd: Number(cost.toFixed(4)), costPerWorkup: workedUp ? Number((cost / workedUp).toFixed(2)) : null,
     stopped, cycleId: cohort?.cycle.id ?? null, level, quota: cohort?.quota ?? null,

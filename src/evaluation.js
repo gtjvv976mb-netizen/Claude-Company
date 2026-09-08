@@ -1,5 +1,5 @@
 import db, { ensureColumn } from "./lib/store.js";
-import { cfg } from "./config.js";
+import { cfg, WORKUPS_DEFAULT, CYCLE_BUDGET_DEFAULT_USD, HUNT_BUDGET_DEFAULT_MS } from "./config.js";
 import { leaveOneOut } from "./agents/composite.js";
 import { runContext } from "./lib/bus.js";
 import { canonicalJson, decisionManifest, deployedCommit, sha256 } from "./provenance.js";
@@ -168,14 +168,17 @@ export function runtimeBehaviorProfile({ runKind = "cycle", pmProvider = "claude
       takeProfitX: Number(process.env.DESK_TAKE_PROFIT_X || POLICY_DEFAULTS.takeProfitX),
       maxAgeHours: Number(process.env.DESK_MAX_AGE_HOURS || POLICY_DEFAULTS.maxAgeHours),
       trailPct: Number(process.env.DESK_TRAIL_PCT || POLICY_DEFAULTS.trailPct),
-      workupsPerCycle: Number(process.env.PENTHOUSE_WORKUPS || 8),
-      cycleBudgetUsd: Number(process.env.PENTHOUSE_CYCLE_BUDGET_USD || 8),
+      /* Same env vars, same defaults as penthouse.js enforces — this is a PROVENANCE
+         record of the config a decision was made under, so a private copy of a default
+         that has since moved records a number no lane ever ran at. */
+      workupsPerCycle: Number(process.env.PENTHOUSE_WORKUPS || WORKUPS_DEFAULT),
+      cycleBudgetUsd: Number(process.env.PENTHOUSE_CYCLE_BUDGET_USD || CYCLE_BUDGET_DEFAULT_USD),
       topN: Number(process.env.PENTHOUSE_TOP_N || 5),
       perCell: Number(process.env.PENTHOUSE_PER_CELL || 5),
       padQuota: Math.min(1, Math.max(0, Number(process.env.PENTHOUSE_PAD_QUOTA || 0.6))),
       whaleBudgetMs: Number(process.env.PENTHOUSE_WHALE_BUDGET_MS || 45_000),
       mustCall: process.env.PENTHOUSE_MUST_CALL !== "0",
-      huntBudgetMs: Number(process.env.PENTHOUSE_HUNT_BUDGET_MS || 240_000),
+      huntBudgetMs: Number(process.env.PENTHOUSE_HUNT_BUDGET_MS || HUNT_BUDGET_DEFAULT_MS),
       huntMax: Number(process.env.PENTHOUSE_HUNT_MAX || 12),
       maxLiveCalls: Math.max(1, Number(process.env.PENTHOUSE_MAX_LIVE_CALLS || 6)),
       sequential: process.env.PENTHOUSE_SEQUENTIAL !== "0",

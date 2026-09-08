@@ -30,6 +30,7 @@ process.env.CLAUDE_CO_DB = process.env.CLAUDE_CO_DB ||
 import db from "./src/lib/store.js";
 import { assertDailyBudget, BudgetExhausted, HOURLY_BURST, OPPORTUNISTIC_SHARE } from "./src/lib/llm.js";
 import { bookState, MAX_LIVE_CALLS } from "./src/mandate.js";
+import { CYCLE_BUDGET_DEFAULT_USD } from "./src/config.js";
 import { openCall, closeCall, liveCalls } from "./src/calls.js";
 
 let pass = 0, fail = 0;
@@ -46,8 +47,19 @@ const charge = (usd, minsAgo) => db.prepare(
 const reset = () => db.prepare("DELETE FROM llm_spend").run();
 
 const CAP = 40;
-const hourCap = (CAP / 24) * HOURLY_BURST;
-console.log(`\nCAP $${CAP}/day · burst x${HOURLY_BURST} · hourly allowance $${hourCap.toFixed(2)}`);
+/* THE ALLOWANCE HAS A FLOOR UNDER IT, and this file used to ignore it because at the
+   time the two numbers were equal by coincidence: $40/24 x 3 = $5.00 and the cycle
+   budget llm.js defaulted to was $4, whose floor is $4 x 1.25 = $5.00. The floor exists
+   so a pace tighter than one cycle's own allowance cannot deadlock the cycle (llm.js,
+   "a pace tighter than one cycle's own allowance is not a pace, it is a deadlock"), and
+   the cycle budget's default moved to $16 on 2026-09-08 — so the coincidence ended and
+   the literal ruler here started measuring a cap the code no longer applies. Derived
+   from the same two constants the code reads, so the PROPERTY under test (under the
+   allowance the desk runs, over it it waits) survives the next move too. */
+const cycleBudget = Number(process.env.PENTHOUSE_CYCLE_BUDGET_USD || CYCLE_BUDGET_DEFAULT_USD);
+const hourCap = Math.max((CAP / 24) * HOURLY_BURST, cycleBudget * 1.25);
+console.log(`\nCAP $${CAP}/day · burst x${HOURLY_BURST} · one cycle $${cycleBudget.toFixed(2)} ` +
+  `· hourly allowance $${hourCap.toFixed(2)} = max($${((CAP / 24) * HOURLY_BURST).toFixed(2)}, $${(cycleBudget * 1.25).toFixed(2)})`);
 console.log(`concurrency ${MAX_LIVE_CALLS} · scanner share ${(OPPORTUNISTIC_SHARE * 100).toFixed(0)}%\n`);
 
 console.log("CONCURRENCY — the desk no longer idles behind one trade");
