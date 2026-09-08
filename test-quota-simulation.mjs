@@ -45,6 +45,7 @@ import { registerHooks } from "node:module";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
+import { cfg } from "./src/config.js";
 import os from "node:os";
 
 const REPO = path.dirname(new URL(import.meta.url).pathname);
@@ -546,7 +547,12 @@ function makeCoin(fate, rnd) {
   if (fate === "thin") liq = Math.round(fl.liq * 0.4);
   if (fate === "no_volume") vol24 = fl.vol * 0.3;
   if (fate === "too_new") ageHours = 0.1;
-  if (fate === "wash_suspect") { vol24 = liq * 55; txns = 8000; }
+  /* Re-anchored 2026-09-08: the fate must actually exceed the CONFIGURED wash bar. It was
+     a flat 55x, written when the bar was lower; the owner's screen now refuses above
+     cfg.screen.maxVolToLiqRatio (250), so 55x passed both screens and, once step 14's
+     bench replacement let these coins reach seats, the fixture's default clean verdicts
+     published them and the NEVER audit failed for a fixture reason, not a desk one. */
+  if (fate === "wash_suspect") { vol24 = liq * (cfg.screen.maxVolToLiqRatio * 1.2); txns = 8000; }
   // The dead-zone gate only looks at coins under 72h, so this fate has to be one.
   if (fate === "post_migration_dump") ageHours = 20;
 
@@ -646,7 +652,7 @@ const db = store.default;
 const bus = await import("./src/lib/bus.js");
 const { spend } = await import("./src/lib/llm.js");
 
-const { runPenthouseCycle } = ph;
+const { runPenthouseCycle, WORKUPS_PER_CYCLE } = ph;
 const { openCycle, cycleStatus, cycleHistory, settleCycles, closeCall, liveCalls,
   cycleCalls, safetyFailures, beginCyclePass } = calls;
 const { CYCLE, MAX_ESCALATION_LEVEL, escalationPlan } = cfgmod;
@@ -934,6 +940,33 @@ console.log("\nCLAIM 7 — with the account empty, what does the ladder do? (the
  * the reason. Sixty cohorts, each run to completion (three published, or the ladder
  * exhausted at L4), over populations of five different qualities.
  */
+/* ─── CLAIM 8 ────────────────────────────────────────────────────────────────────
+   A paid-screen kill costs no slot (plan step 14, 2026-09-08). The mintable fate passes
+   the FREE screen (pair metrics are clean) and dies at the PAID screen inside workup()
+   before any seat is bought — 89 of 500 live workups (18%) ended that way, each one
+   burning a slot. The real loop must now pull the next bench coin instead. */
+console.log("\nCLAIM 8 — a coin the paid screen kills costs no slot: the bench fills it");
+{
+  resetBook();
+  const coins = population({ clean: 3, mintable: 6, held: 4 }, 40, 14);
+  const { r, events } = await cyclePass(coins);
+  const replaced = events.filter((e) => e.kind === "cycle:replaced");
+  const screened = replaced.filter((e) => e.reason === "screened_out");
+  const ends = events.filter((e) => e.kind === "token:end");
+  const free = new Set(["screened_out", "no_data", "error", "credit_outage", "workup_error"]);
+  const paidEnds = ends.filter((e) => !free.has(e.outcome)).length;
+  const screenedEnds = ends.filter((e) => e.outcome === "screened_out").length;
+  ok("the paid screen killed coins in this pass (the fate reached the loop)", screenedEnds >= 1,
+    `screened_out token:end=${screenedEnds} of ${ends.length}`);
+  ok("each paid-screen kill pulled the next coin off the bench", screened.length >= 1 && r.replacedScreened === screened.length,
+    `cycle:replaced reason=screened_out: ${screened.length} · r.replacedScreened=${r.replacedScreened} · all replaced=${replaced.length}`);
+  ok("workedUp counts only workups that reached a seat — a $0 kill is not a workup", r.workedUp === paidEnds,
+    `workedUp=${r.workedUp} paid token:end=${paidEnds} screened=${screenedEnds}`);
+  ok("the queue stayed bounded: at most 2×workups replacements on a pass", replaced.length <= WORKUPS_PER_CYCLE * 2,
+    `replaced=${replaced.length} workups=${WORKUPS_PER_CYCLE} cap=${WORKUPS_PER_CYCLE * 3}`);
+  ok("the three clean coins still published", r.opened === 3, `opened=${r.opened} workedUp=${r.workedUp} cost=$${r.costUsd}`);
+}
+
 console.log("\n══ THE DISTRIBUTION · 60 cohorts run to completion ══");
 
 const QUALITY = [

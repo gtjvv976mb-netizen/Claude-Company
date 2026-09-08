@@ -734,11 +734,19 @@ export async function runPenthouseCycle({
    * So an unreadable coin is replaced rather than mourned. Only free failures are
    * replaced — a coin that reached a seat and was refused has been PAID for and has
    * legitimately used its slot. */
+  /* THE BENCH HOLDS ONLY COINS THE FREE SCREEN WOULD PASS. selectShortlist falls back
+     to the raw ranked order when no viable coin is left — right for the shortlist (a
+     cycle that studies nothing learns nothing), wrong for the bench: once the shortlist
+     has taken every survivor, that fallback made the bench a queue of coins the screen
+     would kill, and with paid-screen kills now bench-replaced (below) each pull would
+     buy a gather() for a coin whose fate is already known. The simulation caught it:
+     30 doomed coins reached seats in 60 cohorts. An empty bench is the honest answer. */
   const bench = selectShortlist(
-    scored.filter((c) => !shortlist.some((s) => s.mint === c.mint)),
+    scored.filter((c) => !shortlist.some((s) => s.mint === c.mint) && wouldSurviveScreen(c) === null),
     workups * 3);
   const queue = [...shortlist];
   let replaced = 0;
+  let replacedScreened = 0;      // of `replaced`, the paid-screen kills (step 14)
 
   /* 4. Only now does anything cost money — and now more than one coin at a time.
    *
@@ -804,18 +812,29 @@ export async function runPenthouseCycle({
       emit("cycle:error", { mint: c.mint, error: String(e.message) });
       return "error";
     }
-    if (!rec || rec.outcome === "no_data") {
+    if (!rec || rec.outcome === "no_data" || rec.outcome === "screened_out") {
       // Free failure: nothing was asked of a model, so the slot is still unspent.
       // Pull the next coin off the bench rather than ending the cycle a candidate short.
+      //
+      // screened_out joined no_data here on 2026-09-08. The paid screen runs inside
+      // workup() before any seat is bought (desk.js, stage 2) and costs $0 in models —
+      // yet 89 of 500 workups (18%) ended screened_out and every one of them burned a
+      // slot, so a fifth of each pass was spent on coins no analyst ever saw. Bench-
+      // replacing them turns every slot into a PAID workup at $0 marginal cost; the
+      // queue cap below still bounds a pass at workups*3 coins however barren the market.
+      const reason = rec?.outcome === "screened_out" ? "screened_out" : "no_data";
       const next = bench.shift();
       if (next && queue.length < workups * 3) {
         replaced++;
+        if (reason === "screened_out") replacedScreened++;
         queue.push(next);
         emit("cycle:replaced", { dropped: c.pair?.baseSymbol ?? c.mint?.slice(0, 6),
-          reason: "no_data", replacedWith: next.pair?.baseSymbol ?? next.mint?.slice(0, 6),
-          note: "an unreadable coin costs nothing, so it must not cost a slot either" });
+          reason, replacedWith: next.pair?.baseSymbol ?? next.mint?.slice(0, 6),
+          note: reason === "screened_out"
+            ? "a coin the paid screen kills before any seat costs nothing, so it must not cost a slot either"
+            : "an unreadable coin costs nothing, so it must not cost a slot either" });
       }
-      return "no_data";
+      return reason;
     }
     workedUp++;                       // paid for, whatever the verdict turned out to be
     // THE COHORT. Every workup that got a verdict is a candidate, not only the ones
@@ -917,7 +936,9 @@ export async function runPenthouseCycle({
         emit("cycle:error", { mint: c.mint, error: String(e.message) });
         continue;
       }
-      if (!rec || rec.outcome === "no_data") continue;
+      // The hunt counts paid workups too: a paid-screen kill reached no seat (see the
+      // worker above), so it neither counts nor goes to publishCall to be refused.
+      if (!rec || rec.outcome === "no_data" || rec.outcome === "screened_out") continue;
       workedUp++;
       const pub = publishCall(rec, { category: c.category, launchpad: c.launchpad, wx,
         escalation: cohort ? level : null, cycleId: cohort?.cycle.id ?? null });
@@ -989,7 +1010,7 @@ export async function runPenthouseCycle({
      rather than at the next tick. */
   if (cohort) { try { settleCycles(); } catch {} }
   return { cycle, considered: universe.length, ranked: scored.length,
-    workedUp, approved: picks.length, opened: opened.length, replacedUnreadable: replaced,
+    workedUp, approved: picks.length, opened: opened.length, replacedUnreadable: replaced, replacedScreened,
     costUsd: Number(cost.toFixed(4)), costPerWorkup: workedUp ? Number((cost / workedUp).toFixed(2)) : null,
     stopped, cycleId: cohort?.cycle.id ?? null, level, quota: cohort?.quota ?? null,
     published: cohortEnd?.published ?? null, want };
