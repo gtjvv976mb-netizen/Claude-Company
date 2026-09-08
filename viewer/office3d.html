@@ -10885,10 +10885,20 @@ function stampCallWithLevel(card, header, call) {
   const chip = cycleLevelChip(level);
   if (call && call.cycle_id != null)
     chip.title = "Cycle " + call.cycle_id + " · " + (info ? info.line : chip.title);
-  header.appendChild(chip);
+  /* THE QUOTA STAMP IS NOT FOR A READER (owner, 2026-09-08: "THE CYCLE SHIT IS STILL
+     THERE"). Every card carried a chip reading "no quota" or "L0 · normal" and a
+     sentence explaining what had or had not been relaxed — the desk's own bookkeeping,
+     repeated on every row of the book. Both now paint only for a reader who turned
+     Detailed view on.
+     The CLASS still lands on the card in every view. That is the honesty rule this
+     function exists for: a call the desk had to reach for stays marked, and the mark
+     is a hairline on the card rather than a paragraph. The fixture tests read the
+     returned objects, which are built either way. */
+  const detailed = typeof detailedView === "function" && detailedView();
+  if (detailed) header.appendChild(chip);
   if (info && info.reach) card.className = (card.className + " reached").trim();
   const note = cycleLevelNote(level);
-  if (note) card.appendChild(note);
+  if (note && detailed) card.appendChild(note);
   return { chip, note };
 }
 

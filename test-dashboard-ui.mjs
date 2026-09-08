@@ -1266,19 +1266,31 @@ try {
   assert.match(three.card.className, /\breached\b/,
     `an L3 card's classes are ${JSON.stringify(three.card.className)}`);
 
-  const zeroText = textOf(zero.card), threeText = textOf(three.card);
+  /* Re-anchored 2026-09-08. The owner, reading the live floor: "THE CYCLE SHIT IS STILL
+     THERE" — every card carried a quota chip and a paragraph about what the desk had or
+     had not relaxed, on every row of the book. Those now paint only in Detailed view.
+     The PROPERTY this block has always guarded is unchanged and is asserted twice over:
+     the reach sentence still EXISTS, in full, on the note the stamper returns; and the
+     card still carries the `reached` class in every view (asserted above), so a call
+     the desk reached for can never be mistaken for one that cleared the normal bar. */
+  const zeroText = textOf(zero.note), threeText = textOf(three.note);
   assert.match(zeroText, /it cleared the desk's normal bar\. Nothing was relaxed for the quota\./,
-    `the L0 card reads: ${JSON.stringify(zeroText)}`);
+    `the L0 note reads: ${JSON.stringify(zeroText)}`);
   assert.doesNotMatch(zeroText, /REACHED/,
-    `an L0 card must not carry a reach warning; it reads: ${JSON.stringify(zeroText)}`);
+    `an L0 note must not carry a reach warning; it reads: ${JSON.stringify(zeroText)}`);
   assert.match(threeText, /REACHED — published at L3 because the cycle was short of quota/,
-    `the L3 card reads: ${JSON.stringify(threeText)}`);
+    `the L3 note reads: ${JSON.stringify(threeText)}`);
   assert.match(threeText, /the X read called this coin's story manufactured/,
-    `the L3 card does not say what was relaxed; it reads: ${JSON.stringify(threeText)}`);
-  /* THE SAFETY FLOOR IS STATED ON THE CARD, because "we reached" and "we lowered the
-     floor" are different claims and the reader must not have to guess which one. */
+    `the L3 note does not say what was relaxed; it reads: ${JSON.stringify(threeText)}`);
+  /* THE SAFETY FLOOR IS STATED, because "we reached" and "we lowered the floor" are
+     different claims and the reader must not have to guess which one. */
   assert.match(threeText, /Every safety gate still passed/,
-    `the L3 card does not say the safety gates held: ${JSON.stringify(threeText)}`);
+    `the L3 note does not say the safety gates held: ${JSON.stringify(threeText)}`);
+  /* AND THE OWNER'S RULE ITSELF: nothing about the quota reaches an ordinary reader. */
+  assert.equal(textOf(three.card), "",
+    `a card must carry no quota prose in the default view; it reads: ${JSON.stringify(textOf(three.card))}`);
+  assert.match(source, /const detailed = typeof detailedView === "function" && detailedView\(\);/,
+    "the stamper decides by Detailed view, not by verdict");
   assert.match(three.note.className, /reach/,
     `the L3 note's classes are ${JSON.stringify(three.note.className)}`);
   assert.equal(zero.note.className, "dp-note",
@@ -1289,8 +1301,10 @@ try {
   const one = stamp(1);
   assert.equal(one.card.className, "call offered",
     `an L1 card's classes are ${JSON.stringify(one.card.className)} — L1 relaxes no standard`);
-  assert.match(textOf(one.card), /Effort only — no standard was lowered for this call\./,
-    `the L1 card reads: ${JSON.stringify(textOf(one.card))}`);
+  /* Re-anchored with the block above: the sentence lives on the returned note, which
+     paints in Detailed view. The card carries no quota prose in the default view. */
+  assert.match(textOf(one.note), /Effort only — no standard was lowered for this call\./,
+    `the L1 note reads: ${JSON.stringify(textOf(one.note))}`);
 
   /* ── 3 · NOTHING CLAIMS A QUOTA CALL IS EQUIVALENT ──────────────────────────
      Every relaxed level must say so in the same words, and no level may carry the
