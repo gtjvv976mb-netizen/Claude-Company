@@ -168,11 +168,15 @@ ok("the Overview, the pulse strip and the hint speak plainly", () => {
      its detail behind a bar — it paints the detail only when Detailed view is on. The
      property is the same (the numbers are reachable and not in a first-time reader's
      way); detailsFold is simply no longer the mechanism. */
-  for (const t of ["studies new pump.fun coins and publishes", "Your floor. The desk has ", "window.PLAIN.botState(", "detailedView()", "plainLead(", "chipRow(", "leadButton("])
+  for (const t of ["studies new pump.fun coins and publishes", "Your floor.", "window.PLAIN.botState(", "detailedView()", "plainLead(", "chipRow(", "leadButton("])
     assert.ok(ov.includes(t), `Overview must contain ${t}`);
   assert.ok(!ov.includes("detailsFold("), "the Overview has no dropdown bar");
   for (const t of ["\" workups\"", "paper call sheet", "self-reported", "OWNER VIEW", "NOT LINKED"])
     assert.ok(!ov.includes(t), `Overview must not say ${t}`);
+  /* 2026-09-08, the owner's list for this tab: bot on/off, an open position, the SOL
+     balance, profit and loss, and $CLAUDECO. Nothing about rounds or quotas. */
+  for (const t of ['label: "Your bot"', 'label: "Open position"', 'label: "SOL"', 'label: "Profit and loss"', 'label: "$CLAUDECO"', "How to turn it off"])
+    assert.ok(ov.includes(t), `Overview must carry ${t}`);
   assert.ok(ov.includes('dashMetric("Settled P&L", feedPrivate ? "PRIVATE"'), "the private-record tile survives in Detailed view");
   const j = html.indexOf("async function pollPulse"); const pulse = html.slice(j, html.indexOf("pollPulse();", j));
   /* t.workups is the server's field name and may stay; the WORD "workups" must not reach the strip. */

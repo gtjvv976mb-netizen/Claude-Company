@@ -75,7 +75,11 @@ console.log("\nTHE ROUTE AND THE TAB BOTH SPEAK OF A WINDOW");
   assert.match(office, /newThisSweep: gate\.rows\.length/, "and separates this sweep from the board");
   const view = fs.readFileSync(new URL("./viewer/office3d.html", import.meta.url), "utf8");
   assert.match(view, /board covers the last/, "the tab says it is a window");
-  assert.match(view, /"seen " \+ found/, "each card says when that caller was seen");
+  /* Re-anchored 2026-09-08. The owner: "IN THE BIG-CALLERS, ONLY THE CALLERS AND THE
+     CALLS THEYVE MADE!!" — the desk's own discovery time was dropped as provenance a
+     reader never asked for. The property kept is the one that matters: each card still
+     dates the CALL, and the tab still states the window it covers (asserted above). */
+  assert.match(view, /"called " \+ posted/, "each card says when the call was made");
   ok("the route records, the tab reads the window", true);
 }
 

@@ -587,7 +587,13 @@ try {
     "...and an unset floor is asked the question instead of handed instructions");
   assert.match(html, /if \(settingsRunner === RUNNER_SELF\) box\.appendChild\(installBox\);/,
     "the second install surface in the settings pane is gated by the same choice");
-  const forkAt = html.indexOf("el.appendChild(renderRunnerFork(runnerChoice");
+  /* Re-anchored 2026-09-08: the fork is built at the same place but ATTACHED only while
+     the bot is not set up (owner: the bot tab should carry what you can change and your
+     wallet balance, not a set-up decision you already made). The property guarded here is
+     the ORDER — whenever the fork does show, it precedes every install instruction. */
+  assert.match(html, /if \(showSetup\) el\.appendChild\(forkNode\);/,
+    "the fork attaches only while the bot is not set up");
+  const forkAt = html.indexOf("const forkNode = renderRunnerFork(runnerChoice");
   const setupAt = html.indexOf("const setupCard = dashNode(");
   const gridAt = html.indexOf('const statusGrid = dashNode("div", "dashgrid")');
   assert.ok(forkAt > 0 && forkAt < gridAt && forkAt < setupAt,
