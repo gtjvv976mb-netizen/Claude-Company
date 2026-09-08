@@ -8935,9 +8935,9 @@ function renderCalls({ feed = [], settings, record }, { liveOnly = false } = {})
   step(3, "Auto-trade it", "Optional. WALL-ST-E \u2014 the self-hosted bot on your own machine \u2014 places the calls for you. Its live status shows above the moment it heartbeats.");
   if (settings) callsPanel.appendChild(buildBotCard(settings));
 
-  // everything read only occasionally
-  const more = window.foldSection?.("Budget \u00b7 spend \u00b7 self-hosted executor");
-  if (more) { more.body.appendChild(buildBudget()); callsPanel.appendChild(more.wrap); }
+  /* NO DROPDOWN BAR (owner, 2026-09-08). Budget and spend are read occasionally, so
+     they paint for a reader who asked for detail and not at all for anyone else. */
+  if (typeof detailedView === "function" && detailedView()) callsPanel.appendChild(buildBudget());
   return;
 }
 
@@ -8953,14 +8953,18 @@ function renderLive({ feed = [], settings, record }) {
   feedWrap.style.cssText = "display:flex;flex-direction:column;gap:7px";
   liveRegion.appendChild(feedWrap);
 
-  const kill = window.foldSection?.("Killed \u2014 the trades that did not happen");
-  if (kill) {
-    el.appendChild(kill.wrap);
-    window.__renderKilledInto?.(kill.body).then((ok) => {
-      const n = kill.body.querySelectorAll(".killrow").length;
-      kill.label.textContent = n ? `Killed \u2014 ${n} shown`
-        : ok === false ? "Killed \u2014 tenants only" : (ok === null ? "Killed \u2014 could not reach the desk" : "Killed \u2014 nothing yet");
-      kill.body.querySelector(".dp-h")?.remove();
+  /* NO DROPDOWN BAR. A plain headed section, and only for a reader who asked for
+     detail: this pane is the book, and the book is the calls. */
+  if (typeof detailedView === "function" && detailedView()) {
+    const killHead = document.createElement("div");
+    killHead.className = "dp-h"; killHead.textContent = "Turned down";
+    const killBody = document.createElement("div");
+    el.append(killHead, killBody);
+    window.__renderKilledInto?.(killBody).then((ok) => {
+      const n = killBody.querySelectorAll(".killrow").length;
+      killHead.textContent = n ? `Turned down \u00b7 ${n}`
+        : ok === false ? "Turned down \u00b7 tenants only" : (ok === null ? "Turned down \u00b7 could not reach the desk" : "Turned down \u00b7 nothing yet");
+      killBody.querySelector(".dp-h")?.remove();
     });
   }
   paintFeedInto(feedWrap, feed, settings);
