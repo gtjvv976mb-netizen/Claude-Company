@@ -168,7 +168,7 @@ ok("the Overview, the pulse strip and the hint speak plainly", () => {
      its detail behind a bar — it paints the detail only when Detailed view is on. The
      property is the same (the numbers are reachable and not in a first-time reader's
      way); detailsFold is simply no longer the mechanism. */
-  for (const t of ["studies new pump.fun coins all day", "Your floor. The desk has ", "window.PLAIN.botState(", "detailedView()", "plainLead(", "chipRow(", "leadButton("])
+  for (const t of ["studies new pump.fun coins and publishes", "Your floor. The desk has ", "window.PLAIN.botState(", "detailedView()", "plainLead(", "chipRow(", "leadButton("])
     assert.ok(ov.includes(t), `Overview must contain ${t}`);
   assert.ok(!ov.includes("detailsFold("), "the Overview has no dropdown bar");
   for (const t of ["\" workups\"", "paper call sheet", "self-reported", "OWNER VIEW", "NOT LINKED"])
@@ -195,9 +195,15 @@ ok("Calls: Shortlist / Open / Closed keep their ids and views; the leads and the
     'id="calls-tab-candidates"', 'id="calls-tab-published"', 'id="calls-tab-closed"', 'aria-controls="candidatepanel"', 'aria-controls="livepanel"', 'aria-controls="closedpanel"'])
     assert.ok(html.includes(t), t);
   const i = html.indexOf("async function loadDashboardCalls"); const calls = html.slice(i, html.indexOf("window.__loadDashboardCallsSubview", i));
-  for (const t of ["Coins the desk would trade right now, each with an entry, a stop and a target.", "Open means the desk is tracking it, not that anyone holds it.",
-    "Calls the desk has closed, and the coins it turned down before they became calls.", "paintCycleSurface(callsCycleSlot, { history: true })", "detailedView()"])
+  /* Re-anchored 2026-09-08. The owner read the shipped leads back to me as clutter:
+     "remove these kinds of details, ITS UNECESSARY". The explanatory second sentences
+     are gone and the leads are cut to the fact. What the assertion guards is unchanged
+     — each view still says in its own words what it is showing. */
+  for (const t of ["Coins the desk would trade right now.", "Closed calls, and coins turned down.",
+    "paintCycleSurface(callsCycleSlot, { history: true })", "detailedView()"])
     assert.ok(calls.includes(t), `Calls must contain ${t}`);
+  for (const t of ["each with an entry, a stop and a target", "Open means the desk is tracking it"])
+    assert.ok(!calls.includes(t), `Calls must not carry the explanatory line: ${t}`);
   /* 2026-09-08, "AVOID PUTTING DROPDOWN BARS": the round history and the record paint
      only in Detailed view, and the turned-down list is a plain headed section. */
   assert.ok(!calls.includes("detailsFold("), "the Calls tab has no dropdown bar");
@@ -219,7 +225,9 @@ ok("Calls: Shortlist / Open / Closed keep their ids and views; the leads and the
 
 ok("the house floor is never called vacant, and the round is one line over the instrument", () => {
   const i = html.indexOf("async function loadOverviewDashboard"); const ov = html.slice(i, html.indexOf("const CANDIDATE_BANDS", i));
-  assert.ok(ov.includes("const isHouse = FLOOR_N === 50 || room.hq === true;") && ov.includes("anyone may watch"), "the HQ visitor reads the house sentence");
+  /* "anyone may watch" was cut with the rest of the padding on 2026-09-08; the property
+     is that the HQ floor is identified as the house desk rather than called vacant. */
+  assert.ok(ov.includes("const isHouse = FLOOR_N === 50 || room.hq === true;") && ov.includes("The house desk."), "the HQ visitor reads the house sentence");
   const j = html.indexOf("function renderRoundLine"); const round = html.slice(j, html.indexOf("const dashboardSubview", j));
   /* 2026-09-08: no dropdown bar. The round is one chip; the instrument paints only in
      Detailed view, and the strain alarm stays a chip in the default view either way. */
