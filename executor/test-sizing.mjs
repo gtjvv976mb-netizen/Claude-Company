@@ -79,8 +79,26 @@ const pf = planEntry({ call: wide, cfg: DEFAULTS, state: st({wins:20, losses:10,
    of trade"). With nothing binding, it still sizes exactly at the ceiling. */
 t("the fixed fund is the ceiling, and is taken in full when nothing binds",
   /operator ceiling/.test(pf.reason) && Math.abs(pf.sol-DEFAULTS.fixedSol)<1e-9, pf.reason);
-const pfBad = planEntry({ call: wide, cfg: DEFAULTS, state: st({wins:3, losses:29}) });
-t("fixed fund does NOT override Kelly's refusals", pfBad.action==="skip", pfBad.reason);
+/* RE-ANCHORED 2026-09-08. The property is unchanged; the fixture no longer expressed it.
+   This asserted "the fixed fund does not override Kelly's refusals" through the W_min
+   gate specifically — and that gate is the ONE refusal now deliberately scoped to where
+   Kelly actually sizes, because with a fixed fund `want` is overwritten by fixedSol and
+   the branch could only ever veto the trade, never shrink it. So the same claim is made
+   here against Kelly's UNCONDITIONAL refusal (a target inside the round-trip cost, which
+   needs no sample at all), the new behaviour is pinned where the old assertion stood, and
+   the W_min gate is still asserted with the fund OFF. executor/test-kelly-fixed-size.mjs
+   proves all three halves in one place. */
+const pfBadEV = planEntry({ call: { ...wide, target: 1 + DEFAULTS.costPct / 2 }, cfg: DEFAULTS,
+  state: st({wins:3, losses:29}) });
+t("fixed fund does NOT override Kelly's -EV refusal",
+  pfBadEV.action==="skip" && /costs eat the target/.test(pfBadEV.reason), pfBadEV.reason);
+const pfLowW = planEntry({ call: wide, cfg: DEFAULTS, state: st({wins:3, losses:29}) });
+t("...a hit rate under W_min is a SIZE the operator's fund owns, still inside the per-name rail",
+  pfLowW.action==="buy" && /operator ceiling/.test(pfLowW.reason) && pfLowW.f <= DEFAULTS.fNameMax + 1e-9,
+  `${pfLowW.action} ${pfLowW.sol} SOL, f ${(pfLowW.f*100).toFixed(2)}% — ${pfLowW.reason}`);
+const pfBad = planEntry({ call: wide, cfg: KELLY, state: st({wins:3, losses:29}) });
+t("...and with the fund OFF the same call is refused exactly as before",
+  pfBad.action==="skip" && /under the/.test(pfBad.reason), pfBad.reason);
 const unsafeFixed = planEntry({ call: wide, cfg: { ...DEFAULTS, maxSolPerTrade: 0.02 },
   state: st({ equitySol: 0.05 }) });
 t("fixed fund still cannot exceed the per-name risk rail on a small burner",

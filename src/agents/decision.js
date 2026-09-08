@@ -487,6 +487,11 @@ This is a memecoin desk, so rank on what actually moves these:
   the cap against the coin's own high and athAgeMin how long ago that high was set: a
   coin well under a high set twenty minutes ago is a late look, whatever its story.
   Null is unmeasured, not clean.
+- HOW DIRECT IS THE WAY OUT? route.hops is how many pools a sell has to pass through,
+  quoted in the asset the bot swaps, and route.amms names them. One hop is one program
+  between the position and the exit; two is two, and the second can be the one that is
+  down when the position needs to leave. Prefer the shorter route when two candidates
+  are otherwise level. Null is unmeasured, not clean.
 - WHO IS BUYING? Distinct wallets arriving beats a few round-tripping.
 - ROOM TO RE-RATE. A $200k coin doubling needs a fraction of what a $15m coin needs.
   Prefer the smaller cap when the story is equally real.
@@ -515,6 +520,12 @@ export async function runBestPick(candidates, { filter = null } = {}) {
       ageHours: ev.pair?.ageHours ?? null,
       priceChange: ev.pair?.priceChange ?? {},
       roundTripCostPct: ev.exitProbe?.roundTripLossPct ?? null,
+      /* THE SHAPE OF THE EXIT, not its price (data/evidence.js routeShape). The probe
+         quotes in the asset the bot actually swaps, so these hops are the bot's hops. */
+      route: { hops: ev.exitProbe?.routeHops ?? null,
+        multiHop: ev.exitProbe?.multiHopRoute ?? null,
+        quotedIn: ev.exitProbe?.quoteAsset ?? null,
+        amms: ev.exitProbe?.sellAmms ?? ev.exitProbe?.buyAmms ?? null },
       pmDecision: c.rec?.pm?.decision, conviction: c.rec?.pm?.conviction,
       thesis: c.rec?.pm?.thesis, invalidation: c.rec?.pm?.invalidation,
       redTeam: c.rec?.redteam?.verdict, redTeamHeadline: c.rec?.redteam?.headline,

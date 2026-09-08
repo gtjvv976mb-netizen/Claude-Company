@@ -301,8 +301,19 @@ export function sanitizeExecutorHealth(value) {
     const observedAt = strictTimestamp(readinessObject.observedAt);
     const route = readinessObject.route === "wsol-usdc" ? "wsol-usdc" : null;
     const providers = readinessObject.providers === 2 ? 2 : 0;
+    /* THE EIGHTH COPY OF THE PER-TRADE CEILING, and the last literal one.
+       executor-dashboard.js's publicReadiness() was the fifth and the caps block below
+       was the seventh; both were derived from EXECUTOR_OPERATOR_MAXIMA when the four
+       declared copies (poller OPERATOR_MAX, launchd-runner OPERATOR_MONEY_MAX,
+       install.sh LIVE_OPERATOR_MAX_*, the maxima themselves) moved to 0.4 SOL. This one
+       was left at the literal 50_000_000 — 0.05 SOL — so a bot armed at the real ceiling
+       rehearses at 400,000,000 lamports, is zeroed here, fails `ready`, and the pulse is
+       persisted `degraded` forever: the desk then reports the floor degraded and the
+       route probe falls back to the stated amount instead of the bot's real cap. Derived
+       now, so raising the ceiling can never strand this reading again. */
     const amountLamports = Number.isSafeInteger(readinessObject.amountLamports) &&
-      readinessObject.amountLamports >= 1 && readinessObject.amountLamports <= 50_000_000
+      readinessObject.amountLamports >= 1 &&
+      readinessObject.amountLamports <= Math.floor(EXECUTOR_OPERATOR_MAXIMA.maxSolPerTrade * 1_000_000_000)
       ? readinessObject.amountLamports : 0;
     const ready = readinessObject.ready === true && lastSuccessAt > 0 && observedAt > 0 &&
       route === "wsol-usdc" && providers === 2 && amountLamports > 0;

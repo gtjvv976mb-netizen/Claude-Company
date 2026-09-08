@@ -2,8 +2,12 @@ import { sweep, classify, CATEGORY_RISK, launchpad } from "./market.js";
 import { gather, screen } from "./data/evidence.js";
 import { workup } from "./desk.js";
 import { openCall, liveCalls, liveCallFor, evaluateExit, closeCall, noteEvent,
-  gateFailures, beginCyclePass, abandonCyclePass, recordCyclePublish, cycleStatus,
+  gateFailures, isSafetyGate, beginCyclePass, abandonCyclePass, recordCyclePublish, cycleStatus,
   settleCycles, recordPublishability } from "./calls.js";
+/* THE BOT'S OWN DEFINITION OF "TRADEABLE", read here so the desk publishes nothing the
+   executor would refuse on arrival. One module, both processes — the whole point of
+   executor/entry-contract.mjs; test-entry-contract-parity.mjs pins the hop count. */
+import { entryContract } from "../executor/entry-contract.mjs";
 import { broadcast } from "./copy.js";
 import { announceExit } from "./alerts.js";
 import { listFloors, HQ_FLOOR } from "./tower.js";
@@ -1187,7 +1191,16 @@ export async function runPenthouseCycle({
          filled. publishCall is synchronous, so this check and the publish cannot be
          interleaved: the pass publishes exactly `want` and no more. */
       if (opened.length >= want) return;
-      const pub = publishCall(rec, { category: c.category, launchpad: c.launchpad, wx,
+      // ONE fresh consensus read, immediately before the (synchronous) publish, so the
+      // call is anchored on a price seconds old rather than on gather()'s ~8.6-minute-old
+      // one. Free; and null when DexScreener cannot answer, which is the old behaviour.
+      const mark = await freshMark(c.mint);
+      /* THE QUOTA IS RE-CHECKED AFTER THE READ. The `await` above is the only place a
+         second hunt worker can interleave, so the check-then-publish pair has to sit
+         entirely on this side of it — otherwise two workers that both passed the check
+         above would both publish and the pass would overshoot `want`. */
+      if (opened.length >= want) return;
+      const pub = publishCall(rec, { category: c.category, launchpad: c.launchpad, wx, mark,
         escalation: cohort ? level : null, cycleId: cohort?.cycle.id ?? null });
       if (pub.callId) opened.push({ id: pub.callId, symbol: rec.symbol });
     };
@@ -1284,7 +1297,9 @@ export async function runPenthouseCycle({
  * to the same list.
  */
 export async function publishCohort({ picks = [], want = 1, level = 0, cohort = null, wx = null,
-  bestPickFn = runBestPick, publish = publishCall } = {}) {
+  /* `markFn` is the same seam as `publish` and `bestPickFn`: the real fresh-consensus
+     read in production, stubbable in a harness that has no market to read. */
+  bestPickFn = runBestPick, publish = publishCall, markFn = freshMark } = {}) {
   const opened = [];
   const { winner: arithmeticWinner, judged } = pickOne(picks);
   const eligible = judged.filter((j) => j.eligibility.eligible);
@@ -1372,8 +1387,10 @@ export async function publishCohort({ picks = [], want = 1, level = 0, cohort = 
       why: winner.eligibility.reason } : null });
 
   if (winner) {
+    // The mark this call is anchored on: one fresh consensus read per candidate, taken
+    // here rather than inside the synchronous publish (see freshMark's note).
     const pub = publish(winner.rec, { category: winner.category, launchpad: winner.launchpad, wx,
-      bestPick: winner.bestPick ?? null,
+      bestPick: winner.bestPick ?? null, mark: await markFn(winner.rec?.mint),
       escalation, cycleId });
     if (pub.callId) opened.push({ id: pub.callId, symbol: winner.rec?.symbol });
     // Out of the ready pool: the desk is holding this one, not still shopping for it.
@@ -1403,7 +1420,7 @@ export async function publishCohort({ picks = [], want = 1, level = 0, cohort = 
       if (opened.length >= want) break;
       if (cand === winner) continue;
       const pub = publish(cand.rec, { category: cand.category, launchpad: cand.launchpad, wx,
-        escalation, cycleId });
+        mark: await markFn(cand.rec?.mint), escalation, cycleId });
       if (pub.callId) {
         opened.push({ id: pub.callId, symbol: cand.rec?.symbol });
         emit("mandate:fellback", { symbol: cand.rec?.symbol,
@@ -1495,8 +1512,99 @@ export function cohortEligibility(rec, level = 0) {
     reason: e.reason, relaxations: [...plan.relaxations, ...(rec?.relaxations ?? [])] };
 }
 
+/* ── THE MARK A CALL IS ANCHORED ON ────────────────────────────────────────────────
+ *
+ * WHAT THIS FIXES, MEASURED. `entry_lo` and `entry_hi` are NULL on every call the desk
+ * has ever written — nothing authored them, so calls.js stores null — and the bot
+ * therefore binds the entry to trade-policy.mjs's +/-10% fallback around `entry_ref`.
+ * `entry_ref` was gather()'s price, read at the TOP of a workup that measures ~8.6
+ * minutes end to end, and office.js's COALESCE then serves that stale number as
+ * `current_mark` under a FRESH `opened_at`. The 8.20% and 26.04% drift refusals the bot
+ * logged were judged against that anchor: the price had not moved 26%, the anchor had
+ * aged 26% out of date.
+ *
+ * So every async lane takes ONE fresh consensus read at the moment of publishing — the
+ * monitor's own read, ds.pairsFor + ds.consensus, free and already the desk's pricing
+ * authority — and hands it here. The call is then anchored on a price seconds old
+ * instead of minutes, and writeWitnessMark puts that same observation in call_events so
+ * the floor feed serves a real mark with a real timestamp rather than the COALESCE
+ * fallback.
+ *
+ * publishCall STAYS SYNCHRONOUS. The book gate ("one live call at a time") is only a
+ * gate because nothing can interleave between reading it and opening the call; several
+ * hunt workups finish concurrently, so an `await` inside this function would let two of
+ * them pass one book check. The read happens in the caller, the decision here.
+ */
+export async function freshMark(mint) {
+  if (!mint) return null;
+  try {
+    const px = await ds.pairsFor(mint);
+    if (!px?.ok) return null;
+    const cons = ds.consensus(px.pairs);
+    if (!cons.ok || !(cons.priceUsd > 0)) return null;
+    return { priceUsd: cons.priceUsd, at: Date.now(),
+      liquidityUsd: cons.liquidityUsd ?? null, poolsUsed: cons.poolsUsed ?? null };
+  } catch { return null; }
+}
+
+/* HOW WIDE THE ENTRY ZONE IS, BY BAND. A nano coin moves 20% while the bot is still
+ * fetching its two Jupiter quotes; a $5m coin does not. One flat +/-10% (the binder's
+ * fallback) is therefore too tight at the bottom of the ladder and about right at the
+ * top. Owner-tunable per band: DESK_ENTRY_ZONE_PCT_NANO (20), DESK_ENTRY_ZONE_PCT_MICRO
+ * (15), DESK_ENTRY_ZONE_PCT (10, every other band and any coin whose cap is unreadable).
+ * These are WIDTHS, not floors — a wider zone admits more drift, it waives no gate:
+ * the stop, the target and the mark's own freshness are tested separately below. */
+export const ENTRY_ZONE_PCT = Object.freeze({
+  nano: Number(process.env.DESK_ENTRY_ZONE_PCT_NANO || 20),
+  micro: Number(process.env.DESK_ENTRY_ZONE_PCT_MICRO || 15),
+});
+export const ENTRY_ZONE_PCT_DEFAULT = Number(process.env.DESK_ENTRY_ZONE_PCT || 10);
+export const entryZonePct = (band) => {
+  const v = ENTRY_ZONE_PCT[band];
+  return Number.isFinite(v) && v > 0 ? v : ENTRY_ZONE_PCT_DEFAULT;
+};
+
+/**
+ * THE ENTRY ZONE THE CALL PUBLISHES, RE-BASED ON THE MARK.
+ *
+ * The Execution seat authors `entry_zone_low` / `entry_zone_high` (agents/schemas.js)
+ * around the price it was shown — gather()'s, minutes old — and its brief already
+ * requires the zone to bracket the live price. Re-basing is what keeps that requirement
+ * true after the workup's own latency: the zone is centred on the fresh mark, and its
+ * WIDTH comes from the band.
+ *
+ * The seat's numbers are not discarded: its SKEW survives. A seat willing to buy 6%
+ * below the price it was shown but only 2% above wrote a lopsided zone on purpose, and
+ * it gets a lopsided zone back — the wider half stretched to exactly the band width and
+ * the narrower half held to the same ratio.
+ *
+ * THE SKEW IS MEASURED AGAINST THE PRICE THE SEAT WAS SHOWN, never against the zone's
+ * own midpoint: relative to its own midpoint every zone is perfectly symmetric by
+ * definition, so that ruler would read "no skew" on every ticket ever written and this
+ * whole branch would be dead code wearing a comment. A ticket with no zone, or one that
+ * does not straddle the authored price, falls back to the symmetric band bracket rather
+ * than inventing a lean the seat did not express.
+ */
+export function entryZoneAround(mark, band, ticket, authoredPrice = null) {
+  const half = entryZonePct(band) / 100;
+  let loFrac = half, hiFrac = half;
+  const lo0 = Number(ticket?.entry_zone_low), hi0 = Number(ticket?.entry_zone_high);
+  const anchor = Number(authoredPrice);
+  if (anchor > 0 && lo0 > 0 && hi0 > lo0 && lo0 < anchor && hi0 > anchor) {
+    const down = (anchor - lo0) / anchor, up = (hi0 - anchor) / anchor;
+    const widest = Math.max(down, up);
+    if (widest > 0) { loFrac = half * (down / widest); hiFrac = half * (up / widest); }
+  }
+  return { lo: mark * (1 - loFrac), hi: mark * (1 + hiFrac), band, pct: half * 100,
+    loPct: loFrac * 100, hiPct: hiFrac * 100 };
+}
+
 export function publishCall(rec, { category = null, launchpad: pad = null, wx = null,
   toFloors = null, bestPick = null, sourceFloor = null,
+  /* The caller's ONE fresh consensus read, {priceUsd, at}. Null means "no mark was
+     taken" and the call is anchored on gather()'s price exactly as it was before this
+     existed — the direct/manual callers (a tenant floor run) are untouched. */
+  mark = null,
   /* THE COHORT STAMP. Both default to null, and a null `escalation` means "no quota is
      pursuing this" — the lane publishes exactly as it did before the cohort existed.
      Only the cycle passes them, so a tenant's own floor run, a watch promotion and a
@@ -1604,6 +1712,81 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
   }
 
   const ev = rec.ev ?? {};
+
+  /* ── THE GEOMETRY GATE, on the caller's fresh mark ──────────────────────────────
+   *
+   * Last, because everything above it is about the COIN and this is about the PRICE
+   * right now: a coin refused here was fit to publish a minute earlier and will be
+   * again. A book_full or a weather veto is not a fact about the entry, so those keep
+   * their own codes and this never runs on them.
+   *
+   * The contract is the executor's own, not a second copy of it, so a call that clears
+   * this is a call the bot's deterministic refusals cannot kill on arrival — which is
+   * the entire reason executor/entry-contract.mjs exists.
+   *
+   * costPct IS DELIBERATELY 0. The desk says WHAT and WHEN; how much a round trip costs
+   * belongs to the process that knows the order size (owner, 2026-09-07 — the round
+   * that deleted cannot_exit and edge_below_cost). With no cost term, the contract's
+   * R_net test reduces to "target above the mark", which mark_at_target has already
+   * decided, so `target_inside_cost` cannot fire from here. The bot still runs it at
+   * its own real size, unconditionally, in executor/poller.mjs.
+   *
+   * With no alertTs there is no call clock yet, so `window_expired` is not tested here
+   * either — the alert has not been raised and its window has not started.
+   *
+   * TWO GATES CANNOT FIRE FROM HERE, BY CONSTRUCTION, and saying so is cheaper than
+   * letting a later reader wonder:
+   *   `mark_outside_zone` — the zone is CENTRED on the mark, so the mark is inside it
+   *      always. That gate belongs to the bot, minutes later, when the price has walked
+   *      away from the zone this call published. It is the whole point of authoring one.
+   *   `stop_at_or_above_entry` — it judges the AUTHORED bracket against the AUTHORED
+   *      price, and calls.js gateFailures() computes that same fact and classes it
+   *      SAFETY, so eligibility() has already refused it several gates above. Kept as
+   *      defence in depth, not as a live path.
+   *
+   * WHICH IS WHY THE CONTRACT'S `entryRef` IS THE AUTHORED PRICE AND NOT THE MARK, even
+   * though the ROW stores the mark. Those two arguments answer two different questions:
+   * `entryRef` is "was the bracket the desk wrote coherent", `mark` is "where is the
+   * price now". Passing the mark as both collapses them, and a price that fell through
+   * a perfectly sound stop then gets reported under the malformed-bracket code — the
+   * desk's own SAFETY code — instead of `mark_breached_stop`. Same refusal either way,
+   * so nothing the bot sees changes: a call refused here is never published.
+   */
+  const markPrice = Number(mark?.priceUsd);
+  const markAt = Number(mark?.at);
+  const marked = markPrice > 0 && Number.isFinite(markAt) && markAt > 0;
+  const band = bandForMarketCap(ev.pair?.marketCap ?? ev.pair?.fdv ?? null);
+  const authoredPrice = Number(ev.pair?.priceUsd) > 0 ? Number(ev.pair.priceUsd) : null;
+  /* THE ANCHOR THE ROW CARRIES: the mark when there is one, gather()'s price when there
+     is not — which is exactly today's behaviour for every caller that takes no mark. */
+  const entryRef = marked ? markPrice : authoredPrice;
+  const zone = marked ? entryZoneAround(markPrice, band, rec.ticket, authoredPrice) : null;
+  if (marked) {
+    const contract = entryContract({
+      entryRef: authoredPrice ?? markPrice, entryLo: zone.lo, entryHi: zone.hi,
+      stop: Number(rec.ticket?.stop_price),
+      target: rec.ticket?.take_profit?.[0]?.price ?? null,
+      mark: markPrice, markAt, now: Date.now(),
+      holdBand: band, holdMinMs: CAP_BANDS[band]?.holdMinMs ?? null,
+      costPct: 0,
+    });
+    if (!contract.ok) {
+      const safety = isSafetyGate(contract.gate);
+      emit("call:withheld", { mint: rec.mint, symbol: rec.symbol, safety,
+        gate: contract.gate, mark: markPrice,
+        reason: `entry contract: ${contract.detail?.message ?? contract.gate}` });
+      try {
+        shadow.recordRefusal({ mint: rec.mint, symbol: rec.symbol ?? ev.symbol,
+          stage: "entry_contract",
+          reason: `${contract.gate}: ${contract.detail?.message ?? "geometry refused"}`,
+          safety, priceUsd: markPrice, mcapUsd: ev.pair?.marketCap ?? ev.pair?.fdv });
+      } catch {}
+      ledger(contract.gate, "withheld");
+      return { outcome: "withheld", reason: contract.detail?.message ?? contract.gate,
+        gate: contract.gate, mark: markPrice };
+    }
+  }
+
   const call = openCall({
     mint: rec.mint, symbol: rec.symbol ?? ev.symbol, category, launchpad: pad,
     sourceFloor,
@@ -1611,7 +1794,10 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
     sourceAttributed: true,
     conviction: rec.pm?.conviction ?? null,
     imageUrl: ev.pair?.imageUrl ?? null,
-    entryRef: ev.pair?.priceUsd ?? null,
+    entryRef,
+    /* AUTHORED AT LAST. Null here is what made the bot fall back to +/-10% around a
+       stale anchor; a zone is written whenever there is a mark to centre it on. */
+    entryLo: zone?.lo ?? null, entryHi: zone?.hi ?? null,
     stop: Number(rec.ticket?.stop_price),
     target: rec.ticket?.take_profit?.[0]?.price ?? null,
     thesis: rec.pm?.thesis ?? null,
@@ -1619,6 +1805,9 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
     flags: ev.mintAccount?.error ? null : (ev.mintAccount?.flags ?? []).map((f) => f.flag ?? f),
     liqUsd: ev.pairs?.totalLiquidityUsd ?? ev.pair?.liquidityUsd ?? null,
     rtLossPct: ev.exitProbe?.roundTripLossPct ?? null,
+    // The other half of the route measurement: how many pools the way out ran through
+    // (data/evidence.js routeShape). An observation stored beside the loss, not a bar.
+    routeHops: ev.exitProbe?.routeHops ?? null,
     // Preserve the team's actual authorization. Floors may be more conservative,
     // but they may never silently throw this away and size larger on their own.
     deskSizeUsd: rec.order?.size ?? rec.ceo?.order_size_usd ?? rec.risk?.position_size_usd ?? null,
@@ -1630,6 +1819,13 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
     cycleId, escalationLevel: escalation,
   });
   if (call) {
+    /* THE OBSERVATION, ON THE RECORD, AT ITS OWN TIMESTAMP. office.js:88-107 serves
+       `current_mark` as the newest marked call_event and COALESCEs to entry_ref /
+       opened_at when there is none — so until the monitor's first pass (45s away, and
+       gated on the witness spacing rule) every feed row quoted the workup's opening
+       price under a freshly stamped opened_at. That is the stale-anchor defect one
+       layer down from entry_ref, and one real row closes it. */
+    if (marked) writeWitnessMark(call.id, markPrice);
     const evidenceLinked = linkPublishedCall(rec.decisionRunId, call.id, { floorNo: sourceFloor });
     if (evidenceLinked) {
       /* Provenance rows carry NO mark. They used to pass call.entry_ref, so one
@@ -1771,7 +1967,8 @@ export async function promoteWatches() {
       const c = { mint: w.mint, pair: rec?.ev?.pair };
       category = classify(c).category; pad = launchpad(c);
     } catch {}
-    const pub = publishCall(rec, { category, launchpad: pad });
+    // One fresh consensus read for the anchor, exactly as the cohort lane takes.
+    const pub = publishCall(rec, { category, launchpad: pad, mark: await freshMark(w.mint) });
     return { checked, promoted: promoted.length, workedUp: 1, outcome: pub.outcome };
   } catch (e) {
     if (e instanceof OutOfCredit) return { halted: e.message };
@@ -1844,7 +2041,8 @@ export async function trendHandoff(candidates = []) {
   const rec = await runFor(null, () => workup(
     new Date().toISOString().replace(/[:.]/g, "-"), top.mint, hook,
     { alwaysTicket: SEQUENTIAL, lane: "trend" }));
-  const pub = publishCall(rec, { category: rec?.ev?.category ?? "memecoin", launchpad: "pump.fun" });
+  const pub = publishCall(rec, { category: rec?.ev?.category ?? "memecoin", launchpad: "pump.fun",
+    mark: await freshMark(top.mint) });
   return { workedUp: 1, symbol: top.symbol, theme: top.theme,
     outcome: pub.outcome ?? rec?.outcome ?? rec?.finalDecision };
 }
@@ -1921,7 +2119,8 @@ export async function freshScan({ minScore = 45 } = {}) {
         `the race pays one winner and the rest go to zero` : "");
     const rec = await runFor(null, () => workup(new Date().toISOString().replace(/[:.]/g, "-"), top.mint, hook,
       { alwaysTicket: SEQUENTIAL, lane: "fresh" }));
-    const pub = publishCall(rec, { category: top.category, launchpad: top.launchpad });
+    const pub = publishCall(rec, { category: top.category, launchpad: top.launchpad,
+      mark: await freshMark(top.mint) });
     return { young: young.length, workedUp: 1, outcome: pub.outcome ?? rec?.outcome ?? rec?.finalDecision };
   } catch (e) {
     if (e instanceof OutOfCredit) return { halted: e.message };

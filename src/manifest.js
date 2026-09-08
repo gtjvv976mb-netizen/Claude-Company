@@ -9,6 +9,10 @@ export const DECISION_MANIFEST_FILES = Object.freeze([
   "package.json",
   "package-lock.json",
   "executor/trade-policy.mjs",
+  /* The entry contract is a DECISION file for the same reason trade-policy.mjs is: both
+     processes read it to decide whether a call is enterable, so a reviewer recomputing
+     membership from a trusted checkout must see it move. */
+  "executor/entry-contract.mjs",
   "src/agents/analysts.js",
   "src/agents/ceo.js",
   "src/agents/compliance.js",

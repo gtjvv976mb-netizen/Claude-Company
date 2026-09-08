@@ -21,6 +21,8 @@ const target = process.argv[2] || path.resolve(path.dirname(fileURLToPath(import
 const localRoot = fs.existsSync(target) ? path.resolve(target) : null;
 const site = target.replace(/\/$/, "");
 const need = ["poller.mjs", "journal.mjs", "jupiter.mjs", "token2022.mjs", "balance-verification.mjs", "entry-quote-guard.mjs", "exit-trigger.mjs", "feed-drain.mjs", "sol-usd-oracle.mjs", "heartbeat-health.mjs", "sleep-assertion.mjs", "monitor.mjs", "strategy.mjs", "trade-policy.mjs",
+  // the entry contract: one definition of "tradeable" shared with the desk, imported by poller.mjs
+  "entry-contract.mjs",
   // desk-led-v4: the desk's ruler and the mirror evaluator ship with the trading process.
   "dexscreener-consensus.mjs", "desk-mirror.mjs",
   "package.json", "package-lock.json", "install.sh", "macos-launchagent.sh", "macos-release.sh", "launchd-runner.mjs"];

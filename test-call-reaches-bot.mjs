@@ -19,42 +19,73 @@
  * reporter deliberately skips verdict='offered'.
  */
 import fs from "node:fs";
+import { ENTRY_WINDOW_FLOOR_MS } from "./executor/entry-contract.mjs";
 
 let pass = 0, fail = 0;
 const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  — " + d : ""}`))
                                  : (fail++, console.log(`  FAIL ${n}${d ? "  — " + d : ""}`)); };
 const poller = fs.readFileSync(new URL("./executor/poller.mjs", import.meta.url), "utf8");
 
-/* The expiry rule, lifted from the source so the test cannot drift from it. */
+/* The expiry rule, lifted from the source so the test cannot drift from it. RE-ANCHORED
+   (step 23): the floor was read out of poller.mjs as a literal, and poller.mjs now binds
+   the entry contract's constant instead — so the floor is imported and the binding is
+   asserted below. Same property, one fewer copy of the number. */
 const MAX = 45 * 60_000;
-const MIN = Number((poller.match(/MIN_CALL_EXPIRY_MS = ([0-9_]+)/) || [])[1]?.replace(/_/g, ""));
+const MIN = ENTRY_WINDOW_FLOOR_MS;
 const expiry = (holdMinMs) => !Number.isFinite(holdMinMs) || holdMinMs <= 0
   ? MAX : Math.max(MIN, Math.min(holdMinMs, MAX * 8));
 
 console.log("\nEXPIRY FOLLOWS THE MARKET CAP, THROUGH THE BAND'S OWN CLOCK");
 {
   const { CAP_BANDS } = await import("./src/bands.js");
-  const expected = { nano: 60_000, micro: 1_200_000, low: 3_600_000,
-    medium: 3_600_000, high: 3_600_000, very_high: 18_000_000 };
+  /* Every band's window is its own minimum hold — except nano, whose 60_000 hold sits
+     UNDER the floor, so nano's window is the floor. That is the one entry here that has
+     to be derived rather than written down: executor/test-entry-window.mjs measures the
+     preflight the floor has to cover (12 serial hops, 68s at the executor's own
+     deadlines), and the number moves when that measurement does. */
+  const expected = { nano: Math.max(60_000, ENTRY_WINDOW_FLOOR_MS), micro: 1_200_000,
+    low: 3_600_000, medium: 3_600_000, high: 3_600_000, very_high: 18_000_000 };
+  // Under two minutes the window is read in seconds: nano's is 90s, and "2 min" is a
+  // rounding of it that matches neither the window nor the band's own 1-minute hold.
+  const label = (n) => n < 120_000 ? `${(n / 1_000).toFixed(0)}s` : `${(n / 60_000).toFixed(0)}m`;
   for (const [band, b] of Object.entries(CAP_BANDS)) {
     const got = expiry(b.holdMinMs);
-    ok(`${band} ($${b.lo / 1000}k+) expires after ${(got / 60_000).toFixed(0)} min`,
-      got === expected[band], `${(got / 60_000).toFixed(0)}m, band holds ${(b.holdMinMs / 60_000).toFixed(0)}m minimum`);
+    ok(`${band} ($${b.lo / 1000}k+) expires after ${label(got)}`,
+      got === expected[band], `${label(got)}, band holds ${label(b.holdMinMs)} minimum`);
   }
-  ok("nano is one minute, as specified", expiry(CAP_BANDS.nano.holdMinMs) === 60_000);
+  ok("nano gets the floor, because its one-minute hold is shorter than the preflight",
+    expiry(CAP_BANDS.nano.holdMinMs) === Math.max(60_000, ENTRY_WINDOW_FLOOR_MS) &&
+    CAP_BANDS.nano.holdMinMs === 60_000,
+    `${expiry(CAP_BANDS.nano.holdMinMs) / 1000}s window over a ${CAP_BANDS.nano.holdMinMs / 1000}s hold`);
   ok("a bigger cap keeps its call alive far longer than a smaller one",
     expiry(CAP_BANDS.very_high.holdMinMs) > expiry(CAP_BANDS.nano.holdMinMs) * 100);
 }
 
 console.log("\nAND IT NEVER RETIRES A CALL THE BOT COULD NOT HAVE SEEN");
 {
-  ok("there is a floor, because a poll is seconds apart and a call must survive several", MIN >= 60_000, `${MIN / 1000}s`);
+  ok("there is a floor, because a poll is seconds apart and a call must survive several — and the preflight it starts",
+    MIN >= 60_000, `${MIN / 1000}s`);
+  ok("...and poller.mjs takes it from the entry contract rather than keeping its own copy",
+    /const MIN_CALL_EXPIRY_MS = ENTRY_WINDOW_FLOOR_MS;/.test(poller) &&
+    !/const MIN_CALL_EXPIRY_MS = \d/.test(poller));
   ok("...so even a one-second hold window gives the bot four polls", expiry(1_000) === MIN);
   ok("a call with no band falls back to the flat setting", expiry(null) === MAX && expiry(0) === MAX);
   ok("an absurd hold window is capped", expiry(999 * 3_600_000) === MAX * 8);
+  /* RE-ANCHORED, NOT RELAXED. This counted `callExpiryMs(` occurrences and wanted three.
+     The intake stopped calling the helper directly when the window became one of the
+     gates in entry-contract.mjs — the single definition of "tradeable" the desk and the
+     bot now share — so the count measured the wiring rather than the property. The
+     property is identical and is asserted at each of the two sites BY NAME below, which
+     is strictly more than the count could say: it also pins that the intake's window is
+     the band's hold_min_ms judged against this machine's own floor and fallback. */
   ok("the rule is applied at BOTH the intake and the submission gate",
-    (poller.match(/callExpiryMs\(/g) || []).length >= 3,
-    `${(poller.match(/callExpiryMs\(/g) || []).length} uses`);
+    /Date\.now\(\) - Number\(event\.ts\) > callExpiryMs\(event\)/.test(poller) &&
+    /const contract = entryContract\(entryContractInput\(ev, Date\.now\(\)\)\)/.test(poller) &&
+    /contract\.gate === "window_expired"/.test(poller),
+    "submission gate: callExpiryMs(event); intake: the contract's window_expired gate");
+  ok("...and the intake's window is the band's own clock, on this machine's bounds",
+    /holdMinMs: ev\?\.hold_min_ms/.test(poller) &&
+    /windowFloorMs: MIN_CALL_EXPIRY_MS, windowFallbackMs: MAX_CALL_AGE_MS/.test(poller));
   ok("the refusal names the band, so it is not a bare number",
     /the \$\{ev\.hold_band \|\| "default"\} band holds for at least/.test(poller));
 }

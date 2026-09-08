@@ -95,6 +95,12 @@ ensureColumn("calls", "source_attributed", "INTEGER NOT NULL DEFAULT 0");
    the desk had to reach to publish it. NULL on every legacy row and on any lane that
    publishes outside a cycle — a NULL escalation_level is "not published under a quota",
    which is NOT the same fact as L0 and must never be rendered as one. */
+/* HOW MANY POOLS THE WAY OUT RAN THROUGH AT PUBLICATION. The worse of the probe's two
+   legs (data/evidence.js routeShape), stored beside rt_loss_at_call as another
+   OBSERVATION of the route the desk measured — never a threshold. NULL on every legacy
+   row and whenever the probe could not report a hop count, which is unmeasured rather
+   than one. */
+ensureColumn("calls", "route_hops_at_call", "INTEGER");
 ensureColumn("calls", "cycle_id", "INTEGER");
 ensureColumn("calls", "escalation_level", "INTEGER");
 db.exec(`CREATE INDEX IF NOT EXISTS idx_calls_cycle ON calls(cycle_id, status)`);
@@ -115,16 +121,21 @@ export function openCall(c) {
   try {
     const info = db.prepare(`
       INSERT INTO calls (mint,symbol,category,launchpad,source_floor,source_scope,source_attributed,image_url,conviction,entry_ref,entry_lo,entry_hi,stop,target,
-                         thesis,invalidation,flags_at_call,liq_at_call,rt_loss_at_call,mcap_at_call,
+                         thesis,invalidation,flags_at_call,liq_at_call,rt_loss_at_call,route_hops_at_call,mcap_at_call,
                          desk_size_usd,desk_risk_usd,desk_equity_usd,policy_version,opened_at,report_file,last_verified_at,
                          hold_band,hold_min_ms,hold_max_ms,cycle_id,escalation_level)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       c.mint, c.symbol ?? null, c.category ?? null, c.launchpad ?? null,
       c.sourceFloor ?? null, c.sourceScope ?? "unattributed", c.sourceAttributed === true ? 1 : 0,
       c.imageUrl ?? null, c.conviction ?? null,
       c.entryRef ?? null, c.entryLo ?? null, c.entryHi ?? null, c.stop ?? null, c.target ?? null,
       c.thesis ?? null, c.invalidation ?? null,
-      c.flags == null ? null : JSON.stringify(c.flags), c.liqUsd ?? null, c.rtLossPct ?? null, c.mcapUsd ?? null,
+      c.flags == null ? null : JSON.stringify(c.flags), c.liqUsd ?? null, c.rtLossPct ?? null,
+      /* `== null` FIRST, for the same reason escalation_level does it below: Number(null)
+         is 0, and 0 hops is not a route — it is the absence of one. An unmeasured probe
+         must store NULL. */
+      c.routeHops == null || !Number.isFinite(Number(c.routeHops)) ? null : Number(c.routeHops),
+      c.mcapUsd ?? null,
       c.deskSizeUsd ?? null, c.deskRiskUsd ?? null, c.deskEquityUsd ?? null, c.policyVersion ?? POLICY_VERSION,
       Date.now(), c.reportFile ?? null,
       Date.now(),           // last_verified_at — clearing the gauntlet IS the first verification
@@ -399,6 +410,17 @@ export const GATE_CLASS = Object.freeze({
   seizable: "SAFETY",                 // a permanent delegate can take the tokens out of your wallet
   transfer_hook: "SAFETY",            // arbitrary code runs on transfer and can refuse your sell
   frozen_by_default: "SAFETY",        // new accounts frozen by default — a buyer may not be able to sell
+  /* THE REST OF THE BOT'S MINT AUDIT (2026-09-08). All pump.fun mints are Token-2022,
+     and the executor accepts one only when no extension can tax, block, redirect,
+     freeze, pause or re-denominate a transfer (executor/token2022.mjs
+     ALLOWED_MINT_EXTENSIONS). The desk screened three of those twenty — permanentDelegate,
+     transferHook, defaultAccountState — so a transferFeeConfig mint published and the
+     poller then threw on arrival and acknowledged the event WITHOUT a retry: the call
+     spent for nothing. Registered EXPLICITLY rather than left to the default below, and
+     SAFETY on its own merits: every member of the refused set is a way the mint can stop
+     or tax the way OUT, which is the freezable/transfer_hook family, not an opinion
+     about edge. No rung of escalationPlan names it, so no quota reaches it either. */
+  bot_mint_refusal: "SAFETY",
   holder_concentration: "SAFETY",     // one non-pool wallet holding half the float
   serial_deployer: "SAFETY",          // the launch farm (16/100 kills)
   post_migration_dump: "SAFETY",      // the graduate dead zone (9/100 kills)
@@ -448,6 +470,19 @@ export const GATE_CLASS = Object.freeze({
      WATCH in 500 workups was the rate that refusal was eating into). */
   dead_curve: "JUDGMENT",
   post_ath_dump: "JUDGMENT",
+  /* THE SHAPE OF THE WAY OUT (2026-09-08). The exit probe now quotes in the asset the
+     bot actually swaps — WSOL at the bot's own declared cap — and records the hop count
+     of each leg (data/evidence.js routeShape). A route with more than one hop is worth
+     SAYING: every extra hop is another program that can fail while a stop is trying to
+     fire, and the bot's entry refuses a route needing a third wallet ATA outright. It is
+     not worth REFUSING on: the coin still sells, and "can this be sold at all" is the
+     only question the probe is allowed to gate (`unverified_exit`). So screen() records
+     it as a NOTE and never as a failure — it can reach no gate today — and it is
+     registered here BY NAME so that if a future caller ever does put it in front of one,
+     gateClass()'s default-deny cannot silently promote a route observation into an
+     un-waivable safety kill. BestPick reads the hop count and prefers the shorter route
+     when the field gives it a choice; that is a ranking, not a veto. */
+  multi_hop_route: "JUDGMENT",
 
   // ── the reputation read (desk.js) ─────────────────────────────────────────────────
   /* The two arms of the same seat, and they are not the same kind of thing. */
@@ -477,6 +512,42 @@ export const GATE_CLASS = Object.freeze({
   // ── the quota bar itself ──────────────────────────────────────────────────────────
   tier_below_bar: "JUDGMENT",
   conviction_below_bar: "JUDGMENT",
+
+  /* ── THE ENTRY CONTRACT'S OWN CODES (2026-09-08) ─────────────────────────────────
+   *
+   * penthouse.js publishCall now runs executor/entry-contract.mjs on the fresh
+   * consensus mark its caller took, and withholds under the contract's gate code. The
+   * moment a desk file emits one of these, gateClass()'s default-deny turns any
+   * UNregistered one into a SAFETY gate no escalation rung may ever waive — a live-mark
+   * refusal wearing a rug check's clothes. entry-contract.mjs says so at ENTRY_GATES
+   * and test-entry-contract-parity.mjs enforces it the moment the desk is wired, which
+   * is now. So every one of them is registered here EXPLICITLY, and every one of them
+   * is JUDGMENT:
+   *
+   *   NONE OF THESE IS A FACT ABOUT THE COIN. They are facts about where the price
+   *   stands relative to a bracket somebody wrote minutes ago. The same coin, unchanged
+   *   — same mint authority, same holders, same pool — passes all of them again as soon
+   *   as the mark comes back inside the zone. That is the definition of a judgment on
+   *   this desk, and the opposite of `mintable` or `thin_liquidity`.
+   *
+   * `no_stop` and `stop_at_or_above_entry` are NOT repeated here: they are the two the
+   * contract shares with the desk's own vocabulary, they are the same facts computed
+   * off the same bracket, and they keep their SAFETY classification above.
+   *
+   * `target_inside_cost` cannot fire from the desk at all — publishCall passes
+   * costPct 0, because what a round trip costs belongs to the bot — but it is
+   * registered anyway: the classification must not depend on which caller happens to
+   * be running the contract today. */
+  no_entry_ref: "JUDGMENT",           // the anchor is unreadable, not the coin
+  mark_stale: "JUDGMENT",             // the READ aged out; nothing about the token moved
+  invalid_zone: "JUDGMENT",           // a malformed authored bracket
+  mark_outside_zone: "JUDGMENT",      // the price walked out of the zone and can walk back
+  mark_breached_stop: "JUDGMENT",     // this entry is gone; the coin is not
+  invalid_target: "JUDGMENT",
+  mark_at_target: "JUDGMENT",         // the move already happened — a missed trade, not a rug
+  target_inside_cost: "JUDGMENT",     // inert from the desk (costPct 0); the bot owns cost
+  window_expired: "JUDGMENT",         // untested at publish: the call has no clock yet
+  reference_refused: "JUDGMENT",      // the contract's dead-man's handle
 });
 
 /** Unknown gate ⇒ SAFETY. Default-deny, deliberately. */

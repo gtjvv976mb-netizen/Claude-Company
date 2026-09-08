@@ -49,7 +49,10 @@ export function writeReport(cycle, r) {
      leaving costs depends on the order size, and the size is the bot's
      (executor/jupiter.mjs:1341-1350 measures it at the real one before signing). The
      line that matters on this row is whether it measured AT ALL. */
-  L.push(`| Sell route (test quote @ $${ev.exitProbe?.targetSizeUsd}) | ${ev.exitProbe?.roundTripLossPct != null ? "route exists; round trip " + ev.exitProbe.roundTripLossPct + "% at that test amount — not a gate" : "NO ROUTE MEASURED — " + (ev.exitProbe?.error ?? "")} |`);
+  L.push(`| Sell route (test quote ${ev.exitProbe?.quoteAmountUi ?? ""} ${ev.exitProbe?.quoteAsset ?? "USDC"}, ~$${ev.exitProbe?.targetSizeUsd}) | ${ev.exitProbe?.roundTripLossPct != null ? "route exists; round trip " + ev.exitProbe.roundTripLossPct + "% at that test amount — not a gate" : "NO ROUTE MEASURED — " + (ev.exitProbe?.error ?? "")} |`);
+  /* The hop count the liquidity seat's brief asks for. An observation of the route the
+     bot itself would take (the probe quotes in its leg), never a bar. */
+  L.push(`| Route hops (buy / sell) | ${ev.exitProbe?.buyHops ?? "—"} / ${ev.exitProbe?.sellHops ?? "—"}${(ev.exitProbe?.sellAmms ?? ev.exitProbe?.buyAmms ?? []).length ? " via " + (ev.exitProbe.sellAmms ?? ev.exitProbe.buyAmms).join(" > ") : ""} |`);
   L.push(`| Token program | ${ev.mintAccount?.program ?? "—"} |`);
   L.push(`| Mint authority | ${ev.mintAccount?.mintAuthority ?? "revoked"} |`);
   L.push(`| Freeze authority | ${ev.mintAccount?.freezeAuthority ?? "revoked"} |`);

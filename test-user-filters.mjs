@@ -99,9 +99,19 @@ ok("a fixed fund larger than the bankroll is clamped", Number(settingsFor(F).fix
   `${settingsFor(F).fixed_sol} SOL vs a ${settingsFor(F).bankroll_sol} SOL bankroll`);
 saveSettings(F, { fixedSol: "auto" });
 ok("auto is expressible", Number(settingsFor(F).fixed_sol) === 0);
-// The dial governs how MUCH, never WHETHER.
-const pf = planEntry({ call: c2, cfg: { ...DEFAULTS, fixedSol: 0.02 }, state: { ...st, wins: 3, losses: 29 } });
+/* THE DIAL GOVERNS HOW MUCH, NEVER WHETHER — re-anchored 2026-09-08. This made the claim
+   through the W_min hit-rate gate, and that gate is now deliberately scoped to the AUTO
+   path: with a fixed fund the engine overwrites `want` with it, so the branch could only
+   ever veto a trade, never size one. The claim itself is unchanged and is made against a
+   refusal that holds whatever the sample says — a bracket whose costs eat the target —
+   plus the hit-rate gate where it still binds, on auto. Both halves, and the scope of the
+   change, are proved in executor/test-kelly-fixed-size.mjs. */
+const evDead = { ...c2, target: 1 + DEFAULTS.costPct / 2 };
+const pf = planEntry({ call: evDead, cfg: { ...DEFAULTS, fixedSol: 0.02 }, state: { ...st, wins: 3, losses: 29 } });
 ok("a fixed fund does NOT override a refusal", pf.action === "skip", pf.reason);
+const pfAuto = planEntry({ call: c2, cfg: { ...DEFAULTS, fixedSol: 0 }, state: { ...st, wins: 3, losses: 29 } });
+ok("...and on auto the hit-rate gate still refuses", pfAuto.action === "skip" && /hit rate/.test(pfAuto.reason),
+  pfAuto.reason);
 
 console.log("\nTHE TEAM DECIDES WHAT IS TRADED — no tenant filter can block a call");
 /* Each of these was, until 2026-09-03, a per-floor gate that could silently refuse a

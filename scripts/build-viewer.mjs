@@ -163,6 +163,11 @@ fs.mkdirSync(path.join(OUT, "executor"), { recursive: true });
 const EXECUTOR_FILES = [
   "poller.mjs", "journal.mjs", "jupiter.mjs", "balance-verification.mjs", "entry-quote-guard.mjs", "exit-trigger.mjs", "feed-drain.mjs", "sol-usd-oracle.mjs", "heartbeat-health.mjs", "sleep-assertion.mjs", "monitor.mjs", "install.sh", "macos-launchagent.sh", "macos-release.sh", "launchd-runner.mjs", "executor.mjs",
   "README.md", "strategy.mjs", "trade-policy.mjs", "simulate.mjs",
+  /* THE ENTRY CONTRACT. One definition of "tradeable" for the desk and the bot, and a
+     runtime import of poller.mjs — so it ships with every install for the same reason
+     token2022.mjs does, and with the same failure if it does not: a 404 that aborts the
+     download before a single line of it is ever read. */
+  "entry-contract.mjs",
   /* Desk-led exits (2026-09-05). The bot no longer carries an exit policy of its own —
      Shrek, call 55: it sold 03:01:42Z on its own normalised stop at -13.5% while the
      desk's determined stop_hit landed 03:10:24Z. When the desk is unreachable the bot

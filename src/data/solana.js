@@ -14,16 +14,82 @@ export const DEV_SOLD_WINDOW_MS = 30 * 60_000;
 export const DEV_SOLD_DEADLINE_MS = 8_000;
 export const DEV_SOLD_SIG_LIMIT = 20;
 
-// Token-2022 extensions that can be used against a holder. The desk classifies
-// these in code so the judgment is auditable, not vibes from a model.
-const DANGEROUS_EXTENSIONS = {
-  transferHook: "Arbitrary program runs on every transfer — can block your sell entirely.",
-  transferFeeConfig: "A tax is skimmed on every transfer; the rate can often be raised later.",
-  permanentDelegate: "A delegate can move or burn tokens out of your wallet without consent.",
-  defaultAccountState: "New accounts can be frozen by default — buyers may be unable to sell.",
-  confidentialTransferMint: "Balances/transfers can be hidden, defeating on-chain flow analysis.",
-  mintCloseAuthority: "The mint can be closed by an authority.",
-};
+/* ── THE BOT'S ACCEPTANCE SET, INVERTED ─────────────────────────────────────────────
+ *
+ * What was here was a hand-written census of six "dangerous" extensions, and it had two
+ * holes at once. It FLAGGED transferFeeConfig, confidentialTransferMint and
+ * mintCloseAuthority that no screen check ever read — evidence.js looks only at
+ * ext_permanentDelegate, ext_transferHook and ext_defaultAccountState — so a
+ * transfer-fee mint was flagged here and screened nowhere. And it had no opinion at all
+ * about the eighteen other Token-2022 extensions that exist.
+ *
+ * Every pump.fun mint is Token-2022, and the executor accepts one only when NO extension
+ * can tax, block, redirect, freeze, pause or re-denominate a transfer:
+ * executor/token2022.mjs assertTradeableExtensions() throws on anything outside its
+ * ALLOWED_MINT_EXTENSIONS, and the poller treats that throw as a DETERMINISTIC entry
+ * failure — "entry acknowledged without a trade", no retry, cursor advanced. So a call
+ * carrying one of these is not a risky call, it is a call the bot can NEVER take: the
+ * cohort slot, the ~$1.30 workup and the publish are spent on a trade that cannot happen.
+ * Refusing it here costs $0 — the mint account is already read (evidence.js gather()).
+ *
+ * So the list below is not the desk's opinion about hazard, it is the BOT'S OWN
+ * acceptance set, and everything outside it is refused as `bot_mint_refusal`.
+ *
+ * WRITTEN OUT RATHER THAN IMPORTED. executor/token2022.mjs imports @solana/web3.js
+ * (token2022.mjs:16) and that is an EXECUTOR dependency — the desk's package.json
+ * declares three dependencies and @solana is not among them, it lives only in
+ * executor/node_modules. Importing the constants would make the desk fail to boot
+ * anywhere the executor's tree is absent, Render included. The parity is enforced by a
+ * test that reads the executor's own source instead (test-token2022-mirror.mjs), so a
+ * drift between the two lists is a red test rather than a silent divergence.
+ *
+ * NAMES: jsonParsed spells an extension in camelCase; the executor's TLV enum spells the
+ * same discriminant in PascalCase. The mirror test converts between the two.
+ */
+export const BOT_ALLOWED_EXTENSIONS = Object.freeze(new Set([
+  "mintCloseAuthority",   //  3 — a mint can only be closed at zero supply; holders unaffected
+  "defaultAccountState",  //  6 — and ONLY when the state is "initialized" (checked below)
+  "metadataPointer",      // 18
+  "tokenMetadata",        // 19
+  "groupPointer",         // 20
+  "tokenGroup",           // 21
+  "groupMemberPointer",   // 22
+  "tokenGroupMember",     // 23
+]));
+
+/* The three refusals that ALREADY have their own screen code, kept exactly as they were.
+   This change adds ONE code for everything else the bot refuses; it does not relabel,
+   move or widen anything the desk was already killing on, and it must not double-count
+   a refusal into two gates. */
+const EXTENSION_OWN_CODE = Object.freeze(new Set([
+  "permanentDelegate",    // seizable
+  "transferHook",         // transfer_hook
+  "defaultAccountState",  // frozen_by_default
+]));
+
+/* Prose for the extensions a memecoin actually turns up with. THE ALLOWLIST IS THE
+   AUTHORITY: an extension missing from this map still refuses, with a generic reason. */
+const EXTENSION_HAZARD = Object.freeze({
+  transferHook: "an arbitrary program runs on every transfer and can block your sell entirely",
+  transferFeeConfig: "a tax is skimmed on every transfer, and the rate can usually be raised later",
+  permanentDelegate: "a delegate can move or burn tokens out of your wallet without consent",
+  nonTransferable: "the token cannot be transferred at all — there is no sell",
+  pausable: "an authority can pause every transfer and strand the position",
+  interestBearingConfig: "the mint re-denominates itself, so one raw unit silently changes what it is worth",
+  scaledUiAmount: "the UI multiplier can be changed, moving the mark the stop and target are set against",
+  confidentialTransferMint: "balances and transfers can be hidden, defeating on-chain flow analysis",
+  confidentialTransferFeeConfig: "a hidden fee on a hidden transfer",
+  confidentialMintBurn: "supply can move without an observable transfer",
+  memoTransfer: "every transfer must carry a memo the executor does not attach",
+  cpiGuard: "transfers made through a program are restricted",
+  unparseableExtension: "the RPC could not name this extension, and an unknown extension fails closed",
+});
+const hazardOf = (name) =>
+  EXTENSION_HAZARD[name] ?? `the executor's mint audit does not accept the ${name} extension`;
+
+/* The executor's own decimal window (token2022.mjs auditMintAccount: "outside the live
+   canary range"). Anything else is refused there before a quote is taken. */
+const MAX_DECIMALS = 18;
 
 export async function mintInfo(mint) {
   const r = await readRpc(cfg.rpc, "getAccountInfo", [mint, { encoding: "jsonParsed" }]);
@@ -32,25 +98,62 @@ export async function mintInfo(mint) {
   const v = r.data.value;
   const info = v.data?.parsed?.info ?? {};
   const isToken2022 = v.owner === TOKEN2022;
-  const extensions = (info.extensions || []).map((e) => e.extension);
+  const extensionDetail = info.extensions || [];
+  const extensions = extensionDetail.map((e) => e.extension);
 
   const flags = [];
   if (info.mintAuthority) flags.push({ flag: "mint_authority_live", detail: `Supply can still be inflated by ${info.mintAuthority}.` });
   if (info.freezeAuthority) flags.push({ flag: "freeze_authority_live", detail: `${info.freezeAuthority} can freeze token accounts, preventing sells.` });
-  for (const ext of extensions) {
-    if (DANGEROUS_EXTENSIONS[ext]) flags.push({ flag: `ext_${ext}`, detail: DANGEROUS_EXTENSIONS[ext] });
+
+  /* Walk the extensions in the executor's own order of business: the allowlist, then
+     defaultAccountState's state byte, then initialisation, then the decimal range. What
+     the bot would refuse and the desk has no code for lands in `botRefusals`. */
+  const botRefusals = [];
+  for (const e of extensionDetail) {
+    const ext = e?.extension;
+    if (ext === "defaultAccountState") {
+      /* THE ONE PLACE THIS CHANGE IS NOT A TIGHTENING, and it is a false positive being
+         removed rather than a gate being relaxed. `frozen_by_default` names its hazard
+         exactly — "new accounts are frozen by default" — and it was firing on the mere
+         PRESENCE of the extension, including a mint whose default state is `initialized`,
+         where no account is frozen and the executor buys happily (token2022.mjs allows
+         type 6 at state 1). The gate still fires on the hazard it names, and on an
+         unreadable state, because unverified is not safe. */
+      const state = e?.state?.accountState ?? null;
+      if (state !== "initialized")
+        flags.push({ flag: "ext_defaultAccountState",
+          detail: `new accounts open in state "${state ?? "unreadable"}" — a buyer may be unable to sell` });
+      continue;
+    }
+    if (BOT_ALLOWED_EXTENSIONS.has(ext)) continue;
+    const detail = hazardOf(ext);
+    flags.push({ flag: `ext_${ext}`, detail });
+    if (!EXTENSION_OWN_CODE.has(ext)) botRefusals.push(`${ext}: ${detail}`);
   }
+  const decimals = info.decimals ?? null;
+  if (info.isInitialized === false)
+    botRefusals.push("the mint account is not initialized");
+  /* UNVERIFIED IS NOT SAFE HERE EITHER. A null decimal count is not a lenient case, it
+     is an account that did not come back with a mint's shape — which the executor also
+     refuses, from the bytes ("does not have the classic SPL mint layout"). */
+  if (!(Number.isInteger(decimals) && decimals >= 0 && decimals <= MAX_DECIMALS))
+    botRefusals.push(`decimals ${decimals} is outside the executor's 0-${MAX_DECIMALS} range`);
+  if (botRefusals.length)
+    flags.push({ flag: "bot_mint_refusal", detail: botRefusals.join("; ") });
 
   return {
     ok: true,
     program: isToken2022 ? "spl-token-2022" : "spl-token",
     isToken2022,
-    decimals: info.decimals ?? null,
+    decimals,
     supply: info.supply ?? null,
     mintAuthority: info.mintAuthority ?? null,
     freezeAuthority: info.freezeAuthority ?? null,
     extensions,
-    extensionDetail: (info.extensions || []),
+    extensionDetail,
+    // Why the bot would refuse, as prose, so the seat bundle and the ledger can say it
+    // without re-deriving anything. Empty when the executor's audit would pass.
+    botRefusals,
     flags,
   };
 }

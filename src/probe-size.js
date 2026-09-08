@@ -1,6 +1,6 @@
 import { EXECUTOR_OPERATOR_MAXIMA } from "./executor-dashboard.js";
 import db from "./lib/store.js";
-import { cfg } from "./config.js";
+import { cfg, MINTS } from "./config.js";
 
 /**
  * THE AMOUNT THE ROUTE PROBE IS QUOTED AT — a test instrument, not a trading size.
@@ -136,6 +136,42 @@ function capsFromHeartbeatRow(raw, floorNo, now) {
     // cap of zero so the caller can say WHICH degenerate case it hit.
     maxSolPerTrade: Number.isFinite(maxSolPerTrade) ? maxSolPerTrade : null,
     dailySolCap: Number(caps?.dailySolCap) || null,
+  };
+}
+
+/* THE ASSET THE ROUTE PROBE IS QUOTED IN — WSOL when a bot is reporting, USDC otherwise.
+ *
+ * THE DEFECT: the probe always quoted USDC->mint->USDC, and the bot never trades that
+ * pair. WALL-ST-E swaps WSOL->mint on the way in and mint->WSOL on the way out
+ * (executor/jupiter.mjs WSOL, executor/poller.mjs), and it REFUSES a route that would
+ * open a third wallet ATA — its rent cap is 4,200,000 lamports against 4,078,560 for
+ * two accounts, so a USDC-legged route does not fit. Measured on the on-curve GoatPro:
+ * one hop via Pump.fun quoted in WSOL, two hops quoted in USDC. The desk was measuring
+ * a route the bot never takes, and reporting its hop count as if it were the bot's.
+ *
+ * WHY THE BOT'S OWN LAMPORTS AND NOT A USD CONVERSION. botProbeNotional() already reads
+ * the largest per-trade cap a live bot has declared (caps.maxSolPerTrade, in SOL); it
+ * then multiplies by a SOL price to state it in dollars. When a bot IS reporting, that
+ * conversion is a round trip through a price the quote does not need — the honest amount
+ * is the lamport figure the bot itself would send. With no bot reporting there is no
+ * SOL figure to send, so the stated USD constant is quoted in USDC exactly as before.
+ *
+ * STILL NOT A SIZE JUDGMENT. This picks the ASSET and the AMOUNT of a test quote and
+ * nothing else; no veto reads either. See the docstring at the top of this file. */
+export function routeProbeLeg(probeSize) {
+  const botSol = Number(probeSize?.botSol);
+  if (probeSize?.fromBot === true && Number.isFinite(botSol) && botSol > 0) {
+    return {
+      quoteMint: MINTS.SOL, quoteAsset: "WSOL",
+      // Lamports, the unit a Solana swap is actually denominated in.
+      quoteAmountRaw: String(Math.round(botSol * 1e9)),
+      quoteAmountUi: botSol,
+    };
+  }
+  return {
+    quoteMint: MINTS.USDC, quoteAsset: "USDC",
+    quoteAmountRaw: String(Math.round(Number(probeSize?.sizeUsd ?? ROUTE_PROBE_FALLBACK_USD) * 1e6)),
+    quoteAmountUi: Number(probeSize?.sizeUsd ?? ROUTE_PROBE_FALLBACK_USD),
   };
 }
 

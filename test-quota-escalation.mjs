@@ -96,6 +96,11 @@ const CASES = {
   seizable: screened("seizable"),
   transfer_hook: screened("transfer_hook"),
   frozen_by_default: screened("frozen_by_default"),
+  /* The rest of the executor's mint audit: a Token-2022 extension outside its allowlist
+     (data/solana.js BOT_ALLOWED_EXTENSIONS). The bot refuses these deterministically and
+     acknowledges the event without a retry, so a published call is spent for nothing —
+     which is exactly why no quota may reach past it. */
+  bot_mint_refusal: screened("bot_mint_refusal"),
   holder_concentration: screened("holder_concentration"),
   serial_deployer: screened("serial_deployer"),
   post_migration_dump: screened("post_migration_dump"),

@@ -35,6 +35,14 @@ process.env.EXECUTE = "0";
 // The seat is always a spy below; an empty key makes any escape to the real seat fail
 // loudly rather than spend.
 process.env.ANTHROPIC_API_KEY = "";
+/* AND NO MARKET READ EITHER. publishCohort now takes one fresh DexScreener consensus
+   mark per candidate before each (synchronous) publish, and this file stubs no network:
+   without the desk's own offline seam it would make a real request per fixture mint, so
+   a suite run would depend on an external API answering. Nothing here is about the
+   mark — the fixtures are hand-built recs, and test-publish-remarks.mjs proves the mark
+   path — so the read declines deterministically and the anchor falls back to the
+   fixture's own price, exactly as it did before that step. */
+process.env.DS_OFFLINE = "1";
 
 const db = (await import("./src/lib/store.js")).default;
 const { publishCohort, cohortEligibility } = await import("./src/penthouse.js");
@@ -48,8 +56,13 @@ const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  —
                                  : (fail++, console.log(`  FAIL ${n}${d ? "  — " + d : ""}`)); };
 const reset = () => {
   for (const c of liveCalls()) closeCall(c.id, "test_reset", 1);
-  // call_events references calls, so it goes first or the FK refuses the delete.
-  db.exec("DELETE FROM call_events; DELETE FROM executor_fills; DELETE FROM deliveries; DELETE FROM calls; DELETE FROM cycles");
+  /* call_events references calls, so it goes first or the FK refuses the delete — and
+     so does `alerts`, whose row broadcast() writes through a fire-and-forget
+     announceEntry. That import used to still be in flight when reset() ran; it is not
+     any more, and an ordering this delete depended on was never a property worth
+     depending on. */
+  db.exec("DELETE FROM call_events; DELETE FROM executor_fills; DELETE FROM deliveries; " +
+          "DELETE FROM alerts; DELETE FROM calls; DELETE FROM cycles");
 };
 const events = [];
 bus.on("event", (ev) => events.push(ev));

@@ -308,8 +308,32 @@ console.log("\n6. THE FREE SAFETY SCREEN DID NOT MOVE");
    free SAFETY gauntlet, so its source text is pinned byte for byte and the hash is
    PRINTED — if this goes red the screen changed, which is either the defect this
    assertion exists to catch or a deliberate later change whose author must re-measure
-   the value here and say, in this comment, why it moved. Measured 2026-09-08. */
-const SCREEN_SHA256 = "88ed3433e37074c7a9f3a5e1384d74be1ff823400c4f9dfd31b5028facd00ab6";
+   the value here and say, in this comment, why it moved. Measured 2026-09-08.
+
+   MOVED 2026-09-08, and the pin is doing its job: screen() gained ONE check,
+   `bot_mint_refusal`. All pump.fun mints are Token-2022 and the executor accepts one
+   only when no extension can tax, block, redirect, freeze, pause or re-denominate a
+   transfer (executor/token2022.mjs ALLOWED_MINT_EXTENSIONS); the screen was reading
+   three of the twenty it rejects, so a transferFeeConfig mint published and the bot
+   refused it on arrival — deterministically, acknowledged without a retry, the call
+   spent for a trade that could never happen. The new check is a TIGHTENING off an
+   account the screen already reads: nothing that used to pass this gauntlet passes it
+   more easily, and the one case that changed direction is a false positive removed
+   (frozen_by_default no longer fires on a defaultAccountState whose state is
+   `initialized`, where no account is frozen and the bot buys). The mirror between the
+   two lists is proven extension-by-extension in test-token2022-mirror.mjs.
+
+   MOVED AGAIN 2026-09-08, and again the pin caught it. screen() gained no check and lost
+   none: `fails` is byte-identical in what it can contain, and `pass` is still
+   `fails.length === 0`. What was added is a second, separate array — `notes` — and one
+   entry in it, `multi_hop_route`, recording that the round-trip probe (now quoted in the
+   asset the bot actually swaps, WSOL at the bot's own declared cap) came back with more
+   than one hop on a leg. A note is not a gate: nothing in this function reads `notes`,
+   desk.js screens on `pass` alone, and test-wsol-probe.mjs drives a clean coin with a
+   two-hop exit through screen() and asserts it still PASSES with zero fails. So the
+   gauntlet did not move; a new observation was recorded beside it. The re-measured hash
+   below is the whole of the change. */
+const SCREEN_SHA256 = "7a38bd32ce1ebeb55f7981a8a7e3fb0c2b41cf0d12cf0109bcfba1592fd55612";
 const screenSrc = screen.toString();
 const screenHash = crypto.createHash("sha256").update(screenSrc).digest("hex");
 console.log(`     sha256(screen.toString()) = ${screenHash}   (${screenSrc.length} bytes of source)`);

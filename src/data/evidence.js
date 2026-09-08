@@ -11,7 +11,7 @@ import * as pf from "./pumpfun.js";
 import { candles, momentumFrom, epochMs, BIRTH_TAPE_CANDLES } from "./pumpfun-live.js";
 import { huntWindowMs } from "../ignition.js";
 import { regime } from "./regime.js";
-import { botProbeNotional } from "../probe-size.js";
+import { botProbeNotional, routeProbeLeg } from "../probe-size.js";
 
 /**
  * THE BIRTH TAPE FOR THE ONE COIN BEING GATHERED.
@@ -32,6 +32,40 @@ export async function launchMomentum({ mint, createdAt, band, curveOpenUsd = nul
   const tape = await candles(mint, { limit: BIRTH_TAPE_CANDLES }).catch(() => []);
   return momentumFrom(tape, { now, createdAt, curveOpenUsd, limit: BIRTH_TAPE_CANDLES });
 }
+
+/* THE SHAPE OF THE WAY OUT, recorded on every probe.
+ *
+ * jupiter.quote() has always returned `hops` (routePlan length) and `amms` (the venue
+ * labels), and both were thrown away one frame later: the liquidity seat's brief asks
+ * for "route hop count: more hops means more failure points under volatility" and there
+ * was no field on the bundle that answered it. These carry it, per leg, plus the worse
+ * of the two as `routeHops`.
+ *
+ * `multiHopRoute` RECORDS, IT DOES NOT REFUSE. A two-hop route is a real fact about the
+ * way out — more programs to fail, more pools to drain — but it is not a fact about
+ * whether the coin CAN be sold, which is the only thing this probe is allowed to gate
+ * (`unverified_exit`, below). So it is a note, never a screen failure, and
+ * `multi_hop_route` is registered JUDGMENT in calls.js GATE_CLASS so default-deny can
+ * never promote it to a kill. Null everywhere means unmeasured, never clean. */
+function routeShape(rt) {
+  const legHops = (q) => Number.isFinite(Number(q?.hops)) ? Number(q.hops) : null;
+  const buyHops = legHops(rt?.buy), sellHops = legHops(rt?.sell);
+  const measured = [buyHops, sellHops].filter((h) => h != null);
+  const routeHops = measured.length ? Math.max(...measured) : null;
+  return {
+    buyHops, sellHops,
+    buyAmms: Array.isArray(rt?.buy?.amms) ? rt.buy.amms : null,
+    sellAmms: Array.isArray(rt?.sell?.amms) ? rt.sell.amms : null,
+    routeHops,
+    multiHopRoute: routeHops == null ? null : routeHops > 1,
+  };
+}
+
+/** What the quote was taken IN, carried beside what it was taken AT. */
+const legLabel = (leg) => ({
+  quoteAsset: leg.quoteAsset, quoteMint: leg.quoteMint,
+  quoteAmountRaw: leg.quoteAmountRaw, quoteAmountUi: leg.quoteAmountUi,
+});
 
 /**
  * Everything the desk knows about one token, fetched deterministically.
@@ -83,13 +117,20 @@ export async function gather(mint, hook = "") {
    * its own heartbeat, and falls back to a stated instrument constant when no bot is
    * reporting. It is a test amount, not a trade amount, and nothing downstream may veto
    * on it — see probe-size.js. */
+  /* AND IT IS QUOTED IN THE ASSET THE BOT ACTUALLY SWAPS. WALL-ST-E only ever goes
+   * WSOL->mint and mint->WSOL (executor/jupiter.mjs, executor/poller.mjs) and refuses a
+   * route that would open a third wallet ATA, so a USDC-legged quote can measure a route
+   * the bot cannot take: measured on the on-curve GoatPro, 1 hop via Pump.fun in WSOL
+   * and 2 hops in USDC. routeProbeLeg() therefore quotes the bot's own declared cap in
+   * lamports whenever a live heartbeat gives it one, and the stated USD constant in USDC
+   * when there is no bot to measure. See probe-size.js. */
   const probeSize = botProbeNotional();
-  const usdcRaw = Math.round(probeSize.sizeUsd * 1e6);
+  const leg = routeProbeLeg(probeSize);
   const wantsDeployer = hook !== "monitor" && mint.endsWith("pump");
   const [mintAcct, rt, jp, promo, marketRegime, deployerRaw] = await Promise.all([
     sol.mintInfo(mint),
-    // Route probe: does a sell path exist and return anything? Quoted in USDC.
-    jup.roundTrip({ quoteMint: MINTS.USDC, tokenMint: mint, quoteAmountRaw: String(usdcRaw) }),
+    // Route probe: does a sell path exist and return anything? Quoted in the bot's leg.
+    jup.roundTrip({ quoteMint: leg.quoteMint, tokenMint: mint, quoteAmountRaw: leg.quoteAmountRaw }),
     // The coin and SOL on the one request: SOL/USD prices the curve's opening value for
     // the launch-share reading below, and costs nothing the desk was not already asking.
     jup.price([mint, MINTS.SOL]),
@@ -239,9 +280,9 @@ export async function gather(mint, hook = "") {
        a fortune to leave is worth SAYING, and the bot decides what to do about it. */
     exitProbe: rt.ok
       ? { targetSizeUsd: probeSize.sizeUsd, sizeSource: probeSize.source,
-          sizeFromBot: probeSize.fromBot, ...rt }
+          sizeFromBot: probeSize.fromBot, ...legLabel(leg), ...rt, ...routeShape(rt) }
       : { targetSizeUsd: probeSize.sizeUsd, sizeSource: probeSize.source,
-          sizeFromBot: probeSize.fromBot, error: rt.error },
+          sizeFromBot: probeSize.fromBot, ...legLabel(leg), ...routeShape(rt), error: rt.error },
     jupPrice,
     derived: {
       totalLiquidityUsd: liq,
@@ -260,11 +301,19 @@ export async function gather(mint, hook = "") {
  */
 export function screen(ev) {
   const fails = [];
+  /* NOTES ARE RECORDED, NOT COUNTED. `pass` is `fails.length === 0` and nothing here
+     touches `fails`, so a note can never screen a coin out — which is the whole point of
+     the separation. desk.js turns a failed screen into `screened_out` regardless of a
+     code's class, so a JUDGMENT code placed in `fails` would kill exactly as hard as a
+     SAFETY one; the class table in calls.js only ranks codes that already reached a
+     gate. A fact worth carrying to the seats but not worth refusing on belongs here. */
+  const notes = [];
   const s = cfg.screen;
   const p = ev.pair || {};
   const d = ev.derived || {};
 
   const check = (cond, code, detail) => { if (cond) fails.push({ code, detail }); };
+  const note = (cond, code, detail) => { if (cond) notes.push({ code, detail }); };
 
   // The launch farm: many priors, none ever graduated. Fires only on POSITIVE
   // evidence — a coin whose deployer we could not identify passes this check,
@@ -446,6 +495,26 @@ export function screen(ev) {
   check(flags.includes("ext_defaultAccountState"),
     "frozen_by_default", "new accounts are frozen by default — a buyer may be unable to sell");
 
+  /* EVERYTHING ELSE THE BOT'S MINT AUDIT REFUSES, refused here instead — for $0.
+   *
+   * The three checks above are the desk's whole Token-2022 vocabulary, and they cover
+   * three of the twenty extensions the executor rejects. A transferFeeConfig mint was
+   * FLAGGED by data/solana.js and screened by nobody: it drew a full ~$1.30 workup, took
+   * a cohort slot, published — and then executor/token2022.mjs
+   * assertTradeableExtensions() threw on arrival, which the poller classifies as a
+   * DETERMINISTIC entry failure and acknowledges WITHOUT a retry. The call was consumed
+   * for a trade that could never happen.
+   *
+   * SAFETY rather than JUDGMENT, and not because "the bot said no": every member of the
+   * refused set is a way the mint can stop or tax the way OUT — a fee on the sell, a
+   * paused transfer, a non-transferable token, a re-denominating unit that moves the
+   * mark the stop is set against. It is the same family as a live freeze authority,
+   * measured from the same account read (data/solana.js BOT_ALLOWED_EXTENSIONS, which is
+   * the executor's own allowlist inverted). */
+  check(flags.includes("bot_mint_refusal"), "bot_mint_refusal",
+    (ev.mintAccount?.flags ?? []).find((f) => f?.flag === "bot_mint_refusal")?.detail
+      ?? "the mint carries something the executor's Token-2022 audit refuses — the bot could not take this call");
+
   // One wallet holding half the float (pool already excluded upstream).
   check(ev.holders?.ok && ev.holders.top1Pct > 50,
     "holder_concentration", `largest non-pool account holds ${ev.holders?.top1Pct}% of supply`);
@@ -475,7 +544,19 @@ export function screen(ev) {
       `liquidity dipped to $${Math.round(held.minLiq)} inside 24h (floor $${fl.liq})`);
   }
 
-  return { pass: fails.length === 0, fails };
+  /* MORE THAN ONE POOL BETWEEN THE POSITION AND WSOL. Recorded because the bot's own
+     entry refuses a route that needs a third wallet ATA (executor/jupiter.mjs, rent cap
+     4,200,000 lamports against 4,078,560 for two accounts), and because every extra hop
+     is another program that can fail while a stop is trying to fire. NOT a refusal: the
+     coin sells, which is the only question this probe is allowed to gate. Fires only on
+     a measured hop count — null is unmeasured, never clean. */
+  note(ev.exitProbe?.multiHopRoute === true, "multi_hop_route",
+    `the way out is ${ev.exitProbe.routeHops} hops in ` +
+    `${ev.exitProbe.quoteAsset ?? "the quote asset"} (buy ${ev.exitProbe.buyHops ?? "?"} via ` +
+    `${(ev.exitProbe.buyAmms ?? []).join(" > ") || "?"}, sell ${ev.exitProbe.sellHops ?? "?"} via ` +
+    `${(ev.exitProbe.sellAmms ?? []).join(" > ") || "?"}) — more programs that can fail on the way out`);
+
+  return { pass: fails.length === 0, fails, notes };
 }
 
 /**

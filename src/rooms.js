@@ -228,14 +228,19 @@ export async function requestRun({ floorNo, wallet, mint, houseSeat = false }) {
        * in mandate.js applies unchanged — this is a new road to the publish step, not
        * a way around it. */
       try {
-        const { publishCall } = await import("./penthouse.js");
+        const { publishCall, freshMark } = await import("./penthouse.js");
         const { classify, launchpad } = await import("./market.js");
         let category = null, pad = null;
         try {
           const c = { mint, pair: res?.ev?.pair };
           category = classify(c).category; pad = launchpad(c);
         } catch {}
-        const pub = publishCall(res, { category, launchpad: pad, toFloors: [floorNo], sourceFloor: floorNo });
+        /* THE SAME FRESH ANCHOR THE HOUSE LANES TAKE. A tenant paid 250,000 $CLAUDECO
+           for this workup; the price it opened with is ~8.6 minutes old by the time it
+           reaches here, and a call anchored on that is the one the bot refuses for
+           "drift". One free consensus read, exactly as the cohort lane does. */
+        const pub = publishCall(res, { category, launchpad: pad, toFloors: [floorNo],
+          sourceFloor: floorNo, mark: await freshMark(mint) });
         if (pub?.callId) {
           db.prepare("UPDATE runs SET detail=? WHERE id=?")
             .run(`${res?.detail ?? res?.finalDecision ?? "decided"} · published as call #${pub.callId}`, runId);
