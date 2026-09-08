@@ -360,7 +360,7 @@ try {
      report is read first and its size is the bot's real SOL, never the desk's. */
   assert.match(view, /if \(c\.bot_status === "open"\) \{\n\s*line\.textContent = `Your bot bought \$\{solStr\(c\.bot_size_sol\)\} SOL of this /,
     "the call card reads the bot's own open report first");
-  assert.match(view, /\} else if \(c\.bot_status === "closed"\) \{[\s\S]{0,200}?`Your bot sold \\u00b7 \$\{Number\.isFinite\(realized\) \? signedSol\(realized\)/,
+  assert.match(view, /\} else if \(c\.bot_status === "closed"\) \{[\s\S]{0,900}?`Your bot sold \\u00b7 \$\{Number\.isFinite\(realized\) \? signedSol\(realized\)[^`]*\$\{exitWords\}/,
     "...and its exit report with the realised SOL and the reason");
   assert.match(view, /x\.fillText\("ENTRY MC"/, "the entry column is a market cap");
   assert.match(view, /x\.fillText\("TARGET MC"/, "the second column is the target, not the mark");

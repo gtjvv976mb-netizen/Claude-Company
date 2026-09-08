@@ -43,6 +43,13 @@ ok("an unknown code falls back to a sentence, lowercased, no underscores", () =>
   const d = P.decision("some_future_outcome");
   assert.equal(d.chip, "FINISHED"); assert.match(d.sentence, /reason on file/); assert.doesNotMatch(d.sentence, /_|[A-Z]{3,}/);
 });
+ok("the bot's own exit kinds read as words, and the card prefers the kind to the free-text reason", () => {
+  assert.equal(P.kind("risk_exit"), "sold by its own risk rule"); assert.equal(P.kind("mirror_exit"), "sold when the desk went quiet"); assert.equal(P.kind("desk_exit"), "closed by the desk");
+  const j = html.indexOf("function paintFeedInto"); const card = html.slice(j, j + 16000);
+  assert.ok(card.includes("window.PLAIN.kind(c.bot_exit_kind || c.bot_exit_code || \"\")") && card.includes("window.__detailedView() && c.bot_exit_reason"), "kind first; the reason only in Detailed view");
+  assert.ok(html.includes("that file is named HARD_STOP, ") && !html.includes("It prints the file's path."), "the hard-stop how-to names the installed file and claims nothing status does not do");
+  assert.ok(html.includes("@media (max-width:420px){ .chiprow .dashbadge:nth-child(n+3){display:none} }"), "a phone shows two chips");
+});
 ok("close reasons read as words", () => {
   assert.equal(P.closeReason("target_hit"), "target hit"); assert.equal(P.closeReason("invalidated"), "reason broke");
   assert.doesNotMatch(P.closeReason("weird_new_reason"), /_/);

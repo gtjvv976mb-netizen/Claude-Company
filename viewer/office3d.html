@@ -284,6 +284,7 @@ body{
 .info-btn:hover{color:var(--ink);border-color:var(--panel-line)}
 .chiprow{display:flex;gap:6px;flex-wrap:wrap}
 .chiprow .dashbadge b{color:var(--ink);font-weight:700}
+@media (max-width:420px){ .chiprow .dashbadge:nth-child(n+3){display:none} }
 .lead-actions{display:flex;gap:7px;flex-wrap:wrap}
 .tape-tools{position:sticky;top:0;z-index:2;display:flex;gap:6px;padding:6px 0 8px;background:var(--panel)}
 .tape-tools .dashbadge{cursor:pointer}
@@ -6398,7 +6399,8 @@ window.__showChatter = (() => { try { return localStorage.getItem("cc_detailed")
   };
   const CLOSE = { target_hit: "target hit", stop_hit: "stop hit", stopped: "stop hit", time_stop: "time ran out",
     timed_out: "time ran out", expired: "time ran out", manual: "closed by the desk", desk_exit: "closed by the desk",
-    invalidated: "reason broke", cannot_exit: "could not be sold", closed: "closed" };
+    invalidated: "reason broke", cannot_exit: "could not be sold", closed: "closed",
+    desk_exit: "closed by the desk", mirror_exit: "sold when the desk went quiet", risk_exit: "sold by its own risk rule" };
   const closeReason = (code) => CLOSE[String(code ?? "").toLowerCase()] ?? fallback(code);
   const DECISION = {
     approved: ["APPROVED", "good", "the desk approved it"], propose: ["APPROVED", "good", "the desk approved it"],
@@ -8965,8 +8967,13 @@ function paintFeedInto(wrap, feed, settings) {
       line.style.color = "var(--good,#4f8f52)";
     } else if (c.bot_status === "closed") {
       const realized = Number(c.bot_realized_sol);
-      line.textContent = `Your bot sold \u00b7 ${Number.isFinite(realized) ? signedSol(realized) : "? SOL"}` +
-        ` \u00b7 ${window.PLAIN.kind(c.bot_exit_reason || c.bot_exit_code || c.bot_exit_kind || "") || "no reason reported"}`;
+      /* The KIND is a person's sentence (desk_exit / mirror_exit / risk_exit); the bot's
+         free-text reason ("independent executable exit mark unavailable on two consecutive
+         ticks") is for Detailed view, and reached the card verbatim before this. */
+      const exitWords = window.PLAIN.kind(c.bot_exit_kind || c.bot_exit_code || "") || "no reason reported";
+      const exitWhy = typeof window.__detailedView === "function" && window.__detailedView() && c.bot_exit_reason
+        ? " \u00b7 " + window.PLAIN.plainDetail(c.bot_exit_reason) : "";
+      line.textContent = `Your bot sold \u00b7 ${Number.isFinite(realized) ? signedSol(realized) : "? SOL"} \u00b7 ${exitWords}${exitWhy}`;
       if (Number.isFinite(realized) && realized !== 0) line.style.color = realized > 0 ? "var(--good,#4f8f52)" : "var(--bad,#b5473b)";
     } else if (!bs?.exists) {
       line.textContent = FLOOR_N == null ? "The desk's own call." : "The desk's own call \u00b7 your bot is not set up, so it is not in this trade";
@@ -11557,10 +11564,11 @@ async function loadWallsteDashboard({ background = false } = {}) {
     };
     const NEED = {
       hardstop: ["Clear the hard stop", () => howTo("How to clear the hard stop",
-        "Your bot stops itself when its hard-stop file exists \u2014 a file beside its state database whose name ends in .hard-stop. "
+        "Your bot stops itself while its hard-stop file exists. For a bot set up by the installer that file is named HARD_STOP, "
+        + "in the bot's own folder; an older set-up uses a file ending in .hard-stop beside its state database. "
         + "While it is there the bot will not buy, and its automatic selling is blocked too.\n\n"
-        + "On the machine that runs it, open a terminal in the bot's folder and run\n    bash macos-launchagent.sh status\n"
-        + "It prints the file's path. Delete that file, then run\n    bash macos-launchagent.sh load\nto start the bot again.\n\n"
+        + "On the machine that runs it, open a terminal in the bot's folder, delete that file, then run\n"
+        + "    bash macos-launchagent.sh load\nto start the bot again (\u201cstatus\u201d shows whether it is running).\n\n"
         + "The desk cannot do any of this for you; nothing on this page can reach your machine.")],
       sell: ["How to sell by hand", () => howTo("How to sell by hand",
         "Your bot holds a coin it could not sell on its own. Nothing on this page can sign a sale \u2014 that needs the bot's wallet key, "
