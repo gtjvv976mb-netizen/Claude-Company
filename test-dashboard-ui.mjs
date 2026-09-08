@@ -353,9 +353,12 @@ try {
     "exposure sums the sizes actually on the board");
   assert.match(view, /if \(hudOnly\) \{[\s\S]{0,700}?window\.__grokBoardUpdate\?\.\(body\.feed \|\| \[\]\);[\s\S]{0,200}?return;/,
     "the hudOnly loadCalls path feeds the board before it returns, so the wall never freezes on another pane");
-  assert.match(view, /if \(c\.bot_status === "open"\) \{\n\s*line\.textContent = `WALL-ST-E is in for \$\{solStr\(c\.bot_size_sol\)\} SOL since /,
+  /* Re-anchored 2026-09-08 with the plain-language card: the words are a person's
+     ("Your bot bought … SOL of this"), the property is the same — the bot's own open
+     report is read first and its size is the bot's real SOL, never the desk's. */
+  assert.match(view, /if \(c\.bot_status === "open"\) \{\n\s*line\.textContent = `Your bot bought \$\{solStr\(c\.bot_size_sol\)\} SOL of this /,
     "the call card reads the bot's own open report first");
-  assert.match(view, /\} else if \(c\.bot_status === "closed"\) \{[\s\S]{0,200}?`WALL-ST-E exited \u00b7 realized /,
+  assert.match(view, /\} else if \(c\.bot_status === "closed"\) \{[\s\S]{0,200}?`Your bot sold \\u00b7 \$\{Number\.isFinite\(realized\) \? signedSol\(realized\)/,
     "...and its exit report with the realised SOL and the reason");
   assert.match(view, /x\.fillText\("ENTRY MC"/, "the entry column is a market cap");
   assert.match(view, /x\.fillText\("TARGET MC"/, "the second column is the target, not the mark");

@@ -174,4 +174,32 @@ ok("the bot page's lead chip is the shared bot state", () => {
   assert.ok(!w.includes('mode + " · STALE"') && !w.includes('"NOT LINKED"'), "the old three-way badge is gone");
 });
 
+ok("a call's life events read as words", () => {
+  assert.equal(P.kind("target_hit"), "target hit"); assert.equal(P.kind("post_migration_dump"), "sold off right after launch");
+  assert.equal(P.kind("mark_update"), "mark update"); assert.doesNotMatch(P.kind("some_new_kind"), /_/);
+});
+ok("Calls: Shortlist / Open / Closed keep their ids and views; the leads and the cards speak plainly", () => {
+  for (const t of ['data-calls-view="candidates">Shortlist</button>', 'data-calls-view="published">Open</button>', 'data-calls-view="closed">Closed</button>',
+    'id="calls-tab-candidates"', 'id="calls-tab-published"', 'id="calls-tab-closed"', 'aria-controls="candidatepanel"', 'aria-controls="livepanel"', 'aria-controls="closedpanel"'])
+    assert.ok(html.includes(t), t);
+  const i = html.indexOf("async function loadDashboardCalls"); const calls = html.slice(i, html.indexOf("window.__loadDashboardCallsSubview", i));
+  for (const t of ["Coins the desk would trade right now, each with an entry, a stop and a target.", "Open means the desk is tracking it, not that anyone holds it.",
+    "Calls the desk has closed, and the coins it turned down before they became calls.", "paintCycleSurface(callsCycleSlot, { history: true })", "detailsFold("])
+    assert.ok(calls.includes(t), `Calls must contain ${t}`);
+  for (const t of ["PUBLISHED IS NOT THE SAME AS HELD", "Killed before publication", "paper book", "executable instructions", "Closed / Killed"])
+    assert.ok(!calls.includes(t), `Calls must not say ${t}`);
+  const j = html.indexOf("function paintFeedInto"); const jEnd = html.indexOf("function buildScoreline", j); const card = html.slice(j, jEnd > 0 ? jEnd : j + 14000);
+  for (const t of ['add("Confidence"', 'add("Entry"', "window.PLAIN.closeReason(c.close_reason", "This call is wrong if: ", "Your bot bought ", "Your bot sold ", "your bot is offline, so it is not in this trade", "stampCallWithLevel(el, h, c)"])
+    assert.ok(card.includes(t), `card must contain ${t}`);
+  for (const t of ["WALL-ST-E is in for", "not linked", "Desk position (paper)", "`Desk position", '"Dossier"', "checking who is taking size"])
+    assert.ok(!card.includes(t), `card must not say ${t}`);
+  const k = html.indexOf("async function loadKilled"); const killed = html.slice(k, html.indexOf("async function openCallDossier", k));
+  assert.ok(killed.includes("turned down by ${window.PLAIN.role(k.seat)}") && !killed.includes("killed by"), "the turned-down row names the analyst's role");
+  const d = html.indexOf("async function openCallDossier"); const file = html.slice(d, html.indexOf("window.openCallDossier", d));
+  for (const t of ["Call file", "What each analyst said", "Why the desk likes it", "What happened", "Trades on the record", "window.PLAIN.kind(e.kind)", "TURNED IT DOWN", "Post-mortem (grade "])
+    assert.ok(file.includes(t), `call file must contain ${t}`);
+  for (const t of ["The seats, in order", "Life of the call", "COLONEL DEBRIEF", '"KILL"', "workup report"]) assert.ok(!file.includes(t), `call file must not say ${t}`);
+  assert.ok(html.includes("NOT REVIEWED · NOT APPROVED · NOT EXECUTABLE"), "the shortlist boundary line is kept word for word");
+});
+
 console.log(`\n${pass} passed — one vocabulary, executed\n`);

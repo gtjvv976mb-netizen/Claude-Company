@@ -1624,9 +1624,9 @@ window.CCModals = (function () {
 
     <section class="dashpanel" id="callsworkspace" role="tabpanel" aria-labelledby="dash-tab-calls" tabindex="0" hidden>
       <div class="subtabs" role="tablist" aria-label="Calls views">
-        <button class="subtab" id="calls-tab-candidates" role="tab" aria-controls="candidatepanel" aria-selected="true" tabindex="0" data-calls-view="candidates">Candidates</button>
-        <button class="subtab" id="calls-tab-published" role="tab" aria-controls="livepanel" aria-selected="false" tabindex="-1" data-calls-view="published">Published</button>
-        <button class="subtab" id="calls-tab-closed" role="tab" aria-controls="closedpanel" aria-selected="false" tabindex="-1" data-calls-view="closed">Closed / Killed</button>
+        <button class="subtab" id="calls-tab-candidates" role="tab" aria-controls="candidatepanel" aria-selected="true" tabindex="0" data-calls-view="candidates">Shortlist</button>
+        <button class="subtab" id="calls-tab-published" role="tab" aria-controls="livepanel" aria-selected="false" tabindex="-1" data-calls-view="published">Open</button>
+        <button class="subtab" id="calls-tab-closed" role="tab" aria-controls="closedpanel" aria-selected="false" tabindex="-1" data-calls-view="closed">Closed</button>
       </div>
       <div class="dashsubpanel" id="candidatepanel" role="tabpanel" aria-labelledby="calls-tab-candidates"></div>
       <div class="callspanel dashsubpanel" id="livepanel" role="tabpanel" aria-labelledby="calls-tab-published" hidden></div>
@@ -6513,7 +6513,9 @@ window.__showChatter = (() => { try { return localStorage.getItem("cc_detailed")
     if (live) return { chip: "LIVE", cls: "good", sentence: "Your bot is running with real money" + heldSentence(h) + ".", action: null };
     return { chip: "DRY RUN", cls: "good", sentence: "Your bot is running and only pretending to trade" + heldSentence(h) + ".", action: null };
   };
-  window.PLAIN = Object.freeze({ role, reason, decision, closeReason, plainDetail, event, chip, fallback, plainAge, deskState, botState, eventTypes: Object.keys(EVENT) });
+  /* A call's life events — published, marked, target hit — as words, never snake_case. */
+  const kind = (code) => { const k = String(code ?? "").toLowerCase(); return CLOSE[k] ?? REASON[k] ?? k.replace(/_/g, " "); };
+  window.PLAIN = Object.freeze({ role, reason, decision, closeReason, kind, plainDetail, event, chip, fallback, plainAge, deskState, botState, eventTypes: Object.keys(EVENT) });
 })();
 /* PLAIN:END */
 
@@ -8854,9 +8856,9 @@ function paintFeedInto(wrap, feed, settings) {
     const cat = document.createElement("span"); cat.className = `cat ${c.category}`; cat.textContent = c.category || "?";
     const st = document.createElement("span");
     st.className = "state" + (c.status === "live" ? " live" : "");
-    st.textContent = c.status === "live" ? "Live" : (c.close_reason || "closed").replace(/_/g, " ");
+    st.textContent = c.status === "live" ? "Open" : window.PLAIN.closeReason(c.close_reason || "closed");
     const why2 = document.createElement("button");
-    why2.className = "dp-btn ghost"; why2.type = "button"; why2.textContent = "Dossier";
+    why2.className = "dp-btn ghost"; why2.type = "button"; why2.textContent = "Call file";
     why2.style.marginLeft = "auto"; why2.style.fontSize = "9.5px"; why2.style.padding = "2px 8px";
     why2.onclick = () => openCallDossier(c.call_id);
     /* THE COHORT STAMP GOES IN BEFORE THE STATUS AND THE DOSSIER BUTTON, both of which
@@ -8883,15 +8885,15 @@ function paintFeedInto(wrap, feed, settings) {
     if (c.thesis) { const p = document.createElement("p"); p.textContent = c.thesis; el.appendChild(p); }
     if (c.invalidation) {
       const p = document.createElement("p"); p.className = "dp-note";
-      p.textContent = "Wrong if: " + c.invalidation;
+      p.textContent = "This call is wrong if: " + c.invalidation;
       el.appendChild(p);
     }
 
     const nums = document.createElement("div");
     nums.className = "nums";
     const add = (k, v) => { if (v == null) return; const s = document.createElement("span"); s.innerHTML = `${k} <b></b>`; s.querySelector("b").textContent = v; nums.appendChild(s); return s; };
-    add("Conviction", c.conviction != null ? Math.round(c.conviction) + "/100" : null);
-    add("Ref", c.entry_ref != null ? "$" + c.entry_ref : null);
+    add("Confidence", c.conviction != null ? Math.round(c.conviction) + "/100" : null);
+    add("Entry", c.entry_ref != null ? "$" + c.entry_ref : null);
     add("Stop", c.stop != null ? "$" + c.stop : null);
     add("Target", c.target != null ? "$" + c.target : null);
     // The number a trade is managed by: where it stands right now, against the ref.
@@ -8924,7 +8926,7 @@ function paintFeedInto(wrap, feed, settings) {
       const w = document.createElement("div");
       w.className = "whales";
       w.dataset.mint = c.mint;
-      w.textContent = "checking who is taking size…";
+      w.textContent = "checking for big wallets\u2026";
       el.appendChild(w);
       loadWhales(c.mint, w);
     }
@@ -8936,8 +8938,8 @@ function paintFeedInto(wrap, feed, settings) {
        publishing a size (2026-09-07) `c.size_sol` is null on every new row, so it would
        have rendered "take null SOL". The reason string already says the bot sizes it. */
     why.textContent = c.verdict === "offered"
-      ? `Your floor: ${c.reason}`
-      : `Your floor passed — ${c.reason}`;
+      ? `For you \u2014 ${window.PLAIN.plainDetail(c.reason)}`
+      : `Not offered to your floor \u2014 ${window.PLAIN.plainDetail(c.reason)}`;
     el.appendChild(why);
 
     /* WHOSE POSITION IS THIS? The card said "Live" and meant the DESK's paper
@@ -8962,29 +8964,29 @@ function paintFeedInto(wrap, feed, settings) {
     const solStr = (v) => { const n = Number(v); return Number.isFinite(n) ? String(+n.toFixed(4)) : "?"; };
     const signedSol = (n) => (n < 0 ? "-" : "+") + Math.abs(n).toFixed(4) + " SOL";
     if (c.bot_status === "open") {
-      line.textContent = `WALL-ST-E is in for ${solStr(c.bot_size_sol)} SOL since ${dashWhen(Number(c.bot_opened_at)) || "—"}`;
+      line.textContent = `Your bot bought ${solStr(c.bot_size_sol)} SOL of this ${dashWhen(Number(c.bot_opened_at)) ? "on " + dashWhen(Number(c.bot_opened_at)) : ""}`;
       line.style.color = "var(--good,#4f8f52)";
     } else if (c.bot_status === "closed") {
       const realized = Number(c.bot_realized_sol);
-      line.textContent = `WALL-ST-E exited · realized ${Number.isFinite(realized) ? signedSol(realized) : "? SOL"}` +
-        ` · ${c.bot_exit_reason || c.bot_exit_code || c.bot_exit_kind || "no reason reported"}`;
+      line.textContent = `Your bot sold \u00b7 ${Number.isFinite(realized) ? signedSol(realized) : "? SOL"}` +
+        ` \u00b7 ${window.PLAIN.kind(c.bot_exit_reason || c.bot_exit_code || c.bot_exit_kind || "") || "no reason reported"}`;
       if (Number.isFinite(realized) && realized !== 0) line.style.color = realized > 0 ? "var(--good,#4f8f52)" : "var(--bad,#b5473b)";
     } else if (!bs?.exists) {
-      line.textContent = "Desk position (paper) · WALL-ST-E not linked — no bot has reported to this floor";
+      line.textContent = FLOOR_N == null ? "The desk's own call." : "The desk's own call \u00b7 your bot is not set up, so it is not in this trade";
     } else if (!bs.running) {
-      line.textContent = "Desk position (paper) · WALL-ST-E is not running — it is not in this trade";
+      line.textContent = "The desk's own call \u00b7 your bot is offline, so it is not in this trade";
     } else {
       const held = window.__botHeld?.(c.mint);
       line.textContent = held
-        ? `Desk position (paper) · YOUR BOT IS IN THIS: ${held.sol} SOL`
-        : `Desk position (paper) · your bot is ${bs.live ? "live" : "on paper"} and not in this one`;
+        ? `Your bot holds ${held.sol} SOL of this`
+        : `The desk's own call \u00b7 your bot (${bs.live ? "live" : "dry run"}) is not in this one`;
       if (held) line.style.color = "var(--good,#4f8f52)";
     }
     el.appendChild(line);
     // When it opened, and when it closed. A card with no time is a card with no history.
     const when = document.createElement("div");
     when.className = "dp-note"; when.style.fontSize = "10px";
-    when.textContent = "opened " + (dashWhen(c.opened_at) || "\u2014") +
+    when.textContent = "published " + (dashWhen(c.opened_at) || "\u2014") +
       (c.status !== "live" && c.closed_at ? " \u00b7 closed " + dashWhen(c.closed_at) : "");
     el.appendChild(when);
 
@@ -9102,14 +9104,14 @@ function buildScoreline(record, feed) {
     if (col) b.style.color = col;
     line.appendChild(s);
   };
-  add("Book", `${r.wins}\u2013${r.losses}`);
-  if (r.settled) add("Settled", String(r.settled));
-  add("Net", `${net < 0 ? "-$" : "$"}${Math.abs(net).toLocaleString()}`, net >= 0 ? "var(--good,#4f8f52)" : "var(--bad,#b0503f)");
-  add("To place", String(toPlace), toPlace ? "var(--amber,#e0ad3d)" : undefined);
+  add("Record", `${r.wins}\u2013${r.losses}`);
+  if (r.settled) add("Closed trades", String(r.settled));
+  add("Profit or loss", `${net < 0 ? "-$" : "$"}${Math.abs(net).toLocaleString()}`, net >= 0 ? "var(--good,#4f8f52)" : "var(--bad,#b0503f)");
+  add("For you, not placed", String(toPlace), toPlace ? "var(--amber,#e0ad3d)" : undefined);
   box.appendChild(line);
 
   const sync = document.createElement("button");
-  sync.className = "dp-btn ghost"; sync.type = "button"; sync.textContent = "Sync my fills";
+  sync.className = "dp-btn ghost"; sync.type = "button"; sync.textContent = "Sync my trades";
   sync.style.cssText = "margin-top:9px";
   const msg = document.createElement("div"); msg.className = "dp-note";
   sync.addEventListener("click", async () => {
@@ -9117,11 +9119,11 @@ function buildScoreline(record, feed) {
     try {
       const { status, body } = await call_api(`/api/floor/${FLOOR_N}/sync`, { method: "POST", body: "{}" });
       msg.textContent = status === 200
-        ? `Found ${body.fillsFound ?? 0} fill${body.fillsFound === 1 ? "" : "s"}, settled ${body.settled ?? 0}.`
+        ? `Found ${body.fillsFound ?? 0} trade${body.fillsFound === 1 ? "" : "s"}, closed ${body.settled ?? 0}.`
         : (body.error || "sync failed");
       if (status === 200) setTimeout(loadCalls, 900);
     } catch { msg.textContent = "Could not reach the desk."; }
-    sync.disabled = false; sync.textContent = "Sync my fills";
+    sync.disabled = false; sync.textContent = "Sync my trades";
   });
   box.append(sync, msg);
   if (r.feesUnpaidUsd > 0) {
@@ -9166,7 +9168,7 @@ function buildRecord(record, feed) {
         : (body.error || "sync failed");
       if (status === 200) setTimeout(loadCalls, 900);
     } catch { msg.textContent = "Could not reach the desk."; }
-    sync.disabled = false; sync.textContent = "Sync my fills";
+    sync.disabled = false; sync.textContent = "Sync my trades";
   });
   box.append(sync, msg);
 
@@ -10137,7 +10139,7 @@ async function loadKilled(host) {
     if (status !== 200) return null;
     if (!body.kills?.length) return;
     const head = document.createElement("div");
-    head.className = "dp-h"; head.textContent = "Killed — the trades that did not happen";
+    head.className = "dp-h"; head.textContent = "Turned down \u2014 the trades that did not happen";
     host.appendChild(head);
     for (const k of body.kills.slice(0, 40)) {
       const row = document.createElement("div"); row.className = "killrow";
@@ -10145,16 +10147,16 @@ async function loadKilled(host) {
       const sym = document.createElement("span"); sym.className = "kr-sym";
       sym.style.display = "inline-flex"; sym.style.alignItems = "center"; sym.style.gap = "7px";
       sym.append(coinFace(k.mint, k.symbol),
-        document.createTextNode(`${k.symbol || k.mint.slice(0, 6)} · killed by ${k.seat}` + (dashWhen(k.ts) ? ` · ${dashWhen(k.ts)}` : "")), caChip(k.mint));
+        document.createTextNode(`${k.symbol || k.mint.slice(0, 6)} · turned down by ${window.PLAIN.role(k.seat)}` + (dashWhen(k.ts) ? ` · ${dashWhen(k.ts)}` : "")), caChip(k.mint));
       const since = document.createElement("span");
       if (k.sinceKillPct != null) {
         since.className = "kr-since " + (k.sinceKillPct <= 0 ? "good" : "bad");
-        since.textContent = (k.sinceKillPct > 0 ? "+" : "") + k.sinceKillPct + "% since the kill";
-        since.title = k.sinceKillPct <= 0 ? "bullet dodged" : "shown honestly: it ran anyway";
+        since.textContent = (k.sinceKillPct > 0 ? "+" : "") + k.sinceKillPct + "% since";
+        since.title = k.sinceKillPct <= 0 ? "a loss avoided" : "shown honestly: it ran anyway";
       }
       top.append(sym, since);
       const why = document.createElement("div"); why.className = "wr-rule";
-      why.textContent = (k.reason || "").slice(0, 160);
+      why.textContent = window.PLAIN.plainDetail(k.reason || "");
       row.append(top, why);
       host.appendChild(row);
     }
@@ -10166,43 +10168,45 @@ async function openCallDossier(callId) {
   const { status, body } = await call_api(`/api/call/${callId}/dossier`);
   if (status !== 200) { window.tape?.("Desk", body?.error || "no dossier", "hi"); return; }
   const d = document.getElementById("dossier");   // reuse the personnel-file pane chrome
-  document.getElementById("d-stamp").textContent = "Call dossier · every seat on the record" +
-    (body.costUsd != null ? ` · research cost $${body.costUsd}` : "");
+  const detailed = typeof window.__detailedView === "function" && window.__detailedView();
+  document.getElementById("d-stamp").textContent = "Call file \u00b7 what every analyst said" +
+    (detailed && body.costUsd != null ? ` \u00b7 research cost $${body.costUsd}` : "");
   document.getElementById("d-name").textContent = body.call.symbol || body.call.mint.slice(0, 8);
   document.getElementById("d-seat").textContent =
-    `${body.call.status === "live" ? "LIVE" : (body.call.close_reason || "closed").replace(/_/g, " ")} · ` +
-    `entry $${body.call.entry_ref} · stop $${body.call.stop} · target $${body.call.target ?? "—"}`;
+    `${body.call.status === "live" ? "OPEN" : window.PLAIN.closeReason(body.call.close_reason || "closed").toUpperCase()} \u00b7 ` +
+    `entry $${body.call.entry_ref} \u00b7 stop $${body.call.stop} \u00b7 target $${body.call.target ?? "\u2014"}`;
   const b = document.getElementById("d-body");
   b.innerHTML = "";
   const mk = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x) e.textContent = x; return e; };
-  if (body.call.thesis) b.appendChild(mk("p", "dbrief", body.call.thesis));
-  if (body.call.invalidation) b.appendChild(mk("p", "dnote", "Wrong if: " + body.call.invalidation));
+  if (body.call.thesis) { b.appendChild(mk("div", "dp-h", "Why the desk likes it")); b.appendChild(mk("p", "dbrief", body.call.thesis)); }
+  if (body.call.invalidation) b.appendChild(mk("p", "dnote", "This call is wrong if: " + body.call.invalidation));
 
   if (body.seats.length) {
-    b.appendChild(mk("div", "dp-h", "The seats, in order"));
+    b.appendChild(mk("div", "dp-h", "What each analyst said"));
     for (const v of body.seats) {
       const row = mk("div", "watchrow");
       const top = mk("div", "wr-top");
-      const name = mk("span", "wr-sym", v.seat.toUpperCase());
+      const role = window.PLAIN.role(v.seat);
+      const name = mk("span", "wr-sym", role.charAt(0).toUpperCase() + role.slice(1));
       const grade = mk("span", "wr-held",
-        v.killed ? "KILL" : (v.verdict || (v.score != null ? "score " + v.score : "")) +
-        (v.confidence != null ? ` · conf ${v.confidence}` : ""));
+        v.killed ? "TURNED IT DOWN" : (v.verdict ? window.PLAIN.decision(v.verdict).chip : (v.score != null ? "scored " + v.score + "/100" : "")) +
+        (v.confidence != null ? ` \u00b7 ${v.confidence}% sure` : ""));
       if (v.killed) grade.style.color = "var(--bad,#b0503f)";
       top.append(name, grade);
       row.appendChild(top);
-      if (v.extract || v.reason) row.appendChild(mk("div", "wr-rule", (v.extract || v.reason || "").slice(0, 220)));
+      if (v.extract || v.reason) row.appendChild(mk("div", "wr-rule", window.PLAIN.plainDetail((v.extract || v.reason || "").slice(0, 220))));
       b.appendChild(row);
     }
   }
   if (body.events.length) {
-    b.appendChild(mk("div", "dp-h", "Life of the call"));
+    b.appendChild(mk("div", "dp-h", "What happened"));
     for (const e of body.events.slice(-14)) {
       b.appendChild(mk("div", "wr-rule",
-        `${dashWhen(e.ts)} · ${e.kind}${e.mark != null ? " · $" + e.mark : ""}${e.detail ? " · " + String(e.detail).slice(0, 90) : ""}`));
+        `${dashWhen(e.ts)} \u00b7 ${window.PLAIN.kind(e.kind)}${e.mark != null ? " \u00b7 $" + e.mark : ""}${e.detail ? " \u00b7 " + window.PLAIN.plainDetail(String(e.detail).slice(0, 90)) : ""}`));
     }
   }
   if (body.fills.length) {
-    b.appendChild(mk("div", "dp-h", "Fills on the record"));
+    b.appendChild(mk("div", "dp-h", "Trades on the record"));
     for (const f of body.fills) {
       const a = document.createElement("a");
       a.className = "wr-rule"; a.style.display = "block";
@@ -10211,10 +10215,10 @@ async function openCallDossier(callId) {
       b.appendChild(a);
     }
   }
-  if (body.lesson) b.appendChild(mk("p", "dnote", `COLONEL DEBRIEF [${body.lesson.grade}]: ${body.lesson.lesson}`));
+  if (body.lesson) b.appendChild(mk("p", "dnote", `Post-mortem (grade ${body.lesson.grade}): ${body.lesson.lesson}`));
   if (body.report) {
     const det = document.createElement("details");
-    const sum = document.createElement("summary"); sum.textContent = "The full workup report";
+    const sum = document.createElement("summary"); sum.textContent = "The full research report";
     sum.style.cursor = "pointer"; sum.style.fontSize = "11px"; sum.style.letterSpacing = ".08em";
     const pre = document.createElement("pre");
     pre.style.cssText = "white-space:pre-wrap;font-size:10.5px;line-height:1.5;opacity:.9;max-height:300px;overflow:auto";
@@ -10238,13 +10242,13 @@ async function loadWhales(mint, el) {
     const { body } = await call_api(`/api/whales/${mint}`);
     whaleCache.set(mint, { at: Date.now(), body });
     paintWhales(body, el);
-  } catch { el.textContent = "whale flow unavailable"; }
+  } catch { el.textContent = "big-wallet activity unavailable"; }
 }
 
 function paintWhales(w, el) {
   el.innerHTML = "";
-  if (!w?.ok) { el.textContent = "whale flow unavailable"; return; }
-  if (!w.buys && !w.sells) { el.textContent = "🐋 no size trading either way right now"; return; }
+  if (!w?.ok) { el.textContent = "big-wallet activity unavailable"; return; }
+  if (!w.buys && !w.sells) { el.textContent = "🐋 no big wallets trading right now"; return; }
 
   const head = document.createElement("div");
   head.className = "wh-head" + (w.netUsd > 0 ? " up" : w.netUsd < 0 ? " down" : "");
@@ -10256,7 +10260,7 @@ function paintWhales(w, el) {
     const r = document.createElement("div");
     r.className = "wh-row " + t.side;
     const short = t.wallet.slice(0, 4) + "…" + t.wallet.slice(-4);
-    r.textContent = `${t.side === "buy" ? "▲ token inflow" : "▼ token outflow"} · ~$${Math.round(t.usd).toLocaleString()} current value · ${short}`;
+    r.textContent = `${t.side === "buy" ? "▲ bought" : "▼ sold"} · worth ~$${Math.round(t.usd).toLocaleString()} now · ${short}`;
     el.appendChild(r);
   }
 }
@@ -10965,7 +10969,10 @@ async function loadOverviewDashboard() {
   if (!el) return;
   /* By dataset, not by an attribute selector: the dashboard test counts the tabs'
      destination attribute across the whole file and expects exactly eight. */
-  const goTo = (dest) => [...document.querySelectorAll(".dtab")].find((t) => t.dataset.destination === dest)?.click();
+  const goTo = (dest) => {
+    [...document.querySelectorAll(".dtab")].find((t) => t.dataset.destination === dest)?.click();
+    if (dest === "calls") activateDashboardSubview("calls", "published");   // the calls, not the shortlist
+  };
   const HOW_THE_DESK_WORKS = "Every few minutes the desk pulls the newest pump.fun coins and screens them for free: "
     + "size, age, whether they can be sold, whether the trading looks real. The few that pass are studied by a team of "
     + "analysts \u2014 contract, exit, demand, chart, story \u2014 argued against by a devil's advocate, and judged by the CEO. "
@@ -11151,22 +11158,28 @@ async function loadCandidateBoard() {
     el.innerHTML = "";
     dashReady(el);
     if (status === 401 || status === 403) {
-      el.append(dashLead("Pre-decision candidates", "This board is private to tenants and the house.", "TENANTS ONLY", "warn"));
+      el.append(dashLead("", "The shortlist is for tenants and the house.", "TENANTS ONLY", "warn"));
       return;
     }
     if (status !== 200) throw new Error(body?.error || "candidate board unavailable");
     const captured = body.capturedAt ? new Date(body.capturedAt).toLocaleString() : "no completed sweep yet";
-    el.append(dashLead("",
-      "Five ranked slots in every canonical market-cap tier, captured after the free screen and before any Claude, Grok, Red Team, CEO, or execution decision.",
-      String(body.candidateCount ?? 0) + " CANDIDATES", "warn"));
+    /* THE SHORTLIST: coins that passed the free screen and nothing more. The boundary
+       line is kept word for word — it is the sentence a reader must not miss. */
+    el.append(plainLead("Coins that passed the free screen and are waiting for the analysts. Nothing here is a call.",
+      { sub: "Five per size band, ranked by the screen. The desk may study any of them next, or none.",
+        info: "Before any analyst spends a cent, every new coin is screened for free: how big it is, how old, whether it can be sold, "
+          + "whether the trading looks real. The ones that pass land here, ranked by size band. Being on the shortlist means "
+          + "the desk might study it next; it is not a recommendation, an order, or permission to trade.", infoTitle: "How the shortlist works" }));
+    el.append(chipRow([
+      { label: "Shortlisted", value: String(body.candidateCount ?? 0) },
+      { label: "Captured", value: captured },
+    ]));
     const boundary = dashNode("div", "boundary-note");
     boundary.innerHTML = "<strong>NOT REVIEWED · NOT APPROVED · NOT EXECUTABLE.</strong> " +
-      "These are market candidates only. Their appearance here is not a call, order, recommendation, or permission to trade.";
+      "These are coins the desk might study, not calls.";
     el.appendChild(boundary);
-    const meta = dashNode("p", "dp-note",
-      "Source: " + String(body.source || "pre-decision") + " · decision status: " +
-      String(body.decisionStatus || "not-reviewed") + " · captured " + captured);
-    el.appendChild(meta);
+    if (detailedView()) el.appendChild(dashNode("p", "dp-note",
+      "Source: " + String(body.source || "pre-decision") + " · decision status: " + String(body.decisionStatus || "not-reviewed")));
 
     for (const [key, fallbackLabel, fallbackNote] of CANDIDATE_BANDS) {
       const band = body.bands?.[key] || {};
@@ -11180,8 +11193,7 @@ async function loadCandidateBoard() {
       for (let index = 0; index < 5; index++) {
         const candidate = candidates[index];
         if (!candidate) {
-          grid.appendChild(dashNode("div", "candidate empty-slot",
-            "Slot " + (index + 1) + " · no screened memecoin in this tier"));
+          grid.appendChild(dashNode("div", "candidate empty-slot", "No coin in this band right now"));
           continue;
         }
         const card = dashNode("article", "candidate");
@@ -11192,10 +11204,10 @@ async function loadCandidateBoard() {
         card.appendChild(cHead);
         const meta2 = dashNode("div", "candidate-meta");
         for (const [label, value] of [
-          ["cap", dashMoney(candidate.marketCapUsd)],
-          ["liq", dashMoney(candidate.liquidityUsd)],
-          ["24h", dashMoney(candidate.volume24hUsd)],
-          ["score", candidate.score == null ? "—" : Math.round(candidate.score)],
+          ["size", dashMoney(candidate.marketCapUsd)],
+          ["can sell", dashMoney(candidate.liquidityUsd)],
+          ["traded 24h", dashMoney(candidate.volume24hUsd)],
+          ["screen score", candidate.score == null ? "—" : Math.round(candidate.score)],
         ]) {
           const bit = dashNode("span");
           bit.append(document.createTextNode(label + " "), dashNode("strong", "", value));
@@ -11207,7 +11219,7 @@ async function loadCandidateBoard() {
         const foot = dashNode("div", "dashactions");
         foot.appendChild(caChip(candidate.mint));
         if (/^https:\/\//.test(String(candidate.pairUrl || ""))) {
-          const link = dashNode("a", "candidate-link", "Inspect market data ↗");
+          const link = dashNode("a", "candidate-link", "Chart ↗");
           link.href = candidate.pairUrl; link.target = "_blank"; link.rel = "noopener";
           foot.appendChild(link);
         }
@@ -11221,7 +11233,7 @@ async function loadCandidateBoard() {
   } catch (error) {
     el.innerHTML = "";
     dashReady(el);
-    el.append(dashLead("Candidate board unavailable",
+    el.append(dashLead("The shortlist could not be loaded",
       String(error?.message || error), "READ-ONLY ERROR", "bad"));
   } finally {
     candidateBoardLoading = false;
@@ -11248,8 +11260,7 @@ async function loadDashboardCalls(view, { force = false } = {}) {
     el.innerHTML = "";
     dashReady(el);
     if (status === 401 || status === 403) {
-      el.append(dashLead(view === "published" ? "Published calls" : "Closed / killed",
-        "This floor's call sheet is private to its tenant.", "TENANTS ONLY", "warn"));
+      el.append(dashLead("", "This floor's calls are private to its tenant. The house desk is public on floor 50.", "TENANTS ONLY", "warn"));
       return;
     }
     if (status !== 200) throw new Error(body?.error || "call sheet unavailable");
@@ -11261,53 +11272,65 @@ async function loadDashboardCalls(view, { force = false } = {}) {
     paintHud({ feed, settings: body.settings, budget: BUDGET, rent: body.rent });
     window.__grokBoardUpdate?.(feed);
 
+    const record = body.record || { wins: 0, losses: 0 };
+    const HOW_A_CALL_WORKS = "A call is a coin the desk would trade itself: an entry price, a stop where the idea is wrong, "
+      + "and a target. The desk publishes the call and tracks it on its own book. Your bot reads the same call and "
+      + "decides on its own whether to buy and how much; this page never sizes a trade or signs for one. "
+      + "A call closes when it hits its target, hits its stop, runs out of time, or the desk closes it.";
     if (view === "published") {
       const published = feed.filter((call) => call.status === "live");
-      el.append(dashLead("",
-        "Decisions that cleared the research chain and remain open on the house paper book.",
-        String(published.length) + " LIVE", published.length ? "good" : ""));
-      const boundary = dashNode("div", "boundary-note");
-      boundary.innerHTML = "<strong>PUBLISHED IS NOT THE SAME AS HELD.</strong> " +
-        "The desk's paper position, your wallet, and WALL-ST-E's local position are shown separately. Any manual swap is signed by you.";
-      el.appendChild(boundary);
-      /* The cohort instrument sits at the head of the book it governs: the quota, the
-         level reached, the strain signal, and the history with each cycle's realised
-         P&L. History is shown here and not on Overview — this is the page a reader
-         comes to when they want to know what the last few cohorts actually did. */
-      const callsCycleSlot = dashNode("div");
-      el.appendChild(callsCycleSlot);
-      paintCycleSurface(callsCycleSlot, { history: true });
-      el.appendChild(buildScoreline(body.record, feed));
+      const forYou = published.filter((call) => call.verdict === "offered").length;
+      /* THE OPEN CALLS: one sentence, the standing note that separates the desk's book
+         from anyone's wallet, three chips, then the cards. The round history and the
+         floor's record sit under Details — that is where a reader who wants to know what
+         the last few rounds actually did goes looking. */
+      el.append(plainLead("Coins the desk would trade right now, each with an entry, a stop and a target.",
+        { sub: "Open means the desk is tracking it, not that anyone holds it. Your bot decides for itself whether to buy.",
+          info: HOW_A_CALL_WORKS, infoTitle: "How a call works" }));
+      el.append(chipRow([
+        { label: "Open", value: String(published.length), cls: published.length ? "good" : "" },
+        FLOOR_N != null && forYou ? { label: "For you", value: String(forYou) } : null,
+        { label: "Record", value: String(record.wins ?? 0) + "\u2013" + String(record.losses ?? 0), title: "closed calls that won and lost" },
+      ]));
       const wrap = dashNode("div");
       wrap.style.cssText = "display:flex;flex-direction:column;gap:7px";
       el.appendChild(wrap);
       if (published.length) paintFeedInto(wrap, published, body.settings);
-      else wrap.appendChild(dashNode("p", "locked", feed.length ? "No open calls right now \u2014 " + feed.length + " closed under Closed / Killed." : "No calls have been published to this floor yet."));
+      else wrap.appendChild(dashNode("p", "locked", feed.length ? "No open calls right now \u2014 " + feed.length + " under Closed." : "No calls have been published to this floor yet."));
+      const details = detailsFold("Details \u00b7 rounds and the record");
+      el.appendChild(details.wrap);
+      const callsCycleSlot = dashNode("div");
+      details.body.appendChild(callsCycleSlot);
+      paintCycleSurface(callsCycleSlot, { history: true });
+      details.body.appendChild(buildScoreline(body.record, feed));
     } else {
       const closed = feed.filter((call) => call.status !== "live");
-      el.append(dashLead("",
-        "Published calls after closure, followed by candidates stopped before a call ever existed.",
-        String(closed.length) + " CLOSED", ""));
-      const boundary = dashNode("div", "boundary-note");
-      boundary.innerHTML = "<strong>TWO DIFFERENT RECORDS.</strong> Closed calls were published decisions. " +
-        "Killed rows were rejected before publication and never became executable instructions.";
-      el.appendChild(boundary);
+      el.append(plainLead("Calls the desk has closed, and the coins it turned down before they became calls.",
+        { sub: "A closed call was a published decision. A turned-down coin never was one.", info: HOW_A_CALL_WORKS, infoTitle: "How a call works" }));
+      const chips = chipRow([
+        { label: "Closed", value: String(closed.length) },
+        { label: "Turned down", value: "\u2026" },
+        { label: "Record", value: String(record.wins ?? 0) + "\u2013" + String(record.losses ?? 0), title: "closed calls that won and lost" },
+      ]);
+      el.append(chips);
       const closedWrap = dashNode("div");
       closedWrap.style.cssText = "display:flex;flex-direction:column;gap:7px";
       el.appendChild(closedWrap);
       if (closed.length) paintFeedInto(closedWrap, closed, body.settings);
-      else closedWrap.appendChild(dashNode("p", "locked", "No published calls have closed yet."));
-      const killedSection = dashNode("section", "dashsection");
-      killedSection.appendChild(dashNode("h4", "", "Killed before publication"));
+      else closedWrap.appendChild(dashNode("p", "locked", "No calls have closed yet."));
+      const killedFold = detailsFold("Turned down before publication");
       const killed = dashNode("div");
       killed.style.cssText = "display:flex;flex-direction:column;gap:7px";
-      killedSection.appendChild(killed);
-      el.appendChild(killedSection);
+      killedFold.body.appendChild(killed);
+      el.appendChild(killedFold.wrap);
       const ok = await loadKilled(killed);
       killed.querySelector(".dp-h")?.remove();
-      if (ok === false) killed.appendChild(dashNode("p", "dp-note", "Killed candidates are tenants only."));
-      else if (ok === null) killed.appendChild(dashNode("p", "dp-note", "Could not read the kill record \u2014 the desk did not answer."));
-      else if (!killed.querySelector(".killrow")) killed.appendChild(dashNode("p", "locked", "Nothing has been killed before publication yet."));
+      const turnedDown = killed.querySelectorAll(".killrow").length;
+      const tdChip = chips.children[1]?.querySelector("b"); if (tdChip) tdChip.textContent = ok === false ? "tenants" : String(turnedDown);
+      if (turnedDown && killedFold.label) killedFold.label.textContent = "Turned down before publication \u00b7 " + turnedDown;
+      if (ok === false) killed.appendChild(dashNode("p", "dp-note", "The turned-down list is for tenants."));
+      else if (ok === null) killed.appendChild(dashNode("p", "dp-note", "Could not read the turned-down list \u2014 the desk did not answer."));
+      else if (!turnedDown) killed.appendChild(dashNode("p", "locked", "Nothing has been turned down yet."));
     }
   } catch (error) {
     el.innerHTML = "";
