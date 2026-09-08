@@ -210,4 +210,15 @@ ok("the house floor is never called vacant, and the round is one line over the i
     assert.ok(round.includes(t), `round must contain ${t}`);
 });
 
+ok("Your bot: chips, one NEEDS-YOU button with a truthful how-to, everything else folded", () => {
+  const i = html.indexOf("async function loadWallsteDashboard"); const w = html.slice(i, html.indexOf("async function loadCalloutsDashboard", i));
+  for (const t of ['{ label: "Your bot", value: botNow.chip', "const NEED = {", "How to sell by hand", "node burner-backup.mjs --show --i-understand",
+    "bash macos-launchagent.sh status", "bash macos-launchagent.sh load", ".hard-stop", "healthFold.body.appendChild(statusGrid)", "el.appendChild(healthFold.wrap)",
+    "setupFold.body.appendChild(secretCard)", "el.appendChild(setupFold.wrap)", 'detailsFold("Recent check-ins")', 'dashMetric("Coins held"', 'dashMetric("Trade size cap"', 'dashMetric("Selling"'])
+    assert.ok(w.includes(t), `bot page must contain ${t}`);
+  for (const t of ['"Recent heartbeats"', "Fund the dedicated burner last", '"Activation checklist"', '"EXITS BLOCKED"', '"MANUAL ACTION"', 'dashMetric("Telemetry"'])
+    assert.ok(!w.includes(t), `bot page must not say ${t}`);
+  assert.ok(!/launchctl|systemctl|rm -f .*hard-stop/.test(w), "no invented commands: only the script's own verbs");
+});
+
 console.log(`\n${pass} passed — one vocabulary, executed\n`);

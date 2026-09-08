@@ -565,7 +565,9 @@ try {
     `only the chosen track is pressed, got ${JSON.stringify(requestedPressed)}`);
 
   /* 8 · THE INSTALL CARD IS DOWNSTREAM OF THE CHOICE, on both install surfaces. */
-  assert.match(html, /if \(runnerChoice === RUNNER_SELF\) el\.appendChild\(setupCard\);/,
+  /* Re-anchored 2026-09-08: the card now lands in the page's Set-up fold; it is still
+     attached only on the self-hosted track, which is the property this guards. */
+  assert.match(html, /if \(runnerChoice === RUNNER_SELF\) setupFold\.body\.appendChild\(setupCard\);/,
     "the five-step install card is attached only on the self-hosted track");
   assert.match(html, /else if \(runnerChoice === RUNNER_HQ\) \{[\s\S]{0,400}?"Nothing is running for you"/,
     "...and a floor that asked for HQ is told nothing is running rather than shown the other track's steps");

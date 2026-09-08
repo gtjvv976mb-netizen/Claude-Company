@@ -11537,6 +11537,53 @@ async function loadWallsteDashboard({ background = false } = {}) {
        the bot's state is stated. "NOT RUNNING" is part of the HQ badge on purpose. */
     lead.appendChild(dashNode("span", "dashbadge " + runnerTrackTone(runnerChoice), runnerTrackBadge(runnerChoice)));
     el.append(lead);
+    /* THE ANATOMY, right under the sentence: three chips, and — only when the bot needs
+       a person — one button whose how-to comes from the bot's own source: the hard stop
+       is a .hard-stop file beside its state database, macos-launchagent.sh has status /
+       load / unload, and burner-backup.mjs is the documented way to the key. Everything
+       else on this page is folded: health and wallet, then set-up. */
+    el.append(chipRow([
+      { label: "Your bot", value: botNow.chip, cls: botNow.cls, title: botNow.sentence },
+      { label: "Wallet", value: wallet.balanceSol == null ? "\u2014" : dashSol(wallet.balanceSol),
+        title: wallet.address ? "confirmed on-chain balance of " + wallet.address : "no address reported yet" },
+      { label: "Last check-in", value: telemetry.ageMs == null ? "never" : window.PLAIN.plainAge(telemetry.ageMs) + " ago" },
+    ]));
+    const healthFold = detailsFold("Details \u00b7 health and wallet");
+    const setupFold = detailsFold("Set-up \u00b7 install, feed key, funding");
+    const openFold = (f) => { if (f.body.style.display === "none") f.head.click(); };
+    const howTo = (title, text) => {
+      const d = window.openDialog({ title, label: "how" });
+      const p = dashNode("p", "dp-note", text);
+      p.style.cssText = "font-size:12.5px;line-height:1.55;color:var(--ink);white-space:pre-line";
+      d.body.appendChild(p);
+      const ok = dashNode("button", "dp-btn", "Got it"); ok.type = "button"; ok.onclick = d.dismiss; d.foot.appendChild(ok);
+    };
+    const NEED = {
+      hardstop: ["Clear the hard stop", () => howTo("How to clear the hard stop",
+        "Your bot stops itself when its hard-stop file exists \u2014 a file beside its state database whose name ends in .hard-stop. "
+        + "While it is there the bot will not buy, and its automatic selling is blocked too.\n\n"
+        + "On the machine that runs it, open a terminal in the bot's folder and run\n    bash macos-launchagent.sh status\n"
+        + "It prints the file's path. Delete that file, then run\n    bash macos-launchagent.sh load\nto start the bot again.\n\n"
+        + "The desk cannot do any of this for you; nothing on this page can reach your machine.")],
+      sell: ["How to sell by hand", () => howTo("How to sell by hand",
+        "Your bot holds a coin it could not sell on its own. Nothing on this page can sign a sale \u2014 that needs the bot's wallet key, "
+        + "which lives only on the machine that runs it.\n\n"
+        + "On that machine, in the bot's folder, run\n    node burner-backup.mjs --show --i-understand\n"
+        + "to print the key. Import it into Phantom, Solflare or Backpack under \u201cimport private key\u201d, find the coin, and swap it to SOL. "
+        + "Afterwards consider moving the SOL to a wallet you control.")],
+      restart: ["How to restart it", () => howTo("How to restart your bot",
+        "Your bot has not checked in, so it is not trading. If its machine was asleep or offline, that is the whole reason.\n\n"
+        + "On the machine that runs it, open a terminal in the bot's folder and run\n    bash macos-launchagent.sh status\n"
+        + "to see why it stopped, then\n    bash macos-launchagent.sh load\nto start it.")],
+      feed: ["Check its connection", () => howTo("Your bot cannot reach the desk",
+        "Your bot is running but its last attempts to read the desk's calls failed. The usual cause is a feed key that was "
+        + "rotated on this page and never copied to the machine.\n\n"
+        + "On the bot's machine, check that the feed key in its .cc-executor.env matches the one under Set-up \u2192 Private feed key here, "
+        + "then restart it with\n    bash macos-launchagent.sh load")],
+      fund: ["Fund its wallet", () => { openFold(healthFold); funding.scrollIntoView({ behavior: "smooth", block: "start" }); }],
+      install: ["Install it", () => { openFold(setupFold); if (typeof openWallsteWalkthrough === "function") openWallsteWalkthrough(); }],
+    };
+    if (botNow.action && NEED[botNow.action]) el.append(leadButton(NEED[botNow.action][0], NEED[botNow.action][1]));
     /* FIRST, AHEAD OF EVERY INSTALL INSTRUCTION. The question of who holds the key is
        not a detail discovered halfway down a setup card. */
     const repaintTrack = () => { dashboardFeedCache = null; setTimeout(loadWallsteDashboard, 400); };
@@ -11605,20 +11652,20 @@ async function loadWallsteDashboard({ background = false } = {}) {
 
     const statusGrid = dashNode("div", "dashgrid");
     statusGrid.append(
-      dashMetric("Telemetry", connected ? "Connected" : heartbeat ? "Stale" : "No heartbeat",
+      dashMetric("Check-in", connected ? "Fresh" : heartbeat ? "Stale" : "Never",
         "self-reported " + (telemetry.ageMs == null ? "never" : dashAge(telemetry.ageMs) + (dashWhen(heartbeat?.seenAt) ? " \u00b7 " + dashWhen(heartbeat.seenAt) : ""))),
       dashMetric("Health", String(health?.state || "not reported").replace(/-/g, " "),
         health?.runtimeCommit ? "runtime " + String(health.runtimeCommit).slice(0, 10) : "reported by the local poller"),
-      dashMetric("Open positions", heartbeat ? String(heartbeat.open ?? 0) : "Not reported",
+      dashMetric("Coins held", heartbeat ? String(heartbeat.open ?? 0) : "Not reported",
         String(Array.isArray(heartbeat?.held) ? heartbeat.held.length : 0) + " holdings named in heartbeat"),
-      dashMetric("Active trade cap", activeCaps ? dashSol(activeCaps.maxSolPerTrade) : "Not reported",
+      dashMetric("Trade size cap", activeCaps ? dashSol(activeCaps.maxSolPerTrade) : "Not reported",
         capPolicy.activeFresh ? "fresh self-report" : activeCaps ? "last-reported · stale" : "awaiting current executor")
     );
-    el.appendChild(statusGrid);
+    healthFold.body.appendChild(statusGrid);
 
     const split = dashNode("div", "wallste-grid");
     const funding = dashNode("section", "dashsection");
-    funding.appendChild(dashNode("h4", "", "5 · Fund the dedicated burner last"));
+    funding.appendChild(dashNode("h4", "", "Fund the bot's wallet"));
     if (wallet.address) {
       funding.appendChild(dashNode("div", "bud-bal",
         wallet.balanceSol == null ? "Balance unavailable" : dashSol(wallet.balanceSol)));
@@ -11654,27 +11701,27 @@ async function loadWallsteDashboard({ background = false } = {}) {
     }
 
     const healthCard = dashNode("section", "dashsection");
-    healthCard.appendChild(dashNode("h4", "", "Current heartbeat details · self-reported"));
+    healthCard.appendChild(dashNode("h4", "", "Health, as the bot reports it"));
     const heartbeatGrid = dashNode("div", "dashgrid");
     const lastTickAt = Number(health?.lastTickCompletedAt || 0);
     const lastFeedAt = Number(health?.lastFeedSuccessAt || 0);
     const readiness = health?.executionReadiness || null;
     heartbeatGrid.append(
-      dashMetric("Last completed tick", lastTickAt ? dashAge(Date.now() - lastTickAt) : "Not reported",
+      dashMetric("Last run", lastTickAt ? dashAge(Date.now() - lastTickAt) : "Not reported",
         lastTickAt ? dashWhen(lastTickAt) : "from outbound heartbeat"),
-      dashMetric("Last feed success", lastFeedAt ? dashAge(Date.now() - lastFeedAt) : "Not reported",
+      dashMetric("Last read of the desk", lastFeedAt ? dashAge(Date.now() - lastFeedAt) : "Not reported",
         lastFeedAt ? dashWhen(lastFeedAt) : "from outbound heartbeat"),
-      dashMetric("Entry pause", health?.entriesPaused === true ? "Paused" : health ? "Not paused" : "Unknown",
+      dashMetric("Buying paused?", health?.entriesPaused === true ? "Yes" : health ? "No" : "Unknown",
         "self-reported control state"),
       dashMetric("Hard stop", health?.hardStop === true ? "ACTIVE" : health ? "Clear" : "Unknown",
         "self-reported control state"),
-      dashMetric("Blocking intent", health?.blockingIntent === true ? "PRESENT" : health ? "Clear" : "Unknown",
+      dashMetric("Unfinished order", health?.blockingIntent === true ? "YES" : health ? "None" : "Unknown",
         "unresolved local journal intent"),
-      dashMetric("Feed / tick failures", health ? String(health.consecutiveFeedFailures ?? 0) + " / " + String(health.consecutiveTickFailures ?? 0) : "\u2014",
+      dashMetric("Failures in a row (feed / run)", health ? String(health.consecutiveFeedFailures ?? 0) + " / " + String(health.consecutiveTickFailures ?? 0) : "\u2014",
         health?.feedRollback ? "feed rollback active" : "consecutive"),
-      dashMetric("Exit safety", health ? (health.exitBlocked ? "EXITS BLOCKED" : health.manualAction ? "MANUAL ACTION" : "Clear") : "\u2014",
+      dashMetric("Selling", health ? (health.exitBlocked ? "BLOCKED" : health.manualAction ? "NEEDS YOU" : "Working") : "\u2014",
         health ? String(health.blockedPositions ?? 0) + " blocked positions" : "no heartbeat"),
-      dashMetric("Readiness providers", readiness ? String(readiness.providers || 0) + " / 2" : "Not reported",
+      dashMetric("Trade rehearsal", readiness ? String(readiness.providers || 0) + " / 2" : "Not reported",
         readiness
           ? (readiness.ready
             ? "ready · " + String(readiness.route || "route unknown") +
@@ -11709,7 +11756,7 @@ async function loadWallsteDashboard({ background = false } = {}) {
     split.appendChild(healthCard);
 
     const checklistCard = dashNode("section", "dashsection");
-    checklistCard.appendChild(dashNode("h4", "", "Activation checklist"));
+    checklistCard.appendChild(dashNode("h4", "", "Ready to go live? The checklist"));
     const list = dashNode("ul", "checklist");
     for (const key of Object.keys(wallsteActivationLabels)) {
       const done = activation[key] === true;
@@ -11723,13 +11770,14 @@ async function loadWallsteDashboard({ background = false } = {}) {
         ? "The local machine currently reports LIVE mode. Any change must be made and confirmed on that machine."
         : "No browser button can arm live mode. Review dry-run output and activate only from the local host."));
     split.appendChild(checklistCard);
-    el.appendChild(split);
+    healthFold.body.appendChild(split);
+    el.appendChild(healthFold.wrap);
 
     const legacyRecovery = legacyBurnerRecoveryCard();
-    if (legacyRecovery) el.appendChild(legacyRecovery);
+    if (legacyRecovery) setupFold.body.appendChild(legacyRecovery);
 
     const secretCard = dashNode("section", "dashsection");
-    secretCard.appendChild(dashNode("h4", "", "Private feed setup"));
+    secretCard.appendChild(dashNode("h4", "", "Private feed key"));
     secretCard.appendChild(dashNode("p", "dp-note",
       "The feed secret authenticates the poller's read-only call feed and outbound heartbeat. It is not a wallet key, but it should still remain private."));
     const secretBox = dashNode("div", "secretbox");
@@ -11778,7 +11826,7 @@ async function loadWallsteDashboard({ background = false } = {}) {
     const docs = dashNode("a", "candidate-link", "Read setup, local activation, safety, and recovery ↗");
     docs.href = "/executor/README.md"; docs.target = "_blank"; docs.rel = "noopener";
     secretCard.appendChild(docs);
-    el.appendChild(secretCard);
+    setupFold.body.appendChild(secretCard);
 
     const executorReleaseCommit = "__CLAUDE_COMPANY_SOURCE_COMMIT__";
     const releaseIsPinned = /^[0-9a-f]{40}$/i.test(executorReleaseCommit);
@@ -11992,7 +12040,7 @@ async function loadWallsteDashboard({ background = false } = {}) {
        track is told the truth about it rather than quietly sent to a terminal. The
        card is built either way because it is a few dozen nodes and one attach point is
        one place to audit; the gate is here, and it is the only one. */
-    if (runnerChoice === RUNNER_SELF) el.appendChild(setupCard);
+    if (runnerChoice === RUNNER_SELF) setupFold.body.appendChild(setupCard);
     else if (runnerChoice === RUNNER_HQ) {
       const waiting = dashNode("section", "dashsection");
       waiting.appendChild(dashNode("h4", "", "Nothing is running for you"));
@@ -12000,15 +12048,16 @@ async function loadWallsteDashboard({ background = false } = {}) {
         "You asked HQ to run this bot. That does not exist yet, so no bot is running, no wallet was created, "
         + "and no money is being managed. The install steps are hidden because they are the other track's steps. "
         + "If you would rather not wait, choose \u201cI'll run it myself\u201d above: it is one command and it works today."));
-      el.appendChild(waiting);
+      setupFold.body.appendChild(waiting);
     } else {
       const unchosen = dashNode("section", "dashsection");
       unchosen.appendChild(dashNode("h4", "", "Choose a track first"));
       unchosen.appendChild(dashNode("p", "dp-note",
         "The install steps appear once you have said who runs the bot. That question decides who holds the "
         + "key, so this page will not answer it for you."));
-      el.appendChild(unchosen);
+      setupFold.body.appendChild(unchosen);
     }
+    el.appendChild(setupFold.wrap);
 
     /* The last pulses, newest first. One overwritten blob meant a tenant could never
 
@@ -12020,7 +12069,7 @@ async function loadWallsteDashboard({ background = false } = {}) {
 
       const hcard = dashNode("section", "dashsection");
 
-      hcard.appendChild(dashNode("h4", "", "Recent heartbeats" + (hist.length ? " \u00b7 last " + hist.length : "")));
+      hcard.appendChild(dashNode("h4", "", "As the bot reported them" + (hist.length ? " \u00b7 last " + hist.length : "")));
 
       if (!hist.length) hcard.appendChild(dashNode("p", "dp-note", "No heartbeats recorded yet."));
 
@@ -12028,7 +12077,7 @@ async function loadWallsteDashboard({ background = false } = {}) {
 
         (dashWhen(h.seenAt) || "\u2014") + " \u00b7 " + (h.mode || "?") + " \u00b7 " + String(h.open ?? 0) + " open" + (h.state ? " \u00b7 " + h.state : "")));
 
-      el.appendChild(hcard);
+      const checkins = detailsFold("Recent check-ins"); checkins.body.appendChild(hcard); el.appendChild(checkins.wrap);
 
     }
 
