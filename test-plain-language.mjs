@@ -164,11 +164,16 @@ ok("the anatomy primitives and the Detailed-view gate exist and openDialog is sh
 
 ok("the Overview, the pulse strip and the hint speak plainly", () => {
   const i = html.indexOf("async function loadOverviewDashboard"); const ov = html.slice(i, html.indexOf("const CANDIDATE_BANDS", i));
-  for (const t of ["studies new pump.fun coins all day", "Your floor. The desk has ", "window.PLAIN.botState(", "detailsFold(", "plainLead(", "chipRow(", "leadButton("])
+  /* Re-anchored 2026-09-08: "AVOID PUTTING DROPDOWN BARS". The Overview no longer folds
+     its detail behind a bar — it paints the detail only when Detailed view is on. The
+     property is the same (the numbers are reachable and not in a first-time reader's
+     way); detailsFold is simply no longer the mechanism. */
+  for (const t of ["studies new pump.fun coins all day", "Your floor. The desk has ", "window.PLAIN.botState(", "detailedView()", "plainLead(", "chipRow(", "leadButton("])
     assert.ok(ov.includes(t), `Overview must contain ${t}`);
+  assert.ok(!ov.includes("detailsFold("), "the Overview has no dropdown bar");
   for (const t of ["\" workups\"", "paper call sheet", "self-reported", "OWNER VIEW", "NOT LINKED"])
     assert.ok(!ov.includes(t), `Overview must not say ${t}`);
-  assert.ok(ov.includes('dashMetric("Settled P&L", feedPrivate ? "PRIVATE"'), "the private-record tile survives under Details");
+  assert.ok(ov.includes('dashMetric("Settled P&L", feedPrivate ? "PRIVATE"'), "the private-record tile survives in Detailed view");
   const j = html.indexOf("async function pollPulse"); const pulse = html.slice(j, html.indexOf("pollPulse();", j));
   /* t.workups is the server's field name and may stay; the WORD "workups" must not reach the strip. */
   assert.ok(pulse.includes("coins studied today") && pulse.includes("turned down") && !/<\/b> workups| workups ·|workups`/.test(pulse), "the strip counts coins studied, not workups");
@@ -191,8 +196,11 @@ ok("Calls: Shortlist / Open / Closed keep their ids and views; the leads and the
     assert.ok(html.includes(t), t);
   const i = html.indexOf("async function loadDashboardCalls"); const calls = html.slice(i, html.indexOf("window.__loadDashboardCallsSubview", i));
   for (const t of ["Coins the desk would trade right now, each with an entry, a stop and a target.", "Open means the desk is tracking it, not that anyone holds it.",
-    "Calls the desk has closed, and the coins it turned down before they became calls.", "paintCycleSurface(callsCycleSlot, { history: true })", "detailsFold("])
+    "Calls the desk has closed, and the coins it turned down before they became calls.", "paintCycleSurface(callsCycleSlot, { history: true })", "detailedView()"])
     assert.ok(calls.includes(t), `Calls must contain ${t}`);
+  /* 2026-09-08, "AVOID PUTTING DROPDOWN BARS": the round history and the record paint
+     only in Detailed view, and the turned-down list is a plain headed section. */
+  assert.ok(!calls.includes("detailsFold("), "the Calls tab has no dropdown bar");
   for (const t of ["PUBLISHED IS NOT THE SAME AS HELD", "Killed before publication", "paper book", "executable instructions", "Closed / Killed"])
     assert.ok(!calls.includes(t), `Calls must not say ${t}`);
   const j = html.indexOf("function paintFeedInto"); const jEnd = html.indexOf("function buildScoreline", j); const card = html.slice(j, jEnd > 0 ? jEnd : j + 14000);
@@ -213,16 +221,21 @@ ok("the house floor is never called vacant, and the round is one line over the i
   const i = html.indexOf("async function loadOverviewDashboard"); const ov = html.slice(i, html.indexOf("const CANDIDATE_BANDS", i));
   assert.ok(ov.includes("const isHouse = FLOOR_N === 50 || room.hq === true;") && ov.includes("anyone may watch"), "the HQ visitor reads the house sentence");
   const j = html.indexOf("function renderRoundLine"); const round = html.slice(j, html.indexOf("const dashboardSubview", j));
-  for (const t of ["calls found", "still looking", "cycleLevelChip(c.level)", "fold.body.appendChild(renderCycleCard(data))", "renderCycleStrain(data.strain)", "renderCycleHistory(data.history)"])
+  /* 2026-09-08: no dropdown bar. The round is one chip; the instrument paints only in
+     Detailed view, and the strain alarm stays a chip in the default view either way. */
+  for (const t of ["calls found", "still looking", "cycleLevelChip(c.level)", "renderCycleCard(data)", "renderCycleStrain(data.strain)", "renderCycleHistory(data.history)", "if (detailedView())"])
     assert.ok(round.includes(t), `round must contain ${t}`);
 });
 
 ok("Your bot: chips, one NEEDS-YOU button with a truthful how-to, everything else folded", () => {
   const i = html.indexOf("async function loadWallsteDashboard"); const w = html.slice(i, html.indexOf("async function loadCalloutsDashboard", i));
   for (const t of ['{ label: "Your bot", value: botNow.chip', "const NEED = {", "How to sell by hand", "node burner-backup.mjs --show --i-understand",
-    "bash macos-launchagent.sh status", "bash macos-launchagent.sh load", ".hard-stop", "healthFold.body.appendChild(statusGrid)", "el.appendChild(healthFold.wrap)",
-    "setupFold.body.appendChild(secretCard)", "el.appendChild(setupFold.wrap)", 'detailsFold("Recent check-ins")', 'dashMetric("Coins held"', 'dashMetric("Trade size cap"', 'dashMetric("Selling"'])
+    "bash macos-launchagent.sh status", "bash macos-launchagent.sh load", ".hard-stop", "healthFold.body.appendChild(statusGrid)", "if (showHealth) el.appendChild(healthFold.wrap)",
+    "setupFold.body.appendChild(secretCard)", "if (showSetup) el.appendChild(setupFold.wrap)", "if (detailedView()) el.appendChild(hcard)", 'dashMetric("Coins held"', 'dashMetric("Trade size cap"', 'dashMetric("Selling"'])
     assert.ok(w.includes(t), `bot page must contain ${t}`);
+  /* 2026-09-08, no dropdown bars: the set-up path appears only while the bot is not
+     set up, health only in Detailed view. A running bot's owner sees almost nothing. */
+  assert.ok(w.includes("const needsSetup = !heartbeat") && !w.includes('detailsFold("'), "the bot page has no dropdown bar");
   for (const t of ['"Recent heartbeats"', "Fund the dedicated burner last", '"Activation checklist"', '"EXITS BLOCKED"', '"MANUAL ACTION"', 'dashMetric("Telemetry"'])
     assert.ok(!w.includes(t), `bot page must not say ${t}`);
   assert.ok(!/launchctl|systemctl|rm -f .*hard-stop/.test(w), "no invented commands: only the script's own verbs");

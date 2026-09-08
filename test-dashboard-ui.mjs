@@ -122,11 +122,17 @@ assert.match(html, /Fund the burner last/);
     "...and the line that prints it, so the comparison is a paste rather than a chore");
 
   /* THE CLONE PATH IS DEMOTED, NOT DELETED. Some readers will not pipe a URL into a
-     shell on principle, and the pinned-commit form is a real property, not a ritual. */
-  assert.match(setup, /foldSection\("Prefer to clone it yourself\?"\)/,
-    "the git-clone form survives behind a disclosure");
+     shell on principle, and the pinned-commit form is a real property, not a ritual.
+     Re-anchored 2026-09-08: the owner asked for no dropdown bars, so the disclosure is
+     gone and the form is attached only in Detailed view. The property this guards —
+     the command still exists, still pinned, still out of the step's main flow — is
+     unchanged; only the mechanism that demotes it moved. */
+  assert.match(setup, /const cloneFold = \{ wrap: dashNode\("div"\), body: dashNode\("div"\) \};/,
+    "the git-clone form survives, in a container rather than a dropdown");
+  assert.match(setup, /if \(detailedView\(\)\) installStep\.appendChild\(cloneFold\.wrap\);/,
+    "...attached only for a reader who asked for detail, never as a bar to press");
   assert.match(setup, /cloneFold\.body\.appendChild\(dashNode\("pre", "commandbox", cloneInstallCommand\)\)/,
-    "...inside the fold, not in the step's main flow");
+    "...and the command itself is unchanged");
   assert.match(setup, /git checkout --detach " \+ executorReleaseCommit/,
     "...still pinned to the exact reviewed commit");
   assert.ok(setup.indexOf("oneCommandInstall)") < setup.indexOf("cloneFold.wrap"),
@@ -154,8 +160,12 @@ assert.match(html, /Fund the burner last/);
   assert.match(legacyPanel,
     /`curl -fsSL https:\/\/claudedotcompany\.com\/install\.sh \| bash -s -- --floor \$\{FLOOR_N\}`/,
     "the settings panel leads with the same one-command install");
-  assert.match(legacyPanel, /foldSection\("Prefer to clone it yourself\?"\)/,
-    "...and keeps the clone form behind the same disclosure");
+  /* Re-anchored 2026-09-08 with the no-dropdown rule: the clone form is still demoted
+     out of the main flow, now by a Detailed-view gate instead of a disclosure bar. */
+  assert.match(legacyPanel, /const cloneWays = \{ wrap: mk\("div"\), body: mk\("div"\) \};/,
+    "...and keeps the clone form out of the main flow");
+  assert.match(legacyPanel, /if \(typeof detailedView === "function" && detailedView\(\)\) installBox\.appendChild\(cloneWays\.wrap\);/,
+    "...attached only for a reader who asked for detail");
   assert.match(legacyPanel, /trades nothing until you separately arm it on that machine/,
     "...and says the default install trades nothing");
 }
