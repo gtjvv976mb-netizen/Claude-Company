@@ -202,4 +202,12 @@ ok("Calls: Shortlist / Open / Closed keep their ids and views; the leads and the
   assert.ok(html.includes("NOT REVIEWED · NOT APPROVED · NOT EXECUTABLE"), "the shortlist boundary line is kept word for word");
 });
 
+ok("the house floor is never called vacant, and the round is one line over the instrument", () => {
+  const i = html.indexOf("async function loadOverviewDashboard"); const ov = html.slice(i, html.indexOf("const CANDIDATE_BANDS", i));
+  assert.ok(ov.includes("const isHouse = FLOOR_N === 50 || room.hq === true;") && ov.includes("anyone may watch"), "the HQ visitor reads the house sentence");
+  const j = html.indexOf("function renderRoundLine"); const round = html.slice(j, html.indexOf("const dashboardSubview", j));
+  for (const t of ["calls found", "still looking", "cycleLevelChip(c.level)", "fold.body.appendChild(renderCycleCard(data))", "renderCycleStrain(data.strain)", "renderCycleHistory(data.history)"])
+    assert.ok(round.includes(t), `round must contain ${t}`);
+});
+
 console.log(`\n${pass} passed — one vocabulary, executed\n`);

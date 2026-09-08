@@ -10900,16 +10900,46 @@ async function fetchCycleSurface(force = false) {
 }
 /** Paint the cycle instrument into a slot that is already in the DOM, so an await here
     cannot reorder the panel around it. */
+/* THE ROUND IN ONE LINE. "Round 25 · 0 of 3 calls found · still looking" plus the level
+   chip (its lvl/reached classes are test hooks and stay), and "Straining" when the
+   server says so. The full instrument — the owner's sentence, the ladder, the strain
+   headline with its counts, the history — is unchanged underneath, in a fold that is
+   open in Detailed view. */
+function renderRoundLine(data) {
+  const row = dashNode("div", "chiprow");
+  const c = data && data.current;
+  if (!c) {
+    row.appendChild(chipRow([{ label: "Round", value: data && data.enabled === false ? "rounds are off" : "between rounds" }]).firstChild);
+    return row;
+  }
+  const state = c.waiting ? "holding until " + c.holdingFor.length + " call" + (c.holdingFor.length === 1 ? "" : "s") + " close"
+    : c.short > 0 ? "still looking" : "done";
+  row.appendChild(chipRow([{ label: "Round " + c.id, value: c.published + " of " + c.quota + " calls found \u00b7 " + state,
+    cls: c.waiting ? "warn" : c.short > 0 ? "" : "good" }]).firstChild);
+  const info = cycleLevelInfo(c.level);
+  const chip = cycleLevelChip(c.level);
+  chip.title = (info && info.reach ? "A stretch: the desk lowered its bar to find calls this round. " : "The normal bar. ") + (info ? info.line : "");
+  row.appendChild(chip);
+  if (data.strain && data.strain.straining) {
+    const b = chipRow([{ label: "Straining", value: "the desk keeps having to stretch", cls: "warn" }]).firstChild;
+    b.title = String(data.strain.headline || "");
+    row.appendChild(b);
+  }
+  return row;
+}
 async function paintCycleSurface(slot, { history = false } = {}) {
   const data = await fetchCycleSurface();
   if (!slot || !data) return;
   slot.innerHTML = "";
   const wrap = dashNode("div", "cyclewrap");
   wrap.style.cssText = "display:flex;flex-direction:column;gap:8px;margin:0 0 10px";
-  wrap.appendChild(renderCycleCard(data));
+  wrap.appendChild(renderRoundLine(data));
+  const fold = detailsFold(history ? "This round, and recent rounds" : "This round");
+  fold.body.appendChild(renderCycleCard(data));
   const strain = renderCycleStrain(data.strain);
-  if (strain) wrap.appendChild(strain);
-  if (history) wrap.appendChild(renderCycleHistory(data.history));
+  if (strain) fold.body.appendChild(strain);
+  if (history) fold.body.appendChild(renderCycleHistory(data.history));
+  wrap.appendChild(fold.wrap);
   slot.appendChild(wrap);
 }
 
@@ -11055,15 +11085,23 @@ async function loadOverviewDashboard() {
     el.append(leadButton(bot.action ? "Open your bot" : offered.length ? "See your calls" : "See the calls",
       () => goTo(bot.action ? "wallste" : "calls")));
   } else {
-    el.append(plainLead(room.lease
-      ? floorName + " is leased. Its calls and controls are private to its tenant; the house desk is public on floor 50."
-      : "Nobody leases " + floorName + " yet. The house desk is public on floor 50.",
-      { sub: room.lease ? "You are visiting." : "Lease it from the tower to run your own desk here.", info: HOW_THE_DESK_WORKS, infoTitle: "How the desk works" }));
+    /* The HQ floor has no lease row by design (rooms.js roomState), so `lease` is null
+       for every visitor of the house floor — which is not vacant, it is the one floor
+       everyone may watch. Say that; say "vacant" only of a floor that really is. */
+    const isHouse = FLOOR_N === 50 || room.hq === true;
+    el.append(plainLead(isHouse
+      ? "The house desk. It studies new pump.fun coins all day and publishes the few it would trade \u2014 anyone may watch."
+      : room.lease
+        ? floorName + " is leased. Its calls and controls are private to its tenant; the house desk is public on floor 50."
+        : "Nobody leases " + floorName + " yet. The house desk is public on floor 50.",
+      { sub: isHouse ? "Lease a floor from the tower to run a desk of your own." : room.lease ? "You are visiting." : "Lease it from the tower to run your own desk here.",
+        info: HOW_THE_DESK_WORKS, infoTitle: "How the desk works" }));
     el.append(chipRow([
-      { label: room.lease ? "Visitor" : "Vacant", value: "", cls: "warn" },
+      { label: isHouse ? "House desk" : room.lease ? "Visitor" : "Vacant", value: "", cls: isHouse ? "good" : "warn" },
       deskChip,
       { label: "Open calls", value: feedPrivate ? "private" : String(live.length) },
     ]));
+    if (isHouse) el.append(leadButton("See the calls", () => goTo("calls")));
   }
 
   /* THE CURRENT ROUND SITS ABOVE THE DETAILS, on purpose. Whether the quota is healthy
