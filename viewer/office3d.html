@@ -1592,7 +1592,7 @@ window.CCModals = (function () {
     <button class="dtab" id="dash-tab-calls" role="tab" aria-controls="callsworkspace" aria-selected="false" tabindex="-1" data-destination="calls">Calls<span class="dot" id="live-dot"></span></button>
     <button class="dtab" id="dash-tab-wallste" role="tab" aria-controls="wallstepanel" aria-selected="false" tabindex="-1" data-destination="wallste">WALL-ST-E</button>
     <button class="dtab" id="dash-tab-team" role="tab" aria-controls="teampanel" aria-selected="false" tabindex="-1" data-destination="team">Team</button>
-    <button class="dtab" id="dash-tab-callouts" role="tab" aria-controls="calloutspanel" aria-selected="false" tabindex="-1" data-destination="callouts">Callouts<span class="dot" id="whale-dot"></span></button>
+    <button class="dtab" id="dash-tab-callouts" role="tab" aria-controls="calloutspanel" aria-selected="false" tabindex="-1" data-destination="callouts">Big callers<span class="dot" id="whale-dot"></span></button>
     <button class="dtab" id="dash-tab-activity" role="tab" aria-controls="activityworkspace" aria-selected="false" tabindex="-1" data-destination="activity">Activity<span class="dot" id="tape-dot"></span></button>
     <button class="dtab" id="dash-tab-performance" role="tab" aria-controls="performanceworkspace" aria-selected="false" tabindex="-1" data-destination="performance">Performance</button>
     <button class="dtab" id="dash-tab-settings" role="tab" aria-controls="settingspanel" aria-selected="false" tabindex="-1" data-destination="settings">Settings</button>
@@ -6625,6 +6625,10 @@ async function fillChronicleGap() {
   } catch { return 0; }
 }
 window.loadChronicle = loadChronicle;
+/* Re-read the chronicle from the top so the chatter filter applies to history too.
+   The SSE cursor (newestChron) is kept; an empty tape makes loadChronicle load the
+   first page instead of gap-filling. */
+window.__reloadTape = () => { chronDone = false; oldestChron = null; window.__tapeGateShown = false; if (tapeEl) tapeEl.innerHTML = ""; return loadChronicle(); };
 window.__fillGap = fillChronicleGap;
 window.__rewindTape = (n = 30) => { newestChron = Math.max(0, newestChron - n); return newestChron; };
 tapeEl.addEventListener("scroll", () => {
@@ -8258,34 +8262,27 @@ async function renderTeamInto(el, { includeBot = true } = {}) {
   // 1. the bot
   const cBot = mk("div", "tchip");
   cBot.style.flexBasis = "100%";
-  cBot.append(mk("span", "tk", "WALL-ST-E \u00b7 autotrader"));
+  cBot.append(mk("span", "tk", "Your bot"));
   // Relayed from the bot's own heartbeat \u2014 the site never claims liveness itself.
   let hb = null;
   try { hb = JSON.parse(R.executorHeartbeat || "null"); } catch {}
   window.__botHeartbeat = hb;                      // wakes the robot in the 3D scene
   const hbAge = hb?.seenAt ? Date.now() - hb.seenAt : null;
-  if (hb && hbAge != null && hbAge < 3 * 60e3) {
-    const bv = mk("span", "tv", `● ${(hb.mode || "?").toUpperCase()} \u00b7 ${hb.open ?? 0} open`);
-    bv.style.color = "var(--good,#4f8f52)";
+  {
+    /* The same state the Overview and the bot page show — one ladder, one vocabulary. */
+    const st = window.PLAIN.botState({ heartbeat: hb, ageMs: hbAge, runnerChoice: "unknown" });
+    const bv = mk("span", "tv", (st.cls === "good" ? "\u25cf " : "\u25cb ") + st.chip + (hb && st.cls === "good" ? ` \u00b7 ${hb.open ?? 0} held` : ""));
+    bv.style.color = st.cls === "good" ? "var(--good,#4f8f52)" : st.cls === "bad" ? "var(--bad,#b0503f)" : "var(--warn,#e0ad3d)";
     cBot.appendChild(bv);
-    cBot.appendChild(mk("span", "dp-note",
-      `self-reported ${Math.max(1, Math.round(hbAge / 1000))}s ago by your machine`));
-  } else if (hb && hbAge != null) {
-    const bv = mk("span", "tv", `○ last pulse ${Math.round(hbAge / 60e3)}m ago`);
-    bv.style.color = "var(--bad,#b0503f)";
-    cBot.appendChild(bv);
-    cBot.appendChild(mk("span", "dp-note", "the poller may be stopped \u2014 check the machine running it"));
-  } else {
-    cBot.appendChild(mk("span", "tv", "○ local status not linked"));
-    cBot.appendChild(mk("span", "dp-note", "Check the machine running the poller"));
+    cBot.appendChild(mk("span", "dp-note", st.sentence + (hbAge != null && st.cls === "good" ? ` Checked in ${window.PLAIN.plainAge(hbAge)} ago.` : "")));
   }
   if (includeBot) strip.appendChild(cBot);
 
   // 2. the shift — with the toggle and cadence inline
   const cShift = mk("div", "tchip");
-  cShift.append(mk("span", "tk", "Team shift"));
-  const sv = mk("span", "tv", grinding ? "\u2692 Grinding" : "\u2615 On a break");
-  const flip = mk("button", "dp-btn" + (grinding ? " ghost" : ""), grinding ? "Break" : "Grind");
+  cShift.append(mk("span", "tk", "The team"));
+  const sv = mk("span", "tv", grinding ? "\u2692 Working" : "\u2615 On a break");
+  const flip = mk("button", "dp-btn" + (grinding ? " ghost" : ""), grinding ? "Give them a break" : "Put them to work");
   flip.onclick = () => { flip.disabled = true; post({ mode: grinding ? "break" : "grind" }); };
   sv.appendChild(flip);
   if (grinding) {
@@ -8305,7 +8302,7 @@ async function renderTeamInto(el, { includeBot = true } = {}) {
   // 3. the brain
   const brain = S.md_brain === "grok" ? "grok" : "claude";
   const cBrain = mk("div", "tchip");
-  cBrain.append(mk("span", "tk", "MD's brain"));
+  cBrain.append(mk("span", "tk", "The MD thinks with"));
   const bvv = mk("span", "tv");
   for (const which of ["claude", "grok"]) {
     const btn = mk("button", "dp-btn" + (brain === which ? "" : " ghost"), which === "claude" ? "Claude" : "Grok");
@@ -10388,7 +10385,7 @@ window.load_stats = async () => {
   }
   el.appendChild(chips);
   const note = document.createElement("p"); note.className = "dp-note";
-  note.textContent = "Settled results and the house's record.";
+  note.textContent = "Closed trades and the house's record.";
   el.appendChild(note);
   try {
     const { status, body } = await call_api("/api/stats/overview");
@@ -10406,10 +10403,10 @@ window.load_stats = async () => {
       ]) el.appendChild(drow([["span grow", k], ["b " + cls, v]]));
     } else if (statsView === "floors") {
       const rows = body.floors || [];
-      if (!rows.length) empty(el, "No floor has settled a trade yet. The first one starts this board.");
+      if (!rows.length) empty(el, "No floor has closed a trade yet. The first one starts this board.");
       for (const f of rows) el.appendChild(drow([
         ["b grow", (f.floor_name || ordC(f.floor_no))],
-        ["span", `${f.settled} settled`],
+        ["span", `${f.settled} closed`],
         ["b " + (f.pnl_usd >= 0 ? "up" : "down"), money(f.pnl_usd)],
       ]));
     } else {
@@ -10431,18 +10428,18 @@ window.load_ranks = async () => {
   const el = document.getElementById("rankspanel");
   el.innerHTML = "";
   const h = document.createElement("p"); h.className = "dp-note";
-  h.textContent = "Ranked by realised, settled P&L. Open positions do not count.";
+  h.textContent = "Ranked by profit on closed trades. Open positions do not count.";
   el.appendChild(h);
   try {
     const { status, body } = await call_api("/api/leaderboard");
     if (status !== 200) return empty(el, "Could not reach the desk.");
     const rows = body.floors || [];
-    if (!rows.length) return empty(el, "No settled results anywhere in the building yet. The first floor to close a copied call ranks first.");
+    if (!rows.length) return empty(el, "No closed trades anywhere in the building yet. The first floor to close a call ranks first.");
     rows.forEach((f, i) => {
       el.appendChild(drow([
         ["b", "#" + (i + 1)],
         ["b grow", (f.floor_name || ordC(f.floor_no)) + (f.md_name ? " · MD " + f.md_name : "")],
-        ["span", f.settled + " settled \u00b7 " + money(f.bought_usd) + " in"], ["faint", dashWhen(f.last_settled) ? "last settled " + dashWhen(f.last_settled) : "\u2014"],
+        ["span", f.settled + " closed \u00b7 " + money(f.bought_usd) + " in"], ["faint", dashWhen(f.last_settled) ? "last closed " + dashWhen(f.last_settled) : "\u2014"],
         ["b " + (f.pnl_usd >= 0 ? "up" : "down"), money(f.pnl_usd)],
       ]));
     });
@@ -10462,10 +10459,9 @@ window.load_ledger = async () => {
       : "The record book could not be loaded (HTTP " + status + "). Try again in a moment.");
     const t = body.totals || {};
     const h = document.createElement("p"); h.className = "dp-note";
-    h.textContent = `The record book. House: ${t.house?.calls ?? 0} calls, ${t.house?.live ?? 0} live, ` +
-      `${t.house?.closed_up ?? 0} closed up, ${t.house?.closed_down ?? 0} closed down. ` +
-      `${FLOOR_N != null ? "This floor:" : "Floors:"} ${t.floors?.settled ?? 0} settled, ${money(t.floors?.pnl_usd)} realised. ` +
-      "";
+    h.textContent = `Every call the desk has published, and every trade ${FLOOR_N != null ? "this floor" : "the floors"} closed. ` +
+      `House: ${t.house?.calls ?? 0} calls, ${t.house?.live ?? 0} open, ${t.house?.closed_up ?? 0} closed up, ${t.house?.closed_down ?? 0} closed down. ` +
+      `${FLOOR_N != null ? "This floor:" : "Floors:"} ${t.floors?.settled ?? 0} closed, ${money(t.floors?.pnl_usd)} profit or loss.`;
     el.appendChild(h);
 
     const hh = document.createElement("div"); hh.className = "data-h"; hh.textContent = "The house's calls";
@@ -10475,16 +10471,16 @@ window.load_ledger = async () => {
     for (const c of body.house || []) {
       el.appendChild(drow([
         ["b grow", (c.symbol || c.mint.slice(0, 6)) + (c.launchpad ? " · " + c.launchpad : "")],
-        ["span", (c.status === "live" ? "live" : (c.close_reason || "closed").replace(/_/g, " ")) + (c.stop != null ? " \u00b7 stop $" + c.stop : "") + (c.target != null ? " \u00b7 tgt $" + c.target : "")],
+        ["span", (c.status === "live" ? "open" : window.PLAIN.closeReason(c.close_reason || "closed")) + (c.stop != null ? " \u00b7 stop $" + c.stop : "") + (c.target != null ? " \u00b7 target $" + c.target : "")],
         ["b " + ((c.move_pct ?? 0) >= 0 ? "up" : "down"), c.move_pct != null ? c.move_pct + "%" : "—"],
-        ["faint", c.status === "live" ? "opened " + (dashWhen(c.opened_at) || ago(c.opened_at)) : "closed " + (dashWhen(c.closed_at || c.opened_at) || ago(c.closed_at || c.opened_at))],
+        ["faint", c.status === "live" ? "published " + (dashWhen(c.opened_at) || ago(c.opened_at)) : "closed " + (dashWhen(c.closed_at || c.opened_at) || ago(c.closed_at || c.opened_at))],
       ]));
     }
 
     const fh = document.createElement("div"); fh.className = "data-h";
-    fh.textContent = FLOOR_N != null ? "This floor's settled trades" : "Every floor's settled trades";
+    fh.textContent = FLOOR_N != null ? "This floor's closed trades" : "Every floor's closed trades";
     el.appendChild(fh);
-    if (!(body.floors || []).length) empty(el, "Nothing settled yet. A trade lands here when a copied call is fully closed and synced.");
+    if (!(body.floors || []).length) empty(el, "Nothing closed yet. A trade lands here once a call has been bought, sold and reported.");
     for (const r of body.floors || []) {
       el.appendChild(drow([
         ["b grow", (r.floor_name ? r.floor_name : ordC(r.floor_no)) + (r.symbol ? " · " + r.symbol : "")],
@@ -10952,6 +10948,7 @@ function activateDashboardSubview(group, view, { focus = false } = {}) {
   if (!chosen) return;
   dashboardSubview[group] = chosen;
   if (group === "activity") document.getElementById("tape-dot")?.classList.remove("on");
+  if (group === "activity") document.querySelector(".tape-tools")?.toggleAttribute("hidden", chosen !== "tape");
   if (group === "calls") window.__dashboardCallsView = chosen;
   for (const button of buttons) {
     const selected = button.getAttribute("data-" + group + "-view") === chosen;
@@ -12193,7 +12190,7 @@ async function loadCalloutsDashboard() {
     dashReady(el);
     if (status === 401 || status === 403) {
       el.append(dashLead("",
-        "Matched caller evidence is private to tenants and the house.", "TENANTS ONLY", "warn"));
+        "Big callers are for tenants and the house.", "TENANTS ONLY", "warn"));
       return;
     }
     if (status !== 200) throw new Error(body?.error || "callouts unavailable");
@@ -12219,14 +12216,27 @@ async function loadCalloutsDashboard() {
     matched.sort((a, b) => b.walletUsd - a.walletUsd);
     const hidden = body.hidden || {};
     const whaleBar = Number(policy.minimumWalletSolUsd) || 0;
-    el.append(dashLead("",
-      "Only Pump.fun-verified callers whose own wallet holds at least " + (whaleBar ? dashMoney(whaleBar) : "the bar") + " of SOL. The figure is that wallet's confirmed SOL balance — it is not a claim that they bought this coin.",
-      String(matched.length) + " WHALE" + (matched.length === 1 ? "" : "S"), matched.length ? "good" : ""));
+    /* BIG CALLERS: one sentence, three chips, the boundary in six words, and the policy
+       paragraph — the window, the coverage, the bar — only in Detailed view. */
+    el.append(plainLead("Pump.fun-verified accounts whose own wallet holds at least " + (whaleBar ? dashMoney(whaleBar) : "the bar")
+      + " of SOL, and the coins they are calling.",
+      { sub: "The wallet balance is confirmed on chain. That the caller bought the coin is not.",
+        info: "Every sweep, the desk reads the callouts posted on pump.fun for the coins it is watching. A post counts only if pump.fun "
+          + "has verified the account (its gold check) AND that account's own wallet holds at least the bar in SOL. A username, a quote or "
+          + "a tracked multiple never qualifies on its own, and the desk never shows unverified chatter. The board is a window of the last "
+          + (coverage.boardHours || 24) + " hours.", infoTitle: "How big callers are chosen" }));
+    el.append(chipRow([
+      { label: "Big callers", value: String(matched.length), cls: matched.length ? "good" : "" },
+      { label: "Checked", value: String(coverage.succeeded ?? 0) + " of " + String(coverage.attempted ?? 0) + " coins" + (coverage.complete === true ? "" : " so far") },
+      dashWhen(body.generatedAt) ? { label: "As of", value: dashWhen(body.generatedAt) } : null,
+    ]));
     const boundary = dashNode("div", "boundary-note");
     boundary.append(
       dashNode("strong", "", "PUMP.FUN GOLD CHECK + A WALLET HOLDING THE BAR, OR IT IS NOT POSTED."),
-      document.createTextNode(" A username, quote, or tracked multiple never qualifies on its own. " +
-        "Policy: " + String(policy.identityClaim || "wallet-match-only") +
+      document.createTextNode(" A username, quote, or tracked multiple never qualifies on its own."));
+    el.appendChild(boundary);
+    if (detailedView()) el.appendChild(dashNode("p", "dp-note",
+      "Policy: " + String(policy.identityClaim || "wallet-match-only") +
         " · value basis: " + String(policy.valueBasis || "caller-wallet-sol-balance-at-current-mark") +
         " · purchase consideration proven: " + String(policy.purchaseConsiderationProven === true) +
         " · unmatched chatter included: " + String(policy.unmatchedChatterIncluded === true) +
@@ -12239,9 +12249,7 @@ async function loadCalloutsDashboard() {
         (whaleBar ? " · bar " + dashMoney(whaleBar) + " of wallet SOL" : "") +
         ((hidden.unverified || hidden.belowWhale)
           ? " · hidden: " + String(hidden.unverified || 0) + " unverified, " + String(hidden.belowWhale || 0) + " below the bar"
-          : ""))
-    );
-    el.appendChild(boundary);
+          : "")));
 
     // Opening the canonical evidence view marks this snapshot seen even when the
     // honest result is empty; an empty scan must not leave a permanent unread dot.
@@ -12285,7 +12293,7 @@ async function loadCalloutsDashboard() {
       const who = callout.username ? "@" + String(callout.username).replace(/^@/, "")
         : String(callout.user).slice(0, 6) + "…" + String(callout.user).slice(-6);
       head.appendChild(dashNode("span", "who", who));
-      if (callout.verified === true) head.appendChild(dashNode("span", "dashbadge good", "PUMP.FUN VERIFIED"));
+      if (callout.verified === true) head.appendChild(dashNode("span", "dashbadge good", "VERIFIED"));
       head.appendChild(dashNode("span", "coin", "$" + String(coin.symbol || coin.mint?.slice(0, 6) || "?").replace(/^\$/, "")));
       if (coin.netUsd != null) head.appendChild(dashNode("span", "coin", (coin.netUsd >= 0 ? "+" : "") + dashMoney(coin.netUsd) + " net"));
       card.appendChild(head);
@@ -12305,7 +12313,7 @@ async function loadCalloutsDashboard() {
       const links = dashNode("div", "dashactions");
       const sourceUrl = callout.source?.url || callout.url;
       if (/^https:\/\//.test(String(sourceUrl || ""))) {
-        const source = dashNode("a", "candidate-link", "Open matched callout ↗");
+        const source = dashNode("a", "candidate-link", "See the post ↗");
         source.href = sourceUrl; source.target = "_blank"; source.rel = "noopener";
         links.appendChild(source);
       }
@@ -12323,7 +12331,7 @@ async function loadCalloutsDashboard() {
     }
     const history = Array.isArray(body.history) ? body.history.filter((h) => !matched.some((m) => m.coin.mint === h.mint && (m.callout.id ?? m.callout.user) === (h.key || "").split(":").slice(1).join(":"))) : [];
     if (history.length) {
-      el.appendChild(dashNode("h4", "", "Previously posted"));
+      el.appendChild(dashNode("h4", "", "Earlier posts"));
       for (const h of history.slice(0, 20)) {
         const line = dashNode("p", "dp-note", (dashWhen(h.seenAt) || "") + " \u00b7 $" + String(h.symbol || String(h.mint || "").slice(0, 6)).replace(/^\$/, "") +
           " \u00b7 " + (h.username ? "@" + String(h.username).replace(/^@/, "") : String(h.user || "").slice(0, 6) + "\u2026") +
@@ -12364,9 +12372,8 @@ async function loadSettingsDashboard() {
     }
     const identity = room.identity || {};
     const copySettings = feedR.status === 200 ? (feedR.body?.settings || {}) : {};
-    el.append(dashLead((identity.floorName || room.floorLabel || "This floor"),
-      "Identity, desk name, notifications, and this device's display. Team operations live under Team; execution filters and feed setup live under WALL-ST-E.",
-      "OWNER CONTROLS", "good"));
+    el.append(plainLead((identity.floorName || room.floorLabel || "This floor") + " \u2014 its name, how it looks, and where alerts go.",
+      { sub: "Your bot's own settings live under WALL-ST-E; the team's under Team." }));
 
     const identityCard = dashNode("section", "dashsection");
     identityCard.appendChild(dashNode("h4", "", "Floor identity"));
@@ -12453,6 +12460,24 @@ async function loadSettingsDashboard() {
     deskCard.append(deskForm, dashNode("p", "dp-note",
       "Receives the same entry and exit alerts as the alert bar, so you hear them with the tab closed."));
     el.appendChild(deskCard);
+
+    /* DISPLAY. The one switch of the redesign: Detailed view restores the owner's
+       density everywhere — every fold open, the desk's internal numbers, analyst chatter
+       on the tape. Per device, in localStorage. */
+    const displayCard = dashNode("section", "dashsection");
+    displayCard.appendChild(dashNode("h4", "", "Display"));
+    const detailedRow = dashNode("label", "dp-row");
+    detailedRow.style.cssText = "display:flex;gap:9px;align-items:flex-start;cursor:pointer";
+    const detailedBox = dashNode("input"); detailedBox.type = "checkbox";
+    detailedBox.checked = typeof window.__detailedView === "function" && window.__detailedView();
+    detailedBox.setAttribute("aria-label", "Detailed view");
+    const detailedText = dashNode("span", "");
+    detailedText.append(dashNode("b", "", "Detailed view"), document.createTextNode(" \u2014 show the desk's internal numbers, the round ladder and analyst chatter everywhere. Off, the floor speaks in plain words and folds the rest."));
+    detailedBox.onchange = () => { window.__setDetailedView?.(detailedBox.checked); window.__reloadTape?.(); loadSettingsDashboard(); };
+    detailedRow.append(detailedBox, detailedText);
+    displayCard.appendChild(detailedRow);
+    displayCard.appendChild(dashNode("p", "dp-note", "Saved on this device only."));
+    el.appendChild(displayCard);
 
     const build = document.querySelector('meta[name="cc-build"]')?.content;
     if (build) {

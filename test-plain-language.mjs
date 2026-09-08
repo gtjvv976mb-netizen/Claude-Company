@@ -221,4 +221,20 @@ ok("Your bot: chips, one NEEDS-YOU button with a truthful how-to, everything els
   assert.ok(!/launchctl|systemctl|rm -f .*hard-stop/.test(w), "no invented commands: only the script's own verbs");
 });
 
+ok("Big callers, Team, the record book, Performance and Settings speak plainly; the chatter toggle can re-read the tape", () => {
+  assert.ok(html.includes('data-destination="callouts">Big callers<span') && html.includes('id="dash-tab-callouts"'), "the tab is Big callers, same id");
+  const c = html.indexOf("async function loadCalloutsDashboard"); const co = html.slice(c, html.indexOf("async function loadSettingsDashboard", c));
+  for (const t of ["and the coins they are calling.", "The wallet balance is confirmed on chain. That the caller bought the coin is not.", '{ label: "Big callers"', "board covers the last", '"VERIFIED"', "See the post"])
+    assert.ok(co.includes(t), `big callers must contain ${t}`);
+  assert.ok(!co.includes('"PUMP.FUN VERIFIED"') && !co.includes("Open matched callout"), "old badge and link words are gone");
+  const tm = html.indexOf("function renderTeamInto"); const team = html.slice(tm, tm + 9000);
+  assert.ok(team.includes('mk("span", "tk", "Your bot")') && team.includes("window.PLAIN.botState({ heartbeat: hb, ageMs: hbAge") && !team.includes("local status not linked"), "the Team tile reads botState");
+  const lg = html.indexOf("window.load_ledger"); const ledger = html.slice(lg, lg + 5000);
+  assert.ok(ledger.includes("window.PLAIN.closeReason(c.close_reason") && ledger.includes("closed trades") && !ledger.includes("settled trades") && ledger.includes("This floor's record is private to its tenant."), "the record book uses the close-reason table and keeps its private-record sentence");
+  assert.ok(html.includes("Ranked by profit on closed trades.") && html.includes("Closed trades and the house's record."), "Performance says closed trades");
+  const st = html.indexOf("async function loadSettingsDashboard"); const settings = html.slice(st, html.indexOf("window.__loadDashboardDestination", st));
+  assert.ok(settings.includes('"Detailed view"') && settings.includes("window.__setDetailedView?.(detailedBox.checked)") && settings.includes('"Settings are owner-only"'), "Settings carries the Detailed-view switch and keeps its owner-only wall");
+  assert.ok(html.includes("window.__reloadTape = () => {") && html.includes("toggleAttribute(\"hidden\", chosen !== \"tape\")"), "the chatter toggle re-reads the tape and the tools bar follows the tape view");
+});
+
 console.log(`\n${pass} passed — one vocabulary, executed\n`);

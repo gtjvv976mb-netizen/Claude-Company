@@ -12,7 +12,10 @@ ok("(a) no JS-style \\uXXXX escape sits in raw HTML text — users saw the six c
 });
 ok("(b) the Callouts lead sentence is whole again", () => {
   assert.doesNotMatch(html, /coin\.ucted purchase cost/);
-  assert.match(html, /it is not a claim that they bought this coin\."/);
+  /* Re-anchored 2026-09-08 to the plain-language lead: still a whole sentence, ending
+     in a period inside the string, never the corrupted fragment. */
+  assert.match(html, /and the coins they are calling\.",/);
+  assert.match(html, /That the caller bought the coin is not\."/);
 });
 ok("(c) the callouts boot reads body.coins, never a bare `coins`", () => {
   assert.doesNotMatch(html, /\.\.\.coins\.flatMap/);

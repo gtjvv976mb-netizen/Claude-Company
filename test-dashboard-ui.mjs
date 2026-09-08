@@ -19,7 +19,7 @@ assert.deepEqual(destinations, [
   ["calls", "Calls"],
   ["wallste", "WALL-ST-E"],
   ["team", "Team"],
-  ["callouts", "Callouts"],
+  ["callouts", "Big callers"],   // renamed 2026-09-08; the destination id, panel and dot are unchanged
   ["activity", "Activity"],
   ["performance", "Performance"],
   ["settings", "Settings"],
@@ -58,7 +58,9 @@ assert.doesNotMatch(calloutsDashboard, /evidence\?\.inflows|row\.inflows|matched
   "no field from the retired inflow-matching contract is read");
 assert.match(calloutsDashboard, /coverage\.succeeded/);
 assert.match(calloutsDashboard, /purchase consideration proven/);
-assert.match(calloutsDashboard, /it is not a claim that they bought this coin/,
+/* Re-anchored 2026-09-08 to the plain-language lead; the property — the tab says the
+   balance is confirmed and the purchase is NOT — is the same sentence in fewer words. */
+assert.match(calloutsDashboard, /The wallet balance is confirmed on chain\. That the caller bought the coin is not\./,
   "the tab says what the number is, and what it is not");
 assert.match(calloutsDashboard, /coinsWithCallouts/,
   "an empty result distinguishes 'no callouts anywhere' from 'none cleared the bar'");
