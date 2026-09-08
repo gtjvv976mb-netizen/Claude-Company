@@ -57,7 +57,13 @@ assert.match(calloutsDashboard, /Number\(callout\?\.walletSolUsd\)/,
 assert.doesNotMatch(calloutsDashboard, /evidence\?\.inflows|row\.inflows|matchedCurrentValueUsd|recent_pool_token_inflow_current_value/,
   "no field from the retired inflow-matching contract is read");
 assert.match(calloutsDashboard, /coverage\.succeeded/);
-assert.match(calloutsDashboard, /purchase consideration proven/);
+/* Re-anchored 2026-09-09. The owner deleted the policy metadata paragraph from the tab
+   ("remove these in the big callers tab"), so the machine-readable policy string is no
+   longer printed. The PROPERTY it guarded — the tab must say that a confirmed wallet
+   balance is not proof the caller bought the coin — is unchanged and now sits in the ⓘ,
+   which is one tap away and is asserted here in plain words. */
+assert.match(calloutsDashboard, /that the caller bought the coin is not/i,
+  "the tab still says a confirmed balance is not proof of purchase");
 /* Re-anchored 2026-09-08 to the plain-language lead; the property — the tab says the
    balance is confirmed and the purchase is NOT — is the same sentence in fewer words. */
 assert.match(calloutsDashboard, /The wallet balance is confirmed on chain\. That the caller bought the coin is not\./,
