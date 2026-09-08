@@ -14,8 +14,10 @@ ok("(b) the Callouts lead sentence is whole again", () => {
   assert.doesNotMatch(html, /coin\.ucted purchase cost/);
   /* Re-anchored 2026-09-08 to the plain-language lead: still a whole sentence, ending
      in a period inside the string, never the corrupted fragment. */
-  assert.match(html, /and the coins they are calling\.",/);
-  assert.match(html, /That the caller bought the coin is not\."/);
+  /* Re-anchored 2026-09-09: the owner removed the Big-callers lead from the tab. The
+     bug this guards is a CORRUPTED sentence, so it now checks the surviving sentence —
+     the one in the ⓘ — is whole and ends in a period inside the string. */
+  assert.match(html, /that the caller bought the coin is not\. The board covers the last "/);
 });
 ok("(c) the callouts boot reads body.coins, never a bare `coins`", () => {
   assert.doesNotMatch(html, /\.\.\.coins\.flatMap/);

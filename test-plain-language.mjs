@@ -180,11 +180,15 @@ ok("the Overview, the pulse strip and the hint speak plainly", () => {
     assert.ok(!ov.includes(t), `Overview must not say ${t}`);
   /* 2026-09-08, the owner's list for this tab: bot on/off, an open position, the SOL
      balance, profit and loss, and $CLAUDECO. Nothing about rounds or quotas. */
-  for (const t of ['label: "Your bot"', 'label: "Open position"', 'label: "SOL"', 'label: "Profit and loss"', 'label: "$CLAUDECO"', "How to turn it off"])
+  /* Re-anchored 2026-09-09: the owner asked for the five facts BIGGER and the
+     how-to-stop button removed, so they are figures now rather than chips. Same five
+     facts, asserted by the same names. */
+  for (const t of ['fact("Your bot"', 'fact("Open position"', 'fact("SOL"', 'fact("Profit and loss"', 'fact("$CLAUDECO"'])
     assert.ok(ov.includes(t), `Overview must carry ${t}`);
+  assert.ok(!ov.includes('leadButton("How to turn it off"'), "the how-to-stop button is gone from the Overview");
   /* The six-tile grid was deleted 2026-09-08. The property it carried — a private
      floor's record never reads as a zero — moved to the chip that replaced it. */
-  assert.ok(ov.includes('value: pnl == null ? "private" : money(pnl)'), "a private floor's record reads private, not zero");
+  assert.ok(ov.includes('fact("Profit and loss", pnl == null ? "Private" : money(pnl)'), "a private floor's record reads private, not zero");
   const j = html.indexOf("async function pollPulse"); const pulse = html.slice(j, html.indexOf("pollPulse();", j));
   /* t.workups is the server's field name and may stay; the WORD "workups" must not reach the strip. */
   assert.ok(pulse.includes("coins studied today") && pulse.includes("turned down") && !/<\/b> workups| workups ·|workups`/.test(pulse), "the strip counts coins studied, not workups");
@@ -268,8 +272,12 @@ ok("Your bot: chips, one NEEDS-YOU button with a truthful how-to, everything els
 ok("Big callers, Team, the record book, Performance and Settings speak plainly; the chatter toggle can re-read the tape", () => {
   assert.ok(html.includes('data-destination="callouts">Big callers<span') && html.includes('id="dash-tab-callouts"'), "the tab is Big callers, same id");
   const c = html.indexOf("async function loadCalloutsDashboard"); const co = html.slice(c, html.indexOf("async function loadSettingsDashboard", c));
-  for (const t of ["and the coins they are calling.", "The wallet balance is confirmed on chain. That the caller bought the coin is not.", '{ label: "Big callers"', "board covers the last", '"VERIFIED"', "See the post"])
+  /* Re-anchored 2026-09-09: the owner removed the lead and the line under it from the
+     tab. Both facts still exist, in the ⓘ, and are asserted there. */
+  for (const t of ["that the caller bought the coin is not.", '{ label: "Big callers"', "board covers the last", '"VERIFIED"', "See the post"])
     assert.ok(co.includes(t), `big callers must contain ${t}`);
+  for (const t of ["Pump.fun-verified accounts whose own wallet", "purchase consideration proven"])
+    assert.ok(!co.includes(t), `big callers must not carry ${t} on the tab`);
   assert.ok(!co.includes('"PUMP.FUN VERIFIED"') && !co.includes("Open matched callout"), "old badge and link words are gone");
   const tm = html.indexOf("function renderTeamInto"); const team = html.slice(tm, tm + 9000);
   assert.ok(team.includes('mk("span", "tk", "Your bot")') && team.includes("window.PLAIN.botState({ heartbeat: hb, ageMs: hbAge") && !team.includes("local status not linked"), "the Team tile reads botState");

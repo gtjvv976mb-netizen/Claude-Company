@@ -64,10 +64,9 @@ assert.match(calloutsDashboard, /coverage\.succeeded/);
    which is one tap away and is asserted here in plain words. */
 assert.match(calloutsDashboard, /that the caller bought the coin is not/i,
   "the tab still says a confirmed balance is not proof of purchase");
-/* Re-anchored 2026-09-08 to the plain-language lead; the property — the tab says the
-   balance is confirmed and the purchase is NOT — is the same sentence in fewer words. */
-assert.match(calloutsDashboard, /The wallet balance is confirmed on chain\. That the caller bought the coin is not\./,
-  "the tab says what the number is, and what it is not");
+/* Re-anchored again 2026-09-09: the owner removed that sentence from the tab face
+   ("remove these in the big callers tab"); it now sits in the ⓘ, and the assertion
+   directly above already checks it there. This one is folded into that. */
 assert.match(calloutsDashboard, /coinsWithCallouts/,
   "an empty result distinguishes 'no callouts anywhere' from 'none cleared the bar'");
 assert.doesNotMatch(calloutsDashboard, /recent_large_onchain_buy|buy receipt|matched buys/,
@@ -206,7 +205,7 @@ assert.match(html, /callsOpen && dashboardSubview\.calls === "candidates"[\s\S]*
    reads "private", never a zero that would look like a flat month. */
 assert.match(html, /const pnl = feedPrivate \? null : Number\(feedR\?\.body\?\.record\?\.netPnlUsd \?\? 0\);/,
   "a private floor's P&L is null, not zero");
-assert.match(html, /label: "Profit and loss", value: pnl == null \? "private" : money\(pnl\)/,
+assert.match(html, /fact\("Profit and loss", pnl == null \? "Private" : money\(pnl\)/,
   "private floor performance is not converted into a false zero");
 /* OWNER DECISION (2026-09-02): the rail must not cover half the screen. The 700px,
  * 85%-tall fixed frame measured 55% x 81% of a 1280x720 viewport and force-opened at

@@ -30,7 +30,11 @@ const started = Date.now();
  * same script and died the same way. Shrinking the simulation for CI would make CI prove
  * less than local; giving it the time it measurably needs does not. */
 const TEST_TIMEOUT_MS = Object.freeze({
-  "test-quota-simulation.mjs": 360_000,
+  /* Raised again 2026-09-09: 360s was not enough once step 14's CLAIM 8 and steps 12
+     and 16 added scenarios. It runs in ~31s on this 15-core machine and timed out on
+     the 2-core CI runner, so the headroom is deliberately large — this file's job is
+     to be slow and thorough, and a timeout here reads as a red suite on a green tree. */
+  "test-quota-simulation.mjs": 900_000,
 });
 const timeoutFor = (test) => TEST_TIMEOUT_MS[path.basename(test)] ?? 120_000;
 
