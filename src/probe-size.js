@@ -1,3 +1,4 @@
+import { EXECUTOR_OPERATOR_MAXIMA } from "./executor-dashboard.js";
 import db from "./lib/store.js";
 import { cfg } from "./config.js";
 
@@ -83,7 +84,9 @@ export function sizingSolUsd({ now = Date.now() } = {}) {
  * second reading, because the number crosses a trust boundary and a stored row can
  * predate a sanitiser. */
 export const BOT_CAP_SOL_MIN = 0.000001;
-export const BOT_CAP_SOL_MAX = 0.05;
+/* Derived, not pinned: this was the literal 0.05 after the executor moved to 0.4, so the
+   desk's evidence probe kept sizing at 0.05 for a bot armed at 0.4. */
+export const BOT_CAP_SOL_MAX = EXECUTOR_OPERATOR_MAXIMA.maxSolPerTrade;
 
 /* HOW OLD A PULSE MAY BE AND STILL COUNT AS A MEASUREMENT. WALL-ST-E heartbeats every
  * 60 seconds, so a day of silence is a bot that is off, uninstalled or unreachable —

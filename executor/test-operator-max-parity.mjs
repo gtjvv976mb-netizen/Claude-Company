@@ -88,6 +88,19 @@ ok("the readiness rehearsal can be run AT the per-trade ceiling — the sixth co
   console.log(`       readiness max: ${readinessMax} lamports = ${perTrade} SOL`);
 });
 
+ok("office.js and probe-size.js accept caps by the DECLARED maxima, not by a literal — the seventh copy", () => {
+  const office = fs.readFileSync(path.join(here, "..", "src", "office.js"), "utf8");
+  const probe = fs.readFileSync(path.join(here, "..", "src", "probe-size.js"), "utf8");
+  assert.match(office, /maxSolPerTrade <= M\.maxSolPerTrade/, "office.js must bound the per-trade cap by EXECUTOR_OPERATOR_MAXIMA");
+  assert.doesNotMatch(office, /maxSolPerTrade <= 0\.\d+ &&/, "no literal per-trade bound may survive in office.js");
+  assert.match(probe, /BOT_CAP_SOL_MAX = EXECUTOR_OPERATOR_MAXIMA\.maxSolPerTrade/);
+  const strategy = read("strategy.mjs");
+  const sentinel = num(strategy, /maxOpenPositions:\s*(\d+)/, "strategy maxOpenPositions");
+  const declared = num(dashboard, /EXECUTOR_OPERATOR_MAXIMA = Object\.freeze\(\{[\s\S]*?maxOpenPositions:\s*(\d+)/, "dashboard maxOpenPositions");
+  assert.equal(declared, sentinel, `the desk accepts up to ${declared} open positions but the bot reports ${sentinel}`);
+  console.log(`       open-position sentinel: ${sentinel} in both`);
+});
+
 ok("arm-caps can actually arm the poller's ceiling — the bug that motivated this test", () => {
   const armable = num(runner, CAPS[0].runner, "runner per-trade");
   const enforced = num(poller, CAPS[0].poller, "poller per-trade");

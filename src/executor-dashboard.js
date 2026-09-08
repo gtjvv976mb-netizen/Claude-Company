@@ -20,7 +20,11 @@ export const EXECUTOR_OPERATOR_MAXIMA = Object.freeze({
   maxSolPerTrade: 0.4,
   rolling24hDeploySol: 1000,
   rolling24hRealizedLossBrakeSol: 0.4,
-  maxOpenPositions: 4,
+  /* The executor's open-position count is a SENTINEL (strategy.mjs DEFAULTS 24 — "book
+     heat and the wallet bind first") and it reports that number in every heartbeat. A
+     bound of 4 here rejected every one of those heartbeats before the SOL caps were even
+     read. Held to the executor's value by test-operator-max-parity.mjs. */
+  maxOpenPositions: 24,
 });
 
 const finite = (value, fallback = null) => {
