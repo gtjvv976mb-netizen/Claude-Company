@@ -95,15 +95,18 @@ ok("SWEEP: every event type in the table yields a sentence with no shouted code,
 
 console.log("\nINTEGRATION, AT SOURCE LEVEL");
 ok("fmtTape delegates to PLAIN and hides chatter unless asked", () => {
-  const fn = html.slice(html.indexOf("function fmtTape(e) {"), html.indexOf("function tape(seat, msg"));
+  const i = html.indexOf("function fmtTape(e) {"); assert.ok(i > 0, "fmtTape exists");
+  const fn = html.slice(i, html.indexOf("\n}\n", i));
   assert.match(fn, /window\.PLAIN\.event\(e\)/); assert.match(fn, /p\.chatter && !window\.__showChatter/);
   assert.doesNotMatch(fn, /case "cycle:start"/, "the old switch must be gone");
 });
 ok("the tape has a Show-analyst-chatter toggle that follows Detailed view", () => {
-  assert.match(html, /class = "tape-tools"/); assert.match(html, /"Show analyst chatter"/); assert.match(html, /cc_detailed/);
+  for (const t of ['className = "tape-tools"', '"Show analyst chatter"', 'localStorage.getItem("cc_detailed")', "window.__reloadTape"])
+    assert.ok(html.includes(t), `page must contain ${t}`);
 });
 ok("memoNode paints the decision chip from the table", () => {
-  const fn = html.slice(html.indexOf("function memoNode("), html.indexOf("function memo(spec)"));
+  const i = html.indexOf("function memoNode("); assert.ok(i > 0, "memoNode exists");
+  const fn = html.slice(i, html.indexOf("\n}\n", i));
   assert.match(fn, /window\.PLAIN\.decision\(decision\)/); assert.doesNotMatch(fn, /\.textContent = decision;/);
 });
 ok("the anatomy primitives and the Detailed-view gate exist and openDialog is shared", () => {
