@@ -436,6 +436,18 @@ export const GATE_CLASS = Object.freeze({
      account is null and never fires. No level of the ladder has a knob for it. Registered
      here explicitly so default-deny cannot mislabel it a measured safety fact. */
   dev_dumped: "JUDGMENT",
+  /* THE CURVE'S TWO OPPORTUNITY READS (2026-09-08), from the FREE pre-screen
+     (penthouse.js wouldSurviveScreen) rather than the paid one. `dead_curve` is a coin
+     still on its curve, under a tenth of the way along after two hours, with no live
+     tape; `post_ath_dump` a nano or micro coin under 40% of a high set more than twenty
+     minutes ago. Neither is a fact about whether the position can be LEFT — a dead
+     curve and a dumped coin both sell — so JUDGMENT, and registered BY NAME so the
+     default-deny below cannot promote either to SAFETY. No rung of escalationPlan
+     references them, so no quota waives them either: a late look is refused for $0 at
+     every level instead of after the ~$0.40 paid workup it used to cost (4 PASS + 15
+     WATCH in 500 workups was the rate that refusal was eating into). */
+  dead_curve: "JUDGMENT",
+  post_ath_dump: "JUDGMENT",
 
   // ── the reputation read (desk.js) ─────────────────────────────────────────────────
   /* The two arms of the same seat, and they are not the same kind of thing. */

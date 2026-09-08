@@ -7,9 +7,10 @@
  * loss, it is looking at the wrong coins all day while believing otherwise.
  */
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { CAP_BANDS } from "./src/categories.js";
 import { asCandidate, bandOf, momentumFrom } from "./src/data/pumpfun-live.js";
-import { ignitionScore, shortlist } from "./src/ignition.js";
+import { ignitionScore, shortlist, attentionOf, huntWindowMs } from "./src/ignition.js";
 
 let pass = 0, fail = 0;
 const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  — " + d : ""}`))
@@ -203,6 +204,137 @@ console.log("\nTHE SCORE PREFERS A REAL MOVE TO A CHART ARTEFACT");
   ok("a coin falling on volume scores below zero", dumping.score < 0, `${dumping.score}`);
   ok("a coin with no tape has no score", ignitionScore(null) === null);
   ok("the band travels with the score", real.band === "micro");
+}
+
+console.log("\nTHE CURVE IS THE ONE FREE EARLY SIGNAL — attention reads it (step 13)");
+{
+  /* Fixtures in the feed's own units, solved from pump.fun's constant product exactly as
+     test-pumpfun-curve.mjs works them by hand: a standard curve opens at vSol 30 / vTok
+     1073M with 279.9M held back, so k = 30e9 * 1073e12 and the graduation total is
+     30*1073/279.9 - 30 = 85.005 SOL however much is already in. With `realSol` SOL in,
+     vSol = 30 + realSol, vTok = k / vSol, realTok = vTok - held; progressSol is then
+     realSol / 85.005. The ruler is checked against that hand figure before it is used. */
+  const SOLL = 1e9, M = 1e12, HELD = 279.9 * M;
+  const curveAt = (realSol, { vSol0 = 30, vTok0 = 1073 } = {}) => {
+    const k = vSol0 * SOLL * vTok0 * M;
+    const vSol = (vSol0 + realSol) * SOLL;
+    const vTok = k / vSol;
+    return { virtual_sol_reserves: vSol, virtual_token_reserves: vTok,
+      real_sol_reserves: realSol * SOLL, real_token_reserves: vTok - HELD };
+  };
+  const STANDARD_TOTAL = 30 * 1073 / 279.9 - 30;          // 85.005 SOL
+  const MINI = { vSol0: 3.75, vTok0: 1097.1 };             // the mini row test-pumpfun-curve.mjs measures
+  const MINI_TOTAL = 3.75 * 1097.1 / 279.9 - 3.75;         // 10.948 SOL
+  // Nano by cap ($12k) so the hunt window is the shortest on the board: 30 min x 12 = 6h.
+  const make = (over = {}) => asCandidate({
+    mint: over.mint ?? "M" + Math.random(), symbol: over.mint ?? "S", name: "n", creator: "c",
+    created_timestamp: NOW - (over.ageMin ?? 9) * MIN,
+    last_trade_timestamp: NOW - MIN,
+    usd_market_cap: over.mcap ?? 12_000, total_supply: 1e15, complete: false,
+    reply_count: over.replies ?? 0,
+    ath_market_cap: over.ath ?? (over.mcap ?? 12_000),
+    ath_market_cap_timestamp: over.athMin != null ? NOW - over.athMin * MIN : null,
+    ...(over.realSol != null ? curveAt(over.realSol, over.curve) : {}),
+  }, { solUsd: 100, now: NOW });
+  const pct = (x) => `${(x * 100).toFixed(2)}%`;
+  const att = (c) => attentionOf(c, { now: NOW });
+  const order = (cs) => shortlist(cs, { now: NOW, limit: 10 }).map((c) => c.mint);
+
+  const nine = make({ mint: "NINE", ageMin: 9, realSol: 0.55 * STANDARD_TOTAL });
+  ok("the ruler: 46.75 SOL in on a standard curve reads 55.00% of 85.005",
+    Math.abs(nine.live.progressSol - 0.55) < 1e-9 && Math.abs(nine.live.gradSolTotal - STANDARD_TOTAL) < 1e-6,
+    `${pct(nine.live.progressSol)} of ${nine.live.gradSolTotal.toFixed(3)} SOL`);
+
+  /* THE PLAN'S CASE, AS STATED: a 9-minute coin at 55% against a 141-hour coin at 3%,
+     equal replies. Note what actually decides it — the 141-hour nano coin is outside the
+     six-hour hunt window (ignition.js huntWindowMs) and never reaches attention at all.
+     It ranks below by absence; the attention numbers are printed anyway. */
+  const old = make({ mint: "OLD141", ageMin: 141 * 60, realSol: 0.03 * STANDARD_TOTAL });
+  const o1 = order([old, nine]);
+  ok("a 9-minute coin at 55% of its curve ranks above a 141-hour coin at 3%, equal replies",
+    o1[0] === "NINE" && o1.indexOf("OLD141") !== 0 && att(nine).attention > att(old).attention,
+    `order ${o1.join(" > ") || "(none)"} · NINE ${att(nine).attention.toFixed(3)} vs OLD141 ${att(old).attention.toFixed(3)}` +
+    ` · OLD141 is ${(141 * 60 * MIN / huntWindowMs("nano")).toFixed(1)}x the nano hunt window, so it is not shortlisted at all`);
+
+  // THE DISCRIMINATING CASE: same age, same replies, same high — only the curve differs.
+  const half = make({ mint: "HALF55", realSol: 0.55 * STANDARD_TOTAL });
+  const thin = make({ mint: "THREE", realSol: 0.03 * STANDARD_TOTAL });
+  const o2 = order([thin, half]);
+  ok("at EQUAL age the coin further along its curve is looked at first", o2[0] === "HALF55",
+    `${o2.join(" > ")} · ${att(half).attention.toFixed(3)} vs ${att(thin).attention.toFixed(3)}`);
+  ok("half the curve earns the whole point; three percent earns six hundredths",
+    att(half).curve === 1 && Math.abs(att(thin).curve - 0.06) < 1e-9,
+    `curve terms ${att(half).curve} and ${att(thin).curve.toFixed(4)}`);
+  const quarter = make({ mint: "Q", realSol: 0.25 * STANDARD_TOTAL });
+  ok("a quarter of the curve earns half a point", Math.abs(att(quarter).curve - 0.5) < 1e-9, `${att(quarter).curve}`);
+  ok("past half the point is capped, not compounded",
+    att(make({ mint: "N", realSol: 0.9 * STANDARD_TOTAL })).curve === 1);
+  const bare = make({ mint: "NOCURVE" });
+  ok("no readable curve is no bonus, never a penalty", bare.live.progressSol === null && att(bare).curve === 0,
+    `progressSol=${bare.live.progressSol} curve term=${att(bare).curve}`);
+
+  // THE LATE LOOK: under half the high, and the high is more than twenty minutes old.
+  const staleDip = make({ mint: "STALEDIP", ath: 12_000 / 0.45, athMin: 25 });
+  const freshDip = make({ mint: "FRESHDIP", ath: 12_000 / 0.45, athMin: 5 });
+  ok("the ruler: both dips sit at 45% of their high", Math.abs(staleDip.live.athRatio - 0.45) < 1e-9
+    && Math.abs(freshDip.live.athRatio - 0.45) < 1e-9, `athRatio ${staleDip.live.athRatio.toFixed(3)}`);
+  ok("45% of a high set 25 minutes ago is a late look: half a point off",
+    att(staleDip).lateLook === 0.5 && Math.abs(att(freshDip).attention - att(staleDip).attention - 0.5) < 1e-9,
+    `stale ${att(staleDip).attention.toFixed(3)} vs fresh ${att(freshDip).attention.toFixed(3)} (nearHigh ${att(staleDip).nearHigh.toFixed(2)} on both)`);
+  ok("the same drawdown off a 5-minute-old high is a dip, not a late look", att(freshDip).lateLook === 0);
+  ok("55% of a stale high is not a late look either",
+    att(make({ mint: "MILD", ath: 12_000 / 0.55, athMin: 25 })).lateLook === 0);
+  ok("a stale high with no timestamp cannot be called late", att(make({ mint: "NOSTAMP", ath: 12_000 / 0.45 })).lateLook === 0);
+  ok("the fresh dip is looked at before the stale one", order([staleDip, freshDip])[0] === "FRESHDIP",
+    order([staleDip, freshDip]).join(" > "));
+
+  // MINI CURVES: a lottery ticket that fills in one buy, unless it is already most of the way.
+  const miniHalf = make({ mint: "MINI50", realSol: 0.5 * MINI_TOTAL, curve: MINI });
+  const miniLate = make({ mint: "MINI85", realSol: 0.85 * MINI_TOTAL, curve: MINI });
+  ok("the ruler: the mini fixture is classed mini and owes ~10.95 SOL in total",
+    miniHalf.live.curveClass === "mini" && Math.abs(miniHalf.live.gradSolTotal - MINI_TOTAL) < 1e-6
+    && Math.abs(miniLate.live.progressSol - 0.85) < 1e-9,
+    `${miniHalf.live.curveClass}, ${miniHalf.live.gradSolTotal.toFixed(3)} SOL, MINI85 at ${pct(miniLate.live.progressSol)}`);
+  const o3 = order([miniHalf, miniLate, half]);
+  ok("a mini curve half filled is not shortlisted", !o3.includes("MINI50"), o3.join(", "));
+  ok("...one 85% along is", o3.includes("MINI85"));
+  ok("...and a standard curve at 55% is untouched by the rule", o3.includes("HALF55"));
+}
+
+console.log("\nSOL ENTERING THE CURVE LIFTS THE SCORE — bounded, and only with a prior reading");
+{
+  const mo = momentumFrom(tape(
+    [...Array(26).fill(1), 1.1, 1.2, 1.3, 1.4, 1.5],
+    [...Array(15).fill(200), ...Array(11).fill(400), ...Array(5).fill(9_000)]));
+  const base = ignitionScore(mo, { band: "micro" }).score;
+  // Whole numbers on purpose: 4.25 of 85 is exactly 5.00% a minute, 17 of 85 exactly 20.
+  const at = (curveVelocity, gradSolTotal = 85) =>
+    ignitionScore(mo, { band: "micro", curveVelocity, gradSolTotal });
+  ok("4.25 SOL a minute on an 85-SOL curve is 5.00% a minute: +5", at(4.25).score - base === 5,
+    `${base} -> ${at(4.25).score}`);
+  ok("...and it says so in words", at(4.25).reasons.some((r) => /curve filling 5\.00% a minute/.test(r)),
+    at(4.25).reasons.at(-1));
+  ok("17 SOL a minute is the cap: +20", at(17).score - base === 20, `${base} -> ${at(17).score}`);
+  ok("25 SOL a minute is still +20 — the term lifts, it never carries", at(25).score - base === 20,
+    `${base} -> ${at(25).score}`);
+  ok("SOL leaving the curve is clamped to 0, not penalised twice", at(-3).score === base && !at(-3).reasons.some((r) => /curve/.test(r)),
+    `${base} -> ${at(-3).score}`);
+  ok("a first sighting (no prior reading) scores exactly as before", at(null).score === base
+    && ignitionScore(mo, { band: "micro" }).score === base, `${at(null).score}`);
+  ok("a velocity without a curve total adds nothing", at(4.25, null).score === base, `${at(4.25, null).score}`);
+  ok("a boosted 300-SOL curve needs proportionally more: 4.25 SOL a minute is +1",
+    at(4.25, 300).score - base === Math.round(4.25 / 300 * 100), `${base} -> ${at(4.25, 300).score}`);
+
+  /* The reading comes from the funnel and the funnel is a database; this lane must not
+     grow one (evidence.js imports it for huntWindowMs). So the cycle LENDS the lookup. */
+  const penthouse = fs.readFileSync(new URL("./src/penthouse.js", import.meta.url), "utf8");
+  const ignition = fs.readFileSync(new URL("./src/ignition.js", import.meta.url), "utf8");
+  ok("the cycle lends the sweep the funnel's velocity", /ignitionSweep\(\{[^}]*curveVelocityOf: funnel\.curveVelocity/.test(penthouse),
+    (penthouse.match(/ignitionSweep\(\{[^}]*\}\)/) || ["not found"])[0]);
+  // Import STATEMENTS only: the comments above are allowed to name funnel.js, the code is not.
+  const dbImports = ignition.split("\n").filter((l) => /^import\b/.test(l) && /funnel\.js|node:sqlite|lib\/store/.test(l));
+  ok("...and ignition.js itself still imports no database", dbImports.length === 0,
+    dbImports.length ? dbImports.join(" | ") : `${ignition.split("\n").filter((l) => /^import\b/.test(l)).length} imports, none of them the funnel, sqlite or the store`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

@@ -246,6 +246,36 @@ console.log("\nL3 — THE NARRATIVE GATE, AND THE ARM OF IT THAT NEVER MOVES");
     `L3=${publishCall(CASES.deployer_has_rugged, { escalation: 3 }).gate} L4=${publishCall(CASES.deployer_has_rugged, { escalation: 4 }).gate}`);
 }
 
+console.log("\nTHE CURVE'S TWO OPPORTUNITY CODES — JUDGMENT by name, and no rung of L0-L4 waives either");
+{
+  /* Step 13 (2026-09-08): dead_curve and post_ath_dump are read off the launch feed's own
+     row for $0 (penthouse.js wouldSurviveScreen) and are OPPORTUNITY, not safety — a dead
+     curve and a dumped coin both sell — so they sit in JUDGMENT_GATES explicitly rather
+     than falling to the SAFETY default. But JUDGMENT is not WAIVABLE: no field of
+     escalationPlan names them (the ladder waives only the manufactured arm at L3 and
+     moves the SEARCH band at L4), so a record carrying either is refused at every level
+     and charged to that code. Driven exactly the way the safety gates are above. */
+  const configSrc = fs.readFileSync(new URL("./src/config.js", import.meta.url), "utf8");
+  for (const code of ["dead_curve", "post_ath_dump"]) {
+    ok(`${code} is in GATE_CLASS by name as JUDGMENT`,
+      Object.hasOwn(GATE_CLASS, code) && gateClass(code) === "JUDGMENT"
+        && JUDGMENT_GATES.includes(code) && !SAFETY_GATES.includes(code),
+      `GATE_CLASS.${code}=${GATE_CLASS[code]}`);
+    const verdicts = LEVELS.map((l) => cohortEligibility(screened(code), l));
+    ok(`${code}: not publishable at any of L0-L4, and charged to itself`,
+      verdicts.every((v) => v.publishable === false && v.gate === code),
+      verdicts.map((v) => `L${v.level}:${v.gate}`).join(" ") +
+      ` (mandate declines every screened_out record as safety=${verdicts[0].safety}; the CLASS is what the ladder reads, and it is ${gateClass(code)})`);
+    const pubs = LEVELS.map((l) => publishCall(screened(code), { category: "memecoin", launchpad: "pump.fun", escalation: l }));
+    ok(`${code}: publishCall refuses it at every level`,
+      pubs.every((r) => r.outcome !== "published" && !r.callId && r.gate === code),
+      pubs.map((r) => `L${r.level}:${r.outcome}/${r.gate}`).join(" "));
+    ok(`${code}: no rung of the ladder names it`,
+      !configSrc.includes(code) && LEVELS.every((l) => !JSON.stringify(escalationPlan(l)).includes(code)),
+      "config.js and every escalationPlan(L) are silent about it");
+  }
+}
+
 console.log("\nL4 — THE BAND WINDOW MOVES; NOT ONE PER-COIN FLOOR MOVES");
 {
   const before = { ...floorsFor(30_000) };

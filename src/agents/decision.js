@@ -480,6 +480,13 @@ This is a memecoin desk, so rank on what actually moves these:
   reads as a sniped or bundled open. Every pump.fun call carries "thesis void if the
   deployer wallet sells", so a creator who already sold is that invalidation already
   true. Null is unmeasured, not clean.
+- WHERE ON THE CURVE, AND HOW FAST. curve.progressSol is the share of the bonding
+  curve's graduation total already filled, read off the curve's own reserves, and
+  curve.velocitySolPerMin is SOL entering the curve per minute from the desk's last
+  two readings — minutesToGraduate is what is still owed divided by that. athRatio is
+  the cap against the coin's own high and athAgeMin how long ago that high was set: a
+  coin well under a high set twenty minutes ago is a late look, whatever its story.
+  Null is unmeasured, not clean.
 - WHO IS BUYING? Distinct wallets arriving beats a few round-tripping.
 - ROOM TO RE-RATE. A $200k coin doubling needs a fraction of what a $15m coin needs.
   Prefer the smaller cap when the story is equally real.
@@ -529,6 +536,20 @@ export async function runBestPick(candidates, { filter = null } = {}) {
         msAfterCreate: ev.momentum?.firstCandle?.msAfterCreate ?? null },
       holders: { top1Pct: ev.holders?.top1Pct, bundleSuspect: ev.holders?.bundleSuspect,
         clustered: ev.holders?.clusteredHolders, midToHead: ev.holders?.midToHead },
+      /* THE CURVE AND THE HIGH, off the listing row the sweep shaped (data/pumpfun-live.js
+         curveOf, carried on the pick as `live`) and the funnel's last two curve readings
+         (funnel.js curveVelocity, on the pick as `curveVelocity`). The evidence bundle
+         has neither: gather() reads the deployer row and the birth tape, not the curve's
+         progress or the ATH. A keyword-sweep pick carries no `live` and reads null
+         throughout — unmeasured, never clean. */
+      curve: { onCurve: c.onCurve ?? null,
+        progressSol: c.live?.progressSol ?? null, solToGraduate: c.live?.solToGraduate ?? null,
+        gradSolTotal: c.live?.gradSolTotal ?? null, curveClass: c.live?.curveClass ?? null,
+        velocitySolPerMin: c.curveVelocity ?? null,
+        minutesToGraduate: c.curveVelocity > 0 && c.live?.solToGraduate > 0
+          ? Number((c.live.solToGraduate / c.curveVelocity).toFixed(1)) : null },
+      athRatio: c.live?.athRatio ?? null,
+      athAgeMin: c.live?.athAt != null ? Math.round((Date.now() - c.live.athAt) / 60_000) : null,
     };
   });
 

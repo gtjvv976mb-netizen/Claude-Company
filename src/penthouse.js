@@ -17,7 +17,7 @@ import { regime } from "./data/regime.js";
 import { cfg, floorsFor, CYCLE, MAX_ESCALATION_LEVEL, escalationPlan, setCycleBandWindow } from "./config.js";
 import * as store from "./lib/store.js";
 import * as shadow from "./shadow.js";
-import { buildBoard, selectAcrossBoard, CAP_BANDS, COIN_TYPES } from "./categories.js";
+import { buildBoard, selectAcrossBoard, CAP_BANDS, COIN_TYPES, bandForMarketCap } from "./categories.js";
 import { recordCandidateBoard } from "./candidate-board.js";
 import * as funnel from "./funnel.js";
 import * as ds from "./data/dexscreener.js";
@@ -248,7 +248,18 @@ const SUBSTANTIVE = new Set(["established", "utility", "infra", "defi", "ai"]);
  * read or a Jupiter probe still belongs inside the workup, where it is measured
  * properly rather than guessed at here.
  */
-export function wouldSurviveScreen(c) {
+/* THE TWO OPPORTUNITY READS OFF THE CURVE (2026-09-08). Both are JUDGMENT in calls.js
+ * GATE_CLASS, registered there BY NAME so default-deny cannot promote them to SAFETY,
+ * and no rung of the ladder references either (config.js escalationPlan waives only
+ * the manufactured arm), so no quota can waive them. Neither says the coin is unsafe —
+ * a dead curve and a dumped coin both sell — it says the coin is not the trade this
+ * desk exists to find, and says so for $0 instead of after a ~$0.40 paid workup. */
+const DEAD_CURVE_MAX_PROGRESS = 0.10;   // under a tenth of the way along...
+const DEAD_CURVE_MIN_AGE_H = 2;         // ...after more than two hours, with no live tape
+const POST_ATH_MAX_RATIO = 0.4;         // under 40% of its own high...
+const POST_ATH_MIN_AGE_MS = 20 * 60_000; // ...set more than twenty minutes ago (nano/micro)
+
+export function wouldSurviveScreen(c, { now = Date.now() } = {}) {
   const p = c.pair || {};
   const s = cfg.screen;
   const liq = p.liquidityUsd ?? 0;
@@ -325,6 +336,30 @@ export function wouldSurviveScreen(c) {
   if (s.minMarketCapUsd > 0 && mcap != null && mcap < s.minMarketCapUsd) return "too_small";
   if (liq > 0 && vol / liq > s.maxVolToLiqRatio) return "wash_suspect";
   if (liq > 0 && mcap != null && mcap / liq > s.maxFdvToLiqRatio) return "fdv_propped";
+
+  /* OPPORTUNITY, read off the launch feed's own row, and AFTER every safety code above
+   * so a record never carries one of these in place of a measured fact.
+   *
+   *   dead_curve     still on its curve, under a tenth of the way along after more than
+   *                  two hours, and no live tape to say otherwise. Progress by SOL is
+   *                  derived per row (pumpfun-live.js curveOf); a live tape means the
+   *                  coin is trading NOW, which is the one thing a dead curve is not.
+   *   post_ath_dump  a nano or micro coin under 40% of its own high, the high set more
+   *                  than twenty minutes ago. A late look: the move already happened,
+   *                  whatever the current five minutes print — the tape does not rescue
+   *                  it, because a bounce off a dump is still a dump.
+   *
+   * Only a row the launch feed shaped carries `live` (asCandidate); a DexScreener row
+   * has none, and neither clause can fire on it. Null fields are unmeasured, not clean,
+   * and an unmeasured number never disqualifies — the desk's standing rule. */
+  const live = c.live ?? null;
+  if (live) {
+    if (c.onCurve === true && live.progressSol != null && live.progressSol < DEAD_CURVE_MAX_PROGRESS
+        && age > DEAD_CURVE_MIN_AGE_H && tape == null) return "dead_curve";
+    const band = live.band ?? bandForMarketCap(mcap);
+    if ((band === "nano" || band === "micro") && live.athRatio != null && live.athRatio < POST_ATH_MAX_RATIO
+        && live.athAt != null && now - live.athAt > POST_ATH_MIN_AGE_MS) return "post_ath_dump";
+  }
   return null;
 }
 
@@ -380,7 +415,9 @@ export function selectShortlist(scored, workups) {
 export async function ignitionUniverse({ solUsd = null, tapes = 40 } = {}) {
   try {
     const { ignitionSweep } = await import("./ignition.js");
-    const r = await ignitionSweep({ solUsd, tapes });
+    // The funnel lends the sweep its SOL-per-minute reading (two stored curve readings,
+    // funnel.js curveVelocity) so a coin seen twice earns ignitionScore's velocity term.
+    const r = await ignitionSweep({ solUsd, tapes, curveVelocityOf: funnel.curveVelocity });
     // Only coins whose tape says something is happening. A negative score is a coin
     // going the wrong way on real volume, and the desk has no reason to look at it.
     return r.ranked.filter((c) => c.ignition.score > 0);
@@ -841,8 +878,17 @@ export async function runPenthouseCycle({
     // the CEO waved through — the mandate ranks the cohort and publishes its best.
     // Which of them are actually eligible is `eligibility()`'s job, and it refuses
     // every safety failure before conviction is even consulted.
+    /* THE CURVE AND THE HIGH TRAVEL WITH THE PICK. The Best Pick brief reads them off
+       the candidate the sweep shaped (`live`, pumpfun-live.js asCandidate) — the
+       evidence bundle carries the deployer row and the birth tape but neither the
+       curve's progress nor the ATH — and the funnel's SOL-per-minute reading is taken
+       here, after this pass's observe(), so the seat sees the latest two readings. A
+       keyword-sweep row has no `live` and reads null throughout: unmeasured, not clean. */
+    let curveVelocity = null;
+    try { curveVelocity = funnel.curveVelocity(c.mint); } catch { curveVelocity = null; }
     picks.push({ rec, category: c.category, launchpad: c.launchpad,
-      conviction: rec.pm?.conviction ?? rec.conviction ?? null });
+      conviction: rec.pm?.conviction ?? rec.conviction ?? null,
+      live: c.live ?? null, onCurve: c.onCurve ?? null, curveVelocity });
     return "studied";
   };
 
