@@ -6532,7 +6532,7 @@ window.__showChatter = (() => { try { return localStorage.getItem("cc_detailed")
     "cycle:budget": (e) => ["desk", "Research budget: " + money(e.usedUsd) + " of " + money(e.capUsd) + " today", "warn", "chatter"],
     "cycle:holding": (e) => ["desk", "Holding " + sym(e) + (e.heldHours != null ? " — " + e.heldHours + "h in" : "") + ". The next round starts when it closes.", "hi", "chatter"],
     "cycle:hunting": (e) => ["desk", "Still looking — studying " + sym(e), "", "chatter"],
-    "cycle:hunt_dry": () => ["desk", "Nothing else worth studying this round", ""],
+    "cycle:hunt_dry": () => ["desk", "Nothing else worth studying this round", "", "chatter"],
     "cycle:escalated": () => ["desk", "Looking harder this round", "", "chatter"],
     "cycle:narrowed": () => null, "cycle:skipped_repeats": () => null, "cycle:prefiltered": () => null,
     "cohort:ranked": () => ["desk", "Ranked this round's coins", "", "chatter"],
