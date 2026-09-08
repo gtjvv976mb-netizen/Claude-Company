@@ -168,16 +168,23 @@ ok("the Overview, the pulse strip and the hint speak plainly", () => {
      its detail behind a bar — it paints the detail only when Detailed view is on. The
      property is the same (the numbers are reachable and not in a first-time reader's
      way); detailsFold is simply no longer the mechanism. */
-  for (const t of ["studies new pump.fun coins and publishes", "Your floor.", "window.PLAIN.botState(", "detailedView()", "plainLead(", "chipRow(", "leadButton("])
+  for (const t of ["studies new pump.fun coins and publishes", "Your floor.", "window.PLAIN.botState(", "plainLead(", "chipRow(", "leadButton("])
     assert.ok(ov.includes(t), `Overview must contain ${t}`);
   assert.ok(!ov.includes("detailsFold("), "the Overview has no dropdown bar");
+  /* 2026-09-08, asked three times: the desk's own bookkeeping is not on this tab in ANY
+     view. Gating it behind Detailed view was not removal — the owner runs with Detailed
+     view on and kept seeing all of it. There is no call site here now. */
+  for (const t of ["paintCycleSurface(", "renderRoundLine(", "cycleLevelChip(", "renderCycleStrain("])
+    assert.ok(!ov.includes(t), `the Overview must not reach the cycle machinery: ${t}`);
   for (const t of ["\" workups\"", "paper call sheet", "self-reported", "OWNER VIEW", "NOT LINKED"])
     assert.ok(!ov.includes(t), `Overview must not say ${t}`);
   /* 2026-09-08, the owner's list for this tab: bot on/off, an open position, the SOL
      balance, profit and loss, and $CLAUDECO. Nothing about rounds or quotas. */
   for (const t of ['label: "Your bot"', 'label: "Open position"', 'label: "SOL"', 'label: "Profit and loss"', 'label: "$CLAUDECO"', "How to turn it off"])
     assert.ok(ov.includes(t), `Overview must carry ${t}`);
-  assert.ok(ov.includes('dashMetric("Settled P&L", feedPrivate ? "PRIVATE"'), "the private-record tile survives in Detailed view");
+  /* The six-tile grid was deleted 2026-09-08. The property it carried — a private
+     floor's record never reads as a zero — moved to the chip that replaced it. */
+  assert.ok(ov.includes('value: pnl == null ? "private" : money(pnl)'), "a private floor's record reads private, not zero");
   const j = html.indexOf("async function pollPulse"); const pulse = html.slice(j, html.indexOf("pollPulse();", j));
   /* t.workups is the server's field name and may stay; the WORD "workups" must not reach the strip. */
   assert.ok(pulse.includes("coins studied today") && pulse.includes("turned down") && !/<\/b> workups| workups ·|workups`/.test(pulse), "the strip counts coins studied, not workups");
@@ -203,19 +210,24 @@ ok("Calls: Shortlist / Open / Closed keep their ids and views; the leads and the
      "remove these kinds of details, ITS UNECESSARY". The explanatory second sentences
      are gone and the leads are cut to the fact. What the assertion guards is unchanged
      — each view still says in its own words what it is showing. */
-  for (const t of ["Coins the desk would trade right now.", "Closed calls, and coins turned down.",
-    "paintCycleSurface(callsCycleSlot, { history: true })", "detailedView()"])
+  for (const t of ["Coins the desk would trade right now.", "Closed calls, and coins turned down."])
     assert.ok(calls.includes(t), `Calls must contain ${t}`);
   for (const t of ["each with an entry, a stop and a target", "Open means the desk is tracking it"])
     assert.ok(!calls.includes(t), `Calls must not carry the explanatory line: ${t}`);
   /* 2026-09-08, "AVOID PUTTING DROPDOWN BARS": the round history and the record paint
      only in Detailed view, and the turned-down list is a plain headed section. */
   assert.ok(!calls.includes("detailsFold("), "the Calls tab has no dropdown bar");
+  /* 2026-09-08: the round surface is off this tab too, in every view. */
+  for (const t of ["paintCycleSurface(callsCycleSlot", "renderRoundLine("])
+    assert.ok(!calls.includes(t), `the Calls tab must not render the cycle: ${t}`);
   for (const t of ["PUBLISHED IS NOT THE SAME AS HELD", "Killed before publication", "paper book", "executable instructions", "Closed / Killed"])
     assert.ok(!calls.includes(t), `Calls must not say ${t}`);
   const j = html.indexOf("function paintFeedInto"); const jEnd = html.indexOf("function buildScoreline", j); const card = html.slice(j, jEnd > 0 ? jEnd : j + 14000);
-  for (const t of ['add("Confidence"', 'add("Entry"', "window.PLAIN.closeReason(c.close_reason", "This call is wrong if: ", "Your bot bought ", "Your bot sold ", "your bot is offline, so it is not in this trade", "stampCallWithLevel(el, h, c)"])
+  for (const t of ['add("Confidence"', 'add("Entry"', "window.PLAIN.closeReason(c.close_reason", "This call is wrong if: ", "Your bot bought ", "Your bot sold ", "your bot is offline, so it is not in this trade"])
     assert.ok(card.includes(t), `card must contain ${t}`);
+  /* 2026-09-08: a card carries no quota stamp in any view. */
+  assert.ok(card.includes("void stampCallWithLevel;") && !card.includes("stampCallWithLevel(el, h, c)"),
+    "the call card must not stamp the level")
   for (const t of ["WALL-ST-E is in for", "not linked", "Desk position (paper)", "`Desk position", '"Dossier"', "checking who is taking size"])
     assert.ok(!card.includes(t), `card must not say ${t}`);
   const k = html.indexOf("async function loadKilled"); const killed = html.slice(k, html.indexOf("async function openCallDossier", k));

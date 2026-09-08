@@ -194,7 +194,13 @@ assert.match(html, /background && \(wallsteFiltersDirty \|\| editingAfterFetch\)
   "a yielded background refresh clears aria-busy before returning");
 assert.match(html, /callsOpen && dashboardSubview\.calls === "candidates"[\s\S]*?loadCandidateBoard\(\)/,
   "the open pre-decision candidate board refreshes across new desk cycles");
-assert.match(html, /dashMetric\("Settled P&L", feedPrivate \? "PRIVATE"/,
+/* Re-anchored 2026-09-08. The Overview's six-tile grid was deleted outright — the owner
+   asked three times for the desk's bookkeeping to come off that tab. The PROPERTY is
+   unchanged and now rides the chip that replaced the tile: a floor whose feed is private
+   reads "private", never a zero that would look like a flat month. */
+assert.match(html, /const pnl = feedPrivate \? null : Number\(feedR\?\.body\?\.record\?\.netPnlUsd \?\? 0\);/,
+  "a private floor's P&L is null, not zero");
+assert.match(html, /label: "Profit and loss", value: pnl == null \? "private" : money\(pnl\)/,
   "private floor performance is not converted into a false zero");
 /* OWNER DECISION (2026-09-02): the rail must not cover half the screen. The 700px,
  * 85%-tall fixed frame measured 55% x 81% of a 1280x720 viewport and force-opened at
@@ -1465,26 +1471,31 @@ try {
   assert.ok(classesOf(history).includes("lvl lvl4") && classesOf(history).includes("lvl lvl0"),
     `history rows carry level chips: ${JSON.stringify(classesOf(history).filter((c) => c.startsWith("lvl")))}`);
 
-  /* ── 8 · THE PAGE ACTUALLY WIRES IT UP ──────────────────────────────────────
-     The builders above are useless if nothing calls them, and a call sheet with no
-     cycle card is exactly the silent state this feature replaces. */
-  assert.match(html, /call_api\("\/api\/cycle"\)/,
-    "the page never fetches the cycle route");
-  assert.equal((html.match(/paintCycleSurface\(/g) || []).length, 4,
-    `paintCycleSurface is defined once and called from three panels; found ${(html.match(/paintCycleSurface\(/g) || []).length} occurrences`);
-  assert.match(html, /paintCycleSurface\(callsCycleSlot, \{ history: true \}\)/,
-    "the Calls → Published panel shows the cycle with its history");
-  assert.match(html, /paintCycleSurface\(cycleSlot, \{ history: false \}\)/,
-    "the Overview shows the current cycle");
-  assert.match(html, /paintCycleSurface\(visitorCycleSlot, \{ history: false \}\)/,
-    "a visitor with no floor open still sees what the house desk's quota is doing");
-  /* EVERY LIST OF CALLS CARRIES THE LEVEL. Two places list calls: the call cards and
-     the Overview's recent summary. A view where an L3 and an L0 are indistinguishable
-     is a silent lowering wherever it is. */
-  assert.match(html, /stampCallWithLevel\(el, h, c\)/,
-    "the call cards are not stamped with the level they were published at");
-  assert.match(html, /row\.appendChild\(cycleLevelChip\(call\.escalation_level\)\)/,
-    "the Overview's recent-calls list drops the level");
+  /* ── 8 · THE PAGE DOES NOT SHOW ANY OF IT ───────────────────────────────────
+     REVERSED BY THE OWNER, 2026-09-08, after asking three times: "USERS DONT NEED TO
+     KNOW ANYTHING ABOUT THE CYLE CYCLE", "THE CYCLE SHIT IS STILL THERE", "TWTF TDID I
+     TELL YOU REMOVE THIS". This block used to assert the opposite — that every panel
+     wired the cycle surface up and every call card carried its level. Twice I answered
+     him by hiding it behind the Detailed-view switch, which changed nothing for him
+     because he runs with that switch on. So the CALL SITES are gone, and this asserts
+     their absence: no panel may reach the cycle machinery again.
+
+     What is NOT weakened, and is still asserted: every builder above is still exercised
+     by fixtures (blocks 1-7), so the level, the strain sentence and the reach warning
+     are all still tested word for word; and the server still stamps the level onto the
+     feed, so the record keeps it even though no tab renders it. The desk still knows
+     what it reached for. It simply no longer tells a person who never asked. */
+  for (const site of [
+    ["paintCycleSurface(callsCycleSlot", "the Calls tab"],
+    ["paintCycleSurface(cycleSlot", "the Overview"],
+    ["paintCycleSurface(visitorCycleSlot", "a visitor's Overview"],
+    ["stampCallWithLevel(el, h, c)", "the call cards"],
+    ["row.appendChild(cycleLevelChip(call.escalation_level))", "the recent-calls list"],
+  ]) assert.ok(!html.includes(site[0]), `${site[1]} must not render the cycle: found ${site[0]}`);
+  assert.match(html, /void stampCallWithLevel;/,
+    "the card painter records why the stamp is deliberately unused");
+  assert.match(html, /function paintCycleSurface\(/,
+    "the builder stays defined — the fixtures above drive it, and it is the desk's own record");
   /* The server has to send it: copy.feedFor selects an explicit column list, so the
      stamp is put back in office.js. If that is removed, every card reads as no-quota. */
   assert.match(officeSource, /withEscalation\(copy\.feedFor\(floorNo/,
