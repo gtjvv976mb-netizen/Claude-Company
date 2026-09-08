@@ -41,8 +41,16 @@ export async function coinInfo(mint) {
     // rather than hoping a shared authority happens to cover it.
     bondingCurve: c.bonding_curve ?? null,
     poolAddress: c.pool_address ?? null,
+    /* The curve's reserves in the feed's own units (lamports). vSol - realSol is the
+       curve's OPENING virtual SOL — 30 on a standard curve, measured 2026-09-08 — which
+       is the denominator the launch-share proxy needs (pumpfun-live.curveOf derives the
+       same number for the listing rows). */
+    virtualSolReserves: num(c.virtual_sol_reserves),
+    realSolReserves: num(c.real_sol_reserves),
   };
 }
+
+const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
 
 /**
  * The deployer's record, judged only by what they have shipped before this coin:

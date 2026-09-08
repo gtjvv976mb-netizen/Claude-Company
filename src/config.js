@@ -15,6 +15,10 @@ if (fs.existsSync(envFile)) {
 }
 
 const num = (k, d) => (process.env[k] ? Number(process.env[k]) : d);
+/* An effort the provider does not know is a 400 that reads as a seat failure, so an env
+   A/B only accepts the ladder lib/llm.js sizes max_tokens for. */
+const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
+const effortEnv = (k, d) => (EFFORTS.has(process.env[k]) ? process.env[k] : d);
 
 export const CHARTER = fs.readFileSync(path.join(ROOT, "DESK.md"), "utf8");
 
@@ -246,12 +250,24 @@ export const cfg = {
    * liquidity keeps a small share because on this desk it mostly confirms what the
    * screen measured. It matters when a pool can be DRAINED, not when a whale would
    * move it — the bot trades $3 to $10. */
+  /* TECHNICAL IS RETIRED, AND ITS 0.03 IS RE-NORMALISED ACROSS THE FOUR THAT REMAIN.
+   *
+   * Live 24h: 31 Technical calls, $0.67 (7d $8.45), 0 kills — and its brief carried no
+   * KILL clause at all, so it could never have ended a workup; at 0.03, on a seat told
+   * to keep its own confidence near zero, it could not move a composite either. A seat
+   * that cannot kill and barely weighs is a bill, not an opinion. "Zero would mean
+   * never hearing it" (above) no longer holds: the location question it kept — already
+   * vertical, a knife still falling — is four numbers on the bundle, pair.priceChange,
+   * that every remaining seat reads. The 0.03 goes back proportionally (0.38/0.97 →
+   * 0.39, 0.26/0.97 → 0.27, 0.24/0.97 → 0.25, 0.09/0.97 → 0.09) so the table still sums
+   * to 1.00 and the order of the seats is untouched. composite() normalises by the
+   * weights present, so this is bookkeeping for the reader, not a change in how a
+   * score is formed. */
   weights: {
-    narrative: 0.38,   // lore, trend, endorsement — on a memecoin this IS the asset
-    forensics: 0.26,   // who owns the float, and have they rugged before
-    flow: 0.24,        // a crowd, or a machine wearing one
-    liquidity: 0.09,   // can it be exited at OUR size; the screen already measured it
-    technical: 0.03,   // the chart, which on a 6-hour-old coin is attention redrawn
+    narrative: 0.39,   // lore, trend, endorsement — on a memecoin this IS the asset
+    forensics: 0.27,   // who owns the float, and have they rugged before
+    flow: 0.25,        // a crowd, or a machine wearing one
+    liquidity: 0.09,   // is there a market, and can a way out be quoted; the screen already measured it
   },
 
   // Defaults are the economical tier; env vars UPGRADE a seat, they no longer rescue
@@ -260,17 +276,29 @@ export const cfg = {
   // Narrative dragging ~41k tokens of raw web results in per run, and five analysts
   // filling bounded schemas on the priciest model in the house. Judgment seats keep
   // Opus; evidence-shaped verdicts do not need it.
+  /* TWO SEATS SIT ON HAIKU 4.5 ($1/$5 per MTok against Sonnet 5's $2/$10), each on
+   * what it is actually asked to author:
+   *   liquidity — a FINDINGS seat. Its two authorised kills (the LIQUIDITY brief in
+   *               agents/analysts.js) are the free screen's own thin_liquidity and
+   *               unverified_exit, applied before it is ever paid; what it adds is the
+   *               shape of the book. Live 24h: 31 calls, $0.95 (7d $13.08), 0 kills.
+   *   execution — compliance.js `stop_mismatch` forces its stop equal to Risk's, so it
+   *               authors the entry zone and the targets and nothing else. Live 24h:
+   *               11 calls, $0.48 (7d $6.26).
+   * Haiku 4.5 rejects output_config.effort, so the effort rows below are inert for both
+   * (lib/llm.js drops the field) and remain only as the ledger's label. Red Team keeps
+   * Opus: its verdict feeds redteam_refuted_unanswered, a SAFETY gate, and the seat
+   * scorecard is empty, so nothing measured yet licenses a cut there. */
   models: {
     scout:      process.env.DESK_MODEL_SCOUT      || "claude-haiku-4-5",
     forensics:  process.env.DESK_MODEL_FORENSICS  || "claude-sonnet-5",
-    liquidity:  process.env.DESK_MODEL_LIQUIDITY  || "claude-sonnet-5",
+    liquidity:  process.env.DESK_MODEL_LIQUIDITY  || "claude-haiku-4-5",
     flow:       process.env.DESK_MODEL_FLOW       || "claude-sonnet-5",
     narrative:  process.env.DESK_MODEL_NARRATIVE  || "claude-sonnet-5",
-    technical:  process.env.DESK_MODEL_TECHNICAL  || "claude-sonnet-5",
     redteam:    process.env.DESK_MODEL_REDTEAM    || "claude-opus-5",
     risk:       process.env.DESK_MODEL_RISK       || "claude-sonnet-5",
     pm:         process.env.DESK_MODEL_PM         || "claude-opus-5",
-    execution:  process.env.DESK_MODEL_EXECUTION  || "claude-sonnet-5",
+    execution:  process.env.DESK_MODEL_EXECUTION  || "claude-haiku-4-5",
   },
 
   effort: {
@@ -279,9 +307,13 @@ export const cfg = {
     liquidity: "medium",
     flow: "high",
     narrative: "medium",
-    technical: "medium",
-    redteam: "high",    // the adversary keeps the strongest MODEL; xhigh thinking alone
-                        // was ~14k output tokens a run and a third of the whole bill
+    redteam: effortEnv("DESK_EFFORT_REDTEAM", "high"),
+                        // the adversary keeps the strongest MODEL; xhigh thinking alone
+                        // was ~14k output tokens a run and a third of the whole bill.
+                        // DESK_EFFORT_REDTEAM is an A/B handle only (medium is about
+                        // -$0.14 a call on the live 7d, $0.336 median): the default is
+                        // not cut, because the verdict feeds a SAFETY gate and the seat
+                        // scorecard has nothing yet to show what a cheaper one costs.
     risk: "high",
     pm: "high",
     execution: "medium",

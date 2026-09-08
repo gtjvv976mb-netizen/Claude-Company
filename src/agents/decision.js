@@ -3,11 +3,13 @@ import { RedTeamOut, RiskOut, PMOut, TicketOut, ScoutOut, BestPickOut } from "./
 import { cfg } from "../config.js";
 import { recentLessons } from "./review.js";
 import { emit, runContext } from "../lib/bus.js";
+/* THE SAME BYTES THE ANALYSTS SENT. The bundle is the cached block of every seat's turn
+   (ask({ shared }) — seatTurn() in lib/llm.js), and a cache hit is a byte match, so the
+   decision seats import the one definition rather than keep a copy that could drift.
+   Compact on purpose: 2-space pretty-printing inflated every downstream prompt ~25% for
+   nothing a model needs. The PM and Risk read ~20k tokens per run of it plus the book. */
+import { bundle } from "./analysts.js";
 
-// Compact on purpose: 2-space pretty-printing inflated every downstream prompt
-// ~25% for nothing a model needs. The PM and Risk read ~20k tokens per run of
-// this bundle plus the book.
-const bundle = (ev) => "=== EVIDENCE BUNDLE ===\n" + JSON.stringify(ev);
 const book = (analysts) =>
   "=== ANALYST BOOK ===\n" +
   Object.entries(analysts)
@@ -154,7 +156,8 @@ export async function runRedTeam(ev, analysts) {
     effort: cfg.effort.redteam,
     schema: RedTeamOut,
     system: REDTEAM_SYSTEM,
-    prompt: `Destroy this trade idea for ${ev.symbol} (${ev.mint}).\n\n${bundle(ev)}\n\n${book(analysts)}`,
+    shared: bundle(ev),
+    prompt: `Destroy this trade idea for ${ev.symbol} (${ev.mint}).\n\n${book(analysts)}`,
   });
 }
 
@@ -210,7 +213,8 @@ export async function runRisk(ev, analysts, redteam) {
     effort: cfg.effort.risk,
     schema: RiskOut,
     system: RISK_SYSTEM,
-    prompt: `Choose the stop and risk tier for ${ev.symbol}.\n\n${bundle(ev)}\n\n${book(analysts)}\n\n=== RED TEAM ===\n${JSON.stringify(redteam)}`,
+    shared: bundle(ev),
+    prompt: `Choose the stop and risk tier for ${ev.symbol}.\n\n${book(analysts)}\n\n=== RED TEAM ===\n${JSON.stringify(redteam)}`,
   });
 }
 
@@ -281,14 +285,18 @@ Two publication rules, absolute:
   OVER: the tape well off its own high, volume falling away rather than accelerating, or
   a rise on almost no money. Judge the state of the move, not the fact of it.`;
 
-const pmPrompt = (ev, analysts, redteam, risk, weightedScore) => {
+/* The Claude seat receives the bundle as the cached first block of its turn
+   (ask({ shared })); Grok has no prefix cache, so its prompt keeps the bundle inline,
+   exactly where it has always been. */
+const pmPrompt = (ev, analysts, redteam, risk, weightedScore, { inlineBundle = false } = {}) => {
   const floorNo = runContext.getStore()?.floor ?? null;
   const lessonScope = floorNo == null || Number(floorNo) === 50 ? "house" : "tenant";
   const lessons = recentLessons(5, { evidenceScope: lessonScope, floorNo });
   return `Decide on ${ev.symbol} (${ev.mint}).\n\n` +
       `=== LESSONS FROM CLOSED CALLS (Colonel Debrief) ===\n` +
       `${lessons.map((l) => `[${l.grade}] ${l.symbol}: ${l.lesson}`).join("\n") || "(no closed calls yet)"}\n\n` +
-      `${bundle(ev)}\n\n${book(analysts)}\n\n` +
+      (inlineBundle ? `${bundle(ev)}\n\n` : "") +
+      `${book(analysts)}\n\n` +
       `=== RED TEAM ===\n${JSON.stringify(redteam)}\n\n` +
       `=== RISK ===\n${JSON.stringify(risk)}\n\n` +
       `=== WEIGHTED ANALYST COMPOSITE ===\n${weightedScore.toFixed(1)} / 100 ` +
@@ -326,7 +334,7 @@ export async function runPM(ev, analysts, redteam, risk, weightedScore, opts = {
     const g = await grokAsk({
       seat: "PM(grok)",
       system: SHARED_RULES + "\n\n" + PM_SYSTEM,
-      prompt: pmPrompt(ev, analysts, redteam, risk, weightedScore),
+      prompt: pmPrompt(ev, analysts, redteam, risk, weightedScore, { inlineBundle: true }),
       shape: `{"decision":"PROPOSE|WATCH|PASS","conviction":0-100,"thesis":"...","invalidation":"...",` +
         `"time_horizon":"...","how_red_team_was_answered":"...","key_disagreement":"...",` +
         `"watch_triggers":["..."],` +
@@ -345,6 +353,7 @@ export async function runPM(ev, analysts, redteam, risk, weightedScore, opts = {
     effort: cfg.effort.pm,
     schema: PMOut,
     system: PM_SYSTEM,
+    shared: bundle(ev),
     prompt: pmPrompt(ev, analysts, redteam, risk, weightedScore),
   });
   return { ...out, _provider: opts.pmProvider === "grok" ? "grok->claude" : "claude" };
@@ -402,7 +411,10 @@ Build the ticket from the routing evidence, not from imagination:
 
 The stop price must match the risk seat's stop exactly. You do not get to move it.`;
 
-/** EXECUTION — turns a decision into an unsigned ticket a human can act on. */
+/** EXECUTION — turns a decision into an unsigned ticket a human can act on.
+ *  On Haiku 4.5 since 2026-09-08: compliance.js `stop_mismatch` forces the ticket's stop
+ *  equal to the Risk seat's, so what this seat authors is the entry zone and the targets.
+ *  Live 24h it was 11 Sonnet calls, $0.48 (7d $6.26), for two numbers and a route name. */
 export async function runExecution(ev, pm, risk) {
   return ask({
     seat: "Execution",
@@ -462,6 +474,12 @@ This is a memecoin desk, so rank on what actually moves these:
   with reach is the strongest single signal on this desk.
 - IS THE DEV PRESENT? Someone who posted the contract themselves and is still replying
   is running a coin. Someone who posted once and vanished has already left.
+- DID THE CREATOR STAY IN? dev.pctOfSupply is the creator wallet's own share of supply
+  read from the chain and dev.soldAll whether their account was emptied; launch.volShare
+  is the first traded minute's volume against the curve's opening SOL, and above one
+  reads as a sniped or bundled open. Every pump.fun call carries "thesis void if the
+  deployer wallet sells", so a creator who already sold is that invalidation already
+  true. Null is unmeasured, not clean.
 - WHO IS BUYING? Distinct wallets arriving beats a few round-tripping.
 - ROOM TO RE-RATE. A $200k coin doubling needs a fraction of what a $15m coin needs.
   Prefer the smaller cap when the story is equally real.
@@ -500,7 +518,15 @@ export async function runBestPick(candidates, { filter = null } = {}) {
         paidSigns: x.paid_or_botted_signs, summary: x.summary },
       dev: { handle: x.dev_handle, looksReal: x.dev_looks_real, postedCA: x.dev_posted_ca,
         engagingNow: x.dev_engaging_now, priorTokens: x.dev_prior_tokens,
-        redFlags: x.dev_red_flags, deskRecord: x.desk_record },
+        redFlags: x.dev_red_flags, deskRecord: x.desk_record,
+        // Read from the chain, not from X (data/solana.js) — null is unmeasured.
+        pctOfSupply: ev.holders?.devPctOfSupply ?? null,
+        accountPresent: ev.holders?.devAccountPresent ?? null,
+        soldAll: ev.holders?.devSoldAll ?? null },
+      // The launch minute against the curve's opening SOL (data/pumpfun-live.js).
+      launch: { volShare: ev.momentum?.launchVolShare ?? null,
+        firstCandleVolUsd: ev.momentum?.firstCandle?.volUsd ?? null,
+        msAfterCreate: ev.momentum?.firstCandle?.msAfterCreate ?? null },
       holders: { top1Pct: ev.holders?.top1Pct, bundleSuspect: ev.holders?.bundleSuspect,
         clustered: ev.holders?.clusteredHolders, midToHead: ev.holders?.midToHead },
     };

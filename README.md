@@ -30,14 +30,17 @@ code narrows the field cheaply, the model only reasons about what survived.
 | 3 | **Liquidity** | model | Can I get out, at size, at a price I'd accept? |
 | 4 | **Flow** | model | Is the demand real, or manufactured? |
 | 5 | **Narrative** | model + web | Is there a story, is it true, and am I early? |
-| 6 | **Technical** | model | Is this a location worth entering? |
-| 7 | **Red Team** | model | *Why does this trade lose money?* |
-| 8 | **Risk** | model + code | Choose a tier and thesis stop; code derives size and loss. |
-| 9 | **PM** | model | Propose, watch, or pass — on what thesis? |
-| 10 | **Execution** | model | The unsigned ticket: route, slicing, stop, targets. |
-| 11 | **Compliance** | code | Does this break a house rule? *(veto, not advice)* |
-| 12 | **CEO** | model | Do I trust this desk, on this trade, today? |
-| 13 | **Scribe** | code | Write it down so the desk can be graded later. |
+| 6 | **Red Team** | model | *Why does this trade lose money?* |
+| 7 | **Risk** | model + code | Choose a tier and thesis stop; code derives size and loss. |
+| 8 | **PM** | model | Propose, watch, or pass — on what thesis? |
+| 9 | **Execution** | model | The unsigned ticket: route, slicing, targets — the stop is Risk's, verbatim. |
+| 10 | **Compliance** | code | Does this break a house rule? *(veto, not advice)* |
+| 11 | **CEO** | model | Do I trust this desk, on this trade, today? |
+| 12 | **Scribe** | code | Write it down so the desk can be graded later. |
+
+A **Technical** seat sat between Narrative and Red Team until 2026-09-08. It was retired on
+its own record — 31 calls and $0.67 in a live day, 0 kills, and no kill clause in its brief
+to make one; the four price-change windows it read are on the bundle for every other seat.
 
 Two permanent seats sit outside that per-token sequence: **Regime** computes the broader
 SOL/BTC weather used by the evidence and portfolio gates, while **Review** grades each
@@ -300,19 +303,23 @@ dry-run-only.
 
 ## What it costs
 
-Model defaults are cost-aware: Haiku scouts; Sonnet handles structured evidence work; Opus
+Model defaults are cost-aware: Haiku scouts, reads the book for the Liquidity seat and
+writes the Execution ticket; Sonnet handles the rest of the structured evidence work; Opus
 is reserved for Red Team, PM and CEO judgment. The running total is printed each cycle.
 The screener is the main cost control: it is pure code and rejects most candidates before
 a model call. To spend less, lower `DESK_MAX_CANDIDATES` or override an individual
-`DESK_MODEL_*` setting; deterministic seats have no model cost.
+`DESK_MODEL_*` setting; deterministic seats have no model cost. `DESK_EFFORT_REDTEAM`
+(low/medium/high/xhigh/max) is an A/B handle for the Red Team's thinking effort only — the
+default stays `high`, because its verdict feeds a safety gate.
 
 ## Known limits
 
 - **`fdv_propped` mis-fires on CEX-listed majors.** The ratio compares FDV to *DEX*
   liquidity, so a token whose real depth is on centralised venues looks thin. It is the
   right test for the DEX-native tokens this desk actually scouts; BONK trips it.
-- **The Technical seat has a genuinely thin dataset** — four price-change windows, no candle
-  history. It is instructed to keep its confidence low and not invent chart levels.
+- **There is no candle history on the bundle** — four price-change windows only. The seat
+  that used to read them alone (Technical) is retired; no other seat is asked to invent
+  chart levels from them.
 - **Holder concentration is often unavailable** on the public RPC, and the desk reports that
   rather than estimating it.
 - **Nothing here has an edge until you have graded it.** Read the first weeks of the journal

@@ -8,8 +8,30 @@ import { grokXRead, hasGrok } from "../lib/grok.js";
 import { emit } from "../lib/bus.js";
 import { whaleFeed } from "../identity.js";
 import * as pf from "./pumpfun.js";
+import { candles, momentumFrom, epochMs, BIRTH_TAPE_CANDLES } from "./pumpfun-live.js";
+import { huntWindowMs } from "../ignition.js";
 import { regime } from "./regime.js";
 import { botProbeNotional } from "../probe-size.js";
+
+/**
+ * THE BIRTH TAPE FOR THE ONE COIN BEING GATHERED.
+ *
+ * workup() is handed a mint and nothing else, so whatever the ignition lane read off a
+ * candidate's minute tape never reached the evidence bundle — the seats were judging a
+ * launch with no view of its launch minute. This pulls the same tape the lane pulls
+ * (pumpfun-live.momentumFor with the 200-row birth request) for a nano or micro coin
+ * still inside its hunt window, and only then: an older coin's first minute is history
+ * the book has already priced, and a bigger coin is not in the population this ruler is
+ * being validated on. One free request, bounded by candles()' own timeout; every
+ * failure reads null, and null is unmeasured.
+ */
+export async function launchMomentum({ mint, createdAt, band, curveOpenUsd = null, now = Date.now() }) {
+  if (!mint || createdAt == null || (band !== "nano" && band !== "micro")) return null;
+  const ageMs = now - createdAt;
+  if (!(ageMs >= 0) || ageMs > huntWindowMs(band)) return null;
+  const tape = await candles(mint, { limit: BIRTH_TAPE_CANDLES }).catch(() => []);
+  return momentumFrom(tape, { now, createdAt, curveOpenUsd, limit: BIRTH_TAPE_CANDLES });
+}
 
 /**
  * Everything the desk knows about one token, fetched deterministically.
@@ -68,7 +90,9 @@ export async function gather(mint, hook = "") {
     sol.mintInfo(mint),
     // Route probe: does a sell path exist and return anything? Quoted in USDC.
     jup.roundTrip({ quoteMint: MINTS.USDC, tokenMint: mint, quoteAmountRaw: String(usdcRaw) }),
-    jup.price([mint]),
+    // The coin and SOL on the one request: SOL/USD prices the curve's opening value for
+    // the launch-share reading below, and costs nothing the desk was not already asking.
+    jup.price([mint, MINTS.SOL]),
     ds.paidOrders(mint),
     regime().catch(() => ({ regime: "unknown" })),
     // Who created it — answered where it is answerable, and skipped on monitor ticks,
@@ -78,12 +102,32 @@ export async function gather(mint, hook = "") {
   // The one genuine dependency: holder concentration is a share OF the supply. The
   // coin's own pool and curve come from the deployer read in the same batch, so the
   // exclusion can name them instead of relying on a shared authority.
-  const holders = mintAcct.ok && mintAcct.supply
-    ? await sol.topHolders(mint, mintAcct.supply, {
-      poolAddress: deployerRaw?.coin?.poolAddress ?? null,
-      bondingCurve: deployerRaw?.coin?.bondingCurve ?? null,
-    })
-    : { ok: false, error: "mint info unavailable" };
+  /* WHAT THE LAUNCHER'S ROW ADDS TO THE HOLDER READ. The creator wallet and the create
+     time let topHolders name the creator's own token account and read it (and, inside
+     the first half hour, whether it was emptied); the curve's opening SOL, priced by the
+     SOL mark from the same Jupiter request, is the denominator the launch minute is read
+     against. Both reads run together — the second is the birth tape (launchMomentum). */
+  const pfCoin = deployerRaw?.coin ?? null;
+  const solUsd = Number(jp?.[MINTS.SOL]?.usdPrice) > 0 ? Number(jp[MINTS.SOL].usdPrice) : null;
+  const tokenBornMs = epochMs(pfCoin?.createdAt);
+  const band = bandForMarketCap(best?.marketCap ?? best?.fdv ?? null);
+  const curveOpenUsd = pfCoin?.virtualSolReserves > 0 && solUsd > 0
+    ? (Math.max(0, pfCoin.virtualSolReserves - (pfCoin.realSolReserves ?? 0)) / 1e9) * solUsd
+    : null;
+  const [holders, momentum] = await Promise.all([
+    mintAcct.ok && mintAcct.supply
+      ? sol.topHolders(mint, mintAcct.supply, {
+        poolAddress: pfCoin?.poolAddress ?? null,
+        bondingCurve: pfCoin?.bondingCurve ?? null,
+        creator: pfCoin?.creator ?? null,
+        createdAt: tokenBornMs,
+        isToken2022: !!mintAcct.isToken2022,
+      })
+      : { ok: false, error: "mint info unavailable" },
+    wantsDeployer
+      ? launchMomentum({ mint, createdAt: tokenBornMs, band, curveOpenUsd }).catch(() => null)
+      : Promise.resolve(null),
+  ]);
 
   const jupPrice = jp?.[mint] ?? null;
 
@@ -155,6 +199,11 @@ export async function gather(mint, hook = "") {
   return {
     ok: true,
     promotion, callouts, deployer, marketRegime, crosscheck,
+    /* THE LAUNCH MINUTE, on the bundle every seat reads: firstCandle {volUsd,
+       msAfterCreate} and launchVolShare against the curve's opening SOL. Null for any
+       coin outside the nano/micro hunt window, and null is unmeasured — the reading is
+       evidence and a shadow log (launch-shadow.js) until it has earned more. */
+    momentum: momentum ?? null,
     /* NO xRead HERE. The paid X read was split out into enrichWithXRead() so that the
      * free safety screen runs FIRST and the desk never buys a Grok read for a coin it
      * was always going to refuse. This return kept naming the variable that moved, so
@@ -224,6 +273,20 @@ export function screen(ev) {
   check(dep?.ok && dep.priorLaunches >= 8 && dep.graduated === 0,
     "serial_deployer",
     dep?.ok ? `deployer shipped ${dep.priorLaunches}+ coins, zero ever graduated` : null);
+
+  /* THE CREATOR HAS ALREADY LEFT. Every pump.fun call is published with "Thesis void if
+   * the deployer wallet sells" (calls.js openCall); a creator whose own token account
+   * was funded and is now empty makes that invalidation true before the call exists.
+   * Fires on POSITIVE chain evidence only — holders.devSoldAll is true solely for an
+   * account seen funded then emptied inside the coin's first thirty minutes (solana.js)
+   * — and never on null, which is an unread or never-opened account. JUDGMENT in
+   * calls.js: the coin can still be bought and sold; what is gone is the thesis. */
+  const h = ev.holders;
+  check(h?.ok && h.devSoldAll === true, "dev_dumped",
+    h?.devSoldAll === true
+      ? `the creator's own token account was funded and is now empty (${h.devAtaTxCount ?? "2+"} transactions` +
+        `${h.devLastTxAt ? `, last ${new Date(h.devLastTxAt).toISOString()}` : ""}) — the deployer has sold`
+      : null);
 
   /* AN UNREADABLE POOL IS NOT A THIN POOL — and `??` could not tell the difference.
    * A pump.fun coin still on its bonding curve has no DexScreener pool at all, so
@@ -438,6 +501,19 @@ function handleFromUrl(url) {
   return "@" + name;
 }
 
+/**
+ * The creator's X handle as the launchpad lists it — the profile link first, the
+ * username pump.fun records second — or null. ONE resolution, exported, because two
+ * callers now start from it: the paid read below, and the desk's free ledger check
+ * before it (desk.js). If the two ever resolved differently the ledger would be asked
+ * about one account and Grok about another, and a rugger it already knows would be
+ * bought a fresh read under a second name.
+ */
+export function creatorHandle(ev) {
+  const pfCoin = ev?.deployer?.coin ?? null;
+  return handleFromUrl(pfCoin?.twitter) ?? pfCoin?.creatorUsername ?? null;
+}
+
 export async function enrichWithXRead(ev, hook = "") {
   if (hook === "monitor" || !hasGrok()) return ev;
   /* HAND GROK WHAT THE DESK ALREADY KNOWS. pump.fun returns the creator's X link and
@@ -446,7 +522,7 @@ export async function enrichWithXRead(ev, hook = "") {
      the handle turns "find whoever launched this" into "read this account", which is
      both cheaper and a better question. */
   const pfCoin = ev.deployer?.coin ?? null;
-  const handle = handleFromUrl(pfCoin?.twitter) ?? pfCoin?.creatorUsername ?? null;
+  const handle = creatorHandle(ev);
   const xr = await grokXRead({ symbol: ev.pair?.baseSymbol ?? ev.mint.slice(0, 6), mint: ev.mint, hook,
     handle, lore: pfCoin?.description ?? null })
     .catch((e) => ({ ok: false, error: `x-read threw: ${String(e?.message || e).slice(0, 200)}` }));

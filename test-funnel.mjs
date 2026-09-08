@@ -8,7 +8,9 @@
  * cheap work twice than trust it once too long.
  */
 import { _reset, observe, decay, dueForScreen, recordScreen, dueForStudy, recordStudy,
-         readyPool, census, retire, TTL, RESTALE_MOVE_PCT } from "./src/funnel.js";
+         readyPool, census, retire, curveVelocity, TTL, RESTALE_MOVE_PCT } from "./src/funnel.js";
+import { shapePair } from "./src/data/dexscreener.js";
+import { asCandidate } from "./src/data/pumpfun-live.js";
 
 let pass = 0, fail = 0;
 const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  — " + d : ""}`))
@@ -16,7 +18,9 @@ const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  —
 
 const coin = (mint, { pad = "pump.fun", score = 50, mcap = 250_000, h1 = 0, cell = "low/memecoin" } = {}) => ({
   mint, score, launchpad: pad, cellKey: cell, band: cell.split("/")[0], coinType: cell.split("/")[1],
-  pair: { baseSymbol: mint, baseName: mint, marketCap: mcap, liquidity: { usd: 30_000 },
+  // `liquidityUsd`, the field both shapers emit — re-anchored from the raw DexScreener
+  // `liquidity.usd` this fixture used to carry, which nothing the desk hands observe() has.
+  pair: { baseSymbol: mint, baseName: mint, marketCap: mcap, liquidityUsd: 30_000,
           volume: { h24: 50_000 }, priceChange: { h1 } },
 });
 
@@ -204,6 +208,79 @@ ok("every stage is counted", ["watch", "screened", "studied", "ready"].every((s)
   { watch: c.watch, screened: c.screened, studied: c.studied, ready: c.ready }));
 ok("and the clocks are published with it", c.ttlMinutes.screen === TTL.screen / 60_000,
   `screen ${c.ttlMinutes.screen}m · study ${c.ttlMinutes.study}m · unseen ${c.ttlMinutes.unseen}m`);
+
+console.log("\nTHE LIQ COLUMN READS THE SHAPE BOTH SHAPERS ACTUALLY EMIT");
+/* observe() read `pair.liquidity.usd`, the raw DexScreener spelling, while both shapers
+ * pass on `liquidityUsd` — so the column was NULL on every row the funnel ever stored,
+ * and green the whole time because no test read it back. Both fixtures here go through
+ * the REAL shapers, so the column is checked against the shape the desk hands it. */
+_reset();
+const near = (a, b, tol = 1e-9) => a != null && Math.abs(a - b) <= tol;
+const SOL = 1e9, M = 1e12;                                   // lamports; six-decimal base units per 1M tokens
+const dsPair = shapePair({ dexId: "raydium", pairAddress: "p1", url: "u", chainId: "solana",
+  baseToken: { symbol: "DSX", name: "Dex Coin" }, quoteToken: { symbol: "SOL" }, priceUsd: "0.01",
+  liquidity: { usd: 42_500 }, marketCap: 250_000, fdv: 250_000, pairCreatedAt: Date.now() - 3.6e6,
+  volume: { h24: 90_000 }, priceChange: { h1: 2 } });
+const pfRow = (over = {}) => ({
+  mint: "PFX", symbol: "PFX", name: "Pump Coin", creator: "C1",
+  created_timestamp: Date.now() - 6 * 60_000, last_trade_timestamp: Date.now(),
+  usd_market_cap: 30_000, total_supply: 1e15, complete: false,
+  virtual_sol_reserves: 38 * SOL, virtual_token_reserves: 847.1 * M,
+  real_sol_reserves: 8 * SOL, real_token_reserves: 567.2 * M,            // 8 SOL in, mid-curve
+  reply_count: 12, ath_market_cap: 45_000, ath_market_cap_timestamp: Date.now() - 20 * 60_000,
+  ...over });
+const pf = (over) => ({ ...asCandidate(pfRow(over), { solUsd: 100 }), score: 50 });
+observe([{ mint: "DSX", score: 50, launchpad: "raydium", pair: dsPair }, pf()]);
+const liqOf = (m) => raw.prepare("SELECT liq FROM funnel WHERE mint=?").get(m).liq;
+ok("a DexScreener pair's liquidity is stored, not NULL", liqOf("DSX") === 42_500,
+  `liq = ${liqOf("DSX")} from liquidity.usd 42,500 via shapePair`);
+ok("a pump.fun curve's is too", liqOf("PFX") === 1_600,
+  `liq = ${liqOf("PFX")} — 8 SOL x $100, both sides of the book, via asCandidate`);
+
+console.log("\nTHE CURVE, THE CROWD AND THE ATH DRAWDOWN REFRESH ON EVERY OBSERVE");
+const curveRow = (m) => raw.prepare(
+  "SELECT curve_sol, curve_sol_at, curve_sol_prev, curve_sol_prev_at, reply_count, ath_ratio FROM funnel WHERE mint=?").get(m);
+let cr = curveRow("PFX");
+ok("curve_sol is the real SOL reserve", cr.curve_sol === 8, `curve_sol = ${cr.curve_sol}`);
+ok("reply_count is pump.fun's", cr.reply_count === 12, `reply_count = ${cr.reply_count}`);
+ok("ath_ratio is cap over ATH", near(cr.ath_ratio, 30_000 / 45_000), `ath_ratio = ${cr.ath_ratio} ($30,000 / $45,000)`);
+const dsRow = curveRow("DSX");
+ok("a coin the launch feed never saw stores NULL here, not 0",
+  dsRow.curve_sol === null && dsRow.reply_count === null && dsRow.ath_ratio === null,
+  `curve_sol ${dsRow.curve_sol}, reply_count ${dsRow.reply_count}, ath_ratio ${dsRow.ath_ratio}`);
+ok("one reading has no velocity", curveVelocity("PFX") === null, `curveVelocity = ${curveVelocity("PFX")}`);
+
+// The next pass: 4.8 more SOL on the curve, the crowd grew, the cap slipped off its high.
+observe([pf({ real_sol_reserves: 12.8 * SOL, virtual_sol_reserves: 42.8 * SOL, reply_count: 31, usd_market_cap: 27_000 })]);
+cr = curveRow("PFX");
+ok("curve_sol refreshes to the new reading", near(cr.curve_sol, 12.8), `curve_sol = ${cr.curve_sol}`);
+ok("...and the reading before it is kept, not lost", cr.curve_sol_prev === 8, `curve_sol_prev = ${cr.curve_sol_prev}`);
+ok("reply_count refreshes", cr.reply_count === 31, `reply_count = ${cr.reply_count}`);
+ok("ath_ratio refreshes", near(cr.ath_ratio, 27_000 / 45_000), `ath_ratio = ${cr.ath_ratio} ($27,000 / $45,000)`);
+
+console.log("\nTWO READINGS GIVE THE CURVE A VELOCITY FOR $0");
+// Both readings landed inside one test tick; set the earlier one four minutes back, the
+// way every clock in this file is aged, so the minutes are known rather than measured.
+raw.prepare("UPDATE funnel SET curve_sol_prev_at = curve_sol_at - ? WHERE mint='PFX'").run(4 * 60_000);
+let v = curveVelocity("PFX");
+ok("velocity is (sol2 - sol1) / minutes", near(v, (12.8 - 8) / 4),
+  `curveVelocity = ${v} SOL/min — (12.8 - 8) / 4 min; at that pace the 72.2 SOL still owed is ~${(72.2 / v).toFixed(0)} min out`);
+observe([{ mint: "PFX", score: 50, launchpad: "pump.fun",
+  pair: { baseSymbol: "PFX", marketCap: 27_000, liquidityUsd: 3_200 } }]);   // the keyword sweep, no `live`
+cr = curveRow("PFX");
+ok("a sweep-only re-observation keeps both readings and the velocity",
+  near(cr.curve_sol, 12.8) && cr.curve_sol_prev === 8 && cr.reply_count === 31 && near(curveVelocity("PFX"), v),
+  `curve_sol ${cr.curve_sol} / prev ${cr.curve_sol_prev}, reply_count ${cr.reply_count}, velocity ${curveVelocity("PFX")}`);
+raw.prepare("UPDATE funnel SET curve_sol_prev_at = curve_sol_at WHERE mint='PFX'").run();
+ok("two readings in the same instant are null, not infinity", curveVelocity("PFX") === null,
+  `curveVelocity = ${curveVelocity("PFX")}`);
+observe([pf({ real_sol_reserves: 10.4 * SOL, virtual_sol_reserves: 40.4 * SOL, reply_count: 33, usd_market_cap: 24_000 })]);
+raw.prepare("UPDATE funnel SET curve_sol_prev_at = curve_sol_at - ? WHERE mint='PFX'").run(2 * 60_000);
+v = curveVelocity("PFX");
+ok("SOL leaving the curve reads negative", near(v, (10.4 - 12.8) / 2),
+  `curveVelocity = ${v} SOL/min — (10.4 - 12.8) / 2 min`);
+console.log("  stored row: " + JSON.stringify(raw.prepare(
+  "SELECT mint, launchpad, liq, mcap, curve_sol, curve_sol_at, curve_sol_prev, curve_sol_prev_at, reply_count, ath_ratio, seen_count FROM funnel WHERE mint='PFX'").get()));
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

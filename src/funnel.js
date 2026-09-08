@@ -68,9 +68,19 @@ CREATE INDEX IF NOT EXISTS idx_funnel_stage ON funnel(stage);
 CREATE INDEX IF NOT EXISTS idx_funnel_seen ON funnel(last_seen);
 `);
 
-/* The live table predates this column, so add it in place rather than by recreating —
- * the funnel's whole value is the history it holds. */
-for (const [col, decl] of [["eligible", "INTEGER"]])
+/* The live table predates these columns, so add them in place rather than by recreating —
+ * the funnel's whole value is the history it holds.
+ *
+ * The curve columns are the cheapest "minutes to graduation" the desk can own: the
+ * sweep already observes every pass (penthouse.js:681), so keeping the reading BEFORE
+ * this one alongside it gives a SOL-per-minute velocity for $0. Two readings, no more —
+ * the funnel is a population, not a tape. */
+for (const [col, decl] of [
+  ["eligible", "INTEGER"],
+  ["curve_sol", "REAL"], ["curve_sol_at", "INTEGER"],          // real SOL on the curve, and when
+  ["curve_sol_prev", "REAL"], ["curve_sol_prev_at", "INTEGER"],  // the reading before it
+  ["reply_count", "INTEGER"], ["ath_ratio", "REAL"],            // pump.fun's crowd and the ATH drawdown
+])
   try { db.exec(`ALTER TABLE funnel ADD COLUMN ${col} ${decl}`); } catch { /* already there */ }
 
 const MIN = 60_000;
@@ -122,38 +132,82 @@ export function observe(coins) {
   let added = 0, refreshed = 0;
   const ins = db.prepare(`
     INSERT INTO funnel (mint,symbol,name,launchpad,cell_key,band,coin_type,stage,
-                        first_seen,last_seen,stage_since,score,mcap,liq,vol24,h1,age_h,seen_count)
-    VALUES (?,?,?,?,?,?,?,'watch',?,?,?,?,?,?,?,?,?,1)`);
+                        first_seen,last_seen,stage_since,score,mcap,liq,vol24,h1,age_h,seen_count,
+                        curve_sol,curve_sol_at,reply_count,ath_ratio)
+    VALUES (?,?,?,?,?,?,?,'watch',?,?,?,?,?,?,?,?,?,1,?,?,?,?)`);
+  /* The pump.fun facts COALESCE like the cell does: a coin the keyword sweep re-observes
+   * carries no `live`, and blanking the last reading the launch feed gave would make the
+   * column flicker with whichever source saw the coin last. The curve pair is shifted in
+   * JS below so the previous reading survives a sweep-only pass the same way. */
   const upd = db.prepare(`
     UPDATE funnel SET last_seen=?, score=?, mcap=?, liq=?, vol24=?, h1=?, age_h=?,
                       seen_count=seen_count+1, symbol=?, launchpad=?,
-                      cell_key=COALESCE(?,cell_key), band=COALESCE(?,band), coin_type=COALESCE(?,coin_type)
+                      cell_key=COALESCE(?,cell_key), band=COALESCE(?,band), coin_type=COALESCE(?,coin_type),
+                      curve_sol=?, curve_sol_at=?, curve_sol_prev=?, curve_sol_prev_at=?,
+                      reply_count=COALESCE(?,reply_count), ath_ratio=COALESCE(?,ath_ratio)
     WHERE mint=?`);
+  const prior = db.prepare(
+    "SELECT curve_sol, curve_sol_at, curve_sol_prev, curve_sol_prev_at FROM funnel WHERE mint=?");
+  const finite = (v) => (Number.isFinite(v) ? v : null);
 
   for (const c of coins) {
     if (!c?.mint) continue;
     const p = c.pair ?? {};
+    const live = c.live ?? {};
     const cell = c.cellKey ? { key: c.cellKey, band: c.band, type: c.coinType } : cellOf(c);
     const f = [
       c.score ?? 0,
       p.marketCap ?? p.fdv ?? null,
-      p.liquidity?.usd ?? null,
+      /* `liquidityUsd` is the spelling BOTH shapers emit (dexscreener.shapePair,
+       * pumpfun-live.asCandidate). This read the raw DexScreener `liquidity.usd`, which
+       * neither passes on, so the column was NULL on every row the funnel ever stored. */
+      p.liquidityUsd ?? null,
       p.volume?.h24 ?? null,
       p.priceChange?.h1 ?? null,
       p.pairCreatedAt ? (now - p.pairCreatedAt) / 3.6e6 : null,
     ];
-    const exists = db.prepare("SELECT mint FROM funnel WHERE mint=?").get(c.mint);
-    if (exists) {
+    const curveSol = finite(live.curveSolReserve);
+    const replies = finite(live.replyCount);
+    const athRatio = finite(live.athRatio);
+    const was = prior.get(c.mint);
+    if (was) {
+      // A new curve reading pushes the current one back a slot; no reading keeps both.
+      const shift = curveSol != null;
       upd.run(now, ...f, p.baseSymbol ?? null, c.launchpad ?? null,
-              cell?.key ?? null, cell?.band ?? null, cell?.type ?? null, c.mint);
+              cell?.key ?? null, cell?.band ?? null, cell?.type ?? null,
+              shift ? curveSol : was.curve_sol, shift ? now : was.curve_sol_at,
+              shift ? was.curve_sol : was.curve_sol_prev, shift ? was.curve_sol_at : was.curve_sol_prev_at,
+              replies, athRatio, c.mint);
       refreshed++;
     } else {
       ins.run(c.mint, p.baseSymbol ?? null, p.baseName ?? null, c.launchpad ?? null,
-              cell?.key ?? null, cell?.band ?? null, cell?.type ?? null, now, now, now, ...f);
+              cell?.key ?? null, cell?.band ?? null, cell?.type ?? null, now, now, now, ...f,
+              curveSol, curveSol == null ? null : now, replies, athRatio);
       added++;
     }
   }
   return { added, refreshed, total: added + refreshed };
+}
+
+/**
+ * How fast SOL is entering the curve, in SOL per minute, from the last two readings the
+ * sweep stored — null with one reading, and null when both were taken in the same
+ * instant rather than an infinity.
+ *
+ * This is the desk's "minutes to graduation" for free: the curve owes a per-row total
+ * (85.005 SOL on six of eight fresh rows measured 2026-09-08, 111-345 on boosted ones —
+ * pumpfun-live.js curveOf), and the caller divides what is still owed by this. Negative
+ * means SOL is leaving the curve. A graduation drains the reserve into the pool in one
+ * block, which is not a sell — read `live.graduated` before believing a large negative.
+ */
+export function curveVelocity(mint) {
+  const r = db.prepare(
+    "SELECT curve_sol, curve_sol_at, curve_sol_prev, curve_sol_prev_at FROM funnel WHERE mint=?").get(mint);
+  if (!r || r.curve_sol == null || r.curve_sol_prev == null
+      || r.curve_sol_at == null || r.curve_sol_prev_at == null) return null;
+  const minutes = (r.curve_sol_at - r.curve_sol_prev_at) / MIN;
+  if (!(minutes > 0)) return null;
+  return (r.curve_sol - r.curve_sol_prev) / minutes;
 }
 
 /**

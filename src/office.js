@@ -9,7 +9,8 @@ import path from "node:path";
 import { ROOT } from "./config.js";
 import { bus, backlog, emit, runFor, chronicleRead } from "./lib/bus.js";
 import { census as funnelCensus } from "./funnel.js";
-import { spend, spendSince, spendBySeat, openCreditBreakers } from "./lib/llm.js";
+import { spend, spendSince, spendBySeat, spendRows, openCreditBreakers } from "./lib/llm.js";
+import { decisionHistogram } from "./evaluation.js";
 import { cfg } from "./config.js";
 /* The cohort cycle's own constants. Imported, never re-declared: the ladder has exactly
    one definition (config.js) and the classification exactly one (calls.js GATE_CLASS).
@@ -432,6 +433,10 @@ const cycleHistoryRow = (c) => ({
   id: c.id, openedAt: c.opened_at, closedAt: c.closed_at ?? null,
   open: c.closed_at == null,
   quota: c.quota, published: c.calls, levelReached: c.escalation_level_reached,
+  /* Published is not taken. What the bot did with the cohort, live from its own rows
+     (calls.cycleExecution) — the funnel the owner actually cares about reads left to
+     right: published → deliverable → taken → exited. */
+  deliverable: c.deliverable, taken: c.taken, exited: c.exited,
   shortfall: !!c.shortfall, forcedClose: !!c.forced_close,
   forcedOpenIds: (() => { try { return JSON.parse(c.forced_open_ids || "null") || []; } catch { return []; } })(),
   closeReason: c.close_reason ?? null,
@@ -462,6 +467,8 @@ export function cycleSurfacePayload(now = Date.now(), limit = 20) {
     current = {
       id: status.id, openedAt: status.openedAt, quota: status.quota,
       published: status.published, short: status.short,
+      // The bot's side of the open cohort, beside the desk's: see cycleHistoryRow.
+      deliverable: status.deliverable, taken: status.taken, exited: status.exited,
       level: status.level, label: plan.label, relaxations: plan.relaxations,
       passes: status.passes, pursuitOver: status.pursuitOver,
       /* HOLDING, not merely open: pursuit is finished and calls are still working. This
@@ -482,12 +489,21 @@ export function cycleSurfacePayload(now = Date.now(), limit = 20) {
         id: k.id, mint: k.mint, symbol: k.symbol, status: k.status,
         escalationLevel: k.escalation_level, openedAt: k.opened_at, closedAt: k.closed_at ?? null,
       })),
+      // This cohort's own slice of the ledger below: what its PM-positives became.
+      publishablePerPmPositive: calls.publishabilityHistogram({ cycleId: status.id }).byGate,
     };
   }
+  /* PUBLISHED PER PM-POSITIVE, the haircut every quota estimate assumed and never
+     measured. All-time over the publishability ledger, which only exists under the
+     recalibrated bar (minConviction 20), so every row in it was judged at that bar. The
+     keys are gate codes with `published` among them; `f` is null until there is a row. */
+  const pub = calls.publishabilityHistogram();
   return {
     enabled: CYCLE.enabled, quota: CYCLE.quota, maxAgeMs: CYCLE.maxAgeMs,
     maxLevel: MAX_ESCALATION_LEVEL, ladder,
     current, history: rows, strain: cycleStrain(rows),
+    publishablePerPmPositive: pub.byGate,
+    publishableFraction: { pmPositive: pub.pmPositive, published: pub.published, f: pub.f },
     /* Said on the wire, not only in the page's copy, so no consumer of this route can
        render a quota-filled call as an equal of one that cleared normally. */
     note: "The level is how far the desk had to reach to publish. A higher level is not a better call — " +
@@ -1033,6 +1049,27 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
         if (url.pathname === "/api/spend/seats") {
           const hours = Math.max(1, Math.min(720, Number(url.searchParams.get("hours")) || 24));
           return json(200, spendBySeat({ hours }));
+        }
+
+        /* HOW WORKUPS END, AND WHAT EACH MODEL CALL COST — the two inputs a cohort
+           simulation has to be calibrated from. decision_runs has carried a binding
+           gate on every row since it existed (evaluation.js gateFor) and nothing read it
+           back; llm_spend has the per-call tail that spendBySeat's means flatten. Counts
+           and five bare columns per spend row; no record_json, no prompt text, no floor.
+           GET only, and it is PUBLIC — insider() is a hard-coded true above — which is
+           why the shape is aggregate by construction rather than by gate. */
+        if (url.pathname === "/api/decisions/histogram") {
+          if (req.method !== "GET") return json(405, { error: "method not allowed" });
+          const hours = Math.max(1, Math.min(8760, Number(url.searchParams.get("hours")) || 168));
+          const sinceMs = Date.now() - hours * 3600e3;
+          const pub = calls.publishabilityHistogram({ sinceMs });
+          return json(200, {
+            hours, sinceMs,
+            decisions: decisionHistogram({ sinceMs }),
+            publishablePerPmPositive: pub.byGate,
+            publishableFraction: { pmPositive: pub.pmPositive, published: pub.published, f: pub.f },
+            llmSpend: spendRows({ sinceMs, limit: queryLimit(url, 5000, 20_000) }),
+          });
         }
 
         if (url.pathname === "/api/leaderboard") return json(200, { floors: identity.leaderboard() });

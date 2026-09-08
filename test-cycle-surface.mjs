@@ -44,6 +44,9 @@ const { CYCLE, MAX_ESCALATION_LEVEL, escalationPlan } = await import("./src/conf
 const office = await import("./src/office.js");
 const { startOffice, cycleStrain, cycleSurfacePayload, withEscalation,
         STRAIN_MIN_CYCLES, STRAIN_PCT } = office;
+const { bus } = await import("./src/lib/bus.js");
+const { railRisk } = await import("./src/desk.js");
+const { recordDecision, gateFor } = await import("./src/evaluation.js");
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => {
@@ -68,8 +71,11 @@ const FLOOR = 50;
    every module that owns one of those tables is imported by this test. */
 const reset = () => {
   for (const c of calls.liveCalls()) calls.closeCall(c.id, "test_reset", 1);
+  /* forward_marks and simulated_outcomes carry a foreign key into decision_runs, so
+     they go first; publishability and llm_spend are the two ledgers block 10 measures. */
   for (const t of ["call_events", "deliveries", "alerts", "fills", "results", "lessons",
-                   "calls", "cycles"]) {
+                   "calls", "cycles", "forward_marks", "simulated_outcomes", "decision_runs",
+                   "publishability", "llm_spend"]) {
     try { db.exec(`DELETE FROM ${t}`); } catch { /* table not created in this process */ }
   }
 };
@@ -570,6 +576,153 @@ console.log("\nTHE BUILDER AND THE ROUTE AGREE");
     JSON.stringify(direct.history) === JSON.stringify(body.history) &&
     direct.strain.straining === body.strain.straining,
     `historyRows=${direct.history.length} vs ${body.history.length} straining=${direct.strain.straining}/${body.strain.straining}`);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════════
+   10 · PUBLISHED PER PM-POSITIVE — the haircut every quota estimate assumed
+   ══════════════════════════════════════════════════════════════════════════════════
+   Every "P(>=3 calls per cohort)" number runs on the PM-positive rate (224 WATCH or
+   PROPOSE / 1,571 paid reads = 14.3% all-time) times a publishable fraction nobody has
+   measured under the recalibrated bar: 58 published / 224 PM-positive = 26% under the
+   OLD bars, and today 13 WATCH verdicts became 0 cohort calls with no counter naming
+   the gate. Three fixtures, one per outcome the plan itemises, through the REAL publish
+   path; the ledger, the surface and the emit are then read back with their counts. */
+console.log("\nPUBLISHED PER PM-POSITIVE — what the PM's yeses became at the gate");
+{
+  reset();
+  const cycleId = seedCycle({ quota: 3, level: 0, passes: 1 });
+  /* The bar comes from the config, not a literal: "conviction 18" in the plan is
+     18 because CYCLE_MIN_CONVICTION is 20. If the owner moves the bar the fixture
+     moves with it and the PROPERTY (two under the bar is refused) still holds. */
+  const bar = escalationPlan(0).minConviction;
+  const seen = [];
+  const onEvent = (ev) => { if (ev.type === "risk:mechanical_zero") seen.push(ev); };
+  bus.on("event", onEvent);
+
+  /* (a) A WATCH two points under the L0 bar. No CEO, no order — a WATCH never reaches
+     the CEO, so its only size is Risk's, exactly as desk.js leaves it. */
+  const low = cleanRecord({ finalDecision: "WATCH",
+    pm: { decision: "WATCH", conviction: bar - 2, thesis: "early", invalidation: "loses the launch low" },
+    ceo: undefined, order: undefined });
+  const rLow = publishCall(low, { category: "memecoin", escalation: 0, cycleId });
+  ok(`a WATCH at conviction ${bar - 2} is refused on conviction_below_bar (L0 bar ${bar})`,
+    rLow.outcome === "declined" && rLow.gate === "conviction_below_bar",
+    `outcome=${rLow.outcome} gate=${rLow.gate} conviction=${low.pm.conviction} bar=${bar}`);
+
+  /* (b) A mechanical zero from the REAL rails, in the shape the pipeline produces: the
+     exit probe never completed, so enforceRiskRails sizes it to $0 — and because the
+     ticket is only drafted when the size is positive (desk.js stage 10), there is no
+     stop either. That second fact is why the attribution below exists. */
+  const zeroMint = mintFor();
+  const zeroEv = { symbol: "ZERO", band: "low",
+    pair: { priceUsd: 0.001, marketCap: 300_000, priceChange: { m5: 2 }, liquidityUsd: 90_000 },
+    pairs: { totalLiquidityUsd: 90_000 }, exitProbe: { error: "no route at any size" },
+    mintAccount: { flags: [] } };
+  const modelRisk = { risk_tier: "half", confidence: 0.7, stop_price: 0.00062, position_size_usd: 40 };
+  const railed = railRisk({ risk: modelRisk, ev: zeroEv, redteam: { verdict: "wounded" },
+    mint: zeroMint, symbol: "ZERO" });
+  ok("the rails size an unproven exit to $0 and say so in a rail note",
+    railed.position_size_usd === 0 && (railed.rail_notes || []).some((n) => /^mechanical zero/.test(n)),
+    `position_size_usd=${railed.position_size_usd} (model asked ${modelRisk.position_size_usd}) notes=${JSON.stringify(railed.rail_notes)}`);
+  ok("...and risk:mechanical_zero was emitted exactly once, with the rail's own reason",
+    seen.length === 1 && seen[0].mint === zeroMint && /^mechanical zero/.test(seen[0].reason),
+    `emitted=${seen.length} reason=${JSON.stringify(seen[0]?.reason)} modelSize=${seen[0]?.modelSize}`);
+  const zero = cleanRecord({ mint: zeroMint, symbol: "ZERO", finalDecision: "WATCH",
+    pm: { decision: "WATCH", conviction: bar + 13, thesis: "real ignition", invalidation: "deployer sells" },
+    risk: railed, ceo: undefined, order: undefined, ticket: null, ev: zeroEv });
+  const coZero = cohortEligibility(zero, 0);
+  const rZero = publishCall(zero, { category: "memecoin", escalation: 0, cycleId });
+  ok("the zero-sized WATCH is refused by the SAFETY floor, not by the conviction bar",
+    rZero.outcome === "unsafe" && coZero.safety === true && /^SAFETY FLOOR \(L0\)/.test(coZero.reason),
+    `outcome=${rZero.outcome} refusedBy=${coZero.gate} gates=${JSON.stringify(coZero.gates)} conviction=${zero.pm.conviction}`);
+
+  /* (c) The control: a clean record publishes. Last, so the one-position book can
+     never be what refused (a) or (b). */
+  const clean = cleanRecord();
+  const rClean = publishCall(clean, { category: "memecoin", escalation: 0, cycleId });
+  ok("a clean PROPOSE publishes", rClean.outcome === "published",
+    `outcome=${rClean.outcome} callId=${rClean.callId}`);
+  bus.off("event", onEvent);
+
+  /* (d) NOT A PM-POSITIVE, NOT IN THE DENOMINATOR. A PASS goes through the same gate and
+     must leave no row, or "published per PM-positive" silently becomes "published per
+     anything" and the fraction is wrong in the flattering direction. */
+  const rowsBefore = db.prepare("SELECT COUNT(*) n FROM publishability").get().n;
+  publishCall(cleanRecord({ finalDecision: "PASS",
+    pm: { decision: "PASS", conviction: 40, thesis: "no", invalidation: "n/a" } }),
+    { category: "memecoin", escalation: 0, cycleId });
+  const rowsAfter = db.prepare("SELECT COUNT(*) n FROM publishability").get().n;
+  ok("a PM PASS writes no publishability row — the denominator is PM-positive only",
+    rowsBefore === 3 && rowsAfter === 3, `rows before=${rowsBefore} after=${rowsAfter}`);
+
+  /* THE SURFACE. Exactly the three columns, one each. */
+  const { status, body } = await hit("/api/cycle");
+  const hist = body?.publishablePerPmPositive;
+  ok("GET /api/cycle carries publishablePerPmPositive", status === 200 && hist && typeof hist === "object",
+    `HTTP ${status} publishablePerPmPositive=${JSON.stringify(hist)}`);
+  ok("...reading {published:1, conviction_below_bar:1, zero_authorized_size:1}",
+    JSON.stringify(Object.fromEntries(Object.entries(hist || {}).sort())) ===
+      JSON.stringify({ conviction_below_bar: 1, published: 1, zero_authorized_size: 1 }),
+    JSON.stringify(hist));
+  ok("...with the fraction beside it: 1 published of 3 PM-positive",
+    body.publishableFraction?.pmPositive === 3 && body.publishableFraction?.published === 1 &&
+      Math.abs(body.publishableFraction?.f - 1 / 3) < 0.001,
+    `publishableFraction=${JSON.stringify(body.publishableFraction)}`);
+  ok("...and the open cohort carries its own slice, which here is all of it",
+    JSON.stringify(body.current?.publishablePerPmPositive) === JSON.stringify(hist),
+    `current.publishablePerPmPositive=${JSON.stringify(body.current?.publishablePerPmPositive)}`);
+  /* THE ATTRIBUTION, ON THE ROW. The floor refused the zero on `no_stop` (it sorts first
+     in gateFailures, and there IS no stop); the histogram charges it to the rails. Both
+     facts are on the row, so nothing is hidden by the choice of column. */
+  const zeroRow = db.prepare("SELECT gate, refused_by, gates, pm_decision, conviction, outcome FROM publishability WHERE mint=?").get(zeroMint);
+  ok("the mechanical zero is charged to zero_authorized_size with the raw gate kept beside it",
+    zeroRow?.gate === "zero_authorized_size" && zeroRow?.refused_by === coZero.gate &&
+      JSON.parse(zeroRow?.gates || "[]").includes("zero_authorized_size"),
+    `gate=${zeroRow?.gate} refused_by=${zeroRow?.refused_by} gates=${zeroRow?.gates} pm=${zeroRow?.pm_decision}@${zeroRow?.conviction} outcome=${zeroRow?.outcome}`);
+
+  /* THE DECISION HISTOGRAM — the calibration SIM C reads. decision_runs is written by
+     desk.workup via recordDecision; drive the same function with the three fixtures
+     plus the three other endings a workup has, and require the route to return the
+     EXACT binding_gate strings gateFor stamps — derived from the source, not retyped. */
+  const endings = [
+    ["clean", clean], ["low", low], ["zero", zero],
+    ["refuted", cleanRecord({ finalDecision: "WATCH", redteam: { verdict: "refuted", headline: "the float is bundled" },
+      pm: { decision: "WATCH", conviction: 30, thesis: "x", invalidation: "y" } })],
+    ["killed", { mint: mintFor(), outcome: "killed", killedBy: "Flow", reason: "one wallet is the tape" }],
+    ["screened", { mint: mintFor(), outcome: "screened_out", fails: [{ code: "mintable", detail: "mint authority present" }] }],
+  ];
+  const expectedGates = new Set(endings.map(([, r]) => gateFor(r)));
+  for (const [, r] of endings) recordDecision("cycle-histogram", r, Date.now());
+  const t = Date.now();
+  db.prepare("INSERT INTO llm_spend (seat,model,effort,in_tok,out_tok,cached_tok,usd,ts) VALUES (?,?,?,?,?,?,?,?)")
+    .run("XRead", "grok-4.6", null, 12_000, 400, 0, 0.15, t - 1000);
+  db.prepare("INSERT INTO llm_spend (seat,model,effort,in_tok,out_tok,cached_tok,usd,ts,floor) VALUES (?,?,?,?,?,?,?,?,?)")
+    .run("Red Team", "claude-opus-5", "high", 30_000, 10_500, 1_200, 0.37, t, 50);
+
+  const h = await hit("/api/decisions/histogram?hours=24");
+  ok("GET /api/decisions/histogram answers 200", h.status === 200, `HTTP ${h.status}`);
+  const gotGates = new Set((h.body?.decisions || []).map((r) => r.binding_gate));
+  ok("...with exactly the binding_gate strings gateFor produces",
+    [...expectedGates].every((g) => gotGates.has(g)) && [...gotGates].every((g) => expectedGates.has(g)),
+    `expected=${JSON.stringify([...expectedGates].sort())} got=${JSON.stringify([...gotGates].sort())}`);
+  const total = (h.body?.decisions || []).reduce((a, r) => a + r.n, 0);
+  const watchRow = (h.body?.decisions || []).find((r) => r.binding_gate === "WATCH" && r.final_decision === "WATCH");
+  ok("...grouped by outcome × final_decision × binding_gate, with counts that add up",
+    total === endings.length && watchRow?.n === 2 && watchRow?.outcome === "decided",
+    `rows=${JSON.stringify(h.body?.decisions?.map((r) => [r.outcome, r.final_decision, r.binding_gate, r.n]))} total=${total}`);
+  const spendRows = h.body?.llmSpend || [];
+  const keysOf = (r) => JSON.stringify(Object.keys(r).sort());
+  ok("...and the per-row llm_spend carries exactly {seat, model, effort, usd, ts} — no floor, no prompt",
+    spendRows.length === 2 && spendRows.every((r) => keysOf(r) === JSON.stringify(["effort", "model", "seat", "ts", "usd"])),
+    `rows=${JSON.stringify(spendRows)}`);
+  ok("...with the measured tails intact rather than a mean",
+    JSON.stringify(spendRows.map((r) => r.usd).sort((a, b) => a - b)) === JSON.stringify([0.15, 0.37]),
+    `usd=${JSON.stringify(spendRows.map((r) => r.usd))}`);
+  ok("...and the same publishable histogram the cycle surface shows",
+    JSON.stringify(h.body?.publishablePerPmPositive) === JSON.stringify(hist),
+    `route=${JSON.stringify(h.body?.publishablePerPmPositive)} cycle=${JSON.stringify(hist)}`);
+  const post = await fetch(base + "/api/decisions/histogram", { method: "POST", body: "{}" });
+  ok("...and it is GET only", post.status === 405, `POST → HTTP ${post.status}`);
 }
 
 server.close();

@@ -60,6 +60,22 @@ export function spendBySeat({ hours = 24 } = {}) {
   };
 }
 
+/**
+ * THE BILL, ROW BY ROW. spendBySeat gives means, and a mean is the wrong number for a
+ * cost simulation: the measured per-seat medians (Red Team $0.37, Narrative $0.21,
+ * PM $0.18 … Liquidity $0.03) sit under a tail the server-side fallback and retries
+ * can stretch to dollars on one call, and only the rows carry that tail. Five columns —
+ * seat, model, effort, usd, ts — and nothing else: no floor, no prompt, no evidence.
+ * Newest first, bounded, so a public GET can never page the whole ledger out.
+ */
+export function spendRows({ sinceMs = 0, limit = 5000 } = {}) {
+  const cap = Math.max(1, Math.min(20_000, Number(limit) || 5000));
+  return db.prepare(`SELECT seat, model, effort, usd, ts FROM llm_spend
+                     WHERE ts >= ? ORDER BY ts DESC LIMIT ?`).all(Number(sinceMs) || 0, cap)
+    .map((r) => ({ seat: r.seat, model: r.model, effort: r.effort,
+      usd: Number(r.usd) || 0, ts: r.ts }));
+}
+
 ensureColumn("llm_spend", "floor", "INTEGER");
 // Existing nulls predate floor attribution and may contain tenant spend. Keep them out
 // of house-only improvement evidence rather than laundering unknown provenance as HQ.
@@ -444,7 +460,14 @@ export const OPPORTUNISTIC_SHARE = Math.min(0.95, Math.max(0.1,
   Number(process.env.DESK_OPPORTUNISTIC_SHARE || 0.55)));
 
 /** Lanes that yield to the reserve. Everything else spends to the full cap. */
-const OPPORTUNISTIC = new Set(["fresh", "promote"]);
+/* THE TREND LANE YIELDS TOO. It was never added here when it was wired up, so while
+ * fresh and promote stood aside at their share it spent to the full cap: 32 TrendScan
+ * calls, $3.47, in the live 24h — 9% of the day — and 122 calls / $13.65 over 7d, every
+ * pass of it abandoned as researchless because both breakers were open. It is a
+ * scanning lane exactly like the other two and has no more claim on the cycle's
+ * reserve than they do. The workup reads this through desk.js; the scan itself reads
+ * it in trends.js, before Grok is paid. */
+const OPPORTUNISTIC = new Set(["fresh", "promote", "trend"]);
 
 /**
  * THE PACE — what actually makes a desk run around the clock.
@@ -706,9 +729,52 @@ actually about to send, immediately before it signs.
 export class Refusal extends Error {}
 
 /**
+ * THE USER TURN, IN CACHE ORDER — and the whole of the prefix fix.
+ *
+ * Measured live over 24h: the PM read ~377k input tokens and had 32,039 of them served
+ * from cache (4.5%); Risk 4.4%; Red Team 6.8%; Narrative 0. The cache is a byte-prefix
+ * match, and the seat's brief used to sit in `system` BETWEEN SHARED_RULES and the
+ * evidence bundle — so the 8-24k-token bundle that eight seats read within seconds of
+ * each other differed, byte for byte, in front of every one of them and could never be
+ * a hit. Now everything that varies by seat comes AFTER the last breakpoint:
+ *
+ *   system      SHARED_RULES                                (breakpoint)
+ *   content[0]  the shared block — the evidence bundle       (breakpoint)
+ *   content[1]  the seat's brief + its standing orders + the task + book/red team/risk
+ *
+ * Caches are model-scoped, and an `output_config.effort` difference splits the messages
+ * cache as well, so the bundle is shared per model AND effort: Forensics, Flow and Risk
+ * on Sonnet/high, Red Team and the PM on Opus/high; Liquidity sits alone on Haiku 4.5
+ * since Technical retired (2026-09-08). Reads bill at 0.1x and 5-minute writes at 1.25x,
+ * so a second seat on the same entry is already ahead. Haiku 4.5's minimum cacheable
+ * prefix is 4,096 tokens — SHARED_RULES alone is under that, so a Haiku seat only hits
+ * once the bundle block is in the prefix. The standing orders stay AFTER the last
+ * breakpoint deliberately:
+ * guidance changes far more often than a charter, and a cached copy would mean a seat
+ * working under orders that were reverted an hour ago.
+ *
+ * THE SEAT'S STANDING ORDERS. Its charter is the constant its module ships; the orders
+ * below it are written by the coach from the desk's own graded results, between
+ * workups. Injected here, once, so every seat in the building learns the same way —
+ * and so a new seat cannot be added that quietly opts out of the feedback loop.
+ */
+function seatTurn({ seat, system, shared, prompt }) {
+  const brief = system ? withPolicy(seat, system) : "";
+  const tail = brief ? `${brief}\n\n${prompt}` : prompt;
+  return [
+    ...(shared ? [{ type: "text", text: shared, cache_control: { type: "ephemeral" } }] : []),
+    { type: "text", text: tail },
+  ];
+}
+
+/**
  * One structured call to a seat. Returns the parsed object, validated against `schema`.
  * Throws after retries rather than returning a half-parsed shape — a seat that cannot
  * answer in contract is a seat that gets dropped, not one that gets guessed at.
+ *
+ * `shared` is the block every seat on the same model reads byte-for-byte — the evidence
+ * bundle — and it is placed ahead of the brief so it can be a cache hit (seatTurn()).
+ * `prompt` is the part that is this seat's alone.
  */
 export async function ask({
   seat,
@@ -717,6 +783,7 @@ export async function ask({
   schema,
   prompt,
   system,
+  shared,
   maxTokens,
   attempts = 3,
 }) {
@@ -749,18 +816,11 @@ export async function ask({
       const req = {
         model,
         max_tokens: maxTokens,
-        system: [
-          { type: "text", text: SHARED_RULES, cache_control: { type: "ephemeral" } },
-          /* THE SEAT'S STANDING ORDERS. Its charter is the constant its module ships;
-             the orders below it are written by the coach from the desk's own graded
-             results, between workups. Injected here, once, so every seat in the
-             building learns the same way — and so a new seat cannot be added that
-             quietly opts out of the feedback loop. Uncached deliberately: guidance
-             changes far more often than a charter, and a stale cached copy would mean
-             a seat working under orders that were reverted an hour ago. */
-          ...(system ? [{ type: "text", text: withPolicy(seat, system) }] : []),
-        ],
-        messages: [{ role: "user", content: prompt }],
+        /* SHARED_RULES ALONE, so the cached prefix is byte-identical for every seat on
+           a model. The seat's brief used to sit here too, between SHARED_RULES and the
+           evidence — and it is what made the bundle unhittable: see seatTurn(). */
+        system: [{ type: "text", text: SHARED_RULES, cache_control: { type: "ephemeral" } }],
+        messages: [{ role: "user", content: seatTurn({ seat, system, shared, prompt }) }],
         output_config: haiku
           ? { format: betaZodOutputFormat(schema) }
           : { format: betaZodOutputFormat(schema), effort },
@@ -851,7 +911,7 @@ export async function ask({
  * Two-step for the narrative seat: server-side web search cannot be combined with a
  * structured output format, so we search in one call and shape the result in a second.
  */
-export async function askWithWeb({ seat, model, effort, schema, prompt, system, maxTokens = 16000 }) {
+export async function askWithWeb({ seat, model, effort, schema, prompt, system, shared, maxTokens = 16000 }) {
   /* The second Anthropic entry point, and it needs the breaker as much as ask() does:
      the narrative seat runs on every workup, so with the account dry it was a full
      third of the refusals. Guarded before seat:searching so a breaker-refused call
@@ -869,12 +929,19 @@ export async function askWithWeb({ seat, model, effort, schema, prompt, system, 
     const req = {
       model,
       max_tokens: maxTokens,
-      system: SHARED_RULES + (system ? `\n\n${system}` : ""),
+      /* Array form with the breakpoint, exactly as ask() builds it. A plain string
+         here carried no cache_control at all, which is why the Narrative seat ran
+         at cached=0 in the measured 24h: 20 calls, $3.79, $0.19 each. Tools render
+         ahead of `system`, so this request keys its own entry rather than sharing the
+         analysts' — but the tool-error retry below re-sends identical bytes and
+         reads it back, and the shaping call in ask() carries the same bundle block
+         under its own effort. */
+      system: [{ type: "text", text: SHARED_RULES, cache_control: { type: "ephemeral" } }],
       // max_uses 4 fed ~41k tokens of raw results back through the loop per run;
       // two searches answer "is there a story and is it true" or nothing will.
       tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 2 }],
       output_config: { effort },
-      messages: [{ role: "user", content: prompt }],
+      messages: [{ role: "user", content: seatTurn({ seat, system, shared, prompt }) }],
     };
     /* This call had NO credit handler at all: a dry account threw the provider's raw
        "credit balance is too low" error out of askWithWeb, where desk.js filed it beside
@@ -932,6 +999,7 @@ export async function askWithWeb({ seat, model, effort, schema, prompt, system, 
     effort: "low", // shaping already-gathered notes is mechanical
     schema,
     system,
+    shared,
     maxTokens,
     prompt:
       `Convert your own research notes into the required contract. Use ONLY what the notes support.\n\n` +

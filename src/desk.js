@@ -1,5 +1,7 @@
 import * as ds from "./data/dexscreener.js";
-import { gather, screen, enrichWithXRead } from "./data/evidence.js";
+import { gather, screen, enrichWithXRead, creatorHandle } from "./data/evidence.js";
+import { reputationFor } from "./devrep.js";
+import { recordLaunchShadow } from "./launch-shadow.js";
 import { ANALYSTS, runAnalyst, runNarrative } from "./agents/analysts.js";
 import { runScout, runRedTeam, runRisk, runPM, runExecution } from "./agents/decision.js";
 import { complianceCheck } from "./agents/compliance.js";
@@ -55,12 +57,62 @@ export function firstKiller(analysts) {
   return Object.entries(analysts || {}).find(([, a]) => a?.kill) ?? null;
 }
 
+/* THE CHEAP BATCH, named so a test derives the seats it expects from the source instead
+   of pinning them. Technical was the third seat here until 2026-09-08 — 31 calls, $0.67
+   in a live day, 0 kills and no KILL clause to make one; agents/analysts.js has the
+   retirement note. Liquidity now sits on Haiku 4.5, so the whole batch is ~$0.045. */
+export const CHEAP_SEATS = Object.freeze(["liquidity", "flow"]);
+
 /**
  * Whether the desk should buy the reputation read for this coin.
  * True only while every seat that has reported so far has let the coin live.
  */
 export function shouldBuyReputationRead(analysts) {
   return firstKiller(analysts) === null;
+}
+
+/**
+ * The desk's own ledger entry for this coin's creator, if it condemns them; else null.
+ *
+ * devrep.js exists so that "the second coin from a known rugger is caught for free",
+ * and it was not doing that: the record was read only inside enrichWithXRead, AFTER the
+ * ~$0.15 read had been paid for, and the kill in workup() trusted only what the fresh
+ * read said. So every relaunch by an account the desk had already written down, with
+ * evidence, bought the research again. Live ledger when this was written: 21 serial
+ * ruggers against 288 suspects.
+ *
+ * The handle is creatorHandle(ev) — the SAME resolution the read starts from — so the
+ * ledger and Grok are asked about one identity. Only `serial_rugger` condemns, and
+ * devrep.js stores that verdict only when the rugging was SOURCED (an unsourced
+ * accusation is filed as `suspect`). suspect, clean and unknown all return null here
+ * and change nothing about the workup: the read is bought exactly as before.
+ */
+export function ruggerOnLedger(ev) {
+  const handle = creatorHandle(ev);
+  const rep = handle ? reputationFor(handle) : null;
+  return rep?.verdict === "serial_rugger" ? rep : null;
+}
+
+/**
+ * The risk rails, with a zero made visible.
+ *
+ * enforceRiskRails sizes a record to $0 on four mechanical grounds (the exit probe
+ * never completed, a live authority, no valid stop, no paper budget) and says so only
+ * in a rail note the Risk seat's verdict swallows. Downstream that zero is the
+ * `zero_authorized_size` SAFETY gate — one of the four post-PM losses (refuted,
+ * conviction, zero size, book) no live counter itemised while today's 13 WATCH verdicts
+ * produced 0 cohort calls. Emitting it here, at the one call site, is what lets the
+ * publishability ledger and the chronicle both name the rails as the cause.
+ */
+export function railRisk({ risk, ev, redteam, mint, symbol }) {
+  const out = enforceRiskRails({ risk, ev, redteam });
+  if (!(out.position_size_usd > 0))
+    emit("risk:mechanical_zero", { mint, symbol,
+      reason: (out.rail_notes ?? []).find((n) => /^mechanical zero/.test(String(n)))
+        ?? "position_size_usd is 0 with no rail note",
+      modelSize: Number.isFinite(Number(risk?.position_size_usd)) ? Number(risk.position_size_usd) : null,
+      modelTier: risk?.risk_tier ?? null });
+  return out;
 }
 
 export async function workup(cycle, mint, hook = "", opts = {}) {
@@ -136,6 +188,97 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
       "(breaker open, no read bought)");
   }
 
+  /* The seat ledger for this workup. Declared here, above the read, because the outage
+     probe below may fill its first entry before anything is bought. */
+  const analysts = {};
+  const seatFailures = [];
+  /* Set by collect() when a rejection is the provider refusing on credit. It is checked
+     after each settled batch rather than inside collect, so the other seats in that batch
+     still record their verdicts before the cycle stops. */
+  let creditFailure = null;
+  const collect = (k, r) => {
+    if (r.status === "fulfilled") {
+      analysts[k] = r.value;
+      store.recordVerdict(cycle, mint, ev.symbol, k, r.value);
+      emit("seat:verdict", { seat: ANALYSTS[k]?.label ?? "Narrative", mint, symbol: ev.symbol,
+        score: r.value.score, confidence: r.value.confidence, kill: r.value.kill });
+    } else {
+      seatFailures.push({ seat: k, error: String(r.reason?.message || r.reason) });
+      emit("seat:failed", { seat: k, mint, error: String(r.reason?.message || r.reason) });
+      /* A DEAD ACCOUNT IS NOT A SEAT FAILURE. Promise.allSettled turns every rejection
+       * into a value, so the OutOfCredit that lib/llm.js throws when the balance is empty
+       * was being filed here beside a timeout and a bad JSON body, and the workup went on
+       * to return "insufficient_coverage" — a research verdict wearing a billing failure.
+       * penthouse.js:773 has been waiting for that throw the whole time. Measured on
+       * 2026-09-06 while both accounts were dry: 1,323 refused Anthropic requests an hour,
+       * 92% of candidates ending as insufficient_coverage, and 2 cycle:halted in 3.2 hours.
+       * Remember it and rethrow once the batch has been collected, so every seat still
+       * reports and the cycle still halts. */
+      if (r.reason instanceof OutOfCredit) creditFailure = creditFailure ?? r.reason;
+    }
+  };
+  /* A kill from any analyst ends the workup the same way wherever it lands. The stage
+     names what the kill SAVED, and the two call sites below say it honestly: one fires
+     before the read is bought, the other after. */
+  const endOnKill = (killer, stage, detail) => {
+    emit("stage", { stage, mint, symbol: ev.symbol, detail });
+    const rec = { mint, symbol: ev.symbol, outcome: "killed", killedBy: killer[0],
+      reason: killer[1].kill_reason, ev, analysts, seatFailures, finalDecision: "killed" };
+    rec.reportFile = writeReport(cycle, rec);
+    emit("token:end", { mint, symbol: ev.symbol, outcome: "killed",
+      detail: `${killer[0]}: ${killer[1].kill_reason}`, report: rec.reportFile });
+    recordEvaluation(rec);
+    return rec;
+  };
+
+  /* THE PROBE MUST NOT BE THE X READ.
+   *
+   * The guard above lets exactly one outage case through: a probe is due. Whatever the
+   * desk buys next is that probe — and until now it was the $0.154 xAI read, bought for
+   * every screen survivor the instant the cooldown lapsed, before any Anthropic seat had
+   * been asked whether the account pays. Measured live over 24h: XRead 110 calls
+   * ($14.69) against Liquidity 31, so ~79 reads (~$10.5, 28% of a $38.26 day) were
+   * bought for coins no seat ever judged; over 7 days, at least 967 of 1,437 reads.
+   *
+   * So while the breaker is not closed the desk asks its CHEAPEST seat first — Liquidity,
+   * $0.03 median live today, ~$0.013 once it sits on Haiku — and only that seat's bill
+   * buys the read. A credit refusal costs nothing here and halts the cycle exactly as
+   * the batch below would have; a success is what closes the breaker (gate.success() at
+   * the meter, llm.js), and the workup then proceeds precisely as in the healthy regime
+   * minus the one seat already answered. A probe that fails WITHOUT proving the account
+   * pays — a timeout, a 404 after a retier — re-arms the breaker for a fresh cooldown,
+   * so every seat after the read would be refused and the read would be the same waste:
+   * that ends here too, with nothing bought. And a probe that condemns the coin ends it
+   * the way any cheap-seat kill does, before a read is paid for.
+   *
+   * The healthy order is untouched. With the breaker closed the read still goes SECOND,
+   * straight after the free screen, as the owner set it on 2026-09-04: in the token:end
+   * window it killed 59 of 94 paid survivors (63%) against the trio's 12 of 35 (34%).
+   * This is an outage fix and only that. */
+  let probedSeat = null;
+  if (analystCredit.state !== "closed") {
+    emit("stage", { stage: "credit_probe", mint, symbol: ev.symbol,
+      detail: "the analyst breaker is open and a probe is due — Liquidity is asked first, and only its bill buys the reputation read" });
+    const probe = await Promise.allSettled([runAnalyst("liquidity", ev)]);
+    collect("liquidity", probe[0]);
+    probedSeat = "liquidity";
+    const afterProbe = creditBreakerState("anthropic");
+    if (creditFailure || afterProbe.state !== "closed") {
+      emit("token:end", { mint, symbol: ev.symbol, outcome: "credit_outage",
+        detail: creditFailure
+          ? "the probe was refused for credit — nothing was bought for this coin"
+          : `the probe failed without proving the account pays (${seatFailures.at(-1)?.error ?? "no detail"}) ` +
+            "— nothing was bought for this coin" });
+      throw creditFailure ?? new OutOfCredit("the Anthropic balance is empty — the desk cannot think " +
+        "(probe failed, no read bought)");
+    }
+    const probeKiller = firstKiller(analysts);
+    if (probeKiller) {
+      return endOnKill(probeKiller, "xread_skipped",
+        `${probeKiller[0]} killed it as the credit probe — the reputation read was never bought`);
+    }
+  }
+
   /* SAFETY CLEARED — only now does the desk buy anything about this coin.
    *
    * The screen above answered the question that disqualifies outright: can this be used
@@ -165,6 +308,37 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
    * narrow: only what Grok states as fact about the deployer or the story, never a
    * lukewarm verdict, because an expensive seat killing on a hunch is how a desk stops
    * publishing anything at all. */
+  /* THE LEDGER IS ASKED BEFORE THE READ IS BOUGHT, NOT AFTER IT.
+   *
+   * A rugger rotates wallets and keeps the account, and devrep.js remembers the
+   * account — but until now only enrichWithXRead read it, once the read was already
+   * paid for, and the kill below acts only on the fresh read's serial_rugger. Asked
+   * here, a creator the desk has already condemned WITH EVIDENCE ends the workup for $0
+   * and nothing is bought about the coin. This is the paid arm's own SAFETY kill
+   * (deployer_has_rugged, calls.js GATE_CLASS — absolute at every level) moved earlier
+   * and made free; it adds no gate and waives none. Recorded as an XRead verdict so
+   * recentKill keeps the coin out of the universe for the usual 12h, and marked
+   * from_ledger so nothing that counts reads mistakes it for a purchase. */
+  const rugger = ruggerOnLedger(ev);
+  if (rugger) {
+    const seen = rugger.tokens.length;
+    const ledgerKill = `the deployer's own account (@${rugger.handle}) has rugged before — on the desk's ledger ` +
+      `since ${new Date(rugger.first_seen).toISOString().slice(0, 10)}, ${seen} launch${seen === 1 ? "" : "es"} seen: ` +
+      `${String(rugger.evidence || "").slice(0, 180) || "sourced by an earlier reputation read"}`;
+    emit("stage", { stage: "ledger", mint, symbol: ev.symbol,
+      detail: "the desk's own ledger condemns this creator — the reputation read was never bought" });
+    emit("seat:verdict", { seat: "XRead", mint, symbol: ev.symbol, kill: true, detail: ledgerKill });
+    store.recordVerdict(cycle, mint, ev.symbol, "XRead",
+      { verdict: "FAIL", kill: true, kill_reason: ledgerKill, from_ledger: true, handle: rugger.handle });
+    const rec = { mint, symbol: ev.symbol, outcome: "killed", killedBy: "xread", killArm: "serial_rugger",
+      reason: ledgerKill, ev, analysts, seatFailures, finalDecision: "killed", relaxations };
+    rec.reportFile = writeReport(cycle, rec);
+    emit("token:end", { mint, symbol: ev.symbol, outcome: "killed",
+      detail: `xread: ${ledgerKill}`, report: rec.reportFile });
+    recordEvaluation(rec);
+    return rec;
+  }
+
   emit("stage", { stage: "reputation", mint, symbol: ev.symbol });
   await enrichWithXRead(ev, hook).catch(() => {});
 
@@ -174,6 +348,13 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
      this before, more than once", which is the single strongest signal available about
      a coin nobody has traded yet. */
   const read = ev.xRead && !ev.xRead.error ? ev.xRead : null;
+  /* THE LAUNCH PROXIES, WRITTEN BESIDE THE VERDICT THEY WILL BE JUDGED AGAINST. The
+     creator's share of supply, whether they have sold, and what the launch minute
+     carried against the curve (data/solana.js, data/pumpfun-live.js) are new rulers, and
+     a ruler is validated before it is trusted: one row per PAID read, so their precision
+     against serial_rugger and manufactured can be read off launch-shadow.js before any
+     of them is allowed to end a workup. Bookkeeping; it can never fail the workup. */
+  if (read) { try { recordLaunchShadow(ev, read); } catch { /* a shadow row must never fail a workup */ } }
   /* THE TWO ARMS ARE NOT THE SAME KIND OF THING, and the cohort quota is what forced
    * the distinction into the code rather than leaving it in the prose above.
    *
@@ -212,7 +393,7 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
     emit("seat:verdict", { seat: "XRead", mint, symbol: ev.symbol, kill: true, detail: grokKill });
     store.recordVerdict(cycle, mint, ev.symbol, "XRead", { verdict: "FAIL", kill: true, kill_reason: grokKill });
     const rec = { mint, symbol: ev.symbol, outcome: "killed", killedBy: "xread", killArm,
-      reason: grokKill, ev, analysts: {}, finalDecision: "killed", relaxations };
+      reason: grokKill, ev, analysts, seatFailures, finalDecision: "killed", relaxations };
     rec.reportFile = writeReport(cycle, rec);
     emit("token:end", { mint, symbol: ev.symbol, outcome: "killed",
       detail: `xread: ${grokKill}`, report: rec.reportFile });
@@ -221,53 +402,23 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
   }
 
   emit("stage", { stage: "analysis", mint, symbol: ev.symbol });
-  const cheapKeys = ["liquidity", "flow", "technical"];
-  const analysts = {};
-  const seatFailures = [];
-  /* Set by collect() when a rejection is the provider refusing on credit. It is checked
-     after each settled batch rather than inside collect, so the other seats in that batch
-     still record their verdicts before the cycle stops. */
-  let creditFailure = null;
-  const collect = (k, r) => {
-    if (r.status === "fulfilled") {
-      analysts[k] = r.value;
-      store.recordVerdict(cycle, mint, ev.symbol, k, r.value);
-      emit("seat:verdict", { seat: ANALYSTS[k]?.label ?? "Narrative", mint, symbol: ev.symbol,
-        score: r.value.score, confidence: r.value.confidence, kill: r.value.kill });
-    } else {
-      seatFailures.push({ seat: k, error: String(r.reason?.message || r.reason) });
-      emit("seat:failed", { seat: k, mint, error: String(r.reason?.message || r.reason) });
-      /* A DEAD ACCOUNT IS NOT A SEAT FAILURE. Promise.allSettled turns every rejection
-       * into a value, so the OutOfCredit that lib/llm.js throws when the balance is empty
-       * was being filed here beside a timeout and a bad JSON body, and the workup went on
-       * to return "insufficient_coverage" — a research verdict wearing a billing failure.
-       * penthouse.js:773 has been waiting for that throw the whole time. Measured on
-       * 2026-09-06 while both accounts were dry: 1,323 refused Anthropic requests an hour,
-       * 92% of candidates ending as insufficient_coverage, and 2 cycle:halted in 3.2 hours.
-       * Remember it and rethrow once the batch has been collected, so every seat still
-       * reports and the cycle still halts. */
-      if (r.reason instanceof OutOfCredit) creditFailure = creditFailure ?? r.reason;
-    }
-  };
-
+  /* Liquidity is left out here when it already ran as the outage probe above: its
+     verdict is on the ledger and a seat is not bought twice for one coin. */
+  const cheapKeys = CHEAP_SEATS.filter((k) => k !== probedSeat);
   const cheap = await Promise.allSettled(cheapKeys.map((k) => runAnalyst(k, ev)));
   cheap.forEach((r, i) => collect(cheapKeys[i], r));
   if (creditFailure) throw creditFailure;
 
-  /* A kill here is final, exactly as it is after the full batch — so stop, and keep the
-     X read's $0.148 plus two more seats. This is the whole saving, and it is recorded
-     so the effect is auditable rather than asserted. */
+  /* A kill here is final, exactly as it is after the full batch — so stop, and keep
+     forensics, narrative, the red team, risk, the PM and execution: a fully-worked coin
+     is ~$1.30 against the ~$0.30 spent by this line. Recorded so the effect is auditable
+     rather than asserted — and recorded HONESTLY. This event was called `xread_skipped`
+     while the read had been bought some sixty lines above it; what a kill here actually
+     skips is the deep batch and every decision seat after it. */
   const cheapKiller = firstKiller(analysts);
   if (cheapKiller) {
-    emit("stage", { stage: "xread_skipped", mint, symbol: ev.symbol,
-      detail: `${cheapKiller[0]} killed it before the reputation read was bought` });
-    const rec = { mint, symbol: ev.symbol, outcome: "killed", killedBy: cheapKiller[0],
-      reason: cheapKiller[1].kill_reason, ev, analysts, seatFailures, finalDecision: "killed" };
-    rec.reportFile = writeReport(cycle, rec);
-    emit("token:end", { mint, symbol: ev.symbol, outcome: "killed",
-      detail: `${cheapKiller[0]}: ${cheapKiller[1].kill_reason}`, report: rec.reportFile });
-    recordEvaluation(rec);
-    return rec;
+    return endOnKill(cheapKiller, "deep_skipped",
+      `${cheapKiller[0]} killed it after the reputation read — forensics, narrative and the decision seats were not bought`);
   }
 
   /* STARTED, NOT AWAITED, and only for a coin still standing. Forensics reads the
@@ -282,6 +433,9 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
   if (creditFailure) throw creditFailure;
 
   // A desk missing half its analysts is not a desk. Refuse to decide on a thin book.
+  // Four seats since Technical retired, so 3 tolerates ONE failure among Liquidity, Flow,
+  // Forensics and Narrative where it tolerated two — kept at 3 on purpose: two of four
+  // is half, and the floor was never a seat count in disguise.
   if (Object.keys(analysts).length < 3) {
     emit("token:end", { mint, symbol: ev.symbol, outcome: "insufficient_coverage" });
     const rec = { mint, symbol: ev.symbol, outcome: "insufficient_coverage", seatFailures, ev, analysts,
@@ -353,18 +507,76 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
     fatalAttacks: fatal.length,
     ...(redteam.downgraded_from ? { downgradedFrom: redteam.downgraded_from } : {}) });
 
+  /* A REFUTATION THAT SURVIVED THE BAR ENDS THE WORKUP HERE.
+   *
+   * Past applyRedTeamBar, `refuted` means a fatal attack the seat marked verified AND
+   * the evidence bundle confirms (redteam-policy.js confirmedByBundle) — a fact about the
+   * coin, not the base rate. The mandate already treats that as a SAFETY refusal unless
+   * the PM proposes over it (mandate.js `redteam_refuted_unanswered`, calls.js GATE_CLASS),
+   * and the rails hand a refuted coin a quarter multiplier the PM's brief then forbids a
+   * PROPOSE against once it reaches zero. Measured all-time: the PM proposed over a
+   * refutation 3 times in 260, and 69 of the 281 coins that reached the red team (25%)
+   * left it refuted — every one of which then bought Risk ($0.063), the PM ($0.173) and,
+   * when a ticket was drafted, Execution ($0.045): ~$0.28 a coin for a record the
+   * mandate was always going to decline.
+   *
+   * So the workup ends with the verdict on the record and nothing else bought. The gate
+   * does not move: gateFor still stamps `redteam`, eligibility still declines with
+   * safety:true, and no escalation level reaches past it. What closes is the PM's
+   * answer-the-refutation path, which the owner may reopen for deployer_misconduct with
+   * an external citation. The downgraded case is deliberately NOT here: a refutation the
+   * bar could not verify is `wounded`, and a wounded coin still buys all three seats. */
+  if (redteam.verdict === "refuted") {
+    emit("stage", { stage: "decision_skipped", mint, symbol: ev.symbol,
+      detail: `the red team refuted it on ${fatal.length} verified fatal attack${fatal.length === 1 ? "" : "s"} — Risk, the PM and Execution were not bought` });
+    const record = { mint, symbol: ev.symbol, outcome: "decided", weighted, ev, analysts,
+      redteamRaw, redteam, risk: null, pm: null, ticket: null, compliance: null,
+      finalDecision: "REFUTED", escalationLevel: plan.level, relaxations };
+    record.reportFile = writeReport(cycle, record);
+    emit("token:end", { mint, symbol: ev.symbol, outcome: "REFUTED",
+      detail: `red team: ${redteam.headline ?? "refuted"}`, report: record.reportFile });
+    record.decisionRunId = recordEvaluation(record);
+    return record;
+  }
+
   const modelRisk = await runRisk(ev, analysts, redteam);
   /* NO BOOK-HEAT ARGUMENT. `retainedBookRiskUsd(liveCalls())` used to ride in here as
      `openRiskUsd` and, once the desk's paper book was "full", zeroed the size and killed
      a clean coin at the publication gate. Deleted 2026-09-07: how much is at risk is the
      bot's question, answered against the wallet that signs (executor/strategy.mjs:308-311),
      not the desk's against a book nobody trades. */
-  const risk = enforceRiskRails({ risk: modelRisk, ev, redteam });
+  const risk = railRisk({ risk: modelRisk, ev, redteam, mint, symbol: ev.symbol });
   if (risk.rail_notes?.length) emit("seat:adjusted", { seat: "Risk", mint, symbol: ev.symbol,
     detail: risk.rail_notes.join("; "), modelTier: modelRisk.risk_tier,
     finalSize: risk.position_size_usd });
   store.recordVerdict(cycle, mint, ev.symbol, "risk", { score: risk.position_size_usd, confidence: risk.confidence, ...risk });
   emit("seat:verdict", { seat: "Risk", mint, symbol: ev.symbol, detail: `$${risk.position_size_usd}` });
+
+  /* A MECHANICAL ZERO ENDS THE WORKUP HERE, BEFORE THE PM AND EXECUTION.
+   *
+   * railRisk has already emitted risk:mechanical_zero and named the rail (an exit the
+   * probe never proved, a live authority, no stop under the price). What is left to
+   * decide is nothing: the PM's brief forbids PROPOSE at zero size (decision.js
+   * PM_SYSTEM), a WATCH at zero size dies at `zero_authorized_size` — SAFETY, no level
+   * reaches past it (calls.js GATE_CLASS, mandate.js) — and the ticket was already gated
+   * on a positive size at stage 10. So the $0.173 Opus call could not change the
+   * outcome; it was the largest of the ~$0.28 bought after a verdict the gate had
+   * already settled. The record still carries the railed size and the rail note, so the
+   * publishability ledger and the chronicle name the rails as the cause. */
+  if (!(risk.position_size_usd > 0)) {
+    const railNote = (risk.rail_notes ?? []).find((n) => /^mechanical zero/.test(String(n)))
+      ?? "the rails sized this at $0";
+    emit("stage", { stage: "pm_skipped", mint, symbol: ev.symbol,
+      detail: `${railNote} — the PM and Execution were not bought` });
+    const record = { mint, symbol: ev.symbol, outcome: "decided", weighted, ev, analysts,
+      redteamRaw, redteam, risk, pm: null, ticket: null, compliance: null,
+      finalDecision: "ZERO_SIZE", escalationLevel: plan.level, relaxations };
+    record.reportFile = writeReport(cycle, record);
+    emit("token:end", { mint, symbol: ev.symbol, outcome: "ZERO_SIZE", size: 0,
+      detail: railNote, report: record.reportFile });
+    record.decisionRunId = recordEvaluation(record);
+    return record;
+  }
 
   const pm = await runPM(ev, analysts, redteam, risk, weighted, opts);
   store.recordVerdict(cycle, mint, ev.symbol, "pm", { verdict: pm.decision, score: pm.conviction, ...pm });

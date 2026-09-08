@@ -342,6 +342,18 @@ ensureColumn("cycles", "passes", "INTEGER NOT NULL DEFAULT 0");
    that never closes, and a guard nobody can see fires is not a guard. */
 ensureColumn("cycles", "forced_open_ids", "TEXT");
 ensureColumn("cycles", "close_reason", "TEXT");
+/* WHAT THE BOT DID WITH THE COHORT. The owner's goal is calls the bot EXECUTES, and
+   until these columns the ledger recorded only publishes (recordCyclePublish counts
+   `calls` rows) — so P(taken | published) was invisible: cycle 19 spent $21.68 for 0
+   calls, and nothing here could say whether the calls that DID publish were ever
+   bought, or sold. Three counts, DISTINCT by call: offered to a floor and never stamped
+   not-executable (deliverable), a reported buy (taken), a reported sell (exited). All
+   from the bot's own rows (copy.js: deliveries, executor_fills). Snapshotted at close
+   and recomputed on every read, exactly as published_count is. Measurement only —
+   nothing reads these to decide anything. */
+ensureColumn("cycles", "deliverable_count", "INTEGER NOT NULL DEFAULT 0");
+ensureColumn("cycles", "taken_count", "INTEGER NOT NULL DEFAULT 0");
+ensureColumn("cycles", "exited_count", "INTEGER NOT NULL DEFAULT 0");
 
 /**
  * EVERY GATE IN THE PIPELINE, CLASSIFIED ONCE.
@@ -415,6 +427,15 @@ export const GATE_CLASS = Object.freeze({
      SEARCH band, never by moving a per-coin floor. */
   too_big: "JUDGMENT",
   too_small: "JUDGMENT",
+  /* THE CREATOR ALREADY SOLD (2026-09-08). openCall stamps "Thesis void if the deployer
+     wallet sells" on every *pump call, so a creator whose own token account was funded
+     and is now empty makes that invalidation true at publish. JUDGMENT, not SAFETY: the
+     coin can still be bought and sold — what is gone is the thesis, not the exit — and it
+     fires only on POSITIVE chain evidence (data/solana.js: a zero balance after two or
+     more transactions, read inside the coin's first 30 minutes); an unread or never-opened
+     account is null and never fires. No level of the ladder has a knob for it. Registered
+     here explicitly so default-deny cannot mislabel it a measured safety fact. */
+  dev_dumped: "JUDGMENT",
 
   // ── the reputation read (desk.js) ─────────────────────────────────────────────────
   /* The two arms of the same seat, and they are not the same kind of thing. */
@@ -525,6 +546,103 @@ export function gateFailures(rec) {
 /** The SAFETY failures only — the ones no level and no quota may reach past. */
 export const safetyFailures = (rec) => gateFailures(rec).filter((g) => g.cls === "SAFETY");
 
+/* ── the publishability ledger ───────────────────────────────────────────────────── */
+
+/**
+ * WHAT HAPPENED TO EVERY PM-POSITIVE WORKUP AT THE PUBLISH GATE.
+ *
+ * Every "P(>=3 calls per cohort)" estimate runs on the PM-positive rate — 224 WATCH or
+ * PROPOSE verdicts out of 1,571 paid X reads all-time, 14.3% — and then assumes some
+ * fraction of those publishes. That fraction has never been measured under the
+ * recalibrated bar (config.js minConviction 20): all-time it was 58 published / 224
+ * PM-positive = 26% under the OLD bars, and the live heartbeat today shows 13 WATCH
+ * verdicts and 0 cohort calls, with no counter anywhere naming which gate ate them.
+ * publishCall emits `call:withheld`, but a chronicle row is not a denominator.
+ *
+ * So publishCall writes one row per PM-positive record, whatever the outcome, and the
+ * histogram over `gate` is the publishable fraction with its refusals itemised. It
+ * records; it decides nothing, and it is written for PM-positive records ONLY so the
+ * row count IS the denominator every estimate uses.
+ */
+db.exec(`
+CREATE TABLE IF NOT EXISTS publishability (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts            INTEGER NOT NULL,
+  mint          TEXT NOT NULL,
+  symbol        TEXT,
+  cycle_id      INTEGER,
+  escalation_level INTEGER,
+  pm_decision   TEXT NOT NULL,
+  conviction    REAL,
+  gate          TEXT NOT NULL,
+  refused_by    TEXT NOT NULL,
+  gates         TEXT NOT NULL,
+  outcome       TEXT NOT NULL,
+  call_id       INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_publishability_gate ON publishability(gate, ts);
+CREATE INDEX IF NOT EXISTS idx_publishability_cycle ON publishability(cycle_id, ts);
+`);
+
+/** The PM's two positive verdicts — the denominator of every published-per-positive rate. */
+export const isPmPositive = (rec) =>
+  rec?.pm?.decision === "WATCH" || rec?.pm?.decision === "PROPOSE";
+
+/**
+ * THE GATE THE HISTOGRAM CHARGES A REFUSAL TO.
+ *
+ * Almost always the gate that refused it. The one exception is a mechanical zero: the
+ * ticket is only drafted when `risk.position_size_usd > 0` (desk.js, stage 10), so a
+ * record the rails sized to zero ALSO has no stop, and `no_stop` sorts ahead of
+ * `zero_authorized_size` in gateFailures. Charging that refusal to `no_stop` would hide
+ * the rails behind their own consequence, and "zero size" is one of the four losses
+ * this ledger exists to itemise. Nothing about the gate itself moves — the record is
+ * still refused by the safety floor, on the same code, with the same reason; only the
+ * column the count lands in changes, and `refused_by` keeps the raw gate beside it.
+ */
+export function publishabilityGate(rec, refusedBy) {
+  if (refusedBy === "no_stop" &&
+      gateFailures(rec).some((g) => g.code === "zero_authorized_size")) return "zero_authorized_size";
+  return refusedBy;
+}
+
+/** One row per PM-positive publish attempt. A no-op for anything the PM did not like. */
+export function recordPublishability(rec, { refusedBy, outcome, escalation = null, cycleId = null,
+                                            callId = null } = {}) {
+  if (!isPmPositive(rec) || !rec?.mint) return null;
+  const codes = gateFailures(rec).map((g) => g.code);
+  const gate = publishabilityGate(rec, refusedBy);
+  const info = db.prepare(`INSERT INTO publishability
+    (ts,mint,symbol,cycle_id,escalation_level,pm_decision,conviction,gate,refused_by,gates,outcome,call_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(Date.now(), rec.mint, rec.symbol ?? rec.ev?.symbol ?? null, cycleId, escalation,
+      rec.pm.decision, Number.isFinite(Number(rec.pm?.conviction)) ? Number(rec.pm.conviction) : null,
+      gate, String(refusedBy), JSON.stringify(codes), String(outcome), callId);
+  emit("call:publishability", { mint: rec.mint, symbol: rec.symbol ?? rec.ev?.symbol,
+    pmDecision: rec.pm.decision, conviction: rec.pm?.conviction ?? null, gate, refusedBy,
+    outcome, cycleId, level: escalation });
+  return Number(info.lastInsertRowid);
+}
+
+/**
+ * PUBLISHED PER PM-POSITIVE, itemised by gate. `byGate` is {gate: count} with
+ * `published` as one of the keys, so the fraction and every refusal read off one map.
+ * `f` is null, not 0, when nothing has been measured yet — an unmeasured desk must not
+ * read as one that publishes nothing.
+ */
+export function publishabilityHistogram({ cycleId = null, sinceMs = 0 } = {}) {
+  const conds = ["ts >= ?"]; const args = [Number(sinceMs) || 0];
+  if (cycleId != null) { conds.push("cycle_id = ?"); args.push(cycleId); }
+  const rows = db.prepare(`SELECT gate, COUNT(*) n FROM publishability
+    WHERE ${conds.join(" AND ")} GROUP BY gate ORDER BY n DESC, gate`).all(...args);
+  const byGate = {};
+  for (const r of rows) byGate[r.gate] = r.n;
+  const pmPositive = rows.reduce((a, r) => a + r.n, 0);
+  const published = byGate.published ?? 0;
+  return { byGate, pmPositive, published,
+    f: pmPositive > 0 ? Number((published / pmPositive).toFixed(4)) : null };
+}
+
 /* ── the ledger ──────────────────────────────────────────────────────────────────── */
 
 const cycleRow = (id) => db.prepare("SELECT * FROM cycles WHERE id=?").get(id) || null;
@@ -538,6 +656,49 @@ const liveCycleCallIds = (id) =>
 const publishedCount = (id) =>
   db.prepare("SELECT COUNT(*) n FROM calls WHERE cycle_id=?").get(id).n;
 
+/* The bot's tables belong to copy.js, and not every process that loads this ledger
+   loads copy.js (test-hold-clock, test-mandate and five more import calls.js alone),
+   nor does every production database predate-proof itself: a table or column that is
+   not there must read as "nothing reported", never as a throw inside closeCycleRow —
+   a cycle must not fail to close over a count it only records. Remembered once true,
+   because a schema only grows. */
+const schemaHas = (() => {
+  const seen = new Set();
+  return (table, column = null) => {
+    const key = column ? `${table}.${column}` : table;
+    if (seen.has(key)) return true;
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+    const has = cols.length > 0 && (column == null || cols.includes(column));
+    if (has) seen.add(key);
+    return has;
+  };
+})();
+
+/**
+ * THE BOT'S SIDE OF ONE COHORT, recomputed from its own rows every time it is asked.
+ * `deliverable` — published calls a floor was OFFERED whose delivery was never stamped
+ * `deliverable=0` (an unstamped row counts: today every offered call is raised at once);
+ * `taken` — calls with at least one reported buy; `exited` — with at least one reported
+ * sell. DISTINCT by call, so the bot's re-posted or partial fills cannot inflate a count
+ * past the number of calls behind it. Read live by cycleStatus and cycleHistory, and
+ * frozen into the row by closeCycleRow.
+ */
+export function cycleExecution(id) {
+  const n = (sql) => db.prepare(sql).get(id).n;
+  const fills = schemaHas("executor_fills");
+  return {
+    deliverable: schemaHas("deliveries", "deliverable")
+      ? n(`SELECT COUNT(DISTINCT d.call_id) n FROM deliveries d JOIN calls c ON c.id=d.call_id
+           WHERE c.cycle_id=? AND d.verdict='offered' AND COALESCE(d.deliverable, 1) <> 0`) : 0,
+    taken: fills
+      ? n(`SELECT COUNT(DISTINCT f.call_id) n FROM executor_fills f JOIN calls c ON c.id=f.call_id
+           WHERE c.cycle_id=? AND f.side='buy'`) : 0,
+    exited: fills
+      ? n(`SELECT COUNT(DISTINCT f.call_id) n FROM executor_fills f JOIN calls c ON c.id=f.call_id
+           WHERE c.cycle_id=? AND f.side='sell'`) : 0,
+  };
+}
+
 /** Has this cycle finished PURSUING its quota (met it, or exhausted the ladder)? */
 export function pursuitOver(c) {
   if (!c) return true;
@@ -547,12 +708,16 @@ export function pursuitOver(c) {
 function closeCycleRow(c, { forced = false, stillOpen = [], reason }) {
   const n = publishedCount(c.id);
   const short = n < c.quota ? 1 : 0;
+  const x = cycleExecution(c.id);
   db.prepare(`UPDATE cycles SET closed_at=?, published_count=?, shortfall=?, forced_close=?,
-              forced_open_ids=?, close_reason=? WHERE id=?`)
+              forced_open_ids=?, close_reason=?, deliverable_count=?, taken_count=?, exited_count=?
+              WHERE id=?`)
     .run(Date.now(), n, short, forced ? 1 : 0,
-      stillOpen.length ? JSON.stringify(stillOpen) : null, reason, c.id);
+      stillOpen.length ? JSON.stringify(stillOpen) : null, reason,
+      x.deliverable, x.taken, x.exited, c.id);
   emit("cycle:closed", { cycleId: c.id, published: n, quota: c.quota, shortfall: !!short,
-    forced, stillOpen, level: c.escalation_level_reached, reason });
+    forced, stillOpen, level: c.escalation_level_reached, reason,
+    deliverable: x.deliverable, taken: x.taken, exited: x.exited });
   return cycleRow(c.id);
 }
 
@@ -692,18 +857,23 @@ export function cycleStatus(now = Date.now()) {
   const published = publishedCount(c.id);
   return { open: true, id: c.id, openedAt: c.opened_at, quota: c.quota, published,
     short: Math.max(0, c.quota - published), level: c.escalation_level_reached,
+    // What the bot has done with those publishes so far: deliverable / taken / exited.
+    ...cycleExecution(c.id),
     passes: c.passes, pursuitOver: pursuitOver(c),
     liveCallIds: liveCycleCallIds(c.id),
     ageMs: now - c.opened_at, forceCloseInMs: Math.max(0, CYCLE.maxAgeMs - (now - c.opened_at)) };
 }
 
-/** Closed cohorts, newest first, with the realised P&L of the calls each published. */
+/** Closed cohorts, newest first, with the realised P&L of the calls each published.
+ *  `deliverable` / `taken` / `exited` are recomputed here on every read, like `calls` is:
+ *  a sell the bot reports after a force-close (its calls are still live and still
+ *  monitored) must show up, and the `*_count` columns keep the close-time snapshot. */
 export function cycleHistory(n = 20) {
   return db.prepare("SELECT * FROM cycles ORDER BY id DESC LIMIT ?").all(n).map((c) => {
     const calls = cycleCalls(c.id);
     const closed = calls.filter((k) => k.status === "closed" && k.entry_ref > 0 && k.close_mark != null);
     const pnls = closed.map((k) => ((k.close_mark - k.entry_ref) / k.entry_ref) * 100);
-    return { ...c, calls: calls.length,
+    return { ...c, calls: calls.length, ...cycleExecution(c.id),
       stillLive: calls.filter((k) => k.status === "live").length,
       realisedPnlPct: pnls.length ? Number((pnls.reduce((a, b) => a + b, 0) / pnls.length).toFixed(2)) : null,
       levels: calls.map((k) => k.escalation_level) };

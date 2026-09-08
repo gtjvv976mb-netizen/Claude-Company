@@ -2,8 +2,10 @@ import { getJson } from "./lib/http.js";
 import { emit } from "./lib/bus.js";
 import { cfg } from "./config.js";
 import { grokTrendScan, hasGrok } from "./lib/grok.js";
+import { creditBreakerState, assertDailyBudget, OutOfCredit } from "./lib/llm.js";
 import * as store from "./lib/store.js";
 import { liveCallFor } from "./calls.js";
+import { bookState } from "./mandate.js";
 
 /**
  * FRONT-RUNNING THE LORE — discovery, run backwards.
@@ -189,6 +191,35 @@ export function raceWinner(coins) {
  * lane is best at finding. */
 export async function scanTrends({ maxThemes = 10, maxAgeHours = 120 } = {}) {
   if (!hasGrok()) return { ok: false, error: "no grok key", candidates: [] };
+
+  /* THE SCAN WAS PAID BEFORE ANYONE ASKED WHETHER THE ANSWER COULD BE USED.
+   *
+   * Every check in this lane sat downstream of grokTrendScan: the handoff looked at
+   * the book only once the scan was bought, and nothing looked at the analyst breaker
+   * at all. Measured in the live 24h: 32 TrendScan calls, $3.47 (~$0.11 a scan), while
+   * both breakers were open and every pass was abandoned as researchless — a front-run
+   * signal nobody could act on, re-bought every eight minutes. Both facts that make
+   * the answer unusable are free and known before the request, so they are asked
+   * first. Strictly `closed`, as the cycle reads it at analystHealthy: this lane is
+   * not the probe that reopens the analysts — the 12-minute cycle is — so a due probe
+   * is no reason to buy a scan on the side. */
+  const credit = creditBreakerState("anthropic");
+  if (credit.state !== "closed")
+    return { ok: false, skipped: "credit_breaker_open", candidates: [],
+      error: `analyst breaker ${credit.state} — a trend nobody can research is not bought` };
+  const book = bookState();
+  if (book.full)
+    return { ok: false, skipped: "position_open", candidates: [],
+      error: `book full at ${book.live} — no seat to publish a trend into` };
+  /* And the reserve. The workup after the scan already yields through desk.js; the
+     scan itself never passed through assertDailyBudget, so it went on being bought past
+     the opportunistic share for a workup that would then be refused on arrival. Same
+     lane, same share, checked before the money leaves. */
+  try { assertDailyBudget(cfg.dailyBudgetUsd, { lane: "trend" }); }
+  catch (e) {
+    if (!(e instanceof OutOfCredit)) throw e;
+    return { ok: false, skipped: "budget", candidates: [], error: e.message };
+  }
 
   const scan = await grokTrendScan({ limit: maxThemes + 4 })
     .catch((e) => ({ ok: false, error: `trend scan threw: ${String(e?.message || e).slice(0, 200)}` }));

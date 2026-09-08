@@ -202,7 +202,9 @@ export function runtimeBehaviorProfile({ runKind = "cycle", pmProvider = "claude
 export const runtimeBehaviorFingerprint = (options = {}) =>
   sha256(canonicalJson(runtimeBehaviorProfile(options)));
 
-function gateFor(rec) {
+/** The binding gate stamped on every decision_runs row. Exported so a test can derive
+ *  the exact strings the histogram must return from the source instead of re-typing them. */
+export function gateFor(rec) {
   if (!rec) return "missing_record";
   if (rec.outcome === "no_data" || rec.outcome === "screened_out" || rec.outcome === "insufficient_coverage") return rec.outcome;
   if (rec.outcome === "killed") return `analyst:${rec.killedBy || "unknown"}`;
@@ -211,6 +213,23 @@ function gateFor(rec) {
   if (rec.pm?.decision === "PASS") return "pm";
   if (rec.finalDecision === "DECLINED") return "ceo";
   return rec.finalDecision || rec.pm?.decision || rec.outcome || "unknown";
+}
+
+/**
+ * HOW WORKUPS END, counted. `binding_gate` has been written on every decision_runs row
+ * since the table existed and nothing ever read it back, so the stage-outcome rates a
+ * cohort simulation needs (screened_out / analyst:* / redteam / pm / WATCH / APPROVED …)
+ * have been argued from memory rather than read. Counts only — no record_json, no
+ * prompt, no evidence — grouped exactly as the plan asks: outcome, final_decision,
+ * binding_gate.
+ */
+export function decisionHistogram({ sinceMs = 0 } = {}) {
+  return db.prepare(`SELECT outcome, final_decision, binding_gate, run_kind, COUNT(*) AS n
+                     FROM decision_runs WHERE decided_at >= ?
+                     GROUP BY outcome, final_decision, binding_gate, run_kind
+                     ORDER BY n DESC, binding_gate`).all(Number(sinceMs) || 0)
+    .map((r) => ({ outcome: r.outcome, final_decision: r.final_decision,
+      binding_gate: r.binding_gate, run_kind: r.run_kind, n: r.n }));
 }
 
 /** Immutable signal-level journal. One research run remains one observation no matter

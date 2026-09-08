@@ -17,7 +17,7 @@
  * been told to LOOK at sooner, not one it has been told to buy.
  */
 import { CAP_BANDS } from "./categories.js";
-import { asCandidate, momentumFor, newLaunches, recentlyTraded } from "./data/pumpfun-live.js";
+import { asCandidate, momentumFor, newLaunches, recentlyTraded, BIRTH_TAPE_CANDLES } from "./data/pumpfun-live.js";
 import { emit } from "./lib/bus.js";
 
 /* HOW LONG A BAND IS WORTH HUNTING IN.
@@ -29,7 +29,10 @@ import { emit } from "./lib/bus.js";
  * twelve times the hold window — because the point is to exclude the archaeology the
  * old keyword sweep was returning (median age twenty-five days), not to be clever. */
 const HUNT_WINDOW_MULTIPLE = 12;
-const huntWindowMs = (band) => (CAP_BANDS[band]?.holdMaxMs ?? 0) * HUNT_WINDOW_MULTIPLE;
+/* Exported because evidence.js asks the same question of the one coin it is gathering
+   — is this still inside the window the lane hunts in — and must not carry its own copy
+   of the multiple. */
+export const huntWindowMs = (band) => (CAP_BANDS[band]?.holdMaxMs ?? 0) * HUNT_WINDOW_MULTIPLE;
 
 /** Coins whose tape is worth pulling. Free: nothing here makes a request. */
 export function shortlist(candidates, { now = Date.now(), limit = 40 } = {}) {
@@ -136,8 +139,25 @@ export async function ignitionSweep({ solUsd = null, freshPages = 2, tradedPages
   }
   const all = [...seen.values()];
   const picked = shortlist(all, { now, limit: tapes });
+  /* THE BIRTH TAPE FOR THE COINS THAT STILL HAVE ONE. A nano or micro coin inside its
+     hunt window is young enough that the server's 200-row ceiling usually returns its
+     whole life, so row 0 is the launch minute and momentumFrom can read what that minute
+     carried against the curve's opening SOL (GoatPro: $6,189 on a ~$5k curve). Every
+     other shortlisted coin gets the ordinary forty-minute tape; the extra is a bigger
+     response on the same free request, no new call. */
+  const perMint = new Map();
+  for (const c of picked) {
+    const band = c.live.band;
+    if (band !== "nano" && band !== "micro") continue;
+    const createdAt = c.pair?.pairCreatedAt ?? null;
+    const ageMs = createdAt ? now - createdAt : null;
+    if (ageMs == null || ageMs < 0 || ageMs > huntWindowMs(band)) continue;
+    const openSol = c.live.curveOpenSol;
+    perMint.set(c.mint, { limit: BIRTH_TAPE_CANDLES, createdAt,
+      curveOpenUsd: openSol > 0 && solUsd > 0 ? openSol * solUsd : null });
+  }
   const momentum = await momentumFor(picked.map((c) => c.mint),
-    { limit: tapeMinutes, concurrency, now });
+    { limit: tapeMinutes, concurrency, now, perMint });
 
   const ranked = [];
   for (const c of picked) {

@@ -1,8 +1,18 @@
 import { readRpc } from "../lib/http.js";
 import { isAddress } from "../lib/base58.js";
+import { associatedTokenAddress, TOKEN_PROGRAM, TOKEN_2022_PROGRAM } from "../lib/ata.js";
 import { cfg } from "../config.js";
 
-const TOKEN2022 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+const TOKEN2022 = TOKEN_2022_PROGRAM;
+
+/* THE CREATOR'S SELL IS LOOKED FOR ONLY WHILE IT WOULD STILL BE NEWS. openCall stamps
+   "Thesis void if the deployer wallet sells" on every pump.fun call; inside the first
+   half hour a creator who has already sold makes that invalidation true at publish, and
+   after it the tape and the holder book have already priced the exit. One read, bounded,
+   and never retried: the desk's standing deadline for a single chain question. */
+export const DEV_SOLD_WINDOW_MS = 30 * 60_000;
+export const DEV_SOLD_DEADLINE_MS = 8_000;
+export const DEV_SOLD_SIG_LIMIT = 20;
 
 // Token-2022 extensions that can be used against a holder. The desk classifies
 // these in code so the judgment is auditable, not vibes from a model.
@@ -75,22 +85,39 @@ const POOL_PROGRAMS = new Set([
  * forensics seat was being handed a rug signature for the entire population this desk
  * hunts. Owners are now resolved and matched, which costs one extra RPC call.
  */
-export async function topHolders(mint, supplyRaw, { poolAddress = null, bondingCurve = null } = {}) {
+export async function topHolders(mint, supplyRaw, { poolAddress = null, bondingCurve = null,
+  /* THE CREATOR, named by the caller from pump.fun's own row (evidence.js hands over
+     deployerRaw.coin.creator and created_timestamp). Null means "not a pump.fun coin or
+     the launcher did not answer", and every creator field below then reads null. */
+  creator = null, createdAt = null, isToken2022 = false, now = Date.now(),
+  devSoldDeadlineMs = DEV_SOLD_DEADLINE_MS } = {}) {
   const r = await readRpc(cfg.rpc, "getTokenLargestAccounts", [mint]);
   if (!r.ok) return { ok: false, error: r.error };
   const raw = r.data?.value || [];
   const known = new Set([...POOL_AUTHORITIES, poolAddress, bondingCurve].filter(Boolean));
 
+  /* THE CREATOR'S OWN TOKEN ACCOUNT, NAMED BEFORE IT IS LOOKED FOR. A creator who bought
+     at launch holds through their associated token account, whose address follows from
+     the wallet and the mint (lib/ata.js). It is appended to the owner lookup the desk
+     already makes — one more key on an existing call, not a new one — so the balance is
+     known exactly even when it is too small to appear among the largest accounts, and
+     a zero can be told apart from an account that was never opened. */
+  const devAta = creator && isAddress(creator)
+    ? (associatedTokenAddress(creator, mint, isToken2022 ? TOKEN_2022_PROGRAM : TOKEN_PROGRAM)?.address ?? null)
+    : null;
+
   /* Resolve each token account's owner, then ask what program owns THAT. A pool's
      authority is often a plain PDA with no data, so the program test alone misses it —
      hence both the address set above and this. */
-  let owners = [], excluded = [], ownerUnknown = false;
+  let owners = [], excluded = [], ownerUnknown = false, devAtaRead = false, devAtaAccount = null;
   try {
-    const infos = await readRpc(cfg.rpc, "getMultipleAccounts",
-      [raw.map((a) => a.address), { encoding: "jsonParsed" }]);
+    const keys = raw.map((a) => a.address);
+    if (devAta && !keys.includes(devAta)) keys.push(devAta);
+    const infos = await readRpc(cfg.rpc, "getMultipleAccounts", [keys, { encoding: "jsonParsed" }]);
     const vals = infos.ok ? (infos.data?.value || []) : [];
-    if (!infos.ok || vals.length !== raw.length) ownerUnknown = true;
-    owners = vals.map((v) => v?.data?.parsed?.info?.owner ?? null);
+    if (!infos.ok || vals.length !== keys.length) ownerUnknown = true;
+    else if (devAta) { devAtaRead = true; devAtaAccount = vals[keys.indexOf(devAta)] ?? null; }
+    owners = vals.slice(0, raw.length).map((v) => v?.data?.parsed?.info?.owner ?? null);
     const ownerAddrs = [...new Set(owners.filter(Boolean))];
     let ownerPrograms = new Map();
     if (ownerAddrs.length) {
@@ -153,6 +180,52 @@ export async function topHolders(mint, supplyRaw, { poolAddress = null, bondingC
   const midShare = mid.length ? pct(mid.reduce((a, b) => a + b, 0)) : 0;
   const headShare = pct((real[0] || 0) + (real[1] || 0));
 
+  /* THE CREATOR IN THE BOOK. Nothing anywhere computed "how much does the creator still
+   * hold" — the launch farm check reads their history and the X read their account, and
+   * the one wallet that actually decides a launch was never asked. Three readings, each
+   * null when it could not be taken, and null is never evidence:
+   *
+   *   devPctOfSupply    — every largest account whose OWNER is the creator, plus the
+   *                       associated account when it sits below the largest twenty.
+   *   devAccountPresent — the creator holds SOMETHING here, or opened an account to.
+   *   devSoldAll        — POSITIVE evidence only: the associated account exists, is
+   *                       empty, and carries two or more confirmed transactions — it was
+   *                       funded and then emptied. Read for a coin under thirty minutes
+   *                       old, with one bounded, unretried signature read. An account
+   *                       that was never opened is a creator who never bought, which is
+   *                       not a creator who sold; a still-funded one reads false.
+   *
+   * These are EVIDENCE and a shadow log (launch-shadow.js) until the log has shown what
+   * they predict; the screen fires only on devSoldAll === true (dev_dumped, JUDGMENT). */
+  let devAccountPresent = null, devPctOfSupply = null, devSoldAll = null;
+  let devAtaTxCount = null, devLastTxAt = null;
+  if (creator && !ownerUnknown) {
+    const inBook = raw.filter((a, i) => owners[i] === creator);
+    let held = inBook.reduce((s, a) => s + Number(a.amount), 0);
+    const ataAmountRaw = devAtaAccount?.data?.parsed?.info?.tokenAmount?.amount;
+    const ataAmount = ataAmountRaw == null ? null : Number(ataAmountRaw);
+    const ataInBook = devAta != null && inBook.some((a) => a.address === devAta);
+    if (devAtaRead && devAtaAccount && !ataInBook && ataAmount != null) held += ataAmount;
+    devAccountPresent = inBook.length > 0 || (devAtaRead && devAtaAccount != null);
+    devPctOfSupply = pct(held);
+    const ageMs = createdAt != null ? now - createdAt : null;
+    const young = ageMs != null && ageMs >= 0 && ageMs < DEV_SOLD_WINDOW_MS;
+    if (held > 0) devSoldAll = false;
+    else if (young && devAtaRead && devAtaAccount && ataAmount === 0) {
+      const sigs = await readRpc(cfg.rpc, "getSignaturesForAddress",
+        [devAta, { limit: DEV_SOLD_SIG_LIMIT, commitment: "confirmed" }],
+        { attempts: 1, timeoutMs: devSoldDeadlineMs });
+      if (sigs.ok && Array.isArray(sigs.data)) {
+        const confirmed = sigs.data.filter((s) => !s?.err);
+        devAtaTxCount = confirmed.length;
+        devLastTxAt = confirmed[0]?.blockTime ? Number(confirmed[0].blockTime) * 1000 : null;
+        // Funded and then emptied is two transactions at the least; one is an account
+        // that was opened and never filled, and says nothing about selling.
+        if (confirmed.length >= 2) devSoldAll = true;
+      }
+    }
+  }
+
   return {
     ok: true,
     // NOTE: these are the largest *token accounts*, which include LP vaults, CEX
@@ -176,6 +249,15 @@ export async function topHolders(mint, supplyRaw, { poolAddress = null, bondingC
     midHoldersPct: midShare,
     headHoldersPct: headShare,
     midToHead: headShare > 0 ? Number((midShare / headShare).toFixed(2)) : null,
+    // The creator's own position, read from the chain (see the block above). Null when
+    // the creator is unknown or the owners could not be resolved — unmeasured, not clean.
+    creator: creator ?? null,
+    devAccountPresent,
+    devPctOfSupply,
+    devSoldAll,
+    devAta,
+    devAtaTxCount,
+    devLastTxAt,
     accounts: accounts.slice(0, 10).map((a) => ({ address: a.address, pctOfSupply: pct(Number(a.amount)) })),
   };
 }

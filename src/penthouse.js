@@ -3,7 +3,7 @@ import { gather, screen } from "./data/evidence.js";
 import { workup } from "./desk.js";
 import { openCall, liveCalls, liveCallFor, evaluateExit, closeCall, noteEvent,
   gateFailures, beginCyclePass, abandonCyclePass, recordCyclePublish, cycleStatus,
-  settleCycles } from "./calls.js";
+  settleCycles, recordPublishability } from "./calls.js";
 import { broadcast } from "./copy.js";
 import { announceExit } from "./alerts.js";
 import { listFloors, HQ_FLOOR } from "./tower.js";
@@ -853,113 +853,9 @@ export async function runPenthouseCycle({
     emit("cycle:concurrency", { workers: CONCURRENCY, studied: workedUp,
       note: "coins are independent of one another; the budget cap is re-read per coin" });
 
-  /* 5. THE COHORT PICK — of everything studied, publish the single best one.
-   *
-   * This replaced an absolute bar that produced 144 kills and zero calls across 177
-   * workups. The bar is not lowered on SAFETY: eligibility() refuses every screened,
-   * killed, vetoed, unexitable, stopless or refuted candidate first, and refuses the
-   * team's own PASS on top of that. What changed is that a lack of CONVICTION — the
-   * CEO holding, the PM wanting one more trigger — now ranks rather than blocks. */
-  const opened = [];
-  const { winner: arithmeticWinner, judged } = pickOne(picks);
-  const eligible = judged.filter((j) => j.eligibility.eligible);
-
-  /* THE SEAT THAT CHOOSES.
-   *
-   * pickOne ranks by arithmetic — tier x 100000 + conviction x 100 + composite — which
-   * is defensible and blind. It cannot see that one coin's story is a trend three hours
-   * old while another's peaked yesterday, or that a real account with reach posted one
-   * and a bought network posted the other. Those decide a memecoin, and a weighted
-   * average of five scores cannot represent them.
-   *
-   * So an agent picks, from the eligible field only. Everything in front of it has
-   * already cleared the safety screen, the analysts, the red team and compliance — it
-   * cannot admit a honeypot because none reaches it. The arithmetic winner stays as the
-   * fallback for when the seat errors or names something that is not on the list. */
-  let winner = arithmeticWinner;
-  if (eligible.length > 1) {
-    try {
-      const bp = await runFor(null, () => runBestPick(eligible));
-      const chosen = eligible.find((j) => j.rec?.mint === bp?.pick_mint);
-      if (chosen) {
-        winner = chosen;
-        winner.bestPick = bp;
-        emit("bestpick:chose", { symbol: bp.pick_symbol, mint: bp.pick_mint,
-          why: bp.why, edge: bp.edge, expected: bp.expected_move,
-          confidence: bp.confidence, runnerUp: bp.runner_up_mint,
-          overrodeArithmetic: arithmeticWinner?.rec?.mint !== bp.pick_mint });
-      } else {
-        emit("bestpick:unusable", { named: bp?.pick_mint ?? null, candidates: eligible.length,
-          note: "the seat named something not on the list — falling back to the ranking" });
-      }
-    } catch (e) {
-      emit("bestpick:failed", { error: String(e?.message || e),
-        note: "falling back to the arithmetic ranking rather than skipping the cycle" });
-    }
-  }
-  /* Write every paid verdict back, so the next pass INHERITS it instead of re-buying
-   * it. This is the half of the funnel that actually saves money — the screen is free,
-   * the workup is not, and until now the desk paid for the same answer about the same
-   * coin every time it came round again. */
-  for (const j of judged) {
-    try {
-      funnel.recordStudy(j.rec?.mint, {
-        eligible: !!j.eligibility.eligible,
-        verdict: j.rec?.pm?.decision ?? null,
-        conviction: j.rec?.pm?.conviction ?? j.eligibility.score ?? null,
-        thesis: j.rec?.pm?.thesis ?? null,
-      });
-    } catch { /* bookkeeping must never be able to fail a cycle */ }
-    if (j.eligibility.eligible) continue;
-    emit("cohort:declined", { mint: j.rec?.mint, symbol: j.rec?.symbol,
-      safety: j.eligibility.safety, reason: j.eligibility.reason });
-  }
-  emit("cohort:ranked", { studied: judged.length,
-    eligible: judged.filter((j) => j.eligibility.eligible).length,
-    winner: winner ? { symbol: winner.rec?.symbol, tier: winner.eligibility.tier,
-      why: winner.eligibility.reason } : null });
-
-  if (winner) {
-    const pub = publishCall(winner.rec, { category: winner.category, launchpad: winner.launchpad, wx,
-      bestPick: winner.bestPick ?? null,
-      escalation: cohort ? level : null, cycleId: cohort?.cycle.id ?? null });
-    if (pub.callId) opened.push({ id: pub.callId, symbol: winner.rec?.symbol });
-    // Out of the ready pool: the desk is holding this one, not still shopping for it.
-    try { funnel.retire(winner.rec?.mint, "published as a call"); } catch {}
-  }
-
-  /* EVERY CYCLE ENDS IN A TRADE — and this is where that instruction is safe to obey.
-   *
-   * The eligible field has already cleared the free safety screen, all five analysts,
-   * the red team and compliance. Nothing in it is a honeypot, nothing in it is
-   * unsellable, nothing in it was launched by a farm. So if the first choice could not
-   * be published for a reason that is NOT about the coin — the book filled, a weather
-   * veto, a race with another lane — the desk takes the next eligible candidate rather
-   * than ending the cycle empty.
-   *
-   * It walks the field in order and stops at the first one that lands. What it will
-   * never do is reach past eligibility: a cycle where every candidate failed a measured
-   * safety fact ends with no call, and says so. That is not the desk refusing to
-   * decide, it is the market not having offered anything holdable. */
-  /* AND THEN THE REST OF THE COHORT'S QUOTA. Without a cohort `want` is 1 and this is
-     the pre-existing fallback verbatim: take the next eligible rather than end empty.
-     With one, the same walk keeps going until the quota is met — from the SAME eligible
-     field, which has already cleared the safety screen, all five analysts, the red team
-     and compliance. It never reaches past eligibility to find a third. */
-  if (opened.length < want && eligible.length > 1) {
-    for (const cand of eligible) {
-      if (opened.length >= want) break;
-      if (cand === winner) continue;
-      const pub = publishCall(cand.rec, { category: cand.category, launchpad: cand.launchpad, wx,
-        escalation: cohort ? level : null, cycleId: cohort?.cycle.id ?? null });
-      if (pub.callId) {
-        opened.push({ id: pub.callId, symbol: cand.rec?.symbol });
-        emit("mandate:fellback", { symbol: cand.rec?.symbol,
-          from: winner?.rec?.symbol ?? null, want, opened: opened.length,
-          note: "the first choice could not be published — took the next eligible rather than ending empty" });
-      }
-    }
-  }
+  /* 5. THE COHORT PICK — choose, then publish up to `want`. The whole step is
+   * publishCohort() below; `opened` is the live array the mandate hunt appends to. */
+  const { opened } = await publishCohort({ picks, want, level, cohort, wx });
 
   /* THE MANDATE — every cycle ends in a call. Not by lowering the bar: by
    * refusing to stop interviewing. If the shortlist pass opened nothing, the
@@ -1100,6 +996,154 @@ export async function runPenthouseCycle({
 }
 
 /**
+ * 5. THE COHORT PICK — of everything studied, choose the best and publish up to `want`.
+ *
+ * This replaced an absolute bar that produced 144 kills and zero calls across 177
+ * workups. The bar is not lowered on SAFETY: eligibility() refuses every screened,
+ * killed, vetoed, unexitable, stopless or refuted candidate first, and refuses the
+ * team's own PASS on top of that. What changed is that a lack of CONVICTION — the
+ * CEO holding, the PM wanting one more trigger — now ranks rather than blocks.
+ *
+ * It is a function rather than a stretch of the cycle body so the field the choosing
+ * seat is handed can be driven directly (test-bestpick-after-eligibility.mjs): `picks`
+ * is the studied cohort exactly as the workers built it, and `bestPickFn` / `publish`
+ * default to the real seat and the one road — only a test ever replaces them. `opened`
+ * comes back as the live array, because the mandate hunt after this keeps appending
+ * to the same list.
+ */
+export async function publishCohort({ picks = [], want = 1, level = 0, cohort = null, wx = null,
+  bestPickFn = runBestPick, publish = publishCall } = {}) {
+  const opened = [];
+  const { winner: arithmeticWinner, judged } = pickOne(picks);
+  const eligible = judged.filter((j) => j.eligibility.eligible);
+  /* The stamp every publish below carries. A null escalation means no quota is
+     pursuing this and publishCall applies no bar — computed once, here, so the seat's
+     field and the road's gate can never be read at two different levels. */
+  const escalation = cohort ? level : null;
+  const cycleId = cohort?.cycle.id ?? null;
+
+  /* THE QUOTA BAR RUNS BEFORE THE SEAT, NOT ONLY AFTER IT.
+   *
+   * Best Pick is an Opus call at $0.087-0.10 (the live 24h bought one, $0.10), and it
+   * was paid on the whole eligible field — while the bar inside publishCall then
+   * refused part of that same field on arrival: call:withheld conviction_below_bar 7
+   * and tier_below_bar 5 in the window. A seat asked to choose among coins the bar
+   * will not let it publish is choosing for nobody. So the same cohortEligibility, at
+   * the same level publishCall will run it at, narrows the field first. It refuses
+   * nothing the road would not have refused a moment later; it only stops paying an
+   * Opus seat to rank it. */
+  const publishable = escalation == null ? eligible
+    : eligible.filter((j) => cohortEligibility(j.rec, escalation).publishable);
+
+  /* THE SEAT THAT CHOOSES.
+   *
+   * pickOne ranks by arithmetic — tier x 100000 + conviction x 100 + composite — which
+   * is defensible and blind. It cannot see that one coin's story is a trend three hours
+   * old while another's peaked yesterday, or that a real account with reach posted one
+   * and a bought network posted the other. Those decide a memecoin, and a weighted
+   * average of five scores cannot represent them.
+   *
+   * So an agent picks, from the eligible field only. Everything in front of it has
+   * already cleared the safety screen, the analysts, the red team and compliance — it
+   * cannot admit a honeypot because none reaches it. The arithmetic winner stays as the
+   * fallback for when the seat errors or names something that is not on the list. */
+  let winner = arithmeticWinner;
+  /* ...AND ONLY WHEN CHOOSING CAN CHANGE WHAT IS PUBLISHED. With `want` or fewer
+     publishable, the walk below publishes every one of them whichever the seat
+     preferred, so the $0.10 would buy an ordering nobody acts on. `want` is 1 without
+     a cohort — the original `> 1` exactly — and a field of one is never a choice. */
+  if (publishable.length > Math.max(1, want)) {
+    try {
+      const bp = await runFor(null, () => bestPickFn(publishable));
+      const chosen = publishable.find((j) => j.rec?.mint === bp?.pick_mint);
+      if (chosen) {
+        winner = chosen;
+        winner.bestPick = bp;
+        emit("bestpick:chose", { symbol: bp.pick_symbol, mint: bp.pick_mint,
+          why: bp.why, edge: bp.edge, expected: bp.expected_move,
+          confidence: bp.confidence, runnerUp: bp.runner_up_mint,
+          overrodeArithmetic: arithmeticWinner?.rec?.mint !== bp.pick_mint });
+      } else {
+        emit("bestpick:unusable", { named: bp?.pick_mint ?? null, candidates: publishable.length,
+          note: "the seat named something not on the list — falling back to the ranking" });
+      }
+    } catch (e) {
+      emit("bestpick:failed", { error: String(e?.message || e),
+        note: "falling back to the arithmetic ranking rather than skipping the cycle" });
+    }
+  } else if (eligible.length > 1) {
+    emit("bestpick:skipped", { eligible: eligible.length, publishable: publishable.length, want,
+      note: publishable.length > 1
+        ? "the field fits the quota — every publishable candidate is published, so the seat could not change what"
+        : "at most one candidate clears the quota bar — there is nothing to choose between" });
+  }
+  /* Write every paid verdict back, so the next pass INHERITS it instead of re-buying
+   * it. This is the half of the funnel that actually saves money — the screen is free,
+   * the workup is not, and until now the desk paid for the same answer about the same
+   * coin every time it came round again. */
+  for (const j of judged) {
+    try {
+      funnel.recordStudy(j.rec?.mint, {
+        eligible: !!j.eligibility.eligible,
+        verdict: j.rec?.pm?.decision ?? null,
+        conviction: j.rec?.pm?.conviction ?? j.eligibility.score ?? null,
+        thesis: j.rec?.pm?.thesis ?? null,
+      });
+    } catch { /* bookkeeping must never be able to fail a cycle */ }
+    if (j.eligibility.eligible) continue;
+    emit("cohort:declined", { mint: j.rec?.mint, symbol: j.rec?.symbol,
+      safety: j.eligibility.safety, reason: j.eligibility.reason });
+  }
+  emit("cohort:ranked", { studied: judged.length,
+    eligible: eligible.length, publishable: publishable.length, want,
+    winner: winner ? { symbol: winner.rec?.symbol, tier: winner.eligibility.tier,
+      why: winner.eligibility.reason } : null });
+
+  if (winner) {
+    const pub = publish(winner.rec, { category: winner.category, launchpad: winner.launchpad, wx,
+      bestPick: winner.bestPick ?? null,
+      escalation, cycleId });
+    if (pub.callId) opened.push({ id: pub.callId, symbol: winner.rec?.symbol });
+    // Out of the ready pool: the desk is holding this one, not still shopping for it.
+    try { funnel.retire(winner.rec?.mint, "published as a call"); } catch {}
+  }
+
+  /* EVERY CYCLE ENDS IN A TRADE — and this is where that instruction is safe to obey.
+   *
+   * The eligible field has already cleared the free safety screen, all five analysts,
+   * the red team and compliance. Nothing in it is a honeypot, nothing in it is
+   * unsellable, nothing in it was launched by a farm. So if the first choice could not
+   * be published for a reason that is NOT about the coin — the book filled, a weather
+   * veto, a race with another lane — the desk takes the next eligible candidate rather
+   * than ending the cycle empty.
+   *
+   * It walks the field in order and stops at the first one that lands. What it will
+   * never do is reach past eligibility: a cycle where every candidate failed a measured
+   * safety fact ends with no call, and says so. That is not the desk refusing to
+   * decide, it is the market not having offered anything holdable. */
+  /* AND THEN THE REST OF THE COHORT'S QUOTA. Without a cohort `want` is 1 and this is
+     the pre-existing fallback verbatim: take the next eligible rather than end empty.
+     With one, the same walk keeps going until the quota is met — from the SAME eligible
+     field, which has already cleared the safety screen, all five analysts, the red team
+     and compliance. It never reaches past eligibility to find a third. */
+  if (opened.length < want && eligible.length > 1) {
+    for (const cand of eligible) {
+      if (opened.length >= want) break;
+      if (cand === winner) continue;
+      const pub = publish(cand.rec, { category: cand.category, launchpad: cand.launchpad, wx,
+        escalation, cycleId });
+      if (pub.callId) {
+        opened.push({ id: pub.callId, symbol: cand.rec?.symbol });
+        emit("mandate:fellback", { symbol: cand.rec?.symbol,
+          from: winner?.rec?.symbol ?? null, want, opened: opened.length,
+          note: "the first choice could not be published — took the next eligible rather than ending empty" });
+      }
+    }
+  }
+  return { opened, judged, eligible, publishable, winner };
+}
+
+/**
  * Watch the open calls. Deliberately cheap: prices and chain flags only, no model calls,
  * so it can run often without the monitoring costing more than the research.
  */
@@ -1188,6 +1232,24 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
   escalation = null, cycleId = null } = {}) {
   const e = eligibility(rec);
 
+  /* THE PUBLISHABILITY LEDGER, written on EVERY way out of this function for a record
+     the PM liked. "P(>=3 per cohort)" has only ever been estimated from the PM-positive
+     rate (14.3% per paid read) times an assumed publishable fraction, and that fraction
+     was never measured under the recalibrated bar: today 13 WATCH → 0 cohort calls
+     with nothing naming the gate. The row is bookkeeping and must never fail a publish;
+     `refusedBy` is the raw gate, and calls.publishabilityGate decides the column. */
+  const ledger = (refusedBy, outcome, callId = null) => {
+    try { recordPublishability(rec, { refusedBy, outcome, escalation, cycleId, callId }); } catch {}
+  };
+  /* The lanes never run cohortEligibility, so their refusal is charged the way it
+     would have been: the first SAFETY code, else the first JUDGMENT code, else the
+     team's own no. */
+  const mandateGate = () => {
+    const gates = gateFailures(rec);
+    return gates.find((g) => g.cls === "SAFETY")?.code ?? gates.find((g) => g.cls === "JUDGMENT")?.code
+      ?? (e.safety ? "unclassified_refusal" : "team_no");
+  };
+
   /* RECORD THE VERDICT HERE, because this is the one place EVERY lane converges.
    *
    * The funnel was being written only by the main cohort loop, so the hunt lane and the
@@ -1225,6 +1287,7 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
         reason: `L${co.level} ${co.gate}: ${co.reason}`, safety: co.safety,
         priceUsd: ev.pair?.priceUsd, mcapUsd: ev.pair?.marketCap ?? ev.pair?.fdv });
     } catch {}
+    ledger(co.gate, co.safety ? "unsafe" : "declined");
     return { outcome: co.safety ? "unsafe" : "declined", reason: co.reason,
       gate: co.gate, level: co.level };
   }
@@ -1247,6 +1310,7 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
         priceUsd: ev.pair?.priceUsd, mcapUsd: ev.pair?.marketCap ?? ev.pair?.fdv,
       });
     } catch {}
+    ledger(mandateGate(), e.safety ? "unsafe" : "declined");
     return { outcome: e.safety ? "unsafe" : "declined", reason: e.reason };
   }
 
@@ -1255,6 +1319,7 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
   if (wx?.regime === "risk_off" && category === "established") {
     emit("call:withheld", { mint: rec.mint,
       reason: `MURDOCK: not flying weather — SOL ${wx.solRet25d}% / BTC ${wx.btcRet25d}% over 25d` });
+    ledger("risk_off", "withheld");
     return { outcome: "withheld", reason: "risk_off" };
   }
 
@@ -1262,6 +1327,7 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
   if (book.full) {
     emit("call:withheld", { mint: rec.mint, symbol: rec.symbol,
       reason: `already holding ${book.holding?.symbol ?? "a position"} — one call at a time` });
+    ledger("book_full", "book_full");
     return { outcome: "book_full", reason: "position_open" };
   }
 
@@ -1350,8 +1416,10 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
     if (floors.length) broadcast(call.id, floors);
     emit("call:published", { callId: call.id, symbol: call.symbol, tier: e.tier, why: e.reason,
       cycleId, level: escalation });
+    ledger("published", "published", call.id);
     return { outcome: "published", callId: call.id, tier: e.tier, level: escalation, cycleId };
   }
+  ledger("open_failed", "open_failed");
   return { outcome: "open_failed" };
 }
 
@@ -1361,13 +1429,40 @@ export function publishCall(rec, { category = null, launchpad: pad = null, wx = 
  * with the watch context in its hook. Promotion buys a re-examination, never a
  * shortcut: the analysts, red team, risk, PM, compliance and CEO all sit again.
  */
+/**
+ * THE TWO FREE FACTS AN OPPORTUNISTIC LANE READS BEFORE IT PAYS.
+ *
+ * Fresh, promote and the trend handoff each asked whether the book had a seat, and
+ * none asked whether the analysts could sit in it — so through an outage they went on
+ * buying workups whose seats were refused on arrival, the research half of the 32
+ * scans / $3.47 the trend lane paid in the live 24h with both breakers open and every
+ * pass abandoned as researchless. Both facts cost nothing, so they are read first and
+ * the same way in all three lanes. Strictly `closed`, as the cycle reads it at
+ * analystHealthy: the 12-minute cycle is the probe that reopens the analysts, and
+ * these lanes are not — a due probe is no reason for a 5-minute lane to spend.
+ *
+ * Returns the skip to hand back, or null when the lane may go on. The breaker skip
+ * carries `halted` because the callers already print that field for a credit halt;
+ * the book skip stays quiet, as it always has.
+ */
+function laneGate() {
+  const book = bookState();
+  if (book.full)
+    return { skipped: "position_open", holding: book.holding?.symbol ?? null, live: book.live };
+  const credit = creditBreakerState("anthropic");
+  if (credit.state !== "closed")
+    return { skipped: "credit_breaker_open", breaker: credit.state,
+      halted: `analyst breaker ${credit.state} — a workup nobody can judge is not bought` };
+  return null;
+}
+
 let promoteBusy = false;
 export async function promoteWatches() {
   if (promoteBusy) return { skipped: "busy" };
-  // One trade at a time: a promotion cannot open a second position, so it must not
-  // pay for a workup it could never publish either.
-  const book0 = bookState();
-  if (book0.full) return { skipped: "position_open", holding: book0.holding?.symbol ?? null };
+  // One trade at a time, and one provider that can judge: a promotion cannot open a
+  // second position, so it must not pay for a workup it could never publish either.
+  const gate = laneGate();
+  if (gate) return gate;
   promoteBusy = true;
   try {
     const { checkWatchlist } = await import("./watchlist.js");
@@ -1467,8 +1562,10 @@ export async function trendHandoff(candidates = []) {
   const top = candidates[0];
   if (!top?.mint) return { workedUp: 0, note: "no candidate" };
   if (liveCallFor(top.mint)) return { workedUp: 0, note: "already live" };
-  const book = bookState();
-  if (book.full) return { workedUp: 0, halted: `book full at ${book.live}` };
+  // scanTrends read the same two facts before it paid for the scan; the seconds between
+  // the two are enough for a call to open or a breaker to trip, so the workup asks again.
+  const gate = laneGate();
+  if (gate) return { workedUp: 0, ...gate, halted: gate.halted ?? `book full at ${gate.live}` };
   const hook = `trend front-run \u00b7 "${top.theme}" (${top.stage ?? "?"}) \u00b7 ` +
     `${top.whyNow ?? ""} \u00b7 establish whether THIS is the canonical token for that story; ` +
     "a naming race pays one winner and the rest are exit liquidity";
@@ -1482,10 +1579,10 @@ export async function trendHandoff(candidates = []) {
 
 export async function freshScan({ minScore = 45 } = {}) {
   if (freshBusy) return { skipped: "busy" };
-  // Same rule as every other lane: while a call is working, the fresh lane does not
-  // buy a workup it has no seat to publish into.
-  const book0 = bookState();
-  if (book0.full) return { skipped: "position_open", holding: book0.holding?.symbol ?? null };
+  // Same rule as every other lane: while a call is working, or while no analyst can
+  // sit, the fresh lane does not buy a workup it has no seat to publish into.
+  const gate = laneGate();
+  if (gate) return gate;
   freshBusy = true;
   try {
     const universe = await sweep();

@@ -358,10 +358,12 @@ console.log("\n6. THE PROMPT SWEEP — every brief the desk ships, not one seat'
   const sweptValues = new Set(Object.values(PROMPTS).map(String));
   const resolve = (id) => { for (const ns of namespaces) if (typeof ns[id] === "string") return ns[id]; return null; };
   // `a.system` is the ANALYSTS table's own dispatch and every row of it is swept above;
-  // `[` is llm.js assembling the request blocks from SHARED_RULES plus the seat's brief,
-  // and the PM's Grok path is those same two swept strings concatenated.
-  const ALLOWED_INDIRECTION = new Set(["a.system", 'SHARED_RULES + "\\n\\n" + PM_SYSTEM',
-    "SHARED_RULES + (system ? `\\n\\n${system}` : \"\")"]);
+  // `[` is llm.js building the request's `system` array from SHARED_RULES alone (the
+  // seat's brief now travels in the user turn, after the cached bundle — seatTurn()),
+  // and the PM's Grok path is those same two swept strings concatenated. The string
+  // form askWithWeb used to build was an allowed indirection here until it went to the
+  // same array as ask(); the entry is gone so nothing can ship under it unswept.
+  const ALLOWED_INDIRECTION = new Set(["a.system", 'SHARED_RULES + "\\n\\n" + PM_SYSTEM']);
   const uncovered = sites.filter((s0) => {
     const e = s0.expr;
     if (ALLOWED_INDIRECTION.has(e) || e.startsWith("[")) return false;

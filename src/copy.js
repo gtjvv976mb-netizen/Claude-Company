@@ -120,6 +120,14 @@ ensureColumn("copy_settings", "executor_heartbeat_log", "TEXT");
 ensureColumn("copy_settings", "launchpads", "TEXT");
 ensureColumn("copy_settings", "min_liq_usd", "REAL");   // per-floor liquidity floor; null = no floor
 ensureColumn("deliveries", "size_sol", "REAL", "size_usd");
+/* WAS THIS DELIVERY EVER EXECUTABLE? NULL = never judged, and it counts as deliverable,
+   because today every offered call is raised the moment it is delivered; 0 = the alert
+   was held past the band's window (bot paused, blocked, absent or already in the mint)
+   and never raised; 1 = raised into a ready bot. Read by the cohort ledger's
+   deliverable_count (calls.js cycleExecution) so P(taken | deliverable) can be told
+   apart from P(taken | published): a bot that was down is not a bot that declined.
+   Nothing stamps it yet — the per-floor readiness gate in alerts.js is the writer. */
+ensureColumn("deliveries", "deliverable", "INTEGER");
 
 /* THE THREE DIALS A TENANT OWNS.
  *

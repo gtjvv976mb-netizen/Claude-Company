@@ -30,7 +30,9 @@ import db from "./src/lib/store.js";
 import { publishCall, needsFastExitLane } from "./src/penthouse.js";
 import { openCall, closeCall, getCall, liveCalls, evaluateExit,
   beginCyclePass, settleCycles, openCycle, openNewCycle, cycleStatus, cycleHistory,
-  cycleCalls, pursuitOver } from "./src/calls.js";
+  cycleCalls, pursuitOver, cycleExecution } from "./src/calls.js";
+import { recordExecutorFill } from "./src/copy.js";
+import { startOffice } from "./src/office.js";
 import { CYCLE, MAX_ESCALATION_LEVEL } from "./src/config.js";
 import fs from "node:fs";
 
@@ -41,7 +43,7 @@ const MIN = 60_000;
 const reset = () => {
   for (const c of liveCalls()) closeCall(c.id, "test_reset", 1);
   // call_events references calls, so it goes first or the FK refuses the delete.
-  db.exec("DELETE FROM call_events; DELETE FROM deliveries; DELETE FROM calls; DELETE FROM cycles");
+  db.exec("DELETE FROM call_events; DELETE FROM executor_fills; DELETE FROM deliveries; DELETE FROM calls; DELETE FROM cycles");
 };
 let seq = 0;
 const clean = (over = {}) => {
@@ -69,7 +71,8 @@ console.log("\nTHE LEDGER — one row per cycle, with the columns the record nee
   reset();
   const cols = db.prepare("PRAGMA table_info(cycles)").all().map((c) => c.name);
   for (const c of ["id", "opened_at", "closed_at", "quota", "published_count",
-    "escalation_level_reached", "shortfall", "forced_close"])
+    "escalation_level_reached", "shortfall", "forced_close",
+    "deliverable_count", "taken_count", "exited_count"])
     ok(`cycles.${c}`, cols.includes(c), cols.join(","));
   const ccols = db.prepare("PRAGMA table_info(calls)").all().map((c) => c.name);
   ok("calls.cycle_id and calls.escalation_level exist",
@@ -256,6 +259,109 @@ console.log("\nTHE LANES THAT HAVE NO QUOTA ARE UNTOUCHED");
     `cycle_id=${call.cycle_id} escalation_level=${call.escalation_level}`);
   ok("...and opened no cycle behind the desk's back", openCycle() === null,
     `openCycle() = ${JSON.stringify(openCycle())}`);
+}
+
+console.log("\nTHE BOT'S SIDE OF THE COHORT — published is not taken, and taken is not exited");
+/* The owner's goal is calls the bot EXECUTES. The ledger counted publishes only
+   (recordCyclePublish), so P(taken | published) was invisible: cycle 19 spent $21.68
+   for 0 calls and no row could say whether any published call was ever bought or sold.
+   This block drives the bot's REAL report path (copy.recordExecutorFill, the writer
+   behind POST /executor/fill) rather than raw INSERTs, so the counts are proved against
+   the rows the bot actually leaves — including its re-posts, which must not double
+   count — and reads them back through the real GET /api/cycle route. */
+{
+  reset();
+  const FLOOR = 7;
+  // A base58 signature the validator accepts (no 0, O, I or l), unique per fill.
+  const sig = (n) => `Cohort${n}`.padEnd(64, "x");
+  const p = beginCyclePass();
+  const cycleId = p.cycle.id;
+  const pubs = [];
+  for (let i = 0; i < 3; i++)
+    pubs.push(publishCall(clean(), { category: "memecoin", launchpad: "pump.fun",
+      escalation: 0, cycleId }));
+  ok("3 calls published into the cohort", pubs.every((r) => r.outcome === "published"),
+    pubs.map((r) => `#${r.callId}`).join(" "));
+  const [a, b, c] = pubs.map((r) => r.callId);
+  // Offer each to the floor — the precondition recordExecutorFill enforces (a fill on a
+  // call the desk never handed this floor is refused, copy.js).
+  for (const id of [a, b, c])
+    db.prepare("INSERT INTO deliveries (call_id,floor_no,verdict,reason,size_sol,delivered_at) VALUES (?,?,?,?,?,?)")
+      .run(id, FLOOR, "offered", "test fixture", 0.05, Date.now());
+
+  const before = cycleStatus();
+  ok("before any fill: deliverable 3, taken 0, exited 0 — offered is not taken",
+    before.deliverable === 3 && before.taken === 0 && before.exited === 0 && before.published === 3,
+    `published=${before.published} deliverable=${before.deliverable} taken=${before.taken} exited=${before.exited}`);
+
+  // The bot buys two of the three and sells one of those, with the chain's numbers.
+  const now = Date.now();
+  const buyA = recordExecutorFill(FLOOR, { callId: a, side: "buy", signature: sig(1), at: now,
+    sizeSol: 0.0175, lamportsIn: 17_500_000, entryMark: 0.001, solUsd: 210 });
+  const buyB = recordExecutorFill(FLOOR, { callId: b, side: "buy", signature: sig(2), at: now + 1,
+    sizeSol: 0.0175, lamportsIn: 17_500_000, entryMark: 0.001, solUsd: 210 });
+  const sellA = recordExecutorFill(FLOOR, { callId: a, side: "sell", signature: sig(3), at: now + 2,
+    sol: 0.021, realizedSol: 0.0035, fraction: 1, reason: "desk target hit", kind: "desk_exit" });
+  ok("the bot's three reports were stored through the real writer",
+    buyA?.side === "buy" && buyB?.side === "buy" && sellA?.side === "sell",
+    `rows: #${buyA?.id} ${buyA?.side} call ${buyA?.call_id} · #${buyB?.id} ${buyB?.side} call ${buyB?.call_id} · #${sellA?.id} ${sellA?.side} call ${sellA?.call_id}`);
+  // A second buy on the same call (a scale-in, or a retried report under a new
+  // signature) is one more fill, not one more call taken.
+  recordExecutorFill(FLOOR, { callId: a, side: "buy", signature: sig(4), at: now + 3,
+    sizeSol: 0.01, lamportsIn: 10_000_000, entryMark: 0.00102, solUsd: 210 });
+  const fillRows = db.prepare("SELECT COUNT(*) n FROM executor_fills").get().n;
+  // The third call was never executable: stamp its delivery the way the readiness gate will.
+  db.prepare("UPDATE deliveries SET deliverable=0 WHERE call_id=?").run(c);
+
+  const live = cycleExecution(cycleId);
+  ok("live read: deliverable 2, taken 2, exited 1 — DISTINCT by call, over 4 fill rows",
+    live.deliverable === 2 && live.taken === 2 && live.exited === 1 && fillRows === 4,
+    `deliverable=${live.deliverable} taken=${live.taken} exited=${live.exited} (executor_fills rows=${fillRows})`);
+  const st = cycleStatus();
+  ok("...and cycleStatus carries the same three beside published",
+    st.published === 3 && st.deliverable === 2 && st.taken === 2 && st.exited === 1,
+    `published=${st.published} deliverable=${st.deliverable} taken=${st.taken} exited=${st.exited}`);
+
+  // The real route, over real HTTP, while the cohort is still open.
+  const { server } = startOffice(0);
+  await new Promise((r) => server.once("listening", r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const hit = async (path) => { const r = await fetch(base + path); return { status: r.status, body: await r.json() }; };
+  const open = await hit("/api/cycle");
+  ok("GET /api/cycle shows them on the OPEN cohort, beside published",
+    open.status === 200 && open.body.current?.id === cycleId && open.body.current.published === 3 &&
+    open.body.current.deliverable === 2 && open.body.current.taken === 2 && open.body.current.exited === 1,
+    `HTTP ${open.status} current={published:${open.body.current?.published}, deliverable:${open.body.current?.deliverable}, ` +
+    `taken:${open.body.current?.taken}, exited:${open.body.current?.exited}}`);
+
+  // Close the cohort: closeCycleRow freezes the three into the row.
+  closeCall(a, "target_hit", 0.002);
+  closeCall(b, "stop_hit", 0.0005);
+  closeCall(c, "thesis_expired", 0.0009);
+  const row = db.prepare("SELECT * FROM cycles WHERE id=?").get(cycleId);
+  console.log("  cycles row:", JSON.stringify(row));
+  ok("closeCycleRow wrote taken_count 2 / exited_count 1 / deliverable_count 2 beside published_count 3",
+    row.closed_at != null && row.published_count === 3 && row.deliverable_count === 2 &&
+    row.taken_count === 2 && row.exited_count === 1,
+    `published_count=${row.published_count} deliverable_count=${row.deliverable_count} ` +
+    `taken_count=${row.taken_count} exited_count=${row.exited_count}`);
+  const closed = await hit("/api/cycle");
+  const h = closed.body.history.find((x) => x.id === cycleId);
+  ok("GET /api/cycle shows them on the CLOSED cohort's history row",
+    !!h && h.published === 3 && h.deliverable === 2 && h.taken === 2 && h.exited === 1 && h.open === false,
+    `history[${cycleId}]={published:${h?.published}, deliverable:${h?.deliverable}, taken:${h?.taken}, exited:${h?.exited}, open:${h?.open}}`);
+
+  /* A sell the bot reports AFTER the cohort closed still counts on read — a force-closed
+     cohort's calls stay live and still get sold — while the row keeps the close-time
+     snapshot. Both are facts; the surface shows the live one, the ledger the other. */
+  recordExecutorFill(FLOOR, { callId: b, side: "sell", signature: sig(5), at: now + 4,
+    sol: 0.009, realizedSol: -0.0085, fraction: 1, reason: "stop", kind: "risk_exit" });
+  const later = (await hit("/api/cycle")).body.history.find((x) => x.id === cycleId);
+  const rowLater = db.prepare("SELECT exited_count FROM cycles WHERE id=?").get(cycleId);
+  ok("a sell reported after the close reads live (exited 2) and leaves the snapshot at 1",
+    later.exited === 2 && rowLater.exited_count === 1,
+    `history exited=${later.exited}, cycles.exited_count=${rowLater.exited_count}`);
+  server.close();
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

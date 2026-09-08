@@ -40,7 +40,7 @@ const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; 
 /* Some rows carry a seconds epoch and some carry milliseconds. Read as-is, a seconds
    timestamp makes a coin minted this morning look 1.6 years old, which is exactly the
    kind of number that quietly disqualifies a candidate for a reason nobody checks. */
-const epochMs = (v) => {
+export const epochMs = (v) => {
   const n = num(v);
   if (n == null || n <= 0) return null;
   return n < 1e12 ? n * 1000 : n;
@@ -104,7 +104,8 @@ const CURVE_BOOSTED_FROM_SOL = 100;
  * Units in are lamports and six-decimal base units, as the feed sends them; SOL out.
  */
 function curveOf(coin, graduated) {
-  const none = { solToGraduate: null, gradSolTotal: null, progressSol: null, progressTok: null, curveClass: null };
+  const none = { solToGraduate: null, gradSolTotal: null, progressSol: null, progressTok: null,
+    curveClass: null, curveOpenSol: null };
   // A finished curve owes nothing and is all the way along. Its total is not recoverable
   // from drained reserves and is not guessed.
   if (graduated) return { ...none, solToGraduate: 0, progressSol: 1, progressTok: 1 };
@@ -128,8 +129,19 @@ function curveOf(coin, graduated) {
     progressTok: realTok0 > 0 ? clamp01(1 - realTok / realTok0) : null,
     curveClass: gradSolTotal < CURVE_MINI_BELOW_SOL ? "mini"
       : gradSolTotal >= CURVE_BOOSTED_FROM_SOL ? "boosted" : "standard",
+    // What the curve was worth the minute it opened, in SOL: the denominator of the
+    // launch-share proxy (momentumFrom). Fixed per curve, unlike the real reserve, which
+    // is ~0 at birth and moves with every trade.
+    curveOpenSol: vSol0 > 0 ? vSol0 / LAMPORTS : null,
   };
 }
+
+/* THE BIRTH TAPE. Two hundred is the server's own ceiling on one candle request, and a
+   nano or micro coin inside its hunt window has traded fewer minutes than that far more
+   often than not — so asking for 200 returns the coin's whole life, and the first row IS
+   the launch minute. Whether it did is proven by the count coming back short, never
+   assumed from the age. */
+export const BIRTH_TAPE_CANDLES = 200;
 
 /**
  * One coin as the rest of the desk expects to see it.
@@ -239,10 +251,31 @@ export async function candles(mint, { limit = 40, interval = "1m" } = {}) {
  * gets checked before anything is measured with it. Returns null rather than a
  * confident zero when the tape is too short to say anything.
  */
-export function momentumFrom(tape, { now = null } = {}) {
+export function momentumFrom(tape, { now = null, createdAt = null, curveOpenUsd = null, limit = null } = {}) {
   if (!Array.isArray(tape) || tape.length < 3) return null;
   const last = tape.at(-1);
   if (!(last?.close > 0) || last.ts == null) return null;
+
+  /* THE LAUNCH MINUTE, AND WHAT IT CARRIED AGAINST THE CURVE.
+   *
+   * GoatPro's first candle carried $6,189 of volume on a curve that opened worth about
+   * $5k — more money in the launch minute than the whole curve started with, which is
+   * what a bundled or sniped open looks like and what no daily aggregate can show. The
+   * reading is taken ONLY when the tape is provably complete: the request asked for
+   * `limit` rows and fewer came back, so nothing older exists and row 0 is the first
+   * minute ever traded. A tape that came back full has been cut somewhere, and its first
+   * row is some minute in the middle of the coin's life — null, not a guess. Row 0 is
+   * the first TRADED minute; msAfterCreate says how long after creation that was. */
+  const complete = Number.isFinite(limit) && limit > 0 && tape.length < limit;
+  const first = tape[0];
+  const firstCandle = complete ? {
+    ts: first.ts,
+    volUsd: first.volume ?? 0,
+    // A minute bucket opens at or before the create instant, so the launch minute reads 0.
+    msAfterCreate: createdAt != null ? Math.max(0, first.ts - createdAt) : null,
+  } : null;
+  const launchVolShare = firstCandle && curveOpenUsd > 0
+    ? Number((firstCandle.volUsd / curveOpenUsd).toFixed(4)) : null;
 
   /* A "1m" CANDLE IS NOT A MINUTE.
    *
@@ -302,20 +335,37 @@ export function momentumFrom(tape, { now = null } = {}) {
     // Null, not Infinity: a coin whose prior window was silent has no ratio to report.
     volAccel: priorVol > 0 ? recentVol / priorVol : null,
     drawdownFromHighPct: high > 0 ? ((last.close / high) - 1) * 100 : null,
+    // The launch minute (see above). Both null unless the tape provably reaches birth;
+    // the share is null again when the curve's opening value could not be priced.
+    firstCandle,
+    launchVolShare,
+    curveOpenUsd: curveOpenUsd > 0 ? curveOpenUsd : null,
   };
 }
 
-/** The minute tape for many mints at once, bounded so a sweep cannot melt the host. */
-export async function momentumFor(mints, { limit = 40, concurrency = 8, now = null } = {}) {
+/**
+ * The minute tape for many mints at once, bounded so a sweep cannot melt the host.
+ *
+ * `perMint` (a Map or object keyed by mint) lets a caller ask a deeper question of a few
+ * coins — the birth tape for a nano or micro coin still inside its hunt window — with the
+ * facts momentumFrom needs to read it: { limit, createdAt, curveOpenUsd }. Everything not
+ * named there gets the sweep's ordinary tape.
+ */
+export async function momentumFor(mints, { limit = 40, concurrency = 8, now = null, perMint = null } = {}) {
   const out = new Map();
   // A single mint passed by mistake would otherwise be spread into its characters and
   // fetched letter by letter, and every reading would come back null.
   const list = typeof mints === "string" ? [mints] : (Array.isArray(mints) ? mints : []);
   const queue = [...new Set(list)].filter(Boolean);
+  const ctxFor = (mint) => (perMint instanceof Map ? perMint.get(mint) : perMint?.[mint]) ?? {};
   const workers = Array.from({ length: Math.max(1, Math.min(16, concurrency)) }, async () => {
     for (let mint = queue.pop(); mint; mint = queue.pop()) {
-      try { out.set(mint, momentumFrom(await candles(mint, { limit }), { now })); }
-      catch { out.set(mint, null); }
+      const ctx = ctxFor(mint);
+      const want = Number.isFinite(ctx.limit) && ctx.limit > 0 ? ctx.limit : limit;
+      try {
+        out.set(mint, momentumFrom(await candles(mint, { limit: want }),
+          { now, createdAt: ctx.createdAt ?? null, curveOpenUsd: ctx.curveOpenUsd ?? null, limit: want }));
+      } catch { out.set(mint, null); }
     }
   });
   await Promise.all(workers);

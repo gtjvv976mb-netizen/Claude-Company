@@ -4,8 +4,13 @@ import { cfg } from "../config.js";
 
 /* Not pretty-printed. The decision seats measured the indentation at roughly a quarter
    of their input tokens and dropped it; the five analyst seats, which run on every
-   workup rather than only on survivors, kept paying for whitespace no model needs. */
-const bundle = (ev) => "=== EVIDENCE BUNDLE ===\n" + JSON.stringify(ev);
+   workup rather than only on survivors, kept paying for whitespace no model needs.
+
+   ONE DEFINITION, shared with decision.js. This string is the cached block every seat
+   reads (ask({ shared }) — see seatTurn() in lib/llm.js), and a cache hit is a byte
+   match: two copies that drifted by a character would silently cost every decision
+   seat its read of the 8-24k-token bundle. test-bundle-cache-prefix.mjs pins the bytes. */
+export const bundle = (ev) => "=== EVIDENCE BUNDLE ===\n" + JSON.stringify(ev);
 
 /* FORENSICS_SYSTEM — the Forensics seat's brief, hoisted to a named export.
    Every prompt this desk ships is swept for cost-conditioned imperatives by
@@ -39,6 +44,16 @@ a launchpad:
   public. xRead.desk_record is what THIS desk already concluded about that handle on a
   previous coin — a record is stronger than a fresh read, because it means the pattern
   repeated.
+- HAS THE CREATOR ALREADY LEFT? holders.devPctOfSupply is the creator wallet's own share
+  of supply read from the chain, holders.devAccountPresent whether their token account
+  exists at all, and holders.devSoldAll is true only when that account was funded and is
+  now empty inside the coin's first half hour — the screen already stops that case, so
+  what reaches you is a creator still holding, or unread. momentum.launchVolShare is the
+  first traded minute's volume against the curve's opening SOL: above one, the launch
+  minute moved more than the whole curve started with, which is what a bundled or sniped
+  open looks like. Both are EVIDENCE the desk is still validating against the
+  reputation read (launch-shadow.js); weigh them, say what they suggest, and treat null
+  as unmeasured rather than as clean or as guilty.
 - POOLS ARE ALREADY OUT, BY OWNER. holders.poolsExcluded says how many pool and
   bonding-curve accounts were removed before the percentages were computed, and
   holders.poolShareOfSupplyPct how much of the supply they held. Until 2026-09-03 they
@@ -190,47 +205,18 @@ analysis you have not done.
 
 KILL if you conclude the activity is predominantly manufactured.`;
 
-/* TECHNICAL_SYSTEM — the Technical seat's brief, hoisted to a named export.
-   Every prompt this desk ships is swept for cost-conditioned imperatives by
-   test-desk-says-what-and-when.mjs, and that sweep's coverage gate requires each
-   `system:` site to NAME its brief: an inlined literal is a prompt no test can reach. */
-export const TECHNICAL_SYSTEM = `You are the TECHNICAL seat. You answer exactly one question:
-
-  "Where is price within its own structure, and is this a location worth entering?"
-
-You have price changes over m5/h1/h6/h24 and current price. That is a THIN dataset — you
-do not have a full candle history, so you cannot identify real support/resistance levels,
-patterns, or moving averages. Do not invent them. Any claim about a chart level you
-cannot derive from the bundle is a violation.
-
-KNOW HOW MUCH YOUR SEAT IS WORTH HERE. This is a micro-cap memecoin desk and yours is
-deliberately the lightest weight on it. On an asset with fundamentals, price action
-summarises what a market of informed participants concluded; on a six-hour-old coin
-there is no such market, and the chart is the same attention the narrative seat is
-reading, redrawn as candles. Treating it as independent confirmation double-counts the
-weaker copy.
-
-So your job is narrow and you should hold it narrowly: say whether this is a bad
-LOCATION to enter — already vertical, blown off, a knife still falling — and say
-plainly when the tape is too short to tell. "Too new to read" is a complete and useful
-answer here. Confidence near zero on a thin tape is correct behaviour, not a failure to
-contribute, and an elaborate structural read of four numbers is worse than silence.
-
-What you CAN legitimately reason about:
-- Short-horizon momentum and its shape across the four windows (accelerating, fading,
-  reversing, or chopping).
-- Whether the current move is already extended — entering after a large h24 move is a
-  materially worse location than entering into consolidation.
-- Volatility implied by the spread of those changes, which the risk seat needs for sizing.
-
-Score the ENTRY LOCATION, not the asset. A good asset at a terrible location is a low
-score from you. Set confidence low — your dataset is genuinely thin, and saying so is
-worth more to the desk than false precision.`;
+/* THE TECHNICAL SEAT IS RETIRED (2026-09-08). Live 24h it was 31 calls for $0.67 (7d
+   $8.45) with 0 kills — its brief carried no KILL clause, so it could not end a workup,
+   and at weight 0.03 with a confidence it was told to keep near zero it could not move
+   one either. The location question it kept (already vertical, a knife still falling)
+   is four numbers on the bundle, pair.priceChange, that every remaining seat reads.
+   config.js re-normalises the weights; desk.js CHEAP_SEATS is the batch it left. */
 
 /**
- * The five analyst seats. Each is deliberately blinkered: it sees the evidence and
- * its own mandate, never another analyst's opinion. Independence is the whole point —
- * five agents that read each other's work produce one opinion wearing five hats.
+ * The four analyst seats (five until Technical retired — see the note above). Each is
+ * deliberately blinkered: it sees the evidence and its own mandate, never another
+ * analyst's opinion. Independence is the whole point — agents that read each other's
+ * work produce one opinion wearing several hats.
  */
 export const ANALYSTS = {
   forensics: {
@@ -254,12 +240,6 @@ export const ANALYSTS = {
     system: FLOW_SYSTEM,
   },
 
-  technical: {
-    label: "Technical",
-    desk: "Price Structure",
-    weight: cfg.weights.technical,
-    system: TECHNICAL_SYSTEM,
-  },
 };
 
 export async function runAnalyst(key, ev) {
@@ -270,9 +250,9 @@ export async function runAnalyst(key, ev) {
     effort: cfg.effort[key],
     schema: AnalystOut,
     system: a.system,
+    shared: bundle(ev),
     prompt:
       `Analyse ${ev.symbol} (${ev.mint}) from your seat only.\n\n` +
-      `${bundle(ev)}\n\n` +
       `Score strictly on your own dimension. Cite an evidence key path for every number.`,
   });
 }
@@ -381,10 +361,10 @@ export async function runNarrative(ev) {
     effort: cfg.effort.narrative,
     schema: AnalystOut,
     system: NARRATIVE_SYSTEM,
+    shared: bundle(ev),
     prompt:
       `Research the narrative around ${ev.symbol} (mint ${ev.mint}) on Solana.\n\n` +
       `Known links from on-chain listing data: ${JSON.stringify({ socials: ev.pair?.socials, websites: ev.pair?.websites })}\n` +
-      `Scout's reason for surfacing it: ${ev.hook || "(none)"}\n\n` +
-      `${bundle(ev)}`,
+      `Scout's reason for surfacing it: ${ev.hook || "(none)"}`,
   });
 }
