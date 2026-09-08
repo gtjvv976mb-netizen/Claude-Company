@@ -275,6 +275,19 @@ body{
 .dashbadge.good{color:var(--good);border-color:color-mix(in srgb,var(--good) 48%,var(--card-line))}
 .dashbadge.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 48%,var(--card-line))}
 .dashbadge.bad{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 48%,var(--card-line))}
+/* PLAIN ANATOMY: one lead, up to three chips, one button, a fold, a ⓘ. */
+.plainlead{display:flex;flex-direction:column;gap:6px}
+.plainlead .lead{margin:0;font-size:13.5px;line-height:1.45;color:var(--ink);max-width:560px;text-wrap:balance}
+.plainlead .sub{margin:0;font-size:11.5px;line-height:1.4;color:var(--ink-soft);max-width:560px}
+.info-btn{align-self:flex-start;font:600 9.5px "JetBrains Mono",monospace;letter-spacing:.08em;text-transform:uppercase;
+  padding:3px 8px;border-radius:999px;border:1px solid var(--card-line);background:transparent;color:var(--ink-faint);cursor:pointer}
+.info-btn:hover{color:var(--ink);border-color:var(--panel-line)}
+.chiprow{display:flex;gap:6px;flex-wrap:wrap}
+.chiprow .dashbadge b{color:var(--ink);font-weight:700}
+.lead-actions{display:flex;gap:7px;flex-wrap:wrap}
+.tape-tools{position:sticky;top:0;z-index:2;display:flex;gap:6px;padding:6px 0 8px;background:var(--panel)}
+.tape-tools .dashbadge{cursor:pointer}
+.tape-tools .dashbadge[aria-pressed="true"]{color:var(--good);border-color:color-mix(in srgb,var(--good) 48%,var(--card-line))}
 /* A metric grid sizes itself to what it is inside. Three hard columns are right across
    the full panel and wrong inside the WALL-ST-E split, where they left each cell about
    85px wide and broke "Clear" into "Cle / ar" and "65s ago" into "65s / ag / o". */
@@ -996,6 +1009,7 @@ window.CCModals = (function () {
     try { box.focus(); } catch {}
     return { scrim, box, head, body, foot, close, dismiss, setTitle: (t) => { heading.textContent = t; } };
   }
+  window.openDialog = openDialog;
 
   /* ══ MODAL 1 · THE NINE STEPS ═══════════════════════════════════════════════
    * Every command and every gate below was read out of the shipped installer,
@@ -6286,47 +6300,188 @@ function tape(seat, msg, cls = "", ts = null) {
   }
 }
 window.tape = tape;
+/* "Show analyst chatter" — off by default, on in Detailed view. Toggling re-reads the
+   chronicle so the filter applies to history as well as to the live edge. */
+window.__showChatter = (() => { try { return localStorage.getItem("cc_detailed") === "1"; } catch { return false; } })();
+{
+  const tools = document.createElement("div");
+  tools.className = "tape-tools";
+  const btn = document.createElement("button");
+  btn.type = "button"; btn.className = "dashbadge";
+  const paint = () => { btn.textContent = (window.__showChatter ? "\u2713 " : "") + "Show analyst chatter"; btn.setAttribute("aria-pressed", String(!!window.__showChatter)); };
+  btn.onclick = () => { window.__showChatter = !window.__showChatter; paint(); if (typeof window.__reloadTape === "function") window.__reloadTape(); };
+  paint(); tools.appendChild(btn);
+  tapeEl.parentElement?.insertBefore(tools, tapeEl);
+}
 
 /* ── the tape is a window onto the chronicle ────────────────────────────────
    It used to start blank on every visit and cap at 240 rows — the record only
    existed while you happened to be watching. Now the last stretch of the
    chronicle backfills on connect, and scrolling to the top pulls ever older
    pages until the true start of the record. */
+/* PLAIN:BEGIN — the page's one vocabulary, in one place.
+ *
+ * The floor was written by the person who built the desk, and it handed every reader
+ * the builder's words: workups, kills, cohorts, seats, escalation levels, provider
+ * error bodies with a team id in them. This block is DOM-free on purpose:
+ * test-plain-language.mjs lifts it out of the file and RUNS it, so every sentence a
+ * user can read is proved to contain no internal code, no provider error and no id.
+ * It lives on window because the tape and the dashboard are separate modules. */
+(() => {
+  const norm = (v) => String(v ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  /* Seats by their server label, their analyst key and their character name, so the
+     tape, the roster and the decision record all say the same plain role. */
+  const ROLE = {
+    scout: "the scout", austinpowerz: "the scout",
+    screener: "the first screen", maxwellsmort: "the first screen",
+    forensics: "contract check", sterlingarchor: "contract check",
+    liquidity: "exit check", ethanhunted: "exit check",
+    flow: "demand check", samfishy: "demand check",
+    technical: "chart check", jasonburn: "chart check",
+    narrative: "story check", trendscan: "story check", xread: "story check", blackwidower: "story check",
+    redteam: "devil's advocate", agent48: "devil's advocate",
+    risk: "risk check", minimeh: "risk check",
+    pm: "portfolio manager", bestpick: "portfolio manager", jamesbound: "portfolio manager",
+    execution: "trade desk", johnquick: "trade desk",
+    compliance: "house rules", judgedread: "house rules",
+    regime: "market weather", murdock: "market weather",
+    review: "post-mortem", coloneldebrief: "post-mortem",
+    scribe: "record keeper", agentp: "record keeper",
+    ceo: "the CEO", bigc: "the CEO",
+    codex: "improvement engineer", codexbanks: "improvement engineer",
+    grokad: "assistant director", groxmulder: "assistant director",
+    md: "Managing Director", floor: "desk", desk: "desk", whales: "big wallets", evidence: "evidence",
+    wallste: "your bot", bot: "your bot",
+  };
+  const role = (seat) => ROLE[norm(seat)] || (seat ? String(seat) : "desk");
+  /* An unknown code is never shown raw in capitals with underscores. */
+  const fallback = (code) => code == null || code === "" ? "" : "result: " + String(code).toLowerCase().replace(/_/g, " ");
+  const REASON = {
+    manufactured: "demand looked fake", manufactured_narrative: "demand looked fake",
+    post_migration_dump: "sold off right after launch", serial_deployer: "the launcher has done this before",
+    deployer_has_rugged: "the launcher has rugged before", thin_liquidity: "too little could be sold at once",
+    too_small: "too small", too_big: "too big", too_new: "too new", no_volume: "nothing trading",
+    no_participants: "nobody trading", wash_suspect: "fake-looking trading",
+    holder_concentration: "too few wallets hold it", mintable: "more coins can be printed",
+    freezable: "the contract can be frozen", seizable: "holders can be seized",
+    transfer_hook: "transfers can be intercepted", frozen_by_default: "new wallets start frozen",
+    conviction_below_bar: "confidence too low", tier_below_bar: "the portfolio manager wanted a trigger first",
+    no_stop: "no stop price", stop_at_or_above_entry: "the stop is above the entry", no_invalidation: "no exit rule",
+    cannot_exit: "could not be sold", unverified_exit: "could not prove it can be sold",
+    unverified_mint: "could not read the contract", insufficient_coverage: "not enough data",
+    fdv_propped: "the valuation looks propped up", price_disputed: "prices did not agree",
+    zero_authorized_size: "no size was authorised", redteam_refuted_unanswered: "the devil's advocate was not answered",
+    compliance_veto: "vetoed by house rules", analyst_kill: "an analyst rejected it", book_full: "the book is full",
+    spike_entry: "the price had already spiked", liquidity_did_not_hold: "the pool did not hold",
+    pm_passed: "the portfolio manager passed", ceo_declined: "the CEO declined",
+    hunt_budget: "research budget reached", out_of_credit: "the analysts could not run", daily_budget: "research budget reached",
+  };
+  const reason = (code) => REASON[norm(code).replace(/[^a-z]/g, "")] ?? REASON[String(code ?? "").toLowerCase()] ?? fallback(code);
+  /* Free text from the server: strip ids, translate any bare code we know, and never
+     let a UUID or a provider's own sentence reach the reader. */
+  const plainDetail = (text) => {
+    let t = String(text ?? "");
+    t = t.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "");
+    if (/(credit|spending limit|balance is empty|403)/i.test(t)) return "the analysts could not run this time";
+    t = t.replace(/\b[a-z]+(?:_[a-z]+)+\b/g, (w) => REASON[w] ?? w.replace(/_/g, " "));
+    return t.replace(/\s+/g, " ").trim().slice(0, 160);
+  };
+  const CLOSE = { target_hit: "target hit", stop_hit: "stop hit", stopped: "stop hit", time_stop: "time ran out",
+    timed_out: "time ran out", expired: "time ran out", manual: "closed by the desk", desk_exit: "closed by the desk",
+    invalidated: "reason broke", cannot_exit: "could not be sold", closed: "closed" };
+  const closeReason = (code) => CLOSE[String(code ?? "").toLowerCase()] ?? fallback(code);
+  const DECISION = {
+    approved: ["APPROVED", "good", "the desk approved it"], propose: ["APPROVED", "good", "the desk approved it"],
+    watch: ["ON WATCH", "warn", "the desk is waiting for its conditions"], held: ["ON WATCH", "warn", "the desk is waiting for its conditions"],
+    pass: ["PASSED", "", "not worth a trade"], passed: ["PASSED", "", "not worth a trade"],
+    declined: ["TURNED DOWN", "bad", "by the CEO"], vetoed: ["TURNED DOWN", "bad", "by house rules"],
+    killed: ["TURNED DOWN", "bad", "an analyst rejected it"], screened_out: ["TURNED DOWN", "bad", "failed the first screen"],
+    unsafe: ["TURNED DOWN", "bad", "failed the first screen"], refuted: ["TURNED DOWN", "bad", "the devil's advocate won"],
+    insufficient_coverage: ["SKIPPED", "", "not enough data"], no_data: ["SKIPPED", "", "not enough data"],
+    error: ["SKIPPED", "", "not enough data"], workup_error: ["SKIPPED", "", "not enough data"],
+    credit_outage: ["SKIPPED", "", "the analysts could not run for a minute"],
+  };
+  const decision = (code, detail) => {
+    const d = DECISION[String(code ?? "").toLowerCase()];
+    const why = detail ? plainDetail(detail) : "";
+    if (d) return { chip: d[0], cls: d[1], sentence: d[2] + (why && why !== d[2] ? " — " + why : "") };
+    return { chip: "FINISHED", cls: "", sentence: "reason on file" + (code ? " (" + fallback(code) + ")" : "") };
+  };
+  const money = (v) => v == null || !Number.isFinite(Number(v)) ? "" : "$" + Math.round(Number(v)).toLocaleString();
+  const short = (m) => (m ? String(m).slice(0, 4) + "…" + String(m).slice(-4) : "");
+  const sym = (e) => e.symbol || short(e.mint) || "a coin";
+  const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
+  const plainStop = (v) => { const t = String(v ?? ""); if (/credit/i.test(t)) return "the analysts could not run";
+    if (/budget/i.test(t)) return "research budget reached"; return REASON[t] ?? t.replace(/_/g, " "); };
+  const plainVerdict = (e) => {
+    if (e.kill) return "turned it down" + (e.kill_reason ? " — " + plainDetail(e.kill_reason) : "");
+    if (e.pass === false) return "turned it down" + (e.detail ? " — " + plainDetail(e.detail) : "");
+    if (typeof e.score === "number") return "scored it " + Math.round(e.score) + "/100";
+    return e.detail ? plainDetail(e.detail) : "done";
+  };
+  /* type -> [who, sentence, tone, "chatter"?]. null hides the event. "chatter" rows are
+     analyst-level and only show when the reader asks for them. */
+  const EVENT = {
+    "cycle:start": () => ["desk", "Round started", "hi"],
+    "cycle:opened": () => ["desk", "New round", "hi"],
+    "cycle:end": (e) => ["desk", "Round over — " + plural(e.count ?? 0, "call") + " found" + (e.stopped ? " (" + plainStop(e.stopped) + ")" : ""), "hi"],
+    "cycle:closed": (e) => ["desk", "Round closed — " + plural(e.published ?? 0, "call"), "hi"],
+    "cycle:short": (e) => ["desk", (e.published ?? 0) + " of " + (e.quota ?? 3) + " calls found this round", ""],
+    "cycle:halted": (e) => ["desk", "Round paused — " + plainStop(e.reason), "warn"],
+    "cycle:budget": (e) => ["desk", "Research budget: " + money(e.usedUsd) + " of " + money(e.capUsd) + " today", "warn"],
+    "cycle:holding": (e) => ["desk", "Holding " + sym(e) + (e.heldHours != null ? " — " + e.heldHours + "h in" : "") + ". The next round starts when it closes.", "hi"],
+    "cycle:hunting": (e) => ["desk", "Still looking — studying " + sym(e), "", "chatter"],
+    "cycle:hunt_dry": () => ["desk", "Nothing else worth studying this round", ""],
+    "cycle:escalated": () => ["desk", "Looking harder this round", "", "chatter"],
+    "cycle:narrowed": () => null, "cycle:skipped_repeats": () => null, "cycle:prefiltered": () => null,
+    "cohort:ranked": () => ["desk", "Ranked this round's coins", "", "chatter"],
+    "cohort:declined": (e) => ["desk", sym(e) + " — not chosen this round", "", "chatter"],
+    "call:published": (e) => ["desk", "Call published: " + sym(e), "good"],
+    "call:withheld": (e) => ["desk", sym(e) + " held back — " + reason(e.gate || e.reason), "warn"],
+    "call:entry_held": (e) => ["desk", sym(e) + " — waiting for your bot to be ready", "warn"],
+    "scout:universe": (e) => ["scout", "Looked at " + (e.total ?? e.fresh ?? "") + " new coins", "", "chatter"],
+    "scout:shortlist": (e) => ["scout", "Shortlisted " + (e.count ?? "") + " for study", "", "chatter"],
+    "scout:skip": () => null,
+    "token:start": (e) => ["desk", "Studying " + sym(e), "", "chatter"],
+    "token:evidence": () => null,
+    "token:end": (e) => { const d = decision(e.outcome, e.detail); return ["desk", sym(e) + " — " + d.chip.toLowerCase() + (d.sentence ? " · " + d.sentence : ""), d.cls, "chatter"]; },
+    "seat:verdict": (e) => ["seat", role(e.seat) + ": " + plainVerdict(e), "", "chatter"],
+    "seat:failed": (e) => ["seat", role(e.seat) + " could not run this time", "warn"],
+    "seat:searching": () => null, "seat:thinking": () => null, "seat:done": () => null, "seat:relaxed": () => null,
+    "seat:adjusted": () => null, "seat:downgraded": () => null,
+    "whales": (e) => ["whales", sym(e) + ": " + plural(e.uniqueBuyers ?? 0, "big wallet") + " buying" + (e.netUsd != null ? " · " + (e.netUsd >= 0 ? "+" : "") + money(e.netUsd) + " net" : ""), ""],
+    "order:slip": (e) => ["desk", "Ticket written for " + sym(e) + " — unsigned, nothing bought yet", ""],
+    "identity:changed": () => ["desk", "The floor's name changed", ""],
+    "watch:opened": (e) => ["desk", sym(e) + " is on watch", ""],
+    "watch:expired": (e) => ["desk", sym(e) + " is off watch — its conditions never came", ""],
+    "trend:scan": () => ["seat", "Story check: looked for stories breaking on X", "", "chatter"],
+    "trend:hunted": () => null, "trend:race": () => null, "trend:no_coin_yet": () => null,
+    "desk:breaker_open": () => ["desk", "The analysts are paused for a minute", "warn"],
+    "desk:breaker_closed": () => ["desk", "The analysts are back", "good"],
+    "desk:out_of_credit": () => null, "fresh:skipped_repeat": () => null, "xread:cached": () => null, "fresh:scan": () => null,
+  };
+  const event = (e) => {
+    const f = e && EVENT[e.type];
+    if (!f) return null;                                   // world:* ambience and anything unlisted stays off the tape
+    const r = f(e);
+    if (!r) return null;
+    const who = r[0] === "seat" ? role(e.seat) : role(r[0]);
+    return { who, text: r[1], cls: r[2] || "", chatter: r[3] === "chatter" };
+  };
+  const chip = Object.freeze({ open: "OPEN", closedUp: "CLOSED · UP", closedDown: "CLOSED · DOWN", dryRun: "DRY RUN",
+    live: "LIVE", offline: "OFFLINE", notSetUp: "NOT SET UP", tenantsOnly: "TENANTS ONLY", ownerOnly: "OWNER ONLY",
+    working: "WORKING", paused: "PAUSED", holding: "HOLDING", vacant: "VACANT" });
+  window.PLAIN = Object.freeze({ role, reason, decision, closeReason, plainDetail, event, chip, fallback, eventTypes: Object.keys(EVENT) });
+})();
+/* PLAIN:END */
+
 function fmtTape(e) {
-  const money = (v) => v == null ? "" : "$" + Math.round(v).toLocaleString();
-  switch (e.type) {
-    case "cycle:start":     return ["Floor", `Cycle ${String(e.cycle).slice(0, 16)} opened`, "hi"];
-    case "cycle:end":       return ["Floor", `Cycle closed — ${e.count ?? 0} calls, $${e.spendUsd ?? 0}${e.stopped ? " (" + e.stopped + ")" : ""}`, "hi"];
-    case "cycle:halted":    return ["Floor", `Cycle halted — ${e.reason}`, "bad"];
-    case "cycle:budget":    return ["Floor", `Budget: $${Number(e.usedUsd).toFixed(2)} of $${Number(e.capUsd).toFixed(2)}`, "warn"];
-    /* THE MANDATE'S OWN TAPE. Under one-trade-at-a-time the desk is idle for most
-     * of the day BY DESIGN — it is holding a position, not broken. An idle desk that
-     * says nothing is indistinguishable from a dead one, so it narrates the wait. */
-    case "cycle:holding":   return ["Floor", `Holding ${e.symbol || short(e.mint)}${e.heldHours != null ? ` — ${e.heldHours}h in` : ""}. The next cycle starts when it closes.`, "hi"];
-    case "cycle:hunting":   return ["Scout", `Still hunting this cycle's call — ${e.symbol || ""} (${e.hunted} interviewed)`.trim()];
-    case "cycle:hunt_dry":  return ["Floor", `No call this cycle: ${e.hunted} coins interviewed, none cleared safety`, "warn"];
-    case "cohort:ranked":   return ["Floor", e.winner
-                                    ? `Cohort of ${e.studied}: ${e.winner.symbol} takes the seat — ${e.winner.why}`
-                                    : `Cohort of ${e.studied}: nothing eligible`, e.winner ? "good" : "warn"];
-    case "cohort:declined": return ["Floor", `${e.symbol || short(e.mint)} out — ${e.reason}`, e.safety ? "bad" : "warn"];
-    case "call:published":  return ["Desk", `CALL: ${e.symbol} — ${e.why}`, "good"];
-    case "call:withheld":   return ["Desk", `withheld ${e.symbol || short(e.mint)} — ${e.reason}`, e.safety ? "bad" : "warn"];
-    case "scout:universe":  return ["Scout", `${e.total} names in, ${e.fresh} fresh`];
-    case "scout:shortlist": return ["Scout", `Shortlist: ${e.count} for full workup`, "hi"];
-    case "scout:skip":      return ["Scout", `skip ${short(e.mint)} — ${e.reason}`, "warn"];
-    case "token:start":     return ["Floor", `── ${short(e.mint)}${e.hook ? " — " + e.hook : ""}`, "hi"];
-    case "token:evidence":  return ["Evidence", `${e.symbol} @ $${e.price} · liq ${money(e.liq)}`];
-    case "token:end":       return ["Floor", `${e.symbol || short(e.mint)} → ${String(e.outcome).replace(/_/g, " ")}${e.detail ? " — " + e.detail : ""}`,
-                                    e.outcome === "killed" || e.outcome === "screened_out" ? "warn" : ""];
-    case "seat:verdict":    return [e.seat, `${e.detail || ""}${e.score != null ? " " + Math.round(e.score) + "/100" : ""}`.trim() || "reported",
-                                    e.kill || e.pass === false ? "bad" : e.pass === true ? "good" : ""];
-    case "seat:failed":     return [e.seat, `seat failed — ${e.error}`, "bad"];
-    case "seat:searching":  return [e.seat, "searching the web"];
-    case "whales":          return ["Whales", `${e.symbol || short(e.mint)}: ${e.buyers ?? "?"} buying, net ${money(e.netUsd)}`, "hi"];
-    case "order:slip":      return ["CEO", `unsigned order — ${e.symbol} ${e.size ? "$" + e.size : ""}`, "good"];
-    case "identity:changed": return ["Floor", `Nameplate: ${e.identity?.floorName || "—"} · MD ${e.identity?.mdName || "—"}`];
-    default: return null;   // world:* ambience and thinking ticks stay off the tape
-  }
+  /* Every sentence on the tape comes from PLAIN (above). Analyst-level rows are
+     "chatter" and stay hidden until the reader asks for them. */
+  const p = window.PLAIN && window.PLAIN.event(e);
+  if (!p) return null;
+  if (p.chatter && !window.__showChatter) return null;
+  return [p.who, p.text, p.cls];
 }
 
 let oldestChron = null, chronBusy = false, chronDone = false;
@@ -6494,7 +6649,11 @@ function memoNode({ symbol, decision, thesis, conviction, size, stop, gmgn, ts }
   m.className = "memo";
   m.innerHTML = `<header><span class="sym"></span><span class="verdict v-${decision}"></span><time class="when">${ts ? new Date(ts).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : ""}</time></header><p class="th"></p><div class="kv"></div>`;
   m.querySelector(".sym").textContent = symbol;
-  m.querySelector(".verdict").textContent = decision;
+  /* The decision as a plain chip, never a raw code: CREDIT_OUTAGE was reaching the
+     reader verbatim, with the analysts' cooldown text under it. */
+  const plain = window.PLAIN ? window.PLAIN.decision(decision) : { chip: String(decision), cls: "" };
+  m.querySelector(".verdict").textContent = plain.chip;
+  if (plain.cls) m.querySelector(".verdict").classList.add(plain.cls);
   m.querySelector(".th").textContent = thesis || "—";
   const kv = m.querySelector(".kv");
   for (const [k, v] of [["Conviction", conviction != null ? conviction + "/100" : null],
@@ -6547,12 +6706,12 @@ function paintInboxSummary(lastSym) {
   }
   bar.innerHTML = "";
   const b = document.createElement("b");
-  b.textContent = approvedCount ? `${approvedCount} authorised` : "Nothing authorised yet";
+  b.textContent = approvedCount ? `${approvedCount} approved` : "Nothing approved yet";
   b.style.color = approvedCount ? "var(--good,#4f8f52)" : "var(--ink-faint,#9aa9a4)";
   bar.appendChild(b);
   const rest = document.createElement("span");
   rest.style.cssText = "opacity:.75;margin-left:8px";
-  rest.textContent = `\u00b7 ${__inboxSeen} memo${__inboxSeen === 1 ? "" : "s"} on the desk` +
+  rest.textContent = `\u00b7 ${__inboxSeen} coin${__inboxSeen === 1 ? "" : "s"} studied` +
     (lastSym ? ` \u00b7 latest: ${lastSym}` : "");
   bar.appendChild(rest);
 }
@@ -10388,6 +10547,58 @@ const dashMetric = (key, value, note) => {
   if (note) card.appendChild(dashNode("small", "", note));
   return card;
 };
+/* ═══ PLAIN ANATOMY ═══════════════════════════════════════════════════════════════
+ * Every surface obeys one shape, so the reader learns the page once:
+ *   one lead sentence for THIS reader → up to three chips → at most one button →
+ *   a closed "Details" fold that carries a count → a small ⓘ holding the policy prose.
+ * Two readers (visitor / tenant) plus a Detailed-view gate that restores the owner's
+ * density by calling today's painters unchanged — rollback for free. */
+const readerOf = (room) => (room && room.isMine ? "tenant" : "visitor");
+const detailedView = () => { try { return localStorage.getItem("cc_detailed") === "1"; } catch { return false; } };
+const setDetailedView = (on) => { try { localStorage.setItem("cc_detailed", on ? "1" : "0"); } catch {} window.__showChatter = !!on; };
+window.__detailedView = detailedView; window.__setDetailedView = setDetailedView;
+/** The ⓘ: the surface's policy prose, plainly worded, in the page's own modal. */
+const infoButton = (title, text) => {
+  const b = dashNode("button", "info-btn", "ⓘ How this works");
+  b.type = "button"; b.title = title;
+  b.onclick = () => {
+    if (typeof window.openDialog !== "function") { alert(text); return; }
+    const d = window.openDialog({ title, label: "how" });
+    const p = dashNode("p", "dp-note", text); p.style.fontSize = "12.5px"; p.style.lineHeight = "1.5"; p.style.color = "var(--ink)";
+    d.body.appendChild(p);
+    const ok = dashNode("button", "dp-btn", "Got it"); ok.type = "button"; ok.onclick = d.dismiss; d.foot.appendChild(ok);
+  };
+  return b;
+};
+/** Lead sentence + optional standing sentence + optional ⓘ. */
+const plainLead = (text, { sub = null, info = null, infoTitle = "How this works" } = {}) => {
+  const wrap = dashNode("div", "plainlead");
+  wrap.appendChild(dashNode("p", "lead", text));
+  if (sub) wrap.appendChild(dashNode("p", "sub", sub));
+  if (info) wrap.appendChild(infoButton(infoTitle, info));
+  return wrap;
+};
+/** Up to three chips: [{ label, value, cls }] → "Label · Value" badges. */
+const chipRow = (chips) => {
+  const row = dashNode("div", "chiprow");
+  for (const c of chips.filter(Boolean).slice(0, 3)) {
+    const badge = dashNode("span", "dashbadge " + (c.cls || ""));
+    badge.append(document.createTextNode(c.label + (c.value != null && c.value !== "" ? " · " : "")));
+    if (c.value != null && c.value !== "") badge.appendChild(dashNode("b", "", c.value));
+    if (c.title) badge.title = c.title;
+    row.appendChild(badge);
+  }
+  return row;
+};
+/** The one button. */
+const leadButton = (label, onClick, { ghost = false, title = null } = {}) => {
+  const b = dashNode("button", "dp-btn" + (ghost ? " ghost" : ""), label);
+  b.type = "button"; if (title) b.title = title; b.onclick = onClick;
+  const row = dashNode("div", "lead-actions"); row.appendChild(b); return row;
+};
+/** A closed fold with a count; open by default in Detailed view. */
+const detailsFold = (label, count = null) => window.foldSection(label + (count != null ? " · " + count : ""), { open: detailedView() });
+
 /* ═══ COHORT CYCLE SURFACE — BEGIN ══════════════════════════════════════════════
  *
  * The owner asked for at least three published calls per cycle, "at any cost, by any
