@@ -38,7 +38,7 @@ import * as alerts from "./alerts.js";
 import * as identity from "./identity.js";
 import { latestCandidateBoard } from "./candidate-board.js";
 import { walletSolBalance } from "./data/solana.js";
-import { buildExecutorDashboard } from "./executor-dashboard.js";
+import { buildExecutorDashboard, EXECUTOR_OPERATOR_MAXIMA } from "./executor-dashboard.js";
 import * as passes from "./passes.js";
 import { callouts, WHALE_USD } from "./whales.js";
 import { verifiedWhaleCallouts, verifiedHolderCallouts, CALLOUT_WHALE_MIN_USD,
@@ -323,13 +323,21 @@ export function sanitizeExecutorHealth(value) {
     const dailySolCap = capsObject.dailySolCap;
     const dailyLossLimitSol = capsObject.dailyLossLimitSol;
     const maxOpenPositions = capsObject.maxOpenPositions;
+    /* THE SEVENTH COPY OF THE CEILING, and the one that silently threw the bot's caps
+       away. These bounds were the literals 0.05 / 0.5 / 0.15 / 4 while the executor's
+       declared maxima moved to 0.4 / 1000 / 0.4 and its open-position sentinel to 24 —
+       so every heartbeat from a correctly-armed bot failed `valid`, caps became null, the
+       desk sized its evidence around a default instead of the bot's real cap, and the
+       floor showed "not funded". Derived from EXECUTOR_OPERATOR_MAXIMA now, which
+       test-operator-max-parity.mjs holds equal to poller.mjs OPERATOR_MAX. */
+    const M = EXECUTOR_OPERATOR_MAXIMA;
     const valid = typeof maxSolPerTrade === "number" && Number.isFinite(maxSolPerTrade) &&
-      maxSolPerTrade >= 0.000001 && maxSolPerTrade <= 0.05 &&
+      maxSolPerTrade >= 0.000001 && maxSolPerTrade <= M.maxSolPerTrade &&
       typeof dailySolCap === "number" && Number.isFinite(dailySolCap) &&
-      dailySolCap >= 0.000001 && dailySolCap >= maxSolPerTrade && dailySolCap <= 0.5 &&
+      dailySolCap >= 0.000001 && dailySolCap >= maxSolPerTrade && dailySolCap <= M.rolling24hDeploySol &&
       typeof dailyLossLimitSol === "number" && Number.isFinite(dailyLossLimitSol) &&
-      dailyLossLimitSol >= 0.000001 && dailyLossLimitSol <= 0.15 &&
-      Number.isInteger(maxOpenPositions) && maxOpenPositions >= 1 && maxOpenPositions <= 4;
+      dailyLossLimitSol >= 0.000001 && dailyLossLimitSol <= M.rolling24hRealizedLossBrakeSol &&
+      Number.isInteger(maxOpenPositions) && maxOpenPositions >= 1 && maxOpenPositions <= M.maxOpenPositions;
     caps = valid ? { maxSolPerTrade, dailySolCap, dailyLossLimitSol, maxOpenPositions } : null;
     capsFailed = !valid;
   }
