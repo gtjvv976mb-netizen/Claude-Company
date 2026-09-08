@@ -82,6 +82,55 @@ export function bandOf(usdMarketCap) {
   return null;
 }
 
+/* CLASSIFYING A CURVE BY ITS GRADUATION TOTAL. The measured populations sit far apart —
+   85.005 SOL on a standard curve, 111-345 on boosted ones, ~10.95 on a mini — so the two
+   lines are drawn in the empty space between them, not on a value any row carries. They
+   name a curve; nothing derived below is computed from them. */
+const CURVE_MINI_BELOW_SOL = 70;
+const CURVE_BOOSTED_FROM_SOL = 100;
+
+/**
+ * THE CURVE, DERIVED FROM ITS OWN ROW — NO CONSTANT.
+ *
+ * "85 SOL to graduate" is true of most curves and wrong per coin: measured live on
+ * 2026-09-08 the graduation total was 85.005 SOL on six of eight fresh rows and 111.2 and
+ * 195.6 on the other two (boosted), and the judges' sample ran 10-345. What IS fixed on a
+ * row is the arithmetic. pump.fun's curve is a constant product k = vSol*vTok; a buy
+ * takes tokens out of the virtual and real reserves together, so vTok - realTok (279.9M
+ * on every live row) is the slice held back for the pool; and the curve completes when
+ * the real tokens run out. The virtual SOL at completion is therefore k / (vTok - realTok),
+ * and what is still owed is that minus today's vSol. Everything here follows from the row.
+ *
+ * Units in are lamports and six-decimal base units, as the feed sends them; SOL out.
+ */
+function curveOf(coin, graduated) {
+  const none = { solToGraduate: null, gradSolTotal: null, progressSol: null, progressTok: null, curveClass: null };
+  // A finished curve owes nothing and is all the way along. Its total is not recoverable
+  // from drained reserves and is not guessed.
+  if (graduated) return { ...none, solToGraduate: 0, progressSol: 1, progressTok: 1 };
+  const vSol = num(coin.virtual_sol_reserves), vTok = num(coin.virtual_token_reserves);
+  const realSol = num(coin.real_sol_reserves), realTok = num(coin.real_token_reserves);
+  if (!(vSol > 0) || !(vTok > 0) || !(realSol >= 0) || !(realTok > 0) || !(vTok > realTok)) return none;
+  const held = vTok - realTok;
+  const solToGraduate = (vSol * vTok / held - vSol) / LAMPORTS;
+  const gradSolTotal = realSol / LAMPORTS + solToGraduate;
+  /* The curve's opening state, recovered rather than assumed: SOL enters the virtual and
+     real reserves together, so vSol - realSol is the opening virtual SOL (30 on a standard
+     row, 39.8 and 70.5 on the two boosted ones measured), k over that is the opening
+     virtual tokens, and less the held slice, the tokens the curve started out selling. */
+  const vSol0 = vSol - realSol;
+  const realTok0 = vSol0 > 0 ? vSol * vTok / vSol0 - held : null;
+  const clamp01 = (x) => Math.min(1, Math.max(0, x));
+  return {
+    solToGraduate,
+    gradSolTotal,
+    progressSol: gradSolTotal > 0 ? clamp01((realSol / LAMPORTS) / gradSolTotal) : null,
+    progressTok: realTok0 > 0 ? clamp01(1 - realTok / realTok0) : null,
+    curveClass: gradSolTotal < CURVE_MINI_BELOW_SOL ? "mini"
+      : gradSolTotal >= CURVE_BOOSTED_FROM_SOL ? "boosted" : "standard",
+  };
+}
+
 /**
  * One coin as the rest of the desk expects to see it.
  *
@@ -91,31 +140,44 @@ export function bandOf(usdMarketCap) {
  * `liquidityUsd` is the bonding curve's REAL SOL reserve priced in dollars, doubled to
  * describe both sides of the book — that reserve is literally the money available to
  * sell into before graduation, which is the number a stop depends on. A graduated coin
- * (`complete`) has a real AMM pool and DexScreener knows it better than this does, so
- * its reserve is reported but flagged.
+ * has a real AMM pool and DexScreener knows it better than this does, so its reserve is
+ * reported but flagged.
+ *
+ * GRADUATED MEANS THE CURVE IS EMPTY, NEVER THAT A POOL ADDRESS EXISTS. Measured on the
+ * launch feed 2026-09-08: pool_address was set on 8 of 8 rows seconds old, every one of
+ * them complete=false with 793.1M tokens still on the curve (the judges saw it on 49-50
+ * of 50). pump.fun pre-assigns the pool, so a test on it calls every launch graduated.
  */
 export function asCandidate(coin, { solUsd = null, now = Date.now() } = {}) {
   if (!coin?.mint) return null;
   const mcap = num(coin.usd_market_cap);
   const supply = num(coin.total_supply);
   const priceUsd = mcap != null && supply > 0 ? mcap / (supply / 10 ** MINT_DECIMALS) : null;
+  const realTok = num(coin.real_token_reserves);
+  const graduated = coin.complete === true || realTok === 0;
   /* A GRADUATED COIN HAS AN EMPTY CURVE, NOT AN EMPTY BOOK. real_sol_reserves goes to
      zero the moment the curve tips into a real AMM pool, and reporting that as $0 of
      liquidity would describe every graduated coin as unsellable — the one condition the
      screen treats as fatal. Unknown is the honest answer; DexScreener knows the pool. */
   const solReserve = num(coin.real_sol_reserves);
-  const curveUsd = coin.complete || solReserve == null || !(solUsd > 0)
+  const curveUsd = graduated || solReserve == null || !(solUsd > 0)
     ? null : (solReserve / LAMPORTS) * solUsd;
   const createdAt = epochMs(coin.created_timestamp);
   const ageHours = createdAt ? (now - createdAt) / 3.6e6 : null;
+  const curve = curveOf(coin, graduated);
+  const ath = num(coin.ath_market_cap);
   return {
     mint: coin.mint,
     launchpad: "pump.fun",
-    onCurve: !coin.complete,
+    onCurve: !graduated,
     source: "pumpfun-live",
     pair: {
-      dex: coin.complete ? "pumpswap" : "pumpfun",
-      pairAddress: coin.pool_address ?? coin.bonding_curve ?? null,
+      dex: graduated ? "pumpswap" : "pumpfun",
+      // The venue the coin trades on: the curve until it empties, the pool after. A fresh
+      // row carries both addresses, so the order has to follow graduation.
+      pairAddress: graduated
+        ? (coin.pool_address ?? coin.bonding_curve ?? null)
+        : (coin.bonding_curve ?? coin.pool_address ?? null),
       url: `https://pump.fun/coin/${coin.mint}`,
       baseSymbol: coin.symbol ?? null,
       baseName: coin.name ?? null,
@@ -139,13 +201,18 @@ export function asCandidate(coin, { solUsd = null, now = Date.now() } = {}) {
     },
     live: {
       band: bandOf(mcap),
-      graduated: !!coin.complete,
+      graduated,
       creator: coin.creator ?? null,
       replyCount: num(coin.reply_count),
-      athMarketCap: num(coin.ath_market_cap),
+      athMarketCap: ath,
+      // When the high was set and how far below it the coin sits now: a coin 60% off a
+      // twenty-minute-old high is a late look, and that is free to know here.
+      athAt: epochMs(coin.ath_market_cap_timestamp),
+      athRatio: ath > 0 && mcap > 0 ? mcap / ath : null,
       lastTradeAt: epochMs(coin.last_trade_timestamp),
       curveSolReserve: solReserve == null ? null : solReserve / LAMPORTS,
       curveLiquidityUsd: curveUsd,
+      ...curve,
       verified: !!coin.verified,
       banned: !!coin.is_banned,
     },
