@@ -27,6 +27,9 @@ const TRADING_RUNTIME_FILES = Object.freeze([
      decides whether a published call is enterable at all, so its bytes are as much a
      part of what this process IS as the stop policy's are. */
   "entry-contract.mjs",
+  /* The route-sizing ladder is a runtime import of poller.mjs and decides the AMOUNT
+     that gets signed, so its bytes are part of what this process IS. */
+  "entry-sizing.mjs",
 ]);
 
 /** A byte identity for exactly the modules loaded by the trading process. */

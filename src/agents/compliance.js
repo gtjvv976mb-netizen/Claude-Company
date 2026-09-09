@@ -1,4 +1,15 @@
 import { cfg } from "../config.js";
+/* A BOT CONSTANT, IMPORTED RATHER THAN COPIED — the only one this seat reads.
+ *
+ * `DEFAULTS.costPct` (executor/strategy.mjs:60) is 0.06: the bot's declared round trip,
+ * slippage both ways plus spread plus priority fee. It is used below for ONE thing —
+ * deciding whether the desk's own authored target is far enough above its own authored
+ * entry to be the re-rate the thesis claims. It is size-INDEPENDENT (a fraction, not a
+ * notional), so it does not reintroduce the $75-versus-$2 mistake the header describes,
+ * and nothing here sizes, caps or floors a trade: the veto is all-or-nothing on a
+ * bracket the desk wrote itself. Imported so the number cannot drift away from the
+ * process that owns it — the same reason src/calls.js:4 imports trade-policy.mjs. */
+import { DEFAULTS as BOT_DEFAULTS } from "../../executor/strategy.mjs";
 
 const FORBIDDEN = /\b(private key|seed phrase|secret key|mnemonic|signTransaction|sendTransaction|sendRawTransaction|keypair)\b/i;
 
@@ -47,6 +58,15 @@ const FORBIDDEN = /\b(private key|seed phrase|secret key|mnemonic|signTransactio
  * check on the desk's OWN paper record (equity, its stated risk budget, its arithmetic
  * agreeing with itself). None of it constrains the bot's wallet, and none of it is a
  * claim about what a trade costs.
+ *
+ * THE ONE ADDITION SINCE, and where it sits against that line (`target_inside_zone` /
+ * `target_inside_cost`, at the ticket block below). Both judge the desk's OWN authored
+ * bracket against the desk's OWN authored entry — the upside leg, which nothing checked
+ * while `stop_above_entry` checked the downside one. The second borrows a single
+ * size-independent bot constant (costPct 0.06) as the threshold for "a little above
+ * spot", which is the line the Execution brief already draws in prose. It prices no
+ * trade, reads no notional, and moves no amount: a fraction that is identical at $2 and
+ * at $75 cannot repeat the mistake this header is about.
  * ═══════════════════════════════════════════════════════════════════════════════════
  */
 export function complianceCheck({ pm, risk, redteam, ticket, ev }) {
@@ -138,6 +158,47 @@ export function complianceCheck({ pm, risk, redteam, ticket, ev }) {
 
     v(ticket.stop_price > 0 && ticket.stop_price >= ticket.entry_zone_low,
       "stop_above_entry", `stop ${ticket.stop_price} is not below entry low ${ticket.entry_zone_low}.`);
+
+    /* ── THE OTHER END OF THE BRACKET, and it was never checked at all ─────────────
+     *
+     * `stop_above_entry` above proves the DOWNSIDE leg is coherent — a stop inside the
+     * entry zone fires on arrival. Nothing proved the same of the UPSIDE leg, and the
+     * two failures it admits are the two the Execution brief already forbids in prose
+     * (decision.js EXECUTION_SYSTEM: "SIZE THE FIRST TARGET TO THE THESIS ... If the
+     * honest target is only a little above spot then the thesis is not a re-rate").
+     * A brief is an instruction to a model; this is the same rule as arithmetic.
+     *
+     * WHAT MADE IT WORTH CODE. The bot's entry contract refuses a bracket whose target
+     * the costs eat (`target_inside_cost`, entry-contract.mjs:235 → planEntry's
+     * R_net = (targetFrac - cost) / (stopFrac + cost)), and it refuses it AFTER the
+     * desk has paid for the whole workup and published — a deterministic refusal on
+     * arrival, no retry (poller.mjs). Every ticket this catches was money already
+     * spent on a call the bot was always going to decline. Making the desk's own
+     * re-rate rule deterministic here is the cheap half of that.
+     *
+     * TARGET INSIDE THE ZONE is the flatly broken one: a first take-profit at or below
+     * the price the ticket is still willing to BUY at is an instruction to sell into
+     * your own entry. It needs no cost model and no size to be wrong.
+     *
+     * TARGET INSIDE THE ROUND TRIP is the re-rate rule with a number on it: 1 + 0.06
+     * (BOT_DEFAULTS.costPct — see the import). At 6% the bot's R_net is zero or
+     * negative before the stop is even priced in, so the call is refused on arrival.
+     * This is NOT the desk pricing a trade — the fraction is the same at every size,
+     * it moves no amount, and it is applied only to numbers the desk authored itself.
+     * The desk still says WHAT and WHEN; it simply no longer publishes a WHAT whose
+     * own upside leg it has already argued is not a thesis.
+     *
+     * Both are conditional on a stated first target: a ticket with no take-profit leg
+     * is a different defect and is not this seat's to rename. */
+    const firstTarget = Number(ticket.take_profit?.[0]?.price);
+    v(firstTarget > 0 && ticket.entry_zone_high > 0 && firstTarget <= ticket.entry_zone_high,
+      "target_inside_zone",
+      `first target ${firstTarget} is at or below the entry zone high ${ticket.entry_zone_high} — ` +
+      "the ticket would sell into its own entry.");
+    v(firstTarget > 0 && px > 0 && firstTarget <= px * (1 + BOT_DEFAULTS.costPct),
+      "target_inside_cost",
+      `first target ${firstTarget} is within ${(BOT_DEFAULTS.costPct * 100).toFixed(0)}% of entry ` +
+      `${px} — the round trip eats it, and a move that small is not the re-rate the thesis argues.`);
 
     /* `stop_inside_costs` WAS HERE, and it was the largest duplicate of the three.
      *

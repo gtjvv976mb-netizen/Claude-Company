@@ -118,7 +118,17 @@ console.log("\nTHE SOURCE DOES WHAT THIS MODEL SAYS");
     `${catchBlock.length} chars`);
   ok("the catch never sells", !/sellAll\(/.test(catchBlock), `${(catchBlock.match(/sellAll\(/g) || []).length} sellAll calls in the catch`);
   ok("the catch still classifies transport vs refusal", /isTransientEntryFailure\(error\)/.test(catchBlock));
-  ok("new entries stay blocked while the mark is unreadable", /pos\.riskDataUnavailable = true;/.test(catchBlock));
+  /* RE-ANCHORED (step 26). This used to read "new entries stay blocked while the mark is
+     unreadable". The flag is still written — it is the heartbeat's and the monitor's
+     health signal, which is what this line actually verifies — but it is no longer in
+     journal.mjs POSITION_BLOCK_FLAGS: an unreadable quote under desk-led-v4 decides
+     nothing, and one illiquid coin was silencing every entry on the book. The property
+     that matters here is unchanged and asserted below: a failed mark NEVER sells. */
+  ok("an unreadable mark is recorded as a health fact for the heartbeat and the monitor",
+    /pos\.riskDataUnavailable = true;/.test(catchBlock) && /noteMarkUnavailable\(pos/.test(catchBlock));
+  ok("...and it is no longer an entry block — that list is custody and identity only",
+    !/\["riskDataUnavailable", "riskDataUnavailableReason"/.test(
+      fs.readFileSync(new URL("./journal.mjs", import.meta.url), "utf8")));
   ok("the old two-tick latch is gone from the valuation pass",
     !/confirmExitMarkFailureWitness/.test(manage) && !/on two consecutive ticks/.test(manage));
   ok("the old sustained-outage sell is gone from the valuation pass",
@@ -126,7 +136,12 @@ console.log("\nTHE SOURCE DOES WHAT THIS MODEL SAYS");
     "the constant survives only in a comment and on the launchd allowlist");
   ok("a successful mark clears the flag", /executableExitMark\(pos, observation\.actualOutputRaw, currentSolUsd\);[\s\S]{0,200}clearMarkUnavailable\(pos\);/.test(manage));
   ok("the only sell in the valuation pass is the retry of an already-latched exit",
-    (manage.match(/await sellAll\(/g) || []).length === 1 && /if \(pos\.exitExecutionRequired\) \{\s*\n\s*await sellAll\(/.test(manage),
+    (manage.match(/await sellAll\(/g) || []).length === 1 && /* RE-ANCHORED (step 26): the retry now computes its clip from the impact ladder
+       first, so the sellAll is no longer the literal next line. The property — the ONE
+       sellAll in this pass is the latched retry, and it sells what the ladder says — is
+       asserted directly. */
+      /if \(pos\.exitExecutionRequired\) \{[\s\S]{0,600}?await sellAll\(pos, pos\.exitExecutionReason \|\| "required risk exit", fraction,/.test(manage) &&
+      /const fraction = exitRetryFraction\(pos\);/.test(manage),
     `${(manage.match(/await sellAll\(/g) || []).length} sellAll call(s)`);
 }
 

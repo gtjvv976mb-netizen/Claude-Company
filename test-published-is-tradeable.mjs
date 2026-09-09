@@ -36,13 +36,23 @@ let pass = 0, fail = 0;
 const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  — " + d : ""}`))
                                  : (fail++, console.log(`  FAIL ${n}${d ? "  — " + d : ""}`)); };
 
+/* THE BOT'S REAL NUMBERS, NOT THE 0.05-ERA ONES. This file swept at fixedSol 0.05 and
+   maxSolPerTrade 0.05, which was the operator ceiling when it was written; the shipped
+   ceiling is 0.4 SOL (executor/strategy.mjs DEFAULTS.fixedSol / maxSolPerTrade) and a
+   sweep at a tenth of it proves the executor's answer moves in a range the executor no
+   longer trades. RE-ANCHORED, not loosened: the property below is unchanged — the desk's
+   answer must not move with any money variable and the bot's must — and it is now
+   measured at the size the bot would actually sign for. */
+const BOT_FIXED_SOL = 0.4, BOT_MAX_SOL = 0.4;
 const WALLET = 0.3366, FEE = 500_000;
 const SLIP = (1 - 300 / 10_000) ** 2;
 const state = { openCount: 0, realizedTodaySol: 0, deployedTodaySol: 0, bookHeat: 0,
   equitySol: WALLET, spendableSol: WALLET, wins: 0, losses: 0 };
 
-/** Would the desk publish this call? Everything about the COIN is held constant. */
-const publishes = (stopPct, rtPct) => {
+/** Would the desk publish this call? Everything about the COIN is held constant.
+ *  `target` is the first take-profit; it defaults to the re-rate every sweep cell uses,
+ *  and the upside-leg section below is the only caller that varies it. */
+const publishes = (stopPct, rtPct, target = 1.9) => {
   const res = complianceCheck({
     pm: { decision: "PROPOSE" }, redteam: { verdict: "survived" },
     /* Loss at stop, off the STOP ALONE. The `+ rtPct / 100` term here matched the round
@@ -50,8 +60,16 @@ const publishes = (stopPct, rtPct) => {
        a friction measured at a notional the desk invented is not the desk's to price. */
     risk: { stop_price: 1 - stopPct / 100, position_size_usd: 12,
       max_loss_usd: Number((12 * (stopPct / 100)).toFixed(2)) },
+    /* THE TARGET IS A RE-RATE, and it has to be for this sweep to be about money at all.
+       It read 1.03 against a 1.02 zone high, which compliance now refuses outright as a
+       broken bracket (`target_inside_zone`, and `target_inside_cost` under it): a first
+       take-profit one cent above the price the ticket still wants to BUY at sells into
+       its own entry, and the bot's entry contract kills it on arrival. Re-anchored to
+       1.9x — the multiple the desk's own Execution brief says a micro-cap thesis argues
+       for — so the only things varying across the sweep remain the stop distance and the
+       round trip, which is the property under test. */
     ticket: { stop_price: 1 - stopPct / 100, entry_zone_low: 1, entry_zone_high: 1.02,
-      take_profit: [{ price: 1.03, pct_to_sell: 100 }] },
+      take_profit: [{ price: target, pct_to_sell: 100 }] },
     ev: { pair: { priceUsd: 1 }, exitProbe: { targetSizeUsd: 15, roundTripLossPct: rtPct } },
   });
   return { pass: res.pass, codes: res.violations.map((v) => v.code) };
@@ -61,7 +79,7 @@ const publishes = (stopPct, rtPct) => {
 const takes = (stopPct, rtPct, conviction) => {
   const sized = planEntry({
     call: { mint: "m", symbol: "T", entry_ref: 1, stop: 1 - stopPct / 100, target: 3, conviction },
-    cfg: { ...DEFAULTS, fixedSol: 0.05, maxSolPerTrade: 0.05, dailySolCap: 0.5,
+    cfg: { ...DEFAULTS, fixedSol: BOT_FIXED_SOL, maxSolPerTrade: BOT_MAX_SOL, dailySolCap: 0.5,
       networkFeeReserveSol: FEE / 1e9, measuredRoundTripLossPct: rtPct }, state });
   if (sized.action !== "buy") return { taken: false, why: sized.reason };
   const conservative = (1 - rtPct / 100) * SLIP - 2 * FEE / (sized.sol * 1e9);
@@ -94,6 +112,65 @@ console.log("\nTHE DESK'S ANSWER DOES NOT MOVE WITH ANY MONEY VARIABLE");
     for (const c of publishes(stopPct, rtPct).codes) if (MONEY.includes(c)) moneyCodes.add(c);
   ok("...and no money veto code is reachable at all",
     moneyCodes.size === 0, [...moneyCodes].join(",") || "none of stop_inside_costs / edge_below_cost / size_exceeds_exit_probe / cannot_exit");
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════════
+ * THE UPSIDE LEG OF THE BRACKET — the half nothing checked.
+ *
+ * The sections above and below are about the SAME question asked at two sizes. This one
+ * is a different question, and it is the one that made the desk pay for calls the bot
+ * was always going to refuse: `stop_above_entry` proved the downside leg coherent while
+ * NOTHING proved the upside one, so a ticket could publish with a first take-profit
+ * inside its own entry zone. The bot then killed it on arrival under the entry
+ * contract's `target_inside_cost`, deterministically and without a retry — after the
+ * whole workup was bought.
+ *
+ * IT IS NOT A COST JUDGMENT SNEAKING BACK. The threshold is a FRACTION (costPct 0.06,
+ * imported from executor/strategy.mjs so it cannot drift), applied to numbers the desk
+ * authored itself. It is the same at $2 and at $75, which is the exact test that
+ * separated a WHAT from a HOW MUCH on 2026-09-07, and it moves no amount: the sections
+ * either side of it prove the desk's answer still does not move with the round trip or
+ * with size, and that the bot's still does.
+ * ═══════════════════════════════════════════════════════════════════════════════════ */
+console.log("\nTHE DESK REFUSES A TARGET THAT IS NOT A RE-RATE");
+{
+  const COST = DEFAULTS.costPct;                       // 0.06 — the constant compliance imports
+  const ENTRY = 1, ZONE_HIGH = 1.02;                   // the fixture's authored bracket
+  console.log(`  entry_ref ${ENTRY}, entry_zone_high ${ZONE_HIGH}, ` +
+    `bot costPct ${COST} → the re-rate floor is ${(ENTRY * (1 + COST)).toFixed(4)}`);
+  const cases = [
+    ["a target AT the entry price", 1.00, ["target_inside_zone", "target_inside_cost"]],
+    ["a target inside the entry zone", 1.015, ["target_inside_zone", "target_inside_cost"]],
+    ["a target AT the zone high", ZONE_HIGH, ["target_inside_zone", "target_inside_cost"]],
+    ["a target above the zone but inside the round trip", 1.03, ["target_inside_cost"]],
+    ["a target exactly AT 1.06x entry", 1.06, ["target_inside_cost"]],
+    ["a target a hair over 1.06x entry", 1.0601, []],
+    ["the 1.9x re-rate the sweep uses", 1.9, []],
+  ];
+  for (const [name, target, expected] of cases) {
+    const p = publishes(20, 1, target);
+    const got = p.codes.filter((c) => c.startsWith("target_"));
+    ok(`${name} (${target}) → ${expected.length ? expected.join("+") : "published"}`,
+      got.length === expected.length && expected.every((c) => got.includes(c)),
+      `codes=[${p.codes.join(",") || "clean"}] pass=${p.pass}`);
+  }
+
+  /* AND THE POINT OF IT: whatever the desk publishes, the bot's two deterministic
+     bracket refusals cannot fire on it. Swept over the same stop range as the sections
+     either side, at the target the fixture now authors. */
+  const bracketKills = [];
+  for (const stopPct of STOPS) {
+    const sized = planEntry({
+      call: { mint: "m", symbol: "T", entry_ref: 1, stop: 1 - stopPct / 100, target: 1.9, conviction: 100 },
+      cfg: { ...DEFAULTS, fixedSol: BOT_FIXED_SOL, maxSolPerTrade: BOT_MAX_SOL, dailySolCap: 0.5,
+        networkFeeReserveSol: FEE / 1e9, measuredRoundTripLossPct: 1 }, state });
+    if (sized.action === "skip" && (/costs eat the target/.test(sized.reason)
+        || /stop is at or above entry/.test(sized.reason)))
+      bracketKills.push(`stop ${stopPct}%: ${sized.reason}`);
+  }
+  ok("no desk-published bracket makes planEntry say 'costs eat the target' or 'stop is at or above entry'",
+    bracketKills.length === 0,
+    bracketKills.length ? bracketKills.slice(0, 3).join(" | ") : `${STOPS.length} stop distances, none refused on the bracket`);
 }
 
 console.log("\nTHE BOT'S ANSWER DOES MOVE — THE JUDGMENT WAS RELOCATED, NOT DELETED");

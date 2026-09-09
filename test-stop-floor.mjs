@@ -106,13 +106,24 @@ console.log("\nTHE EXECUTOR'S GUARD IS STILL THERE, AND STILL REFUSES THOSE FOUR
      are real: `preflight.lossPct` is measured on `preliminaryAmountRaw`, the lamports
      about to be spent, and `worstFeeRatio` is the fee share of that same order. */
   const pollerSrc = fs.readFileSync(new URL("./executor/poller.mjs", import.meta.url), "utf8");
-  ok("poller.mjs still computes a conservative return and compares it to the stop",
-    /conservativeReturnRatio\s*=\s*executableReturnRatio\s*\*\s*slippageHaircut\s*-\s*worstFeeRatio/.test(pollerSrc)
-    && /if\s*\(conservativeReturnRatio\s*<=\s*entryReference\.stopRatio\)/.test(pollerSrc),
-    "executor/poller.mjs:1234-1253");
+  /* RE-ANCHORED, NOT RELAXED (route sizing, 2026-09-09). The guard moved out of
+     poller.mjs into executor/entry-sizing.mjs, because it had to run at EVERY candidate
+     amount the halving ladder quotes rather than once at the desk's clip — halving cures
+     the round-trip and impact caps but RAISES the fixed fee's share of the trade, so a
+     rung that clears both caps can still be at/below the stop. That is strictly more of
+     this guard, not less. Both halves of the property are asserted at the new address:
+     the comparison itself, and that the fee share is taken on the exact lamports about
+     to be spent (the ladder's own `input`) rather than on a desk constant. */
+  const sizingSrc = fs.readFileSync(new URL("./executor/entry-sizing.mjs", import.meta.url), "utf8");
+  ok("the entry path still computes a conservative return and compares it to the stop",
+    /conservativeReturnRatio\s*=\s*executableReturnRatio\s*\*\s*slippageHaircut\s*-\s*worstFeeRatio/.test(sizingSrc)
+    && /cost\.conservativeReturnRatio\s*<=\s*stopRatio/.test(sizingSrc)
+    && /stopRatio:\s*entryReference\.stopRatio/.test(pollerSrc),
+    "executor/entry-sizing.mjs, on entryReference.stopRatio handed in by poller.mjs");
   ok("...on the amount it is really about to spend, not on a desk constant",
-    /worstFeeRatio\s*=\s*2\s*\*\s*jupiter\.cfg\.expectedNetworkFeeLamports\s*\/\s*Number\(preliminaryAmountRaw\)/.test(pollerSrc),
-    "worstFeeRatio is a share of preliminaryAmountRaw");
+    /worstFeeRatio\s*=\s*2\s*\*\s*expectedNetworkFeeLamports\s*\/\s*Number\(input\)/.test(sizingSrc)
+    && /expectedNetworkFeeLamports:\s*jupiter\.cfg\.expectedNetworkFeeLamports/.test(pollerSrc),
+    "worstFeeRatio is a share of the ladder's own quoted amount");
   ok("...and jupiter.mjs still caps the measured entry round trip",
     /entry round-trip loss \$\{lossPct\}% exceeds cap/.test(
       fs.readFileSync(new URL("./executor/jupiter.mjs", import.meta.url), "utf8")),

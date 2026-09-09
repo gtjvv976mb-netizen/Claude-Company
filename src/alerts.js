@@ -1,7 +1,12 @@
 import db, { ensureColumn } from "./lib/store.js";
 import crypto from "node:crypto";
 import { emit } from "./lib/bus.js";
-import "./calls.js";
+import { getCall } from "./calls.js";
+/* THE BOT'S OWN DEFINITION OF "TRADEABLE", read here for the same reason penthouse.js
+   reads it: an entry alert raised on geometry the bot deterministically refuses is not
+   a slow trade, it is a dead one. One module, both processes — test-entry-contract-
+   parity.mjs pins the hop count at 0 for every desk file that reaches it. */
+import { entryContract, entryWindowMs } from "../executor/entry-contract.mjs";
 
 /**
  * ALERTS — the desk can be right and the tenant still lose money because nobody told them.
@@ -136,6 +141,192 @@ async function push(url, title, body) {
   finally { if (t) clearTimeout(t); }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════════════
+ * THE ENTRY ALERT IS A CLOCK, SO RAISING ONE INTO A BOT THAT CANNOT ACT BURNS IT.
+ *
+ * The alert row's created_at IS the event's `ts` on the wire (office.js executorFeedPayload
+ * serves `ts: r.created_at`), and that timestamp is what starts the call's expiry clock in
+ * the bot (poller.mjs callExpiryMs, judged against `ev.ts`). So an alert raised while the
+ * bot is paused, hard-stopped, holding an unresolved blocking intent, rolled back off the
+ * feed, un-rehearsed, absent, or already in this very mint does not wait politely: it ages.
+ * Under a blocking intent every entry in the batch is deferred and replayed against that
+ * same clock, and a nano call — a 90s window on a 60s hold — is dead before the intent
+ * resolves.
+ *
+ * HOLDING COSTS NOTHING. The delivery row is already durable; the alert is the only thing
+ * with a clock, and reconcileMissingEntryAlerts (which the bot's own poll runs on every
+ * tick) re-raises it the moment the floor is healthy again — with a FRESH created_at, i.e.
+ * a full window. Past the band's own window the call is stamped not_executable instead, so
+ * the cohort ledger can tell "the bot was down" from "the bot declined".
+ *
+ * A FLOOR WITH NO HEARTBEAT AT ALL IS NOT A FLOOR WITH A DOWN BOT. Every floor has an
+ * executor_secret from the moment its copy settings exist (it is minted with them, not
+ * configured), so the secret cannot distinguish a floor that runs a bot from one whose
+ * tenant reads the Calls tab. The HEARTBEAT can: it exists only once a poller has posted
+ * one. A floor that has never posted one has nothing to burn a window on and its alert is
+ * a human notification, so the gate does not apply there and the behaviour is unchanged.
+ *
+ * NEITHER IS A BOT THAT SAYS IT IS REHEARSING. The gate applies only to a heartbeat whose
+ * `mode` is "live", and the reason is not politeness — it is what the window is FOR. A
+ * paper bot spends no money on an aged entry, and it reports no executionReadiness at all
+ * (poller.mjs builds that block only under EXECUTE, because the rehearsal it records is a
+ * live route probe), so judging it on that flag would hold every call from every paper
+ * floor for ever. What a paper run produces instead is exactly the contract
+ * executor/test-follow-through.mjs measures end to end: every published call reaches the
+ * bot and is DECIDED on — held in the bot's own journal while a signed buy is unresolved,
+ * and offered back to the same gates the moment it resolves. Holding those calls at the
+ * desk would delete the one signal a rehearsal exists to produce, and protect nothing.
+ * The bot that can lose money on a stale window is the live one, and it is gated.
+ *
+ * NONE OF THESE REASONS IS A PUBLISH GATE, and none is registered in calls.js GATE_CLASS
+ * on purpose. gateFailures() answers "may this coin be published"; these answer "can THIS
+ * floor's bot act on it right now", which is a fact about a machine and not about a mint.
+ * They never reach gateClass(), so its default-deny cannot turn a paused laptop into an
+ * un-waivable safety kill — the same separation the exit-alert namespace already keeps
+ * (calls.js, the `cannot_exit` note). The GEOMETRY half of the gate reports the entry
+ * contract's own codes, and those twelve ARE registered there explicitly.
+ * ═══════════════════════════════════════════════════════════════════════════════════ */
+
+/** Why a floor's bot could not be handed an entry right now. Machine state, not coin facts. */
+export const ENTRY_HOLD_REASONS = Object.freeze([
+  "heartbeat_stale",       // the bot has been quiet longer than the entry itself lives
+  "bot_hard_stop",         // the HARD STOP sentinel is present; nothing is automated
+  "bot_entries_paused",    // the operator paused new exposure
+  "bot_blocking_intent",   // an unresolved journal intent defers the whole batch
+  "bot_feed_rollback",     // the bot has rolled itself back off this feed
+  "bot_not_ready",         // no passing execution rehearsal (or a paper-mode bot, which has none)
+  "mint_already_held",     // the bot is in this coin; the desk does not stack a second entry
+]);
+
+/** The floor's last self-reported pulse, read as "can this bot take an entry?".
+ *  `bot:false` means no LIVE pulse was ever posted — no bot to burn a window on (an
+ *  absent floor or a rehearsing one), so no gate. See the two carve-outs above. */
+export function executorReadiness(floorNo, { now = Date.now(), windowMs = null } = {}) {
+  let hb = null;
+  try {
+    const raw = db.prepare("SELECT executor_heartbeat FROM copy_settings WHERE floor_no=?")
+      .get(Number(floorNo))?.executor_heartbeat;
+    hb = raw ? JSON.parse(raw) : null;
+  } catch { hb = null; }
+  const none = (mode = null) => ({ bot: false, ready: true, reason: null, ageMs: null, held: [], mode });
+  if (!hb || typeof hb !== "object" || Array.isArray(hb)) return none();
+  if (String(hb.mode ?? "") !== "live") return none(hb.mode ?? null);
+
+  const seenAt = Number(hb.seenAt) > 0 ? Number(hb.seenAt) : (Number(hb.ts) > 0 ? Number(hb.ts) : 0);
+  const ageMs = seenAt > 0 ? now - seenAt : null;
+  const held = Array.isArray(hb.held)
+    ? hb.held.map((h) => String(h?.mint ?? "")).filter(Boolean) : [];
+  const health = hb.health && typeof hb.health === "object" ? hb.health : null;
+  const state = { bot: true, ageMs, held, seenAt, mode: "live" };
+  const no = (reason) => ({ ...state, ready: false, reason });
+
+  /* THE AGE IS JUDGED AGAINST THE ENTRY'S OWN WINDOW, not against the 60s heartbeat
+     cadence: the question is not "is this bot chatty" but "will it still be here while
+     this entry is worth taking". A caller with no window falls back to the same default
+     the contract uses for a call with no band. */
+  const window = Number(windowMs) > 0 ? Number(windowMs) : entryWindowMs({ holdMinMs: null });
+  if (ageMs == null || ageMs > window) return no("heartbeat_stale");
+  /* Ordered worst-first so the reason a tenant reads is the one they must act on. Each
+     flag is sanitizeExecutorHealth's own boolean (office.js) — self-reported, already
+     bounded, and only ever able to make this reading more conservative. */
+  if (health?.hardStop === true) return no("bot_hard_stop");
+  if (health?.entriesPaused === true) return no("bot_entries_paused");
+  if (health?.blockingIntent === true) return no("bot_blocking_intent");
+  if (health?.feedRollback === true) return no("bot_feed_rollback");
+  if (health?.executionReadiness?.ready !== true) return no("bot_not_ready");
+  return { ...state, ready: true, reason: null };
+}
+
+/** The newest observation on the call, exactly as the feed COALESCEs it (office.js). */
+function markOn(call) {
+  let row = null;
+  try {
+    row = db.prepare(`SELECT mark, ts FROM call_events
+      WHERE call_id=? AND mark IS NOT NULL ORDER BY id DESC LIMIT 1`).get(call.id);
+  } catch { row = null; }
+  return { mark: row?.mark ?? call.entry_ref ?? null, markAt: row?.ts ?? call.opened_at ?? null };
+}
+
+/**
+ * Should this floor be handed this entry right now — and if not, what says no?
+ * Returns { bot, hold }: `hold` is null to raise, else { reason, windowMs, ageMs,
+ * message, notExecutable }. `bot` says whether this floor has ever posted a pulse, which
+ * is what decides whether the delivery is worth stamping at all.
+ *
+ * The call's own clock is `opened_at`, not the alert's: the alert is what this function
+ * decides whether to create, so it cannot be its own timestamp. entryWindowMs is the
+ * contract's, so "the band's window" has one definition on both sides of the fence.
+ */
+function entryGate(call, floorNo, { now = Date.now() } = {}) {
+  const windowMs = entryWindowMs({ holdMinMs: call.hold_min_ms });
+  const readiness = executorReadiness(floorNo, { now, windowMs });
+  // No live bot on this floor (absent, or rehearsing): nothing to burn, so nothing to gate.
+  if (!readiness.bot) return { bot: false, hold: null };
+  const base = { windowMs, ageMs: readiness.ageMs, heartbeatSeenAt: readiness.seenAt ?? null };
+  const no = (reason, message, extra = {}) => ({ bot: true,
+    hold: { ...base, reason, message, ...extra } });
+  if (readiness.reason)
+    return no(readiness.reason, `the floor's bot is ${readiness.reason}`);
+  if (call.mint && readiness.held.includes(String(call.mint)))
+    return no("mint_already_held",
+      `the bot already holds ${call.symbol || String(call.mint).slice(0, 6)}`);
+
+  /* THE GEOMETRY, ON THE SAME ROW SHAPE THE FEED WILL SERVE. costPct is 0 for the reason
+     publishCall states at length: what a round trip costs belongs to the process that
+     knows the order size (owner, 2026-09-07), so `target_inside_cost` cannot fire from
+     the desk. alertTs is the call's opening, which makes `window_expired` the ONE gate
+     here that is terminal — an entry past its own band window will never come back. */
+  const { mark, markAt } = markOn(call);
+  const contract = entryContract({
+    entryRef: call.entry_ref, entryLo: call.entry_lo, entryHi: call.entry_hi,
+    stop: call.stop, target: call.target, mark, markAt, now,
+    holdBand: call.hold_band ?? null, holdMinMs: call.hold_min_ms ?? null,
+    alertTs: call.opened_at ?? null, costPct: 0,
+  });
+  if (contract.ok) return { bot: true, hold: null };
+  return no(contract.gate, contract.detail?.message ?? contract.gate,
+    { notExecutable: contract.gate === "window_expired" });
+}
+
+/** Was this delivery ever executable? See the column's note in copy.js. Never throws:
+ *  bookkeeping must not be able to fail an alert. */
+function stampDeliverable(callId, floorNo, value) {
+  try {
+    return db.prepare(`UPDATE deliveries SET deliverable=? WHERE call_id=? AND floor_no=?
+                         AND (deliverable IS NULL OR deliverable <> ?)`)
+      .run(value, callId, floorNo, value).changes > 0;
+  } catch { return false; }
+}
+
+/* ONE DEXSCREENER READ WHEN AN ALERT IS HELD, and a witness mark from it.
+ *
+ * A held alert is re-raised later, and the contract it must pass then is judged on the
+ * newest marked call_event — which, without this, is the publish-time witness aging past
+ * MARK_MAX_AGE_MS (15m). Every band but nano holds for longer than that, so a call held
+ * for a paused bot would come back refused as `mark_stale`: cured by the wait, killed by
+ * the ruler. One read per announcement, not per floor — it is one mint.
+ *
+ * INJECTED, NOT IMPORTED. penthouse.js imports announceExit from this file, so a static
+ * import back would be a module cycle; the desk process has both modules loaded already,
+ * which makes the dynamic import a lookup rather than a load. writeWitnessMark is used
+ * rather than noteEvent because it is THE ONE DOOR a witness mark enters by (its own note
+ * in penthouse.js): the spacing rule that stops one observation confirming itself. */
+async function witnessOnHold(call, deps = null) {
+  try {
+    const d = deps ?? await (async () => {
+      const [ds, pent] = await Promise.all([
+        import("./data/dexscreener.js"), import("./penthouse.js"),
+      ]);
+      return { pairsFor: ds.pairsFor, consensus: ds.consensus, writeWitnessMark: pent.writeWitnessMark };
+    })();
+    const px = await d.pairsFor(call.mint);
+    if (!px?.ok) return null;
+    const cons = d.consensus(px.pairs);
+    if (!cons?.ok || !(cons.priceUsd > 0)) return null;
+    return d.writeWitnessMark(call.id, cons.priceUsd) ? cons.priceUsd : null;
+  } catch { return null; }
+}
+
 /**
  * A new call is worth waking up for too. The trade loop STARTS with knowing the
  * call exists: a tenant whose tab was closed at 3am used to learn about an entry
@@ -157,12 +348,26 @@ async function push(url, title, body) {
  * next tick. raise() is idempotent through UNIQUE(floor_no, call_id, kind), so a
  * repeated sweep cannot duplicate an alert, and a call the desk has already closed is
  * deliberately left alone — resurrecting a dead call is worse than losing it.
+ *
+ * IT IS ALSO THE RE-RAISE FOR A HELD ALERT. announceEntry withholds an entry from a floor
+ * whose bot cannot act on it (see the readiness gate above), which leaves EXACTLY the row
+ * shape this sweep already looks for: an offered delivery with no entry alert on a live
+ * call. So the same poll that heals a lost write hands over a held one the moment the
+ * floor is healthy — with a fresh created_at, and therefore a full window rather than the
+ * remains of one. Past the band's own window the entry is dead however healthy the bot
+ * gets, so the delivery is stamped not_executable instead and never raised: the ledger
+ * can then tell a bot that was down from a bot that declined.
+ *
+ * SYNCHRONOUS, DELIBERATELY. office.js calls it fire-and-forget inside a try/catch on
+ * every feed poll; an async version's rejection would escape that catch as an unhandled
+ * rejection. The DexScreener witness read therefore lives on announceEntry's hold path
+ * only — the poll that runs this is already the bot's, seconds apart.
  */
-export function reconcileMissingEntryAlerts(floorNo, { withinMs = 6 * 3600e3, limit = 20 } = {}) {
+export function reconcileMissingEntryAlerts(floorNo, { withinMs = 6 * 3600e3, limit = 20, now = Date.now() } = {}) {
   let rows;
   try {
     rows = db.prepare(`
-      SELECT d.call_id, d.size_sol, c.mint, c.symbol, c.thesis
+      SELECT d.call_id, d.size_sol, c.*
         FROM deliveries d
         JOIN calls c ON c.id = d.call_id
         LEFT JOIN alerts a
@@ -170,12 +375,25 @@ export function reconcileMissingEntryAlerts(floorNo, { withinMs = 6 * 3600e3, li
        WHERE d.floor_no = ? AND d.verdict = 'offered' AND a.id IS NULL
          AND c.status = 'live' AND d.delivered_at > ?
        ORDER BY d.delivered_at DESC LIMIT ?`)
-      .all(floorNo, Date.now() - withinMs, Math.max(1, Math.min(100, limit)));
+      .all(floorNo, now - withinMs, Math.max(1, Math.min(100, limit)));
   } catch { return 0; }
 
   let repaired = 0;
   for (const r of rows) {
     const sym = r.symbol || String(r.mint).slice(0, 6);
+    /* The gate again, on the durable row. A held alert stays held silently — this runs on
+       every poll, so announcing each wait would be a bus event every few seconds — and
+       only the terminal verdict speaks. */
+    const { bot, hold } = entryGate(r, floorNo, { now });
+    if (hold) {
+      if (hold.notExecutable) {
+        stampDeliverable(r.call_id, floorNo, 0);
+        emit("call:entry_held", { floorNo, callId: r.call_id, mint: r.mint, symbol: sym,
+          reason: hold.reason, windowMs: hold.windowMs, botAgeMs: hold.ageMs,
+          notExecutable: true, detail: hold.message });
+      }
+      continue;
+    }
     const fresh = raise({
       floorNo, callId: r.call_id, kind: "entry", urgency: "normal",
       title: `New call — ${sym}`,
@@ -187,6 +405,7 @@ export function reconcileMissingEntryAlerts(floorNo, { withinMs = 6 * 3600e3, li
     });
     if (fresh) {
       repaired++;
+      if (bot) stampDeliverable(r.call_id, floorNo, 1);
       emit("alert:repaired", { floorNo, callId: r.call_id, symbol: sym,
         note: "an offered delivery had no entry alert; the bot could never have seen this call" });
     }
@@ -194,13 +413,29 @@ export function reconcileMissingEntryAlerts(floorNo, { withinMs = 6 * 3600e3, li
   return repaired;
 }
 
-export async function announceEntry(call) {
+export async function announceEntry(call, { now = Date.now(), witnessDeps = null } = {}) {
   const rows = db.prepare(`SELECT d.floor_no, d.size_sol, c.webhook_url
                            FROM deliveries d LEFT JOIN copy_settings c ON c.floor_no = d.floor_no
                            WHERE d.call_id=? AND d.verdict='offered'`).all(call.id);
   const sym = call.symbol || call.mint.slice(0, 6);
-  let sent = 0;
+  /* The DURABLE row, not the caller's object: hold_min_ms, hold_band, entry_lo/hi and
+     opened_at are what the gate is judged on, and a caller may hand us a projection. */
+  const row = getCall(call.id) ?? call;
+  let sent = 0, held = 0;
   for (const r of rows) {
+    /* ── THE READINESS + GEOMETRY GATE ────────────────────────────────────────────
+       Before raise(), because raise() is what starts the clock. A held alert leaves the
+       delivery exactly as it was — verdict 'offered', deliverable unjudged — so the
+       reconciler below re-raises it with a full window the moment the floor is healthy. */
+    const { bot, hold } = entryGate(row, r.floor_no, { now });
+    if (hold) {
+      held++;
+      if (hold.notExecutable) stampDeliverable(call.id, r.floor_no, 0);
+      emit("call:entry_held", { floorNo: r.floor_no, callId: call.id, mint: call.mint,
+        symbol: sym, reason: hold.reason, windowMs: hold.windowMs, botAgeMs: hold.ageMs,
+        notExecutable: hold.notExecutable === true, detail: hold.message });
+      continue;
+    }
     const title = `New call — ${sym}`;
     /* THE SIZE CAME OUT OF THIS SENTENCE ON 2026-09-07. It read "Your floor sized it at
        X SOL", which was untrue twice over even then — the floor did not size it, the desk
@@ -221,9 +456,14 @@ export async function announceEntry(call) {
          2026-09-07, and non-binding either way (executor/strategy.mjs:247). */
       target: call.target, size_sol: r.size_sol ?? null, size_binding: false, thesis: call.thesis,
       invalidation: call.invalidation } }).catch(() => {});
-    if (fresh) sent++;
+    /* Stamped 1 only when there IS a bot: the column records whether a delivery was ever
+       executable, and a floor with no executor at all has no such fact to record. NULL
+       already counts as deliverable in the ledger (calls.js cycleExecution). */
+    if (fresh) { sent++; if (bot) stampDeliverable(call.id, r.floor_no, 1); }
   }
-  return { floors: rows.length, alerted: sent };
+  /* One read for the mint, only when something was actually held — see witnessOnHold. */
+  if (held) await witnessOnHold(row, witnessDeps);
+  return { floors: rows.length, alerted: sent, held };
 }
 
 /* THE ONE PLACE AN EXIT ALERT'S WORDS AND URGENCY ARE DECIDED. announceExit and the

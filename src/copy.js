@@ -126,7 +126,10 @@ ensureColumn("deliveries", "size_sol", "REAL", "size_usd");
    and never raised; 1 = raised into a ready bot. Read by the cohort ledger's
    deliverable_count (calls.js cycleExecution) so P(taken | deliverable) can be told
    apart from P(taken | published): a bot that was down is not a bot that declined.
-   Nothing stamps it yet — the per-floor readiness gate in alerts.js is the writer. */
+   THE WRITER IS THE PER-FLOOR READINESS GATE in alerts.js, wired 2026-09-09: it stamps 1
+   when the alert is raised into a floor that has a bot, 0 when the entry passed the
+   band's own window while still held, and leaves NULL for a floor with no bot at all —
+   which has no such fact to record and already counts as deliverable. */
 ensureColumn("deliveries", "deliverable", "INTEGER");
 
 /* THE THREE DIALS A TENANT OWNS.

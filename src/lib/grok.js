@@ -16,7 +16,7 @@
  * daily brake sees Grok dollars too.
  */
 import db from "./store.js";
-import { acquireCredit, noteUnpersistedProviderSpend, spend, withProviderBudget }
+import { acquireCredit, noteUnpersistedProviderSpend, spend, spendNow, withProviderBudget }
   from "./llm.js";
 // Pure module: patterns only, no config or db, so no cycle back into the client.
 import { isProviderCreditError } from "../provider-health.js";
@@ -45,7 +45,12 @@ export function grokUsageCost(data, searches = 0) {
     exact: Number.isFinite(ticks) && ticks >= 0 };
 }
 
-function meterGrok(seat, data, searches = 0) {
+/* EXPORTED so a simulation can meter a synthetic read through the REAL cost path rather
+ * than through a second copy of it. SIM B's grok stub returned $0 and the desk's largest
+ * single line item (44.9% of a 7-day $386.91 bill, 1,170 reads at a $0.1484 mean) was
+ * therefore absent from every cost number that run printed. Nothing else changed: the
+ * live call site below is the same one it always was. */
+export function meterGrokUsage(seat, data, searches = 0) {
   const { model, i, o, cached, usd } = grokUsageCost(data, searches);
   spend.usd += usd; spend.calls += 1; spend.inTok += i; spend.outTok += o;
   spend.cachedTok += cached;
@@ -57,7 +62,7 @@ function meterGrok(seat, data, searches = 0) {
     db.prepare(`INSERT INTO llm_spend
       (floor,floor_attributed,evidence_scope,seat,model,effort,in_tok,out_tok,cached_tok,usd,ts)
       VALUES (?,1,?,?,?,?,?,?,?,?,?)`)
-      .run(floor, evidenceScope, seat, model, null, i, o, cached, usd, Date.now());
+      .run(floor, evidenceScope, seat, model, null, i, o, cached, usd, spendNow());
   } catch { noteUnpersistedProviderSpend(usd); }
 }
 
@@ -134,7 +139,7 @@ async function xai(path, body, timeoutMs = 90000,
         }
         const searches = Math.max(minSearches,
           (data?.output ?? []).filter((item) => /search/i.test(item?.type ?? "")).length);
-        meterGrok(seat, data, searches);
+        meterGrokUsage(seat, data, searches);
         gate.success();          // xAI billed us: the account is live, close the breaker
         return { ok: true, data };
       } catch (e) {

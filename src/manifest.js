@@ -13,6 +13,9 @@ export const DECISION_MANIFEST_FILES = Object.freeze([
      processes read it to decide whether a call is enterable, so a reviewer recomputing
      membership from a trusted checkout must see it move. */
   "executor/entry-contract.mjs",
+  /* And the route-sizing ladder, for the same reason: it is where a cost-shaped refusal
+     becomes a smaller fill rather than an abandoned call, so a reviewer must see it move. */
+  "executor/entry-sizing.mjs",
   "src/agents/analysts.js",
   "src/agents/ceo.js",
   "src/agents/compliance.js",

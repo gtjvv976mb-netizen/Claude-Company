@@ -264,10 +264,21 @@ ok("...while a bracket with real room still trades",
   outsideCosts.action === "buy", `${outsideCosts.action} ${outsideCosts.sol} SOL`);
 
 const pollerSrc = fs.readFileSync(path.join(ROOT, "executor/poller.mjs"), "utf8");
+/* RE-ANCHORED, NOT RELAXED (route sizing, 2026-09-09). The refusal moved into
+   executor/entry-sizing.mjs, where the halving ladder applies it at every candidate
+   amount instead of once at the desk's clip. It is still the BOT's refusal at the BOT's
+   own size: the stop comes from the bot's entryReference, the starting amount is the
+   bot's own plan.sol, and the ladder's source is asserted to read no desk field at all. */
+const sizingSrc = fs.readFileSync(path.join(ROOT, "executor/entry-sizing.mjs"), "utf8");
 ok("and the preflight refusal is still there, on the lamports about to be spent",
-  /conservativeReturnRatio <= entryReference\.stopRatio/.test(pollerSrc) &&
+  /cost\.conservativeReturnRatio <= stopRatio/.test(sizingSrc) &&
+  /stopRatio: entryReference\.stopRatio/.test(pollerSrc) &&
   /preliminaryAmountRaw/.test(pollerSrc),
-  "poller.mjs entry preflight");
+  "executor/entry-sizing.mjs, driven from poller.mjs entry preflight");
+ok("...and the size the ladder starts from is the bot's own plan, not a feed field",
+  /sol: plan\.sol, lamportsPerSol: LAMPORTS/.test(pollerSrc) &&
+  !/\b(size_sol|fixed_sol|conviction)\b/.test(sizingSrc),
+  "sol: plan.sol; entry-sizing.mjs names no desk field");
 
 console.log("\nTHE DESK'S DELIVERY NO LONGER ASSERTS AN AUTHORITATIVE SIZE");
 /* Two honest options were on the table: drop size_sol from the delivery, or keep it and

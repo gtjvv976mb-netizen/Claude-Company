@@ -25,6 +25,14 @@ const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  —
                                  : (fail++, console.log(`  FAIL ${n}${d ? "  — " + d : ""}`)); };
 
 const poller = fs.readFileSync(new URL("./poller.mjs", import.meta.url), "utf8");
+/* RE-ANCHORED, NOT RELAXED (route sizing, 2026-09-09). The executable-cost guard and its
+   dominant-term message no longer sit inline in poller.mjs: they moved into
+   entry-sizing.mjs so the halving ladder can evaluate them at every candidate amount.
+   The property under test is unchanged — the ENTRY PATH charges the cost model, never the
+   refusal gate — so the two assertions below read the entry path as a whole, and the
+   poller's own line asserting it hands the cost model to that ladder is checked too. */
+const entrySizing = fs.readFileSync(new URL("./entry-sizing.mjs", import.meta.url), "utf8");
+const entryPath = poller + entrySizing;
 const constant = (name) => {
   const m = poller.match(new RegExp(`${name}:\\s*([0-9_]+)`));
   return m ? Number(m[1].replace(/_/g, "")) : null;
@@ -40,12 +48,16 @@ console.log("\nTHE TWO NUMBERS ARE SEPARATE, AND POINT OPPOSITE WAYS");
   ok("the sizing reserve reads the cost model, not the gate",
     /networkFeeReserveSol: EXECUTE \? jupiter\.cfg\.expectedNetworkFeeLamports/.test(poller));
   ok("the executable-cost guard reads the cost model, not the gate",
-    /worstFeeRatio = 2 \* jupiter\.cfg\.expectedNetworkFeeLamports/.test(poller));
+    /worstFeeRatio = 2 \* expectedNetworkFeeLamports/.test(entryPath) &&
+    /expectedNetworkFeeLamports: jupiter\.cfg\.expectedNetworkFeeLamports/.test(poller));
+  ok("the gate constant never reaches the cost model",
+    !/worstFeeRatio = 2 \* jupiter\.cfg\.maxNetworkFeeLamports/.test(entryPath) &&
+    !/expectedNetworkFeeLamports: jupiter\.cfg\.maxNetworkFeeLamports/.test(poller));
   ok("the gate itself is still enforced, unchanged",
     /if \(networkFees > cfg\.maxNetworkFeeLamports\)/.test(
       fs.readFileSync(new URL("./jupiter.mjs", import.meta.url), "utf8")));
   ok("a fee-model refusal names itself instead of blaming the desk",
-    /dominant term: \$\{worstFeeRatio >/.test(poller));
+    /dominant term: \$\{worstFeeRatio >/.test(entryPath));
 }
 
 console.log("\nAN ORDINARY DESK CALL STILL BUYS  (the assertion the suite was missing)");

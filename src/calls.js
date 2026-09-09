@@ -500,6 +500,27 @@ export const GATE_CLASS = Object.freeze({
   no_stop: "SAFETY",                  // unmanageable for anyone copying it
   no_entry_price: "SAFETY",
   stop_at_or_above_entry: "SAFETY",   // it would fire on arrival
+  /* THE UPSIDE LEG OF THE SAME BRACKET (2026-09-09). compliance.js now refuses a ticket
+     whose first take-profit sits at or below the price the ticket is still willing to
+     BUY at — an instruction to sell into its own entry, the mirror image of
+     stop_at_or_above_entry above and SAFETY for the same reason: it is a malformed
+     bracket, true at every size, and no quota gets to publish one. Registered by name
+     even though it can only ever arrive through complianceGateClass() (which answers
+     SAFETY by SOURCE for every compliance violation), so that the table and the seat
+     agree out loud rather than by coincidence.
+
+     ITS SIBLING `target_inside_cost` IS DELIBERATELY NOT LISTED TWICE. Compliance raises
+     that code too — a target inside the bot's declared 6% round trip is not the re-rate
+     the thesis argues — but the key is already taken, below, by the ENTRY CONTRACT's
+     gate of the same name, which is JUDGMENT because a live mark drifting to the target
+     says nothing about the coin. Two vocabularies, one string, and that is not an
+     oversight: exactly as with `cannot_exit` above, compliance violations never reach
+     this table at all (gateFailures() classifies them by source), so the compliance
+     veto is SAFETY and un-waivable while the contract's live-mark refusal stays
+     JUDGMENT. Reclassifying the entry below would silently promote a mark-drift
+     refusal into an un-waivable rug check, which test-entry-contract-parity.mjs
+     refuses on purpose. */
+  target_inside_zone: "SAFETY",
   zero_authorized_size: "SAFETY",
   spike_entry: "SAFETY",              // copiers would be the exit
 
@@ -545,7 +566,11 @@ export const GATE_CLASS = Object.freeze({
   mark_breached_stop: "JUDGMENT",     // this entry is gone; the coin is not
   invalid_target: "JUDGMENT",
   mark_at_target: "JUDGMENT",         // the move already happened — a missed trade, not a rug
-  target_inside_cost: "JUDGMENT",     // inert from the desk (costPct 0); the bot owns cost
+  /* JUDGMENT here classifies the CONTRACT's emitter only — inert from publishCall
+     (costPct 0); the bot owns cost. compliance.js raises the same string as a veto on
+     the desk's own authored target, and that one is SAFETY by source and never reads
+     this table. See the note at target_inside_zone above. */
+  target_inside_cost: "JUDGMENT",
   window_expired: "JUDGMENT",         // untested at publish: the call has no clock yet
   reference_refused: "JUDGMENT",      // the contract's dead-man's handle
 });

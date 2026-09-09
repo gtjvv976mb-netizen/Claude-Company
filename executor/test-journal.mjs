@@ -193,11 +193,22 @@ raw.close();
 ok("valid JSON cannot corrupt rolling risk rails into negative deploy capacity", () => assert.throws(
   () => new ExecutionJournal(riskFile, { wallet, create: false }), /deployedTodaySol is invalid/));
 
-ok("every durable reconciliation/monitor/exit flag blocks new exposure", () => {
-  assert.match(positionEntryBlock({ riskDataUnavailable: true,
-    riskDataUnavailableReason: "mark outage" }), /mark outage/);
+/* RE-ANCHORED (step 26). riskDataUnavailable used to be in POSITION_BLOCK_FLAGS and this
+   pinned it there. It is out on purpose: under desk-led-v4 the exit MARK decides nothing
+   (a desk_exit never consults it), so one coin the bot could not quote — the everyday
+   state of a drained pump.fun pool — froze every entry on the book. It remains the
+   heartbeat/monitor health signal. What blocks now is custody and identity: the desk
+   answering about ANOTHER COIN under a held call id took its place in the list, so the
+   property "a durable contradiction about the book freezes new exposure" still holds. */
+ok("custody and identity contradictions block new exposure; an unreadable quote does not", () => {
   assert.match(positionEntryBlock({ exitExecutionRequired: true,
     exitExecutionReason: "stop fired" }), /stop fired/);
+  assert.match(positionEntryBlock({ balanceReconciliationRequired: true,
+    balanceReconciliationReason: "two RPCs disagree" }), /two RPCs disagree/);
+  assert.match(positionEntryBlock({ deskIdentityMismatch: true,
+    deskIdentityMismatchReason: "the desk's row names another coin" }), /another coin/);
+  assert.equal(positionEntryBlock({ riskDataUnavailable: true,
+    riskDataUnavailableReason: "mark outage" }), null);
 });
 
 const incompleteFile = path.join(dir, "incomplete-history.sqlite");

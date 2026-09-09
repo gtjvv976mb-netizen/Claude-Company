@@ -190,10 +190,15 @@ console.log("\nSTATE-HANDLING CONTRACTS IN THE POLLER");
       !/independent executable exit mark unavailable on two consecutive ticks/.test(manage) &&
       !/sustained outage; latching a risk-reducing exit/.test(manage),
     "the two-witness latch and the outage latch were bot-originated exits (TOAD 2026-09-04; Shrek call 55)");
+  /* RE-ANCHORED (step 26): the retry now reads its clip off the price-impact ladder
+     before it sells, so the sellAll is no longer the literal next line. The property —
+     ONE sellAll in this pass, and it is the latched retry — is unchanged and is asserted
+     against the call itself rather than against the whitespace in front of it. */
   ok("desk-led-v4: the only sellAll in the valuation pass is the retry of an already-latched exit",
     (manage.match(/await sellAll\(/g) || []).length === 1 &&
-      /if \(pos\.exitExecutionRequired\) \{\s*\n\s*await sellAll\(/.test(manage),
-    `${(manage.match(/await sellAll\(/g) || []).length} sellAll call(s) in manageOpen`);
+      /if \(pos\.exitExecutionRequired\) \{[\s\S]{0,600}?await sellAll\(pos, pos\.exitExecutionReason \|\| "required risk exit", fraction,/.test(manage) &&
+      /const fraction = exitRetryFraction\(pos\);/.test(manage),
+    `${(manage.match(/await sellAll\(/g) || []).length} sellAll call(s) in manageOpen, selling the ladder's clip`);
   const limits = src.slice(src.indexOf("const LIVE_LIMITS"), src.indexOf("const log ="));
   ok("the new bounds are FROZEN live ceilings like every other cap",
     /blockHeightWindow: 600/.test(limits) && /maxQuoteShortfallPct: 15/.test(limits) && /maxExitAttempts: 12/.test(limits),

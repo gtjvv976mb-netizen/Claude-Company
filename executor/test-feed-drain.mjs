@@ -43,8 +43,15 @@ assert.match(poller, /consumeDeferredDeskExit: Boolean\(deferredExit\)/,
   "confirmed entry accounting must atomically consume its deferred exit");
 assert.match(poller, /unsafeExitPrepass[\s\S]*cursor stays pinned/,
   "the cursor must not advance when an exit could not be durably represented");
-assert.match(poller, /CRITICAL FEED ROLLBACK:[\s\S]*entries remain frozen; local position\/risk exits continue/,
-  "a feed rollback must freeze entries without disabling local position exits");
+/* RE-ANCHORED (step 26). The line used to promise "local position/risk exits continue",
+ * and under desk-led-v4 there ARE no local exits — the bot holds unless the desk
+ * determines. The PROPERTY this pinned is unchanged and is now asserted against what
+ * actually carries it: a rollback freezes ENTRIES only, and the batch's desk exits are
+ * still executed (runExitPrepass) instead of the branch returning empty-handed. */
+assert.match(poller, /CRITICAL FEED ROLLBACK:[\s\S]*entries remain frozen; the batch's \$\{count\} desk exit\(s\) were still executed/,
+  "a feed rollback must freeze entries without disabling the exits");
+assert.match(poller, /if \(feedCursor\.rollback\) \{[\s\S]*await runExitPrepass\(events\)/,
+  "the rollback branch must run the exit prepass before it returns");
 assert.match(poller, /feedRollback: feedRollbackActive\(\)/,
   "feed rollback must be visible in the post-tick heartbeat");
 assert.match(poller, /waitForRecoveryBudget\(pass,[\s\S]*Math\.min\(1_000/,

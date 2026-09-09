@@ -113,8 +113,15 @@ console.log("\n2. THE FEED IS READ BEFORE THE BOOK IS VALUED, EVERY TICK");
       /noteDeskUnreachable\("feed authentication rejected"\)/.test(consume));
   ok("...and cleared on a valid authenticated payload, BEFORE the rollback verdict",
     consume.indexOf("noteDeskReachable();") > 0 && consume.indexOf("noteDeskReachable();") < consume.indexOf("if (feedCursor.rollback) {"));
-  ok("the CRITICAL FEED ROLLBACK line still promises latched exits continue",
-    /CRITICAL FEED ROLLBACK:[\s\S]*entries remain frozen; local position\/risk exits continue/.test(consume));
+  /* RE-ANCHORED (step 26). "local position/risk exits continue" was a promise v4 could
+     not keep: the bot has no exit of its own, so returning from the rollback branch shut
+     every exit path at once. The line — and the branch — now say and do the true thing:
+     entries frozen, the batch's desk exits still executed, reconciliation still running. */
+  ok("the CRITICAL FEED ROLLBACK line promises the exits that actually exist under v4",
+    /CRITICAL FEED ROLLBACK:[\s\S]*entries remain frozen; the batch's \$\{count\} desk exit\(s\) were still executed/.test(consume) &&
+      /and reconciliation still runs, both identity-checked against the held mint/.test(consume));
+  ok("...and the branch runs the exit prepass rather than returning empty-handed",
+    /if \(feedCursor\.rollback\) \{[\s\S]*const \{ count \} = await runExitPrepass\(events\);/.test(consume));
   const manage = src.slice(src.indexOf("async function manageOpen"), src.indexOf("function recordPositionFailure"));
   ok("manageOpen's only sellAll is the latched retry", (manage.match(/await sellAll\(/g) || []).length === 1,
     `${(manage.match(/await sellAll\(/g) || []).length}`);
@@ -681,7 +688,12 @@ console.log("\n10. THE MIRROR'S OWN DETERMINATION EXPIRES WHEN THE DESK COMES BA
     atExpiry > 0 && atSell > atExpiry, `expiry@${atExpiry} < sellAll@${atSell}`);
   ok("...and the latched retry is still the only sellAll in the valuation pass",
     (manage.match(/await sellAll\(/g) || []).length === 1 &&
-      /if \(pos\.exitExecutionRequired\) \{\s*\n\s*await sellAll\(/.test(manage),
+      /* RE-ANCHORED (step 26): the retry now computes its clip from the impact ladder
+       first, so the sellAll is no longer the literal next line. The property — the ONE
+       sellAll in this pass is the latched retry, and it sells what the ladder says — is
+       asserted directly. */
+      /if \(pos\.exitExecutionRequired\) \{[\s\S]{0,600}?await sellAll\(pos, pos\.exitExecutionReason \|\| "required risk exit", fraction,/.test(manage) &&
+      /const fraction = exitRetryFraction\(pos\);/.test(manage),
     `${(manage.match(/await sellAll\(/g) || []).length} sellAll call(s)`);
   const drop = src.slice(src.indexOf("function dropExpiredMirrorLatch(pos) {"), src.indexOf("function validEntryEvent(ev) {"));
   ok("...judged on the live unreachability clock and the live per-position silence",

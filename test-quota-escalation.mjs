@@ -138,6 +138,16 @@ const CASES = {
    still emits, and it is arithmetic rather than money: a stop that is not below the
    entry zone fires on arrival whatever anyone paid. */
 CASES.stop_above_entry = vetoed("stop_above_entry");
+/* THE UPSIDE LEG OF THE SAME BRACKET (2026-09-09). compliance.js now refuses a ticket
+   whose first take-profit sits at or below the entry zone high (`target_inside_zone`,
+   registered SAFETY in GATE_CLASS) or inside the bot's declared 6% round trip
+   (`target_inside_cost`, which compliance raises and which is SAFETY by SOURCE like
+   every other violation — the GATE_CLASS entry of that name belongs to the entry
+   contract's live-mark gate and is JUDGMENT there). Both are arithmetic on a bracket
+   the desk authored itself, so both are driven here at every level: a quota short of
+   calls does not get to publish a ticket that sells into its own entry. */
+CASES.target_inside_zone = vetoed("target_inside_zone");
+CASES.target_inside_cost = vetoed("target_inside_cost");
 
 console.log("\nEVERY SAFETY GATE IS DRIVEN — no gate may be classified and then never tested");
 {

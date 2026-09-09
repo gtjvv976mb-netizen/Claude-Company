@@ -35,6 +35,11 @@ const TEST_TIMEOUT_MS = Object.freeze({
      the 2-core CI runner, so the headroom is deliberately large — this file's job is
      to be slow and thorough, and a timeout here reads as a red suite on a green tree. */
   "test-quota-simulation.mjs": 900_000,
+  /* SIM C runs three regimes of the real cycle plus a real poller subprocess against a
+     local Jupiter server. Same reasoning as above and the same generous headroom: it is
+     ~90s on this 15-core machine at the default cohort count, and a timeout here would
+     read as a red suite on a green tree. */
+  "test-sim-c.mjs": 900_000,
 });
 const timeoutFor = (test) => TEST_TIMEOUT_MS[path.basename(test)] ?? 120_000;
 

@@ -191,6 +191,13 @@ console.log("\n3. THE DESK MAKES NO COST JUDGMENT");
     risk: { stop_price: 0.97, position_size_usd: 300, max_loss_usd: Number((300 * (0.03 + 0.225)).toFixed(2)) },
     ticket: { entry_zone_low: 1, entry_zone_high: 1.02, stop_price: 0.97,
       take_profit: [{ price: 1.01, pct_to_sell: 100 }] }, ev });
+  /* THE VIOLATIONS THIS FIXTURE DOES RAISE ARE NOT MONEY VETOES, and the assertion is
+     written by NAME so that stays checkable. A 1% target under a 1.02 zone high is a
+     bracket that sells into its own entry (`target_inside_zone`) and is inside the
+     bot's declared 6% round trip (`target_inside_cost`) — both added 2026-09-09, both
+     judged on numbers the desk authored itself, both identical at $2 and at $75. That
+     size-independence is the whole test for whether a judgment is the desk's, and it is
+     why neither is in MONEY_CODES. */
   ok("compliance raises no money veto on a 3% stop, a 1% target and a 22.5% round trip",
     !res.violations.some((v) => MONEY_CODES.includes(v.code)),
     res.violations.map((v) => v.code).join(",") || "no violations");
@@ -207,10 +214,31 @@ console.log("\n3. THE DESK MAKES NO COST JUDGMENT");
 
   // THE BOT'S EQUIVALENT: two of them, both unconditional, both at the bot's own size.
   const pollerSrc = src("./executor/poller.mjs");
-  ok("BOT: poller.mjs still refuses an entry whose costs already reach the stop",
-    liveLines(pollerSrc, /if \(conservativeReturnRatio <= entryReference\.stopRatio\)/).length === 1
-    && liveLines(pollerSrc, /worstFeeRatio = 2 \* jupiter\.cfg\.expectedNetworkFeeLamports \/ Number\(preliminaryAmountRaw\)/).length === 1,
-    "executor/poller.mjs:1234-1253, on preliminaryAmountRaw");
+  /* RE-ANCHORED, NOT RELAXED (route sizing, 2026-09-09). The guard moved into
+     executor/entry-sizing.mjs so the halving ladder applies it at EVERY candidate amount
+     instead of once at the desk's clip — strictly more refusal, and still the BOT's, at
+     the bot's own size: poller.mjs hands it the bot's entryReference stop and the bot's
+     own cost model, and no desk field reaches the ladder at all. */
+  const sizingSrc = src("./executor/entry-sizing.mjs");
+  /* RE-ANCHORED, NOT RELAXED (the paper-preflight seam, 2026-09-09). This counted the
+     poller's sizeEntryToRoute arguments and required EXACTLY ONE of each, which is a
+     count of CALL SITES standing in for the property. SIM C's PAPER_PREFLIGHT seam adds a
+     second call site — paper mode now runs the same ladder instead of returning before it
+     — and the literal 1 went red while the property it protects was untouched.
+     The property is "every call to the route sizer is handed the BOT's own stop ratio and
+     the BOT's own fee model, and no desk field reaches it", so that is what is asserted
+     now, over every call site rather than over an assumed single one. Strictly stronger:
+     the old form said nothing about a second call site, this one judges all of them. */
+  const sizingCalls = codeOnly(pollerSrc).split("sizeEntryToRoute({").slice(1)
+    .map((chunk) => chunk.slice(0, chunk.indexOf("})")));
+  ok("BOT: the entry path still refuses an entry whose costs already reach the stop",
+    liveLines(sizingSrc, /cost\.conservativeReturnRatio <= stopRatio/).length === 1
+    && liveLines(sizingSrc, /worstFeeRatio = 2 \* expectedNetworkFeeLamports \/ Number\(input\)/).length === 1
+    && sizingCalls.length >= 1
+    && sizingCalls.every((c) => /stopRatio: entryReference\.stopRatio/.test(c)
+      && /expectedNetworkFeeLamports: jupiter\.cfg\.expectedNetworkFeeLamports/.test(c)),
+    `executor/entry-sizing.mjs, on the ladder's own quoted lamports — ${sizingCalls.length} ` +
+    `sizeEntryToRoute call site(s) in poller.mjs, every one on the bot's own stop and fee model`);
   ok("BOT: jupiter.mjs still caps the measured entry round trip",
     liveLines(src("./executor/jupiter.mjs"), /if \(lossPct > cap\) throw new Error/).length === 1,
     "executor/jupiter.mjs:1349, maxEntryRoundTripLossPct");

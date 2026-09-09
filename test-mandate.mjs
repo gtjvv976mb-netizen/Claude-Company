@@ -220,7 +220,15 @@ console.log("\nCOMPLIANCE — a WATCH ticket must be audited exactly like a PROP
   /* AND THE MONEY VETOES ARE GONE FROM BOTH VERDICTS. A ticket whose first target is
      4% away against a 3% measured round trip used to be refused as edge_below_cost; it
      must now reach the reader, because whether 4% is worth chasing depends on a cost
-     that depends on a size this desk does not know. */
+     that depends on a size this desk does not know.
+
+     WHAT THE PRINTED CODES SHOW NOW, and it is not a contradiction: this fixture also
+     raises `target_inside_zone` and `target_inside_cost` (compliance.js, 2026-09-09).
+     Those are the BRACKET being incoherent on the desk's own numbers — a first target
+     at 1.04 sits under the 1.1 the same ticket is still willing to buy at, and under
+     the 1.06 re-rate floor — which is true at every size and is what the three deleted
+     vetoes were NOT. The claim under test is unchanged and is asserted by name: none of
+     edge_below_cost / stop_inside_costs / size_exceeds_exit_probe is reachable. */
   const thinEdge = { entry_zone_low: 0.9, entry_zone_high: 1.1, stop_price: 0.8,
     take_profit: [{ price: 1.04, pct_to_sell: 100 }], max_slippage_bps: 500 };
   for (const decision of ["PROPOSE", "WATCH"]) {

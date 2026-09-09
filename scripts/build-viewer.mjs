@@ -168,6 +168,8 @@ const EXECUTOR_FILES = [
      token2022.mjs does, and with the same failure if it does not: a 404 that aborts the
      download before a single line of it is ever read. */
   "entry-contract.mjs",
+  /* And the route-sizing ladder it imports — same 404-aborts-the-install failure mode. */
+  "entry-sizing.mjs",
   /* Desk-led exits (2026-09-05). The bot no longer carries an exit policy of its own —
      Shrek, call 55: it sold 03:01:42Z on its own normalised stop at -13.5% while the
      desk's determined stop_hit landed 03:10:24Z. When the desk is unreachable the bot

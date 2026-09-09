@@ -28,7 +28,7 @@ CREATE INDEX IF NOT EXISTS idx_spend_ts ON llm_spend(ts);
  * the bill untouched. Aggregate only: no prompt text, no evidence, no wallet.
  */
 export function spendBySeat({ hours = 24 } = {}) {
-  const since = Date.now() - Math.max(1, Number(hours) || 24) * 3600e3;
+  const since = spendNow() - Math.max(1, Number(hours) || 24) * 3600e3;
   const rows = db.prepare(`
     SELECT seat, model, effort,
            COUNT(*) AS calls,
@@ -209,6 +209,25 @@ let breakerClock = () => Date.now();
 export function setCreditBreakerClock(fn) {
   breakerClock = typeof fn === "function" ? fn : () => Date.now();
 }
+
+/* THE SAME SEAM FOR THE MONEY RAILS, AND FOR THE SAME REASON.
+ *
+ * assertDailyBudget's three windows (24h cap, the hourly pace, the lane reserve) and
+ * reserveProviderBudget's provider ceiling all key on Date.now(), so a simulation that
+ * runs fifty cycles inside one wall-clock minute measures the PACE BRAKE rather than the
+ * thing it set out to measure. SIM B's answer was to widen the cap to $1,000,000 and say
+ * so in its header — which means the one end-to-end run of the cycle never exercised the
+ * $16/pass, $200/day and hourly rails at all.
+ *
+ * With the clock injected, SIM C runs those rails at their real values and advances time
+ * the way the desk experiences it. Production never calls this; the default is the wall
+ * clock, and every reader below goes through spendNow() so a future window cannot be
+ * added that quietly reads Date.now() directly. */
+let spendClock = () => Date.now();
+export function setSpendClock(fn) {
+  spendClock = typeof fn === "function" ? fn : () => Date.now();
+}
+export const spendNow = () => spendClock();
 
 const CREDIT_BREAKERS = new Map();
 const breakerRecord = (provider) => {
@@ -492,8 +511,8 @@ export const HOURLY_BURST = Math.max(1, Number(process.env.DESK_HOURLY_BURST || 
 /** Throws before any tokens are spent if this lane's share of the last 24h is gone. */
 export function assertDailyBudget(capUsd, { lane = "cycle" } = {}) {
   if (!capUsd || capUsd <= 0) return;
-  const totalSpent = spendSince(Date.now() - 24 * 3600e3).usd;
-  const spent = spendSince(Date.now() - 24 * 3600e3,
+  const totalSpent = spendSince(spendNow() - 24 * 3600e3).usd;
+  const spent = spendSince(spendNow() - 24 * 3600e3,
     { evidenceScope: "house", includeUnattributed: true }).usd;
   const yields = OPPORTUNISTIC.has(lane);
   if (totalSpent >= capUsd) {
@@ -517,7 +536,7 @@ export function assertDailyBudget(capUsd, { lane = "cycle" } = {}) {
      * protected a cycle half the size of the one that ran. Same env var, one default. */
     const cycleBudget = Number(process.env.PENTHOUSE_CYCLE_BUDGET_USD || CYCLE_BUDGET_DEFAULT_USD);
     const hourCap = Math.max((capUsd / 24) * HOURLY_BURST, cycleBudget * 1.25);
-    const spentHour = spendSince(Date.now() - 3600e3,
+    const spentHour = spendSince(spendNow() - 3600e3,
       { evidenceScope: "house", includeUnattributed: true }).usd;
     if (spentHour >= hourCap) {
       emit("cycle:paced", { lane, spentHourUsd: spentHour, hourCapUsd: Number(hourCap.toFixed(2)),
@@ -615,7 +634,7 @@ export function reserveProviderBudget({ provider = "anthropic", maxTokens = 1600
   const searchCeiling = Math.max(0, Math.min(10_000, Number(maxSearches) || 0));
   const usd = inputTokenCeiling / 1e6 * price.in +
     outputTokenCeiling / 1e6 * price.out + searchCeiling * price.search;
-  const spent = rawProviderSpendUsd(Date.now() - 24 * 3600e3);
+  const spent = rawProviderSpendUsd(spendNow() - 24 * 3600e3);
   if (spent + reservedProviderUsd + usd > capUsd) {
     throw new BudgetExhausted(
       `metered provider ceiling: $${spent.toFixed(2)} spent + $${reservedProviderUsd.toFixed(2)} reserved; ` +
@@ -672,7 +691,7 @@ export function meterAnthropicUsage(requestedModel, message, seat, effort) {
   try {
     db.prepare("INSERT INTO llm_spend (floor,floor_attributed,evidence_scope,seat,model,effort,in_tok,out_tok,cached_tok,usd,ts) VALUES (?,1,?,?,?,?,?,?,?,?,?)")
       .run(floor, evidenceScope, seat ?? null, model, effort ?? null,
-        totalInput, output, cacheRead, usd, Date.now());
+        totalInput, output, cacheRead, usd, spendNow());
   } catch { noteUnpersistedProviderSpend(usd); } // preserve the brake even if the ledger is unavailable
   return cost;
 }

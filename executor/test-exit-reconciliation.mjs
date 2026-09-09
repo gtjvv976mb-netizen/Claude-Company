@@ -45,6 +45,7 @@ import {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const POLLER = path.join(here, "poller.mjs");
 const src = fs.readFileSync(POLLER, "utf8");
+const journalSrc = fs.readFileSync(path.join(here, "journal.mjs"), "utf8");
 let pass = 0, fail = 0;
 const ok = (n, c, d = "") => { c ? (pass++, console.log(`  ok   ${n}${d ? "  — " + d : ""}`))
                                  : (fail++, console.log(`  FAIL ${n}${d ? "  — " + d : ""}`)); };
@@ -666,9 +667,17 @@ console.log("\n9. A CALL ID IS NOT AN IDENTITY: THE RECONCILE PATH REFUSES A FOR
   ok("a mismatch returns without selling, and says so at the top of the transcript",
     /return "identity-mismatch";/.test(one) && /CRITICAL CALL IDENTITY MISMATCH \$\{pos\.symbol\}/.test(one) &&
       /this needs an operator/.test(one), "");
+  /* RE-ANCHORED (step 26). The mismatch used to block new exposure only as a SIDE EFFECT
+     of riskDataUnavailable, and riskDataUnavailable has since left POSITION_BLOCK_FLAGS
+     (an unreadable quote is weather; it must not silence the book). The property — a desk
+     row about another coin freezes new exposure — is unchanged and is now carried by the
+     identity flag itself, which is registered in journal.mjs POSITION_BLOCK_FLAGS. */
   ok("...and is a durable flag, not just a log line: new exposure is blocked while it stands",
-    /pos\.deskIdentityMismatch = true;/.test(one) && /pos\.riskDataUnavailable = true;/.test(one),
-    "riskDataUnavailable is journal.positionEntryBlock's flag and heartbeat-health's blockedPositions");
+    /pos\.deskIdentityMismatch = true;/.test(one) && /pos\.deskIdentityMismatchReason =/.test(one) &&
+      /pos\.riskDataUnavailable = true;/.test(one) &&
+      /\["deskIdentityMismatch", "deskIdentityMismatchReason"/.test(journalSrc),
+    "deskIdentityMismatch is journal.positionEntryBlock's flag; riskDataUnavailable stays " +
+    "the heartbeat/monitor health signal");
   const manage = src.slice(src.indexOf("async function manageOpen"), src.indexOf("function recordPositionFailure"));
   ok("a readable exit quote does NOT clear an identity contradiction",
     /if \(pos\.deskIdentityMismatch !== true\) \{\s*\n\s*delete pos\.riskDataUnavailable;/.test(manage), "");
@@ -677,26 +686,39 @@ console.log("\n9. A CALL ID IS NOT AN IDENTITY: THE RECONCILE PATH REFUSES A FOR
   ok("an unproven identity is logged once per call id, like absence",
     /if \(!reconcileIdentityUnprovenLogged\.has\(callId\)\) \{/.test(one), "");
 
-  /* THE ROLLBACK GATE. While the authenticated latest_id sits behind the durable cursor
-   * the desk's database is not the one the bot has been trading against — entries are
-   * frozen for exactly that reason — and /executor/calls reads that same database, whose
-   * ids are AUTOINCREMENT. consumeFeed calls noteDeskReachable() BEFORE the rollback
-   * branch (a desk that answers IS reachable; mirroring a talking desk would be the bot
-   * second-guessing it), so unreachability does not cover this and the flag must. */
+  /* THE ROLLBACK GATE, REVERSED (step 26) — RE-ANCHORED, NOT DELETED.
+   * It used to refuse the pass outright: latest_id behind the durable cursor means the
+   * desk is serving a database the bot has not been trading against, whose AUTOINCREMENT
+   * ids could be another coin's row wearing a held number. That hazard is now answered
+   * where it belongs — every reconciled row must NAME THE HELD MINT or it is refused
+   * (callIdentityVerdict, asserted above) — while the gate itself was closing the LAST
+   * exit lane the bot has under a frozen feed. Entries stay frozen; getting OUT of
+   * exposure the bot already has is not something a rewound database can authorise
+   * wrongly, because a wrong-mint row never reaches a sell. Both halves are asserted. */
   const rollbackOpen = { execute: true, inFlight: false, deskUnreachableSince: null, now: T0,
     lastReconcileAt: T0 - 5 * MIN, reconcileMs: MIN, heldCallIds: [55] };
-  ok("no reconciliation while the authenticated feed is in rollback",
-    reconcileGate({ ...rollbackOpen, feedRollback: true }).run === false &&
-      reconcileGate({ ...rollbackOpen, feedRollback: true }).why === "feed-rollback",
-    reconcileGate({ ...rollbackOpen, feedRollback: true }).why);
-  ok("...and the same pass runs the moment the rollback clears",
-    reconcileGate({ ...rollbackOpen, feedRollback: false }).run === true,
-    reconcileGate({ ...rollbackOpen, feedRollback: false }).why);
+  ok("reconciliation RUNS under a feed rollback — it is the only exit lane while the feed is frozen",
+    reconcileGate({ ...rollbackOpen, feedRollback: true }).run === true &&
+      reconcileGate({ ...rollbackOpen, feedRollback: true }).why === "reconcile",
+    JSON.stringify(reconcileGate({ ...rollbackOpen, feedRollback: true })));
+  ok("...and the verdict still carries the alarm, so the transcript can say the pass ran under one",
+    reconcileGate({ ...rollbackOpen, feedRollback: true }).feedRollback === true &&
+      reconcileGate({ ...rollbackOpen, feedRollback: false }).feedRollback === false,
+    `${reconcileGate({ ...rollbackOpen, feedRollback: true }).feedRollback} / ` +
+    `${reconcileGate({ ...rollbackOpen, feedRollback: false }).feedRollback}`);
+  ok("...and every other gate still refuses, so the rollback change narrowed nothing else",
+    reconcileGate({ ...rollbackOpen, feedRollback: true, execute: false }).why === "paper" &&
+      reconcileGate({ ...rollbackOpen, feedRollback: true, inFlight: true }).why === "in-flight" &&
+      reconcileGate({ ...rollbackOpen, feedRollback: true, deskUnreachableSince: T0 }).why === "desk-unreachable" &&
+      reconcileGate({ ...rollbackOpen, feedRollback: true, lastReconcileAt: T0 }).why === "throttled" &&
+      reconcileGate({ ...rollbackOpen, feedRollback: true, heldCallIds: [] }).why === "nothing-held",
+    "paper/in-flight/desk-unreachable/throttled/nothing-held all still refuse");
   const reconcileFn = src.slice(src.indexOf("async function reconcileHeldCalls()"), src.indexOf("/* THE FEED, READ BEFORE THE BOOK IS VALUED."));
-  ok("the live pass feeds it the same flag that freezes entries",
+  ok("the live pass still feeds it the flag that freezes ENTRIES, and says so out loud",
     /feedRollback: feedRollbackActive\(\),/.test(reconcileFn) &&
+      /gate\.feedRollback === true/.test(reconcileFn) &&
       /if \(feedRollbackActive\(\)\)\s*\n\s*return log\(`SKIP \$\{ev\.symbol\}: authenticated feed latest_id rolled behind durable cursor/.test(src),
-    "");
+    "entries stay frozen under rollback; only the exit lane reopened");
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
