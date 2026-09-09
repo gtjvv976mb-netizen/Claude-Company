@@ -78,10 +78,23 @@ check("installing arms by default and the dry run is the explicit opt-out",
   !/^MODE="paper"$/m.test(installer) && /EXECUTE_VALUE="0"/.test(installer),
   `default: ${(installer.match(/^MODE="[a-z]+"$/m) || ["<none>"])[0]}; ` +
   `opt-out: ${(installer.match(/--dry-run\)[^\n]*/) || ["<none>"])[0]}`);
+/* RE-ANCHORED 2026-09-09 for the upgrade path, and the property is unchanged: live
+   is a named mode, it alone sets EXECUTE=1, and it never arms without a wallet
+   acknowledgement that a terminal supplied. What MOVED is one line of nesting — the
+   tty demand now sits in the else of "does the acknowledgement already on this
+   machine name this very burner", because a re-pin of an unchanged wallet must not
+   demand a terminal to retype a binding that already holds. So the literal pinned
+   here is the pair that still makes an unbound install impossible: the tty demand is
+   still inside the live branch, and arming still requires LIVE_ACK to equal the
+   public key derived from the keypair on disk. Loosening either would let live mode
+   arm with no acknowledgement at all, which is what this line has always guarded. */
 check("live mode is still a named mode that alone sets EXECUTE=1",
   /--live\) MODE="live"/.test(installer) && /EXECUTE_VALUE="1"/.test(installer) &&
-  /if \[ "\$MODE" = "live" \]; then\n  if \[ ! -r \/dev\/tty \]; then echo "live mode requires a terminal acknowledgement"/.test(installer),
-  `EXECUTE_VALUE assignments: ${JSON.stringify(installer.match(/EXECUTE_VALUE="[01]"/g))}`);
+  /if \[ ! -r \/dev\/tty \]; then echo "live mode requires a terminal acknowledgement"/.test(installer) &&
+  /\[ "\$PRIOR_LIVE_ACK" = "\$PUBKEY" \]/.test(installer) &&
+  /LIVE_ACK" != "\$PUBKEY/.test(installer),
+  `EXECUTE_VALUE assignments: ${JSON.stringify(installer.match(/EXECUTE_VALUE="[01]"/g))}; ` +
+  `binding reuse guard: ${(installer.match(/\[ "\$PRIOR_LIVE_ACK" = "\$PUBKEY" \]/) || ["<none>"])[0]}`);
 check("live acknowledgement must match the generated public key",
   /LIVE_ACK" != "\$PUBKEY/.test(installer) &&
   /write_env_line LIVE_TRADING_ACK "\$LIVE_ACK"/.test(installer));
@@ -269,8 +282,16 @@ check("Jupiter key is read privately, never accepted as an argv value",
 check("feed secret stays out of argv and the systemd unit",
   installer.includes("--secret-file") && installer.includes("EnvironmentFile=") &&
   !installer.includes("Environment=CC_SECRET=") && !installer.includes("--secret)"));
+/* RE-ANCHORED 2026-09-09: the burner is addressed through $KEYPAIR_PATH now, so that
+   an upgrade keeps the wallet the existing environment already names instead of
+   generating a second one beside it. The property is the same one and is asserted on
+   BOTH halves so the indirection cannot become a way out of it: the default is still
+   exactly $INSTALL_DIR/burner.json, and whatever that variable holds is still
+   chmod 600 before anything reads or writes it. */
 check("key, environment and journal are owner-only",
-  installer.includes("umask 077") && installer.includes('chmod 600 "$INSTALL_DIR/burner.json"') &&
+  installer.includes("umask 077") &&
+    installer.includes('KEYPAIR_PATH="$INSTALL_DIR/burner.json"') &&
+    installer.includes('chmod 600 "$KEYPAIR_PATH"') &&
     installer.includes('chmod 600 "$ENV_NEXT"') && installer.includes('chmod 600 "$STATE_DB"'));
 check("one durable state database has exactly one canonical process lock",
   installer.includes('LOCK_FILE="${STATE_DB}.lock"') &&

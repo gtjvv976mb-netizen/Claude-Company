@@ -40,6 +40,12 @@ const TEST_TIMEOUT_MS = Object.freeze({
      ~90s on this 15-core machine at the default cohort count, and a timeout here would
      read as a red suite on a green tree. */
   "test-sim-c.mjs": 900_000,
+  /* Two sealed end-to-end installer runs plus eight acknowledgement runs, every one
+     of them on a real pty because the ceremonies under test read from /dev/tty. It is
+     ~61s on this 15-core machine and the pty feeder's own waits do not shrink with
+     core count, so the default 120s is the wrong budget for it on a 2-core runner —
+     and a timeout here would read as a red suite on a green tree. */
+  "test-install-upgrade.mjs": 600_000,
 });
 const timeoutFor = (test) => TEST_TIMEOUT_MS[path.basename(test)] ?? 120_000;
 

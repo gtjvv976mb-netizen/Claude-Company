@@ -1127,6 +1127,11 @@ window.CCModals = (function () {
             + "0600. The key is never transmitted anywhere, and nothing here funds it.",
           "Asks for the feed secret with the typing hidden. It is never a command-line flag, because argv "
             + "lands in your shell history and in the process list.",
+          "Asks only ONCE. If this machine already has an install, re-running the command to move to a "
+            + "newer published commit reuses the feed secret, both RPC endpoints, the Jupiter key and the "
+            + "same burner wallet out of the mode-0600 file it wrote the first time — it names which keys "
+            + "it reused and shows none of their values. Your caps carry over exactly and cannot be raised "
+            + "here; the wallet is still re-checked, and you retype it only if the key on disk changed.",
           "Installs a supervised service, so it starts again by itself. This is the one part that writes "
             + "outside the install folder. On a Mac: a per-user LaunchAgent in your own home folder, and no "
             + "administrator password is asked for. On Linux: it uses sudo to write a hardened service file at "

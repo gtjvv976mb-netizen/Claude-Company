@@ -396,10 +396,16 @@ esac
     `opt-out ${(installer.match(/--dry-run\)[^\n]*/) || ["<none>"])[0]}`);
   check("going live still costs a typed public key and, for raised caps, a typed sentence",
     /LIVE_ACK" != "\$PUBKEY/.test(installer) && /LIVE_CAPS_ACK" != "\$CAPS_ACK_EXPECTED/.test(installer));
+  /* RE-ANCHORED 2026-09-09 with the upgrade path: the burner is reached through
+     $KEYPAIR_PATH so a re-pin keeps the wallet the existing environment names. Both
+     halves are pinned so the indirection buys no slack — the default is still that
+     exact path, and the file it names is still chmod 600 locally and still never
+     curled from anywhere. */
   check("the burner key is still generated locally and never transmitted",
     /generating a dedicated, unfunded burner wallet locally/.test(installer) &&
     !/curl[^\n]*burner\.json/.test(installer) &&
-    /chmod 600 "\$INSTALL_DIR\/burner\.json"/.test(installer));
+    /KEYPAIR_PATH="\$INSTALL_DIR\/burner\.json"/.test(installer) &&
+    /chmod 600 "\$KEYPAIR_PATH"/.test(installer));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -484,6 +490,23 @@ esac
     for (const dir of [site, launcherHome, launcherBin]) fs.mkdirSync(dir, { recursive: true });
     fs.copyFileSync(path.join(here, "install.sh"), path.join(site, "install.sh"));
     fs.writeFileSync(path.join(launcherBin, "launchctl"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    /* RE-ANCHORED 2026-09-09, and the guard below is STRICTLY STRONGER for it. The
+       property has always been "this run installed nothing into the real home". The
+       ruler was "~/claudeco-executor does not exist" — which is a different question,
+       and on any machine that has ever had a real install the two answers part
+       company in BOTH directions: it fails on a directory born before the test
+       started, and it would have passed a run that wrote into an install that
+       already existed. Snapshot the whole subtree here, before the run, and compare
+       it after: absent -> present is still caught, and so now is any entry the run
+       adds inside an install this machine already has. */
+    const realExecutorDir = path.join(os.homedir(), "claudeco-executor");
+    const snapRealHome = () => {
+      try {
+        if (!fs.existsSync(realExecutorDir)) return "<absent>";
+        return fs.readdirSync(realExecutorDir, { recursive: true }).sort().join("\n");
+      } catch (err) { return `<unreadable:${err.code}>`; }
+    };
+    const realHomeBefore = snapRealHome();
     // Six lines, because the launcher is no longer the last thing that asks: Return,
     // a bad floor, a good floor, Return to run — and then install.sh's own hidden
     // secret prompt, which an empty answer ends, and finally Return to close. Feeding
@@ -521,11 +544,13 @@ esac
        proves this run went no further is that one. */
     check("the launcher's run ended on its own rather than being cut off",
       run.finished, `finished ${run.finished}`);
+    const realHomeAfter = snapRealHome();
     check("nothing was installed, in the sandbox home or this machine's own",
-      !fs.existsSync(path.join(os.homedir(), "claudeco-executor")) &&
+      realHomeAfter === realHomeBefore &&
       !fs.existsSync(path.join(launcherHome, "claudeco-executor")) &&
       /must be exactly 40 hexadecimal characters/.test(run.out),
-      `real home: ${fs.existsSync(path.join(os.homedir(), "claudeco-executor"))}, ` +
+      `real home ${realHomeBefore === "<absent>" ? "absent" : `${realHomeBefore.split("\n").length} entries`} ` +
+      `before, unchanged by this run: ${realHomeAfter === realHomeBefore}; ` +
       `sandbox home: ${JSON.stringify(fs.readdirSync(launcherHome))}`);
   }
 }
