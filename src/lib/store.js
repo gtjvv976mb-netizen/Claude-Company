@@ -1,9 +1,9 @@
 import { DatabaseSync } from "node:sqlite";
-import { resolveDbFile } from "./db-file.js";
+import { openJournal } from "./db-file.js";
 
 // CLAUDE_CO_DB lets tests run against a throwaway file instead of the live journal, and
 // resolveDbFile() makes sure a test that FORGOT to set it still cannot open the live one.
-const db = new DatabaseSync(resolveDbFile());
+const db = openJournal(DatabaseSync);
 db.exec(`
 CREATE TABLE IF NOT EXISTS seen (
   mint TEXT PRIMARY KEY, symbol TEXT, first_seen INTEGER, last_seen INTEGER, looks INTEGER DEFAULT 0

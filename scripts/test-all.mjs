@@ -30,21 +30,31 @@ const started = Date.now();
  * same script and died the same way. Shrinking the simulation for CI would make CI prove
  * less than local; giving it the time it measurably needs does not. */
 const TEST_TIMEOUT_MS = Object.freeze({
-  /* Raised again 2026-09-09: 360s was not enough once step 14's CLAIM 8 and steps 12
-     and 16 added scenarios. It runs in ~31s on this 15-core machine and timed out on
-     the 2-core CI runner, so the headroom is deliberately large — this file's job is
-     to be slow and thorough, and a timeout here reads as a red suite on a green tree. */
+  /* THE CORE COUNT WAS NEVER THE REASON. Raising this 360s -> 900s on 2026-09-09 did
+     not help: the build still died at the new ceiling, which is what a per-commit cost
+     looks like and not what a slow CPU looks like. Measured 2026-09-10: the simulation
+     is single-threaded (25.9s CPU against 30.6s wall), runs the same 31s under CI's
+     exact Node 22.23.2 as under Node 24, and commits 74,263 writes of which only 315
+     are inside an explicit transaction. At SQLite's default journal every one of the
+     remaining ~74,000 paid a journal create + fsync + delete; APFS returns from fsync()
+     without reaching the medium, Linux does not. src/lib/db-file.js openJournal() now
+     opens the desk journal in WAL, which cut this file's system time 14.1s -> 2.9s and
+     its wall clock 30.6s -> 13.9s on the same machine with identical assertions. The
+     headroom below stays generous anyway — a timeout here reads as a red suite on a
+     green tree, and this file's job is to be slow and thorough. */
   "test-quota-simulation.mjs": 900_000,
   /* SIM C runs three regimes of the real cycle plus a real poller subprocess against a
-     local Jupiter server. Same reasoning as above and the same generous headroom: it is
-     ~90s on this 15-core machine at the default cohort count, and a timeout here would
-     read as a red suite on a green tree. */
+     local Jupiter server. It timed out on the same build and for the same reason; the
+     WAL change took it ~90s -> 49.6s here. What system time it still carries is the
+     executor's own journal, which has always run WAL at synchronous=FULL because that
+     database records open positions and must not trade durability for speed. Same
+     generous headroom as above. */
   "test-sim-c.mjs": 900_000,
   /* Two sealed end-to-end installer runs plus eight acknowledgement runs, every one
      of them on a real pty because the ceremonies under test read from /dev/tty. It is
-     ~61s on this 15-core machine and the pty feeder's own waits do not shrink with
-     core count, so the default 120s is the wrong budget for it on a 2-core runner —
-     and a timeout here would read as a red suite on a green tree. */
+     ~61s on this 15-core machine and the pty feeder's own waits are wall-clock waits
+     that no amount of hardware shortens, so the default 120s is the wrong budget for
+     it — and a timeout here would read as a red suite on a green tree. */
   "test-install-upgrade.mjs": 600_000,
 });
 const timeoutFor = (test) => TEST_TIMEOUT_MS[path.basename(test)] ?? 120_000;

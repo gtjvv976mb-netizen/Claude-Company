@@ -44,12 +44,12 @@
  * list than it used to consider.
  */
 import { DatabaseSync } from "node:sqlite";
-import { resolveDbFile } from "./lib/db-file.js";
+import { openJournal } from "./lib/db-file.js";
 import { PAD_QUOTA, cellOf } from "./categories.js";
 
 // Same resolver as lib/store.js: one file per process, and never the live journal from
 // a stray `node test-*.mjs`.
-const db = new DatabaseSync(resolveDbFile());
+const db = openJournal(DatabaseSync);
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS funnel (
