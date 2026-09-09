@@ -529,11 +529,23 @@ check("installer never pipes a mutable bootstrap script into a privileged shell"
     ["launchd-runner.mjs", "macos-launchagent.sh", "macos-release.sh"].every((f) => darwin.includes(f)) &&
     /SOURCE_FILES=\("\$\{SOURCE_FILES\[@\]\}" "\$\{DARWIN_FILES\[@\]\}"\)/.test(installer),
     `DARWIN_FILES: ${JSON.stringify(darwin)}`);
+  /* RE-ANCHORED 2026-09-09. The property is that this installer never PERFORMS a
+     launchd lifecycle operation itself — it hands that to the reviewed scripts. The
+     ruler was "the string never appears", which also forbade PRINTING one for a human
+     to run. That mattered: the refusal for an already-loaded agent used to name
+     ~/claudeco-executor/current/macos-launchagent.sh unconditionally, a path that does
+     not exist unless a previous install completed into the default directory, and the
+     owner was handed a command that could not work. The fallback now prints the
+     launchctl form, which needs no file on disk. So the check strips heredoc BODIES —
+     text the installer emits — and asserts the verbs appear in none of the code that
+     is left. Executing one still fails this; telling a person how to no longer does. */
+  const executable = installer.replace(/<<-?'?([A-Za-z_][A-Za-z0-9_]*)'?\n[\s\S]*?\n\1\n/g, "\n");
   check("macOS adoption is delegated to the reviewed scripts, not restated in the installer",
     /bash "\$source_dir\/macos-release\.sh" stage/.test(installer) &&
     /bash "\$source_dir\/macos-release\.sh" install/.test(installer) &&
     /bash "\$controller" install/.test(installer) && /bash "\$controller" load/.test(installer) &&
-    !/launchctl (disable|enable|bootstrap|bootout)/.test(installer));
+    !/launchctl (disable|enable|bootstrap|bootout)/.test(executable),
+    `launchd verbs outside heredocs: ${JSON.stringify((executable.match(/launchctl (disable|enable|bootstrap|bootout)/g) || []))}`);
   check("no sudo is reachable on the macOS path",
     installer.split("\n").filter((l) => /^\s*sudo /.test(l)).length > 0 &&
     /if \[ "\$PLATFORM" = "linux" \]; then sudo systemctl daemon-reload/.test(installer) &&
