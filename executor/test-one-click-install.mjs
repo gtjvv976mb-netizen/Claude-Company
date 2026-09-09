@@ -80,14 +80,27 @@ function runOnPty(body, lines, { env = {} } = {}) {
   const help = spawnSync("bash", [path.join(here, "install.sh"), "--help"], { encoding: "utf8" });
   const text = help.stdout || "";
   check("--help exits 0", help.status === 0, `exit ${help.status}`);
-  check("--help names the dry run as the default and says it trades nothing",
-    /THE DEFAULT IS A DRY RUN/.test(text) && /trades no money at all/i.test(text),
-    text.split("\n").find((l) => /DRY RUN/.test(l)) || "<no DRY RUN line>");
+  /* RE-ANCHORED 2026-09-09. This asked --help to say the default was a dry run.
+     The owner deleted that stage, so the same paragraph now has to carry the
+     opposite warning AND the fact that makes it survivable — the wallet is empty
+     and only the operator can fund it. Both are asserted; a --help that announced
+     arming without saying funding is separate would be worse than the old one. */
+  check("--help says installing arms, that funding is the separate switch, and names the opt-out",
+    /INSTALLING ARMS REAL TRADING/.test(text) &&
+    /no rehearsal install to do first/i.test(text) &&
+    /funding is the switch, not this command/.test(text) &&
+    /--dry-run\s+Install without arming/.test(text),
+    text.split("\n").find((l) => /INSTALLING ARMS/.test(l)) || "<no arming line>");
   check("--help says where the burner key is written",
     /claudeco-executor\/burner\.json/.test(text) && /0600/.test(text),
     text.split("\n").find((l) => /burner\.json/.test(l)) || "<no burner.json line>");
-  check("--help says going live is a separate deliberate step",
-    /separate, deliberate act/.test(text) && /retype the burner wallet/.test(text));
+  /* RE-ANCHORED with the line above: "separate, deliberate act" described the second
+     install, which is gone. The acknowledgement it was really guarding did not move,
+     so that is what is checked now — inside the one install, on this terminal. */
+  check("--help still says the burner's own public key must be retyped before it arms",
+    /retype the burner wallet's own public key before it arms/.test(text) &&
+    /raising any cap\s+makes you type a second sentence/.test(text),
+    text.split("\n").find((l) => /retype the burner wallet/.test(l)) || "<no retype line>");
   const widest = Math.max(...text.split("\n").map((l) => l.length));
   check("--help fits in 80 columns", widest <= 80, `widest line is ${widest} chars`);
   const flags = [...installer.matchAll(/^\s{4}(--[a-z-]+)[|)]/gm)].map((m) => m[1]);
@@ -373,9 +386,14 @@ esac
     live.replace(/^# BEGIN LIVE_CREDENTIALS\n/, "").startsWith('if [ "$MODE" = "live" ]; then') &&
     !installer.slice(0, installer.indexOf("# BEGIN LIVE_CREDENTIALS")).includes("cred_collect "),
     `cred_collect calls before the live guard: ${(installer.slice(0, installer.indexOf("# BEGIN LIVE_CREDENTIALS")).match(/cred_collect /g) || []).length}`);
-  check("dry run is still the installed default and executes nothing",
-    /^MODE="paper"$/m.test(installer) && /EXECUTE_VALUE="0"/.test(installer) &&
-    /--live\) MODE="live"/.test(installer));
+  /* RE-ANCHORED 2026-09-09: the default flipped. What this line is really for is
+     that the two modes stay TWO — that a dry run is still reachable, still writes
+     EXECUTE=0, and is still the only thing that does. */
+  check("the dry run survives as an explicit opt-out and is the only thing that clears EXECUTE",
+    /^MODE="live"$/m.test(installer) && /--dry-run\) MODE="paper"/.test(installer) &&
+    /EXECUTE_VALUE="0"/.test(installer) && !/^MODE="paper"$/m.test(installer),
+    `default ${(installer.match(/^MODE="[a-z]+"$/m) || ["<none>"])[0]}, ` +
+    `opt-out ${(installer.match(/--dry-run\)[^\n]*/) || ["<none>"])[0]}`);
   check("going live still costs a typed public key and, for raised caps, a typed sentence",
     /LIVE_ACK" != "\$PUBKEY/.test(installer) && /LIVE_CAPS_ACK" != "\$CAPS_ACK_EXPECTED/.test(installer));
   check("the burner key is still generated locally and never transmitted",
@@ -402,8 +420,13 @@ esac
       !/provisions Linux hosts using systemd only/.test(run.stderr),
       `exit ${run.status}, first line: ${(run.stderr || "").trim().split("\n")[0]}`);
   }
-  check("the WSL2 guidance still says the install trades nothing",
-    /still a dry run and trades\nnothing/.test(guidance));
+  /* RE-ANCHORED: the WSL2 route no longer installs a dry run, so it can no longer
+     say it does. What a Windows reader must still be told is where the money risk
+     actually starts, and that is the transfer they make afterwards. */
+  check("the WSL2 guidance says the install arms and that the wallet stays empty until funded",
+    /That install arms the bot/.test(guidance) &&
+    /empty until you fund it yourself/.test(guidance),
+    (guidance.split("\n").find((l) => /arms the bot/.test(l)) || "<none>").trim());
   // A Mac used to be told to go and find a Linux box. Section I drives what it gets
   // now; all this needs to say is that the gate itself no longer turns one away.
   check("the gate names Windows as the only unsupported desktop, not macOS",
@@ -424,14 +447,26 @@ esac
     const syntax = spawnSync("bash", ["-n", launcher], { encoding: "utf8" });
     check("the launcher parses", syntax.status === 0, `bash -n exit ${syntax.status} ${syntax.stderr || ""}`.trim());
     const body = fs.readFileSync(launcher, "utf8");
-    check("the launcher says plainly that nothing is traded",
-      /It does not trade/.test(body) && /DRY RUN/.test(body) && /Not one cent moves/.test(body));
-    // Comments explain what the launcher deliberately does NOT do, so they mention
-    // --live by name. What matters is that no line it executes ever passes one.
-    const executed = body.replace(/^#.*$/gm, "");
-    check("the launcher can only ever start a dry run",
-      !executed.includes("--live") && !/secret|api.key/i.test(executed),
-      `executable lines mentioning --live: ${(executed.match(/--live/g) || []).length}`);
+    /* RE-ANCHORED 2026-09-09. This used to require the launcher to promise that
+       nothing is traded. install.sh arms by default now, so that promise would be a
+       lie — and a double-clickable file that arms a trading bot has to say so in the
+       plainest words it has. The protection the old line stood for is unchanged and
+       is asserted right below it: the launcher still passes nothing but a floor. */
+    check("the launcher says plainly that this trades real money and that funding is the switch",
+      /trades REAL MONEY/.test(body) && /It does not fund anything/.test(body) &&
+      /That transfer is the on switch/.test(body),
+      (body.split("\n").find((l) => /REAL MONEY/.test(l)) || "<no real-money line>").trim());
+    /* Read the INVOCATION, not the file. A grep over the whole script for "api key"
+       now matches the launcher's own explanation of what install.sh will ask for —
+       the words a reader needs are not the words a shell runs. What must be true is
+       narrower and stronger: there is exactly one line that executes the installer,
+       and its arguments are a floor number and nothing else. */
+    const invocations = body.split("\n").filter((l) => !/^\s*#/.test(l) && /install\.sh"? --/.test(l));
+    const args = invocations.join(" ").match(/--[a-z-]+/g) || [];
+    check("exactly one line runs the installer, and it passes a floor and nothing else",
+      invocations.length === 1 && args.join(",") === "--floor" &&
+      !/secret|jupiter|rpc|max-sol|daily/i.test(invocations[0] || ""),
+      `invocations: ${JSON.stringify(invocations.map((l) => l.trim()))}; flags: ${JSON.stringify(args)}`);
     check("the launcher runs the same published one-liner, not a second installer",
       /\$STATIC\/install\.sh/.test(body) && /bash "\$TMP\/install\.sh" --floor "\$FLOOR"/.test(body));
     check("the launcher shows a checksum the user can compare with the site",
@@ -453,15 +488,24 @@ esac
     // a bad floor, a good floor, Return to run — and then install.sh's own hidden
     // secret prompt, which an empty answer ends, and finally Return to close. Feeding
     // only the first four deadlocks the pty against that prompt.
+    /* Six fed lines, same as before: Return, a bad floor, a good floor, Return to
+       run — and then install.sh's own first question, which is now the published
+       commit rather than the feed secret, and finally Return to close. An empty
+       answer to that question is what stops this run before it creates anything. */
     const run = runOnPty(`STATIC=${shq(`file://${site}`)} bash ${shq(launcher)}`,
       ["", "notanumber", "14", "", "", ""],
       { env: { HOME: launcherHome, PATH: `${launcherBin}:${process.env.PATH}` } });
-    check("the launcher explains itself, insists on a numeric floor, and reaches install.sh",
-      /Not one cent moves/.test(run.out) && /That is not a number/.test(run.out) &&
+    check("the launcher explains itself, insists on a numeric floor, and reaches a LIVE install.sh",
+      /trades REAL MONEY/.test(run.out) && /That is not a number/.test(run.out) &&
       /SHA-256 of the downloaded installer:\n    [0-9a-f]{64}/.test(run.out) &&
-      /installing WALL-ST-E \(paper mode\)/.test(run.out) &&
+      /installing WALL-ST-E \(live mode\)/.test(run.out) &&
       !/provisions Linux hosts using systemd only/.test(run.out),
-      `transcript ${run.out.length} chars; sha line: ${(run.out.match(/^\s+[0-9a-f]{64}$/m) || ["<none>"])[0].trim()}`);
+      `transcript ${run.out.length} chars; mode line: ` +
+      `${(run.out.split("\n").find((l) => /installing WALL-ST-E/.test(l)) || "<none>").trim()}`);
+    check("with no commit typed, that live install refuses instead of installing anything",
+      /must be exactly 40 hexadecimal characters/.test(run.out) &&
+      !fs.existsSync(path.join(launcherHome, "claudeco-executor", "burner.json")),
+      `refusal: ${JSON.stringify((run.out.split("\n").find((l) => /40 hexadecimal/.test(l)) || "<none>").trim())}`);
     check("on a Mac the launcher no longer warns that the installer targets Linux",
       !/provisions Linux hosts|systemd service|Linux VPS/.test(body) &&
       /per-user LaunchAgent called/.test(body),
@@ -470,14 +514,17 @@ esac
       { encoding: "utf8" }).stdout.trim();
     check("the checksum it shows is the checksum of the bytes it is about to run",
       run.out.includes(realSha), `installer sha256 ${realSha}; shown: ${run.out.includes(realSha)}`);
-    // The installer it reached must have stopped at the secret, having created nothing
-    // — in the sandbox home it was given, and above all in the real one.
+    /* The installer it reached must have stopped at its FIRST question, having
+       created nothing — in the sandbox home it was given, and above all in the real
+       one. That first question used to be the feed secret; a live install asks for
+       the published commit before it asks for anything else, so the refusal that
+       proves this run went no further is that one. */
     check("the launcher's run ended on its own rather than being cut off",
       run.finished, `finished ${run.finished}`);
     check("nothing was installed, in the sandbox home or this machine's own",
       !fs.existsSync(path.join(os.homedir(), "claudeco-executor")) &&
       !fs.existsSync(path.join(launcherHome, "claudeco-executor")) &&
-      /floor secret must be the hex value/.test(run.out),
+      /must be exactly 40 hexadecimal characters/.test(run.out),
       `real home: ${fs.existsSync(path.join(os.homedir(), "claudeco-executor"))}, ` +
       `sandbox home: ${JSON.stringify(fs.readdirSync(launcherHome))}`);
   }
@@ -658,8 +705,17 @@ if (!macCapable) {
       fs.readFileSync(path.join(box.mirror, f), "utf8").includes("WALLSTE_REC") &&
       fs.readFileSync(path.join(box.mirror, f), "utf8") !== fs.readFileSync(path.join(here, f), "utf8")),
     `mirror: ${JSON.stringify(fs.readdirSync(box.mirror).filter((f) => f.endsWith(".sh")))}`);
+  /* --dry-run IS NOW EXPLICIT HERE, AND THAT IS THE ONLY CHANGE TO THIS SECTION.
+     What it measures has never been the default mode: it is the macOS orchestration —
+     which script is invoked, with which absolute arguments, in which order, and that
+     no sudo or systemctl is ever reached. A default install arms, and an armed install
+     is exactly what must not run inside a sandbox on the machine that hosts the
+     owner's live agent: it would clone a pinned commit, walk the credential wizard
+     against real providers, and demand an acknowledgement no feeder can know. The
+     flip of the default is pinned in section E and driven against a Git fixture in
+     test-install.mjs; this run stays the adoption test it was written to be. */
   const run = runOnPty(
-    `cd ${shq(box.root)} && bash ${shq(installerCopy)} --floor 14 --static https://static.invalid`,
+    `cd ${shq(box.root)} && bash ${shq(installerCopy)} --floor 14 --dry-run --static https://static.invalid`,
     [secret], { env: box.env });
   const out = run.out;
   const calls = box.calls();
@@ -714,16 +770,23 @@ if (!macCapable) {
 
   const envPath = path.join(box.installDir, ".cc-executor.env");
   const envText = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
-  check("the environment file is written 0600 and finishes in DRY RUN",
+  check("the environment file is written 0600 and an unarmed install writes EXECUTE=0",
     fs.existsSync(envPath) && (fs.statSync(envPath).mode & 0o777) === 0o600 &&
     /^EXECUTE="0"$/m.test(envText) && !/LIVE_TRADING_ACK/.test(envText) &&
     !/JUPITER_API_KEY/.test(envText),
     fs.existsSync(envPath)
       ? `mode ${(fs.statSync(envPath).mode & 0o777).toString(8)}, ${(envText.match(/^EXECUTE=.*$/m) || ["<no EXECUTE line>"])[0]}`
       : "<no environment file>");
-  check("the finished install tells the owner it traded nothing and how to arm live later",
-    /THIS IS A DRY RUN\. EXECUTE=0\./.test(out) && /--live/.test(out) &&
-    /retype/.test(out) && /No wallet was funded/.test(out));
+  /* RE-ANCHORED: arming is no longer "later", and it is no longer another install.
+     The closing text has to say so — the same command minus --dry-run — and it must
+     still name the acknowledgement and the fact that nothing was funded. */
+  check("the unarmed install says it is unarmed and that arming is the same command again",
+    /THIS INSTALL IS NOT ARMED, because you asked for --dry-run\. EXECUTE=0/.test(out) &&
+    /Arming it is the SAME command without --dry-run/.test(out) &&
+    /--expected-commit <PUBLISHED_COMMIT_SHA>/.test(out) &&
+    /retype/.test(out) && /No wallet was funded/.test(out) &&
+    !/git clone https:\/\/github\.com/.test(out),
+    (out.split("\n").find((l) => /NOT ARMED/.test(l)) || "<no unarmed line>").trim());
 
   // The whole reason the secret is read from /dev/tty. One grep over every argument
   // every stand-in saw, plus the transcript the user would be looking at.
@@ -964,11 +1027,17 @@ exit 0
     /## Windows/.test(readme) && /wsl --install -d Ubuntu/.test(readme));
   check("the README documents the double-click launcher by its exact filename",
     readme.includes(LAUNCHER), `README mentions "${LAUNCHER}": ${readme.includes(LAUNCHER)}`);
-  check("the README still says the default install trades nothing",
-    /dry run/i.test(readme.slice(0, oneLiner > 0 ? oneLiner + 1200 : 2000)));
+  /* RE-ANCHORED: the README used to have to say the default install trades nothing.
+     It does not any more, so what it must say instead — near the one-liner, where a
+     reader actually is — is that installing arms and that the empty wallet is what
+     keeps it harmless until they fund it themselves. */
+  check("the README says up front that the one command arms, and that funding is the switch",
+    /arms it/i.test(readme.slice(0, oneLiner > 0 ? oneLiner + 1600 : 2400)) &&
+    /fund/i.test(readme.slice(0, oneLiner > 0 ? oneLiner + 1600 : 2400)),
+    JSON.stringify(readme.slice(Math.max(0, oneLiner - 400), oneLiner + 400).trim().slice(0, 200)));
 }
 
 fs.rmSync(temp, { recursive: true, force: true });
 console.log(fail ? `\n${fail} failed — the one-click install path is NOT safe to advertise` :
-  "\nOne-click install: guided, checksum-verified, and still a dry run by default.");
+  "\nOne-click install: guided, checksum-verified, and armed in one command.");
 process.exit(fail ? 1 : 0);

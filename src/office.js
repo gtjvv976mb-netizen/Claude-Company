@@ -39,7 +39,7 @@ import * as alerts from "./alerts.js";
 import * as identity from "./identity.js";
 import { latestCandidateBoard } from "./candidate-board.js";
 import { walletSolBalance } from "./data/solana.js";
-import { buildExecutorDashboard, EXECUTOR_OPERATOR_MAXIMA } from "./executor-dashboard.js";
+import { buildExecutorDashboard, botRunControl, EXECUTOR_OPERATOR_MAXIMA } from "./executor-dashboard.js";
 import * as passes from "./passes.js";
 import { callouts, WHALE_USD } from "./whales.js";
 import { verifiedWhaleCallouts, verifiedHolderCallouts, CALLOUT_WHALE_MIN_USD,
@@ -137,7 +137,18 @@ export function executorFeedPayload(floorNo, rawAfter = 0) {
                 never from this. Kept on the wire for the tenant's screen and for older
                 clients that read it; stated non-binding so no new one honours it. */
              size_binding: false,
-             mcap_tier: floorSettings.mcap_tier ?? "any" },
+             mcap_tier: floorSettings.mcap_tier ?? "any",
+             /* THE TENANT'S OFF SWITCH RIDES ON THE FEED THE BOT ALREADY POLLS.
+              * Nothing is pushed: this is a field in a response the bot asked for, on
+              * its own schedule, and the bot decides what to do with it (poller.mjs
+              * onEntry — open no new positions; exits, marks, reconciliation and
+              * heartbeats are untouched). `false` is the only value that means off, so
+              * an older server that omits the field, or a mangled one, reads as "no
+              * request" and changes nothing. This flag can never turn trading ON: the
+              * bot's local hard-stop and entry-pause sentinels are separate checks that
+              * this cannot clear. See copy.js entries_enabled. */
+             entries_enabled: Number(floorSettings.entries_enabled ?? 1) !== 0,
+             entries_enabled_at: floorSettings.entries_enabled_at ?? null },
     events: rows.map((r) => ({
       id: r.id, event_id: `${floorNo}:${r.kind}:${r.id}`, call_id: r.call_id,
       type: r.kind, mint: r.mint, symbol: r.symbol,
@@ -269,6 +280,11 @@ export async function executorStatusPayload(floorNo, {
       takeProfitX: raw.take_profit_x,
       fixedSol: raw.fixed_sol,
       marketCapTier: raw.mcap_tier,
+      /* The off/on REQUEST. It is handed to the dashboard builder next to the bot's own
+         echo so the two are reconciled in one place and no screen can show the request
+         as though it were the bot's state. */
+      entriesEnabled: Number(raw.entries_enabled ?? 1) !== 0,
+      entriesEnabledAt: raw.entries_enabled_at ?? null,
       updatedAt: raw.updated_at,
     },
   });
@@ -362,6 +378,17 @@ export function sanitizeExecutorHealth(value) {
     state,
     entriesPaused: value.entriesPaused === true,
     hardStop: value.hardStop === true,
+    /* THE BOT'S ECHO OF THE OFF SWITCH, AND IT IS TRI-STATE ON PURPOSE.
+     * `entriesEnabled` is the bot's EFFECTIVE state — no switch is currently refusing a
+     * new entry — and `deskEntriesEnabled` is the value it last read out of the feed's
+     * rules block. Both are null when the bot has not said, which is not the same as
+     * "on": a pulse from an older build must never be rendered as a confirmation that
+     * this floor's request was heard. The page compares deskEntriesEnabled with the
+     * stored request and says "pending" while they differ. */
+    entriesEnabled: value.entriesEnabled === true ? true
+      : value.entriesEnabled === false ? false : null,
+    deskEntriesEnabled: value.deskEntriesEnabled === true ? true
+      : value.deskEntriesEnabled === false ? false : null,
     blockingIntent: value.blockingIntent === true,
     blockedPositions: count(value.blockedPositions),
     manualAction: value.manualAction === true,
@@ -721,8 +748,9 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
            never signs, never touches a key — it just hands the bot the calls
            the desk already published, with everything a trade needs. This is
            how a tenant can use the same policy without handing us custody. The
-           local poller defaults to paper mode and alone may run the explicit,
-           independently gated live canary. */
+           local poller is the only thing that can arm a live canary, and it is
+           armed on the tenant's own machine — this feed cannot arm, size, fund
+           or stop it, and it never learns whether it did. */
         const feedMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/executor\/feed$/);
         if (feedMatch) {
           const floorNo = Number(feedMatch[1]);
@@ -1920,6 +1948,60 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             return json(409, { ...read(), error: r.error, needsAcknowledgement: true,
               staleAcknowledgement: !!r.staleAcknowledgement });
           if (!r.ok) return json(400, { error: r.error, allowed: copy.BOT_OPERATORS });
+          return json(200, { ok: true, ...read() });
+        }
+
+        /* ── THE OFF/ON SWITCH — A REQUEST, NOT A COMMAND ───────────────────
+           The tenant's own gate, exactly like bot-operator above: the floor
+           owner's WALLET SESSION, never the executor secret. A bot must not be
+           able to answer the question "should this bot be trading?" on its
+           owner's behalf, and a stolen feed key must not become a way to switch
+           somebody else's trading back on.
+
+           WHAT A POST DOES: it writes one column pair on this floor's own
+           settings row. It starts nothing, stops nothing, sends nothing, and has
+           no path to the machine the bot runs on — the server has no control
+           channel to any bot and this route does not invent one. The bot reads
+           the flag out of the `rules` block of the feed IT polls, on its own
+           schedule, and decides for itself. So the response deliberately reports
+           the request and the bot's last ECHO separately, with `pending` true
+           until the bot has confirmed hearing this exact value: an offline bot
+           has heard nothing, and a page that claimed otherwise would be telling
+           a tenant their money was safe when it was not.
+
+           OFF MEANS "OPEN NO NEW POSITIONS". It is not a sell and it does not
+           stop exits, marks, reconciliation or heartbeats. */
+        const runMatch = url.pathname.match(/^\/api\/floor\/(\d+)\/bot-run$/);
+        if (runMatch) {
+          const floorNo = Number(runMatch[1]);
+          if (!me) return json(401, { error: "sign in with your wallet first" });
+          if (!holdsFloor(floorNo)) return json(403, { error: "this is not your floor" });
+          const read = () => {
+            const request = copy.entriesEnabledFor(floorNo);
+            const stored = executorHeartbeatPayload(floorNo).heartbeat;
+            const health = sanitizeExecutorHealth(stored?.health);
+            const seenAt = Number(stored?.seenAt) || 0;
+            return { floorNo,
+              ...botRunControl({
+                requested: request.enabled, requestedAt: request.at,
+                echoedDesk: health?.deskEntriesEnabled ?? null,
+                echoedEffective: health?.entriesEnabled ?? null,
+                heartbeatSeenAt: seenAt, nowMs: Date.now(),
+              }) };
+          };
+          if (req.method === "GET") { res.setHeader("cache-control", "no-store"); return json(200, read()); }
+          if (req.method !== "POST") return json(405, { error: "method not allowed" });
+          const body = await readBody();
+          /* Accept the two shapes a button can honestly send and NOTHING else. A
+             missing or unrecognised value is a 400 that writes nothing: silently
+             defaulting a run-state request to "on" is the one failure mode this
+             route may never have. */
+          const wanted = body?.enabled === true || body?.run === "on" ? true
+            : body?.enabled === false || body?.run === "off" ? false : null;
+          if (wanted === null)
+            return json(400, { error: "send { enabled: true|false } or { run: \"on\"|\"off\" }" });
+          const r = copy.setEntriesEnabled(floorNo, wanted, {});
+          if (!r.ok) return json(400, { error: r.error });
           return json(200, { ok: true, ...read() });
         }
 

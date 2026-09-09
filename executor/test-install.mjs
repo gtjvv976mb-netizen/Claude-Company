@@ -31,8 +31,8 @@ const need = ["poller.mjs", "journal.mjs", "jupiter.mjs", "token2022.mjs", "bala
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-install-test-"));
 const sources = new Map();
 let fail = 0;
-const check = (name, condition) => {
-  console.log(`${condition ? "PASS" : "FAIL"}  ${name}`);
+const check = (name, condition, actual) => {
+  console.log(`${condition ? "PASS" : "FAIL"}  ${name}${actual === undefined ? "" : `\n        actual: ${actual}`}`);
   if (!condition) fail++;
 };
 
@@ -66,8 +66,22 @@ for (const [owner, source] of sources) {
 }
 
 const installer = sources.get("install.sh") || "";
-check("dry run remains the default", /MODE="paper"/.test(installer) && /EXECUTE_VALUE="0"/.test(installer));
-check("live mode is explicit", /--live\) MODE="live"/.test(installer) && /EXECUTE_VALUE="1"/.test(installer));
+/* RE-ANCHORED 2026-09-09, and the property it pins is the OPPOSITE of the one it
+   pinned before: this line used to require MODE="paper" as the default. The owner
+   removed the dry-run STAGE ("stop the dry-run, no dry run already"), so installing
+   now arms, and --dry-run is the explicit opt-out. What has NOT changed, and is
+   asserted alongside it here so the flip cannot quietly take anything with it, is
+   that EXECUTE is still a two-valued thing the mode decides — 0 unless the live path
+   sets 1 — rather than something an argv value can set directly. */
+check("installing arms by default and the dry run is the explicit opt-out",
+  /^MODE="live"$/m.test(installer) && /--dry-run\) MODE="paper"/.test(installer) &&
+  !/^MODE="paper"$/m.test(installer) && /EXECUTE_VALUE="0"/.test(installer),
+  `default: ${(installer.match(/^MODE="[a-z]+"$/m) || ["<none>"])[0]}; ` +
+  `opt-out: ${(installer.match(/--dry-run\)[^\n]*/) || ["<none>"])[0]}`);
+check("live mode is still a named mode that alone sets EXECUTE=1",
+  /--live\) MODE="live"/.test(installer) && /EXECUTE_VALUE="1"/.test(installer) &&
+  /if \[ "\$MODE" = "live" \]; then\n  if \[ ! -r \/dev\/tty \]; then echo "live mode requires a terminal acknowledgement"/.test(installer),
+  `EXECUTE_VALUE assignments: ${JSON.stringify(installer.match(/EXECUTE_VALUE="[01]"/g))}`);
 check("live acknowledgement must match the generated public key",
   /LIVE_ACK" != "\$PUBKEY/.test(installer) &&
   /write_env_line LIVE_TRADING_ACK "\$LIVE_ACK"/.test(installer));
@@ -274,6 +288,134 @@ check("live signing requires a locally pinned runtime source",
 check("live runtime bytes come from immutable Git blobs, not the worktree cache",
   /git -C "\$source_root" cat-file blob "\$SOURCE_COMMIT:executor\/\$file"/.test(installer) &&
   installer.indexOf("cat-file blob") < installer.indexOf("npm ci --ignore-scripts"));
+
+/* ── ONE INSTALL REACHES LIVE ─────────────────────────────────────────────────
+ * The dry-run STAGE is gone; every safety REQUIREMENT it was bundled with is not.
+ * Going live used to mean two installs, and the second one existed only to answer
+ * "where does the signing code come from": clone by hand, detach at the published
+ * commit, rerun with --live. The installer performs that clone itself now, and this
+ * section proves the swap changed nobody's guarantees — the 40-character commit is
+ * still the operator's own input, a checkout that is not detached at exactly it is
+ * still not accepted as the pin, and a commit the repository does not contain is
+ * still a refusal rather than a fallback.
+ *
+ * Driven, not grepped: the reviewed block is extracted and executed against a local
+ * Git fixture, so what is measured is what the shell actually does. */
+const liveSourceStart = installer.indexOf("# BEGIN LIVE_SOURCE");
+const liveSourceEnd = installer.indexOf("# END LIVE_SOURCE");
+check("installer exposes one reviewed pinned-source resolver",
+  liveSourceStart >= 0 && liveSourceEnd > liveSourceStart,
+  `BEGIN at ${liveSourceStart}, END at ${liveSourceEnd}`);
+check("the resolver runs before the authoritative live-source verification",
+  liveSourceEnd > 0 && liveSourceEnd < installer.indexOf("live source must be detached at the published commit"),
+  `resolver ends at ${liveSourceEnd}, verification at ${installer.indexOf("live source must be detached at the published commit")}`);
+check("the published commit is typed by the operator and never fetched for them",
+  /IFS= read -r EXPECTED_COMMIT < \/dev\/tty/.test(installer) &&
+  !/curl[^\n]*EXPECTED_COMMIT/.test(installer) &&
+  !/EXPECTED_COMMIT="\$\(curl/.test(installer),
+  (installer.split("\n").find((l) => /read -r EXPECTED_COMMIT/.test(l)) || "<no prompt>").trim());
+check("with no terminal the missing commit is named, not guessed",
+  /live mode needs --expected-commit <40-character published commit>/.test(installer),
+  (installer.split("\n").find((l) => /live mode needs --expected-commit/.test(l)) || "<none>")
+    .trim().slice(0, 150));
+
+if (liveSourceStart >= 0 && liveSourceEnd > liveSourceStart &&
+    spawnSync("git", ["--version"], { encoding: "utf8" }).status === 0) {
+  const block = installer.slice(liveSourceStart, liveSourceEnd);
+  const fixture = path.join(temp, "pinned-repo");
+  fs.mkdirSync(path.join(fixture, "executor"), { recursive: true });
+  fs.writeFileSync(path.join(fixture, "executor", "poller.mjs"), "// pinned fixture\n");
+  const ident = ["-c", "user.email=fixture@example.invalid", "-c", "user.name=fixture",
+    "-c", "commit.gpgsign=false"];
+  const git = (args, cwd = fixture) => spawnSync("git", args, { cwd, encoding: "utf8" });
+  git(["init", "-q"]);
+  git([...ident, "add", "executor/poller.mjs"]);
+  git([...ident, "commit", "-qm", "pinned release"]);
+  const PINNED = (git(["rev-parse", "HEAD"]).stdout || "").trim();
+  const ABSENT = "b".repeat(40);
+  const tempReal = fs.realpathSync(temp);
+  console.log(`  fixture repo ${fixture}\n  pinned commit ${PINNED}`);
+
+  let seq = 0;
+  const runSource = (overrides = {}) => {
+    const installDir = path.join(tempReal, `src-install-${seq++}`);
+    const result = spawnSync("bash", ["-c",
+      `set -uo pipefail\n${block}\nprintf 'RESOLVED=%s\\n' "$SOURCE_DIR"`], {
+      env: {
+        ...process.env,
+        MODE: "live",
+        EXPECTED_COMMIT: PINNED,
+        SOURCE_DIR: "",
+        INSTALL_DIR: installDir,
+        REPO: fixture,
+        STATIC: "https://static.invalid",
+        ...overrides,
+      },
+      encoding: "utf8",
+    });
+    const resolved = (/RESOLVED=(.*)/.exec(result.stdout || "") || [, ""])[1];
+    return { ...result, installDir, resolved };
+  };
+
+  const dry = runSource({ MODE: "paper", EXPECTED_COMMIT: "" });
+  check("--dry-run resolves no source, asks for no commit and clones nothing",
+    dry.status === 0 && dry.resolved === "" && !fs.existsSync(dry.installDir),
+    `exit ${dry.status}, resolved ${JSON.stringify(dry.resolved)}, ` +
+    `${dry.installDir} exists: ${fs.existsSync(dry.installDir)}`);
+
+  const malformed = runSource({ EXPECTED_COMMIT: "not-a-commit" });
+  check("a commit that is not 40 hex characters is refused before anything is fetched",
+    malformed.status !== 0 &&
+    /the published commit must be exactly 40 hexadecimal characters/.test(malformed.stderr),
+    `exit ${malformed.status}, stderr: ${JSON.stringify((malformed.stderr || "").trim())}`);
+
+  const absent = runSource({ EXPECTED_COMMIT: ABSENT });
+  check("a commit the repository does not contain is a refusal, never a fallback",
+    absent.status !== 0 &&
+    new RegExp(`published commit ${ABSENT} is not in `).test(absent.stderr) &&
+    /could not obtain the published source at /.test(absent.stderr),
+    `exit ${absent.status}, stderr: ${JSON.stringify((absent.stderr || "").trim().split("\n").join(" | "))}`);
+
+  const fresh = runSource();
+  const freshHead = fresh.resolved
+    ? (spawnSync("git", ["-C", path.dirname(fresh.resolved), "rev-parse", "HEAD"], { encoding: "utf8" }).stdout || "").trim()
+    : "<nothing resolved>";
+  const freshDetached = fresh.resolved
+    ? spawnSync("git", ["-C", path.dirname(fresh.resolved), "symbolic-ref", "-q", "HEAD"], { encoding: "utf8" }).status !== 0
+    : false;
+  check("one install with no local checkout obtains the pinned commit itself, detached",
+    fresh.status === 0 &&
+    fresh.resolved === path.join(fresh.installDir, "source", PINNED, "executor") &&
+    fs.existsSync(path.join(fresh.resolved, "poller.mjs")) &&
+    freshHead === PINNED && freshDetached,
+    `exit ${fresh.status}, resolved ${fresh.resolved}, HEAD ${freshHead}, detached ${freshDetached}`);
+
+  /* A checkout already detached at exactly the named commit is used as it stands —
+     that is the operator's own reviewed tree, and re-cloning over it would be the
+     installer overruling them. */
+  const pinnedCheckout = path.join(temp, "pinned-checkout");
+  spawnSync("git", ["clone", "-q", fixture, pinnedCheckout], { encoding: "utf8" });
+  spawnSync("git", ["-C", pinnedCheckout, "checkout", "-q", "--detach", PINNED], { encoding: "utf8" });
+  const pinnedExecutor = fs.realpathSync(path.join(pinnedCheckout, "executor"));
+  const reuse = runSource({ SOURCE_DIR: pinnedExecutor });
+  check("a checkout already detached at that commit is used as it stands, not re-cloned",
+    reuse.status === 0 && reuse.resolved === pinnedExecutor &&
+    !fs.existsSync(path.join(reuse.installDir, "source")),
+    `resolved ${reuse.resolved}; cloned anything: ${fs.existsSync(path.join(reuse.installDir, "source"))}`);
+
+  /* ...and a checkout sitting on a MOVING BRANCH is not, even though its HEAD commit
+     is the right one this second. That is the pinned-commit rule, and the convenience
+     above must not have bought a way around it. */
+  const branchCheckout = path.join(temp, "branch-checkout");
+  spawnSync("git", ["clone", "-q", fixture, branchCheckout], { encoding: "utf8" });
+  const branchRef = (spawnSync("git", ["-C", branchCheckout, "symbolic-ref", "-q", "HEAD"], { encoding: "utf8" }).stdout || "").trim();
+  const branchHead = (spawnSync("git", ["-C", branchCheckout, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout || "").trim();
+  const moving = runSource({ SOURCE_DIR: fs.realpathSync(path.join(branchCheckout, "executor")) });
+  check("a checkout on a moving branch is not accepted as the pin, even at the right commit",
+    branchHead === PINNED && moving.status === 0 &&
+    moving.resolved === path.join(moving.installDir, "source", PINNED, "executor"),
+    `branch ${branchRef} at ${branchHead}; resolved ${moving.resolved}`);
+}
 check("a complete release is staged before the running service is stopped",
   installer.indexOf("npm ci --ignore-scripts") < installer.indexOf("systemctl is-active --quiet cc-executor") &&
   installer.includes('RELEASES_DIR="$INSTALL_DIR/releases"'));

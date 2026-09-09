@@ -87,6 +87,10 @@ const publicCaps = (value) => {
   return caps;
 };
 
+/** A boolean the bot may simply never have sent. null is "it has not said", which is
+ *  not the same as false and is very much not the same as true. */
+const triState = (value) => value === true ? true : value === false ? false : null;
+
 const publicHealth = (value) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const state = ["healthy", "entries-paused", "degraded", "manual-action", "exits-blocked"]
@@ -95,6 +99,10 @@ const publicHealth = (value) => {
     state,
     entriesPaused: value.entriesPaused === true,
     hardStop: value.hardStop === true,
+    // The off switch, as the BOT reports it: its effective entry state, and the flag it
+    // last read from the feed. See botRunControl below for how the two are reconciled.
+    entriesEnabled: triState(value.entriesEnabled),
+    deskEntriesEnabled: triState(value.deskEntriesEnabled),
     blockingIntent: value.blockingIntent === true,
     blockedPositions: count(value.blockedPositions),
     manualAction: value.manualAction === true,
@@ -177,6 +185,85 @@ const publicBalance = (wallet, result, requiredForReadinessSol = null) => {
   };
 };
 
+/**
+ * THE OFF/ON SWITCH, RECONCILED IN ONE PLACE.
+ *
+ * There are two different facts here and a page that conflates them lies to its reader:
+ *
+ *   REQUESTED — what the tenant last asked for on their floor. Stored on this server.
+ *               It is a row in a table. It has reached nobody.
+ *   ECHOED    — what the BOT last said about itself in a heartbeat: `echoedDesk` is the
+ *               flag it read out of the feed, `echoedEffective` is whether it will open
+ *               a new position at all right now.
+ *
+ * The server has no way to push the request to the bot — the bot polls — so a bot that
+ * is asleep, offline, or on a machine that lost its network has heard nothing, and the
+ * only honest thing to show is PENDING. `confirmed` is deliberately conjunctive: the
+ * bot must be checking in AND have echoed back this exact value. A stale heartbeat that
+ * happens to carry the value the tenant just asked for is evidence about the past, not
+ * a confirmation, so a check-in older than the staleness window can never confirm.
+ *
+ * And when the two disagree the ECHO wins the display, because the echo is what is
+ * actually happening to the money: a floor asking "on" whose bot reports entries
+ * refused is a bot held by its own local sentinel, which this server cannot clear and
+ * must not paper over.
+ *
+ * Pure, so the contract has a direct test (test-bot-onoff.mjs) instead of one that has
+ * to drive a browser.
+ */
+export function botRunControl({
+  requested = true,
+  requestedAt = null,
+  echoedDesk = null,
+  echoedEffective = null,
+  heartbeatSeenAt = 0,
+  nowMs = Date.now(),
+  staleAfterMs = EXECUTOR_HEARTBEAT_STALE_MS,
+} = {}) {
+  const wanted = requested !== false;
+  const now = timestamp(nowMs) || Date.now();
+  const seenAt = timestamp(heartbeatSeenAt);
+  const connected = seenAt > 0 && now - seenAt <= Math.max(0, Number(staleAfterMs) || 0);
+  const desk = triState(echoedDesk);
+  const effective = triState(echoedEffective);
+  const confirmed = connected && desk === wanted;
+  // Unconfirmed, or confirmed by a bot that did not report an effective state: either
+  // way there is no echo to show, and "pending" is the whole truth.
+  const state = !confirmed || effective === null ? "pending" : effective ? "on" : "off";
+  const sentence = state === "pending"
+    ? (connected
+      ? "Asked. Your bot applies it on its next check-in."
+      : "Your bot has not checked in, so it has not heard this yet. It applies whenever it next does.")
+    : state === "on"
+      ? "Your bot is opening new positions."
+      : wanted
+        ? "Your bot is not opening new positions — its own switch, on its machine, is refusing. " +
+          "Nothing on this page can clear that."
+        : "Your bot is not opening new positions. It still manages and sells anything it already holds.";
+  return {
+    requested: wanted,
+    requestedLabel: wanted ? "ON" : "OFF",
+    requestedAt: timestamp(requestedAt) || null,
+    confirmed,
+    pending: !confirmed,
+    state,
+    /* THE CHIP NAMES BOTH FACTS WHILE THEY DIFFER. "ON · PENDING" says what was asked
+       for AND that nothing has confirmed it — a single word could only be one of the
+       two, and the one a reader would assume is the one that is not yet true. */
+    chip: state === "pending" ? (wanted ? "ON · PENDING" : "OFF · PENDING") : state.toUpperCase(),
+    cls: state === "on" ? "good" : state === "off" ? "warn" : "",
+    sentence,
+    // The button's next press. Stopping is always the safe direction, so it is offered
+    // even while a turn-off is still pending.
+    nextAction: wanted ? "off" : "on",
+    echo: { deskEntriesEnabled: desk, entriesEnabled: effective, connected, seenAt: seenAt || null },
+    /* Said in the payload, not only in a comment: this request travels by the bot
+       ASKING for it. Nothing here reaches the machine. */
+    delivery: "bot-polls-feed-no-push",
+    meaning: "off = open no new positions; exits, marks, reconciliation and heartbeats continue",
+  };
+}
+
 export function buildExecutorDashboard({
   heartbeatLog = [],
   floorNo,
@@ -230,6 +317,18 @@ export function buildExecutorDashboard({
     },
     wallet,
     filters,
+    /* THE OFF/ON SWITCH. The tenant's request and the bot's own echo, reconciled — see
+       botRunControl. It rides on the same owner-only payload the WALL-ST-E page and the
+       Overview already fetch, so neither screen has to make a second round trip to
+       learn whether the bot has heard. */
+    runControl: botRunControl({
+      requested: settings.entriesEnabled !== false,
+      requestedAt: settings.entriesEnabledAt ?? null,
+      echoedDesk: pulse?.health?.deskEntriesEnabled ?? null,
+      echoedEffective: pulse?.health?.entriesEnabled ?? null,
+      heartbeatSeenAt: pulse?.seenAt ?? 0,
+      nowMs: now,
+    }),
     activation: {
       feedCredentialReady: settings.feedCredentialReady === true,
       heartbeatSeen: Boolean(pulse),

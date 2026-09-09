@@ -102,11 +102,19 @@ assert.match(html, /Fund the burner last/);
     "...that copies that exact line");
 
   /* THE SAFETY SENTENCE SITS WITH THE COMMAND. A reader about to pipe a URL into
-     bash decides at that moment, not at the panel four steps down. */
-  assert.match(setup, /This installs a dry run: WALL-ST-E watches the feed[\s\S]{0,200}?trades nothing\./,
-    "the page says plainly, next to the command, that the default install trades nothing");
-  assert.match(setup, /It cannot buy or sell until you separately arm it on that machine/,
-    "...and that arming is a separate, deliberate act on the host");
+     bash decides at that moment, not at the panel four steps down.
+     RE-ANCHORED 2026-09-09: the installer now ARMS by default (install.sh MODE="live";
+     --dry-run is the opt-out), so the sentence that used to promise the paste was inert
+     would be a false safety promise about real money. The property is unchanged and is
+     now stricter — the truth about money must still sit next to the command, and the
+     truth is that this arms. What keeps money safe is stated with it: the wallet it
+     creates is empty and funding is a separate act only the reader can take. */
+  assert.match(setup, /This ARMS your bot: one command, no rehearsal install first\./,
+    "the page says plainly, next to the command, that the install arms real trading");
+  assert.match(setup, /wallet it creates is empty[\s\S]{0,120}?sending SOL is the switch/,
+    "...and that funding, not installing, is the moment money is at risk");
+  assert.doesNotMatch(setup, /installs a dry run|trades nothing until you separately arm/,
+    "...and never claims the paste is inert");
   assert.match(setup, /The burner key is generated on your host, is never sent anywhere/,
     "...and that the key never leaves the machine");
 
@@ -159,7 +167,7 @@ assert.match(html, /Fund the burner last/);
 /* The older copy-settings panel offered the same clone incantation. One surface fixed
    and one surface stale is how a user ends up back at the git-clone anyway. */
 {
-  const legacyPanel = html.slice(html.indexOf('"Install WALL-ST-E · dry run by default"'),
+  const legacyPanel = html.slice(html.indexOf('"Install WALL-ST-E · arms on install"'),
     html.indexOf('"Optional · supervised live canary"'));
   assert.ok(legacyPanel.length > 400, "could not locate the copy-settings install panel");
   assert.match(legacyPanel,
@@ -171,11 +179,24 @@ assert.match(html, /Fund the burner last/);
     "...and keeps the clone form out of the main flow");
   assert.match(legacyPanel, /if \(typeof detailedView === "function" && detailedView\(\)\) installBox\.appendChild\(cloneWays\.wrap\);/,
     "...attached only for a reader who asked for detail");
-  assert.match(legacyPanel, /trades nothing until you separately arm it on that machine/,
-    "...and says the default install trades nothing");
+  /* RE-ANCHORED 2026-09-09 with the armed install: the settings panel must still tell a
+     reader what the paste does with their money, and what it does now is ARM. */
+  assert.match(legacyPanel, /This ARMS your bot\./,
+    "...and says the install arms real trading");
+  assert.match(legacyPanel, /funding is the switch, not this command/,
+    "...and that funding, not installing, is the moment money moves");
 }
 
-assert.match(html, /cannot start, stop, steer, sign for, or fund it/);
+/* RE-ANCHORED 2026-09-09. This pinned the literal "cannot start, stop, steer, sign for,
+   or fund it", written when the page had no control of any kind. The floor now has an
+   off switch, so that exact sentence would be a lie by omission and it legitimately
+   moved. THE PROPERTY IS UNCHANGED AND IS ASSERTED IN THREE PARTS: the page still says
+   nothing here reaches the machine and that it cannot start, stop, sign for or fund the
+   bot; it names the switch as a REQUEST the bot collects on its own poll rather than
+   anything this server sends; and it says the operator's own hard stop wins. */
+assert.match(html, /Nothing on this page reaches your bot's machine: it cannot start, stop, sign for, or fund it/);
+assert.match(html, /request your bot reads on its own next check-in/);
+assert.match(html, /your machine's own hard stop always wins/);
 assert.match(html, /Active local cap policy · self-reported/);
 assert.match(html, /rolling realized-loss entry brake/);
 assert.match(html, /The realized-loss value is an entry brake, not a guaranteed loss ceiling/);
@@ -775,8 +796,10 @@ try {
       assert.doesNotMatch(commands.join(" "), /<N>|<floor|YOUR_FLOOR|\{floor/i,
         `a placeholder survived into a copyable command: ${JSON.stringify(commands)}`);
       const shown = textOf(scrim);
-      assert.match(shown, /installs a dry run/,
+      assert.match(shown, /THIS ARMS REAL TRADING/,
         `the install step says what it installs: ${shown.slice(0, 200)}`);
+      assert.match(shown, /sending SOL is the switch, not this command/,
+        `the install step says when money is at risk: ${shown.slice(0, 260)}`);
     }
   }
 

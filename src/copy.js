@@ -151,6 +151,37 @@ ensureColumn("copy_settings", "take_profit_x", "REAL NOT NULL DEFAULT 0");
 ensureColumn("copy_settings", "fixed_sol", "REAL NOT NULL DEFAULT 0");
 ensureColumn("copy_settings", "mcap_tier", "TEXT NOT NULL DEFAULT 'any'");
 
+/* THE OFF SWITCH — A REQUEST THIS FLOOR LEAVES OUT, NOT A COMMAND THIS SERVER SENDS.
+ *
+ * Until now the only way to stop a bot was to walk to the machine it runs on and touch
+ * a sentinel file, and the WALL-ST-E page said so in as many words. That is honest and
+ * it is unusable: the owner asked for "an off/on button" (2026-09-09) on the same
+ * Overview as the five figures.
+ *
+ * WHAT THIS COLUMN IS. One desired state, stored beside this floor's other copy
+ * settings. The server does not — and structurally cannot — push it anywhere: the bot
+ * POLLS /executor/feed on its own schedule and reads the flag out of the `rules` block
+ * it already fetches. There is no socket, no callback URL, no queue. If the machine is
+ * asleep the request simply sits here, which is why every surface that shows it shows
+ * the bot's OWN echo and says "pending" until the bot has confirmed.
+ *
+ * WHAT "OFF" MEANS, EXACTLY: open no new positions. It is NOT a sell, and it does not
+ * stop the bot managing or exiting what it already holds — exits, marks, reconciliation
+ * and heartbeats all continue. An off switch that stranded an open position would be a
+ * trap, and this codebase's whole reason for existing is not to build those.
+ *
+ * WHAT IT CANNOT DO: turn trading ON against the operator's will. The bot's local
+ * sentinels (its hard-stop and entry-pause files) are checked independently of this
+ * flag and each other, so a server "on" can never clear one — see poller.mjs onEntry
+ * and test-bot-onoff.mjs, which asserts exactly that.
+ *
+ * NOT REACHABLE THROUGH saveSettings(), for the same reason bot_operator is not: this
+ * must not be able to ride along inside a generic settings patch from a form that meant
+ * to change a sleeve. It has its own owner-authenticated route. */
+ensureColumn("copy_settings", "entries_enabled", "INTEGER NOT NULL DEFAULT 1");
+// When the CURRENT desired state was asked for. The page dates the request with it.
+ensureColumn("copy_settings", "entries_enabled_at", "INTEGER");
+
 /* WHO RUNS THIS FLOOR'S BOT — the one question the product never asked out loud.
  *
  * A tenant could lease a floor, set six filters and still not know whether a bot was
@@ -402,6 +433,41 @@ export function saveSettings(floorNo, patch) {
   return settingsFor(floorNo);
 }
 
+/**
+ * THIS FLOOR'S DESIRED RUN STATE — read by the page, and by the feed the bot polls.
+ *
+ * `enabled` is what the tenant last asked for. It is a REQUEST, never a fact about the
+ * bot: nothing here has heard from the machine. Every caller that renders it to a human
+ * must pair it with the bot's own echo (executor-dashboard.js botRunControl) so an
+ * offline bot cannot be reported as having obeyed.
+ */
+export function entriesEnabledFor(floorNo) {
+  const s = settingsFor(Number(floorNo));
+  return { enabled: Number(s?.entries_enabled ?? 1) !== 0, at: s?.entries_enabled_at ?? null };
+}
+
+/**
+ * Record the tenant's off/on request. Writes ONE column pair on this floor's own
+ * settings row and nothing else — it starts no process, stops no process, sends no
+ * message, and cannot reach the machine the bot runs on. The bot learns about it on its
+ * next ordinary poll of /executor/feed, or never, if it is not running.
+ *
+ * Anything that is not a boolean is refused rather than coerced. "off" arriving as the
+ * string "false" and landing on `true` because a truthy check was cheaper is precisely
+ * the class of bug that turns a stop button into a decoration.
+ */
+export function setEntriesEnabled(floorNo, enabled, { now = Date.now() } = {}) {
+  const n = Number(floorNo);
+  if (!Number.isInteger(n) || n <= 0) return { ok: false, error: "bad floor" };
+  if (enabled !== true && enabled !== false)
+    return { ok: false, error: "enabled must be true or false" };
+  settingsFor(n);                                   // the row must exist before we write it
+  db.prepare("UPDATE copy_settings SET entries_enabled=?, entries_enabled_at=? WHERE floor_no=?")
+    .run(enabled ? 1 : 0, now, n);
+  const s = entriesEnabledFor(n);
+  return { ok: true, floorNo: n, entriesEnabled: s.enabled, entriesEnabledAt: s.at };
+}
+
 /** The only two answers. Unset is the absence of one, not a third option to pick. */
 export const BOT_OPERATORS = Object.freeze(["self", "hq_requested"]);
 
@@ -426,8 +492,11 @@ export const BOT_OPERATOR_TRACKS = Object.freeze({
     custody: "The burner keypair is generated on your machine and never leaves it. " +
       "This desk holds no key of yours and cannot move your funds.",
     install: "curl -fsSL https://claudedotcompany.com/install.sh | bash -s -- --floor N",
+    /* Re-worded 2026-09-09 with the installer: there is no dry-run stage to pass
+       through any more, and this line claimed there was. The protection it was really
+       describing is the empty wallet, which is unchanged and now says so. */
     installNote: "One command, macOS and Linux. It generates the burner locally and " +
-      "defaults to a dry run — nothing trades until you pass the live flags yourself.",
+      "arms it, and that wallet starts empty — nothing trades until you fund it.",
     costs: Object.freeze([
       "A machine that stays awake — the bot only trades while it is running.",
       "Two RPC accounts for live trading (a primary and a secondary).",

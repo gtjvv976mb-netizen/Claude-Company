@@ -600,6 +600,38 @@ const clearFeedRollback = () => {
   feedRollback = null;
   journal.setMeta("feed_rollback", null);
 };
+
+/* ── THE TENANT'S OFF SWITCH ──────────────────────────────────────────────────
+ *
+ * The floor page has an off/on button now (owner, 2026-09-09: "an off/on button"). It
+ * does not, and cannot, reach this process: there is no inbound port, no callback and
+ * no queue. The desired state is a boolean in the `rules` block of the feed THIS
+ * process asks for, and this is the whole of the mechanism — read it on the poll that
+ * already happens, remember it, and let onEntry consult it.
+ *
+ * null until a feed has been read, and only a literal boolean moves it: an older or
+ * damaged server that omits the field leaves the switch exactly where it was rather
+ * than inventing a state. Not persisted on purpose — the value arrives in the SAME
+ * payload as the events it governs, so a restart cannot act on an entry before it has
+ * seen the flag that goes with it.
+ *
+ * OFF MEANS: OPEN NO NEW POSITIONS. It is checked in onEntry alone. Exits, marks,
+ * reconciliation, the desk mirror, the fill reports and the heartbeat are untouched —
+ * an off switch that stranded an open position would be worse than no switch.
+ *
+ * AND IT CANNOT TURN TRADING ON. `false` blocks; nothing here ever clears the hard-stop
+ * or entry-pause sentinels, which are separate, local, and checked on their own. */
+let deskEntriesEnabled = null;
+const deskEntriesOff = () => deskEntriesEnabled === false;
+const noteDeskEntriesRule = (rules) => {
+  const wanted = rules && typeof rules === "object" ? rules.entries_enabled : undefined;
+  if (wanted !== true && wanted !== false) return;
+  if (wanted === deskEntriesEnabled) return;
+  deskEntriesEnabled = wanted;
+  log(wanted
+    ? "your floor's switch is ON — new positions are permitted again (your machine's own hard stop and entry pause still bind)"
+    : "your floor's switch is OFF — no new positions will be opened; exits, marks and reconciliation continue");
+};
 const save = () => journal.saveRuntime(S);
 save();
 if (process.env.INIT_ONLY === "1") {
@@ -1323,6 +1355,13 @@ async function onEntry(ev) {
     return log(`SKIP ${ev.symbol}: authenticated feed latest_id rolled behind durable cursor — entries frozen`);
   if (pauseEntries()) return log(`SKIP ${ev.symbol}: PAUSE ENTRIES file is present`);
   if (hardStop()) return log(`SKIP ${ev.symbol}: HARD STOP file is present`);
+  /* The floor's own off switch, read off the feed this process polls. It sits BELOW the
+     two local sentinels deliberately: those are the operator's, they are checked first,
+     and no value of this flag can reach past them. This is the only place it is
+     consulted — the exit path below and manageOpen never ask. */
+  if (deskEntriesOff())
+    return log(`SKIP ${ev.symbol}: your floor's switch is OFF — no new positions ` +
+      "(exits, marks and reconciliation continue)");
   const history = journal.riskHistoryStatus(Date.now());
   if (!history.complete)
     return log(`SKIP ${ev.symbol}: rolling risk history is quarantined until ${new Date(history.incompleteUntil).toISOString()}`);
@@ -2143,6 +2182,11 @@ function sendHeartbeat() {
   try {
     health = executorHeartbeatHealth({
       entriesPaused: pauseEntries(), hardStop: hardStop(),
+      /* The floor's switch, ECHOED not obeyed-in-silence: the page shows what this bot
+         says it heard, never what the server asked for. Until this line reports the
+         value the tenant pressed, their screen says the request is pending — because
+         it is. */
+      deskEntriesEnabled,
       blockingIntent: Boolean(journal.hasBlockingIntent()), positions: openList(),
       lastTickCompletedAt: runtimeHealth.lastTickCompletedAt,
       lastFeedSuccessAt: runtimeHealth.lastFeedSuccessAt,
@@ -2163,7 +2207,7 @@ function sendHeartbeat() {
   } catch {
     // Telemetry can lose detail; it can never stop the trading/reconciliation loop.
     health = executorHeartbeatHealth({
-      entriesPaused: pauseEntries(), hardStop: hardStop(), blockingIntent: true,
+      entriesPaused: pauseEntries(), hardStop: hardStop(), deskEntriesEnabled, blockingIntent: true,
       lastTickCompletedAt: runtimeHealth.lastTickCompletedAt,
       lastFeedSuccessAt: runtimeHealth.lastFeedSuccessAt,
       consecutiveFeedFailures: runtimeHealth.consecutiveFeedFailures,
@@ -2819,6 +2863,11 @@ async function consumeFeed() {
       if (payload.cluster !== "mainnet-beta") throw new Error("feed cluster is not mainnet-beta");
       if (!Array.isArray(payload.events)) throw new Error("feed omitted its events array");
       const events = payload.events;
+      /* THE FLOOR'S OFF SWITCH, BEFORE ANY EVENT IN THIS PAYLOAD IS ACTED ON. The flag
+         and the entries it governs arrive in the same response, so a call published
+         after the tenant pressed OFF can never be entered on the strength of a stale
+         reading. It is read even on the rollback path below, which returns early. */
+      noteDeskEntriesRule(payload.rules);
       /* Say why a call was NOT offered. An empty feed is indistinguishable from a
        * desk that published nothing, and today it hid two published calls the floor
        * had declined. The feed now carries the floor's recent verdicts; log each
