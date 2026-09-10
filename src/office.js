@@ -11,7 +11,7 @@ import { bus, backlog, emit, runFor, chronicleRead } from "./lib/bus.js";
 import { census as funnelCensus } from "./funnel.js";
 import { spend, spendSince, spendBySeat, spendRows, openCreditBreakers } from "./lib/llm.js";
 import { decisionHistogram } from "./evaluation.js";
-import { seatAlpha } from "./seat-alpha.js";
+import { seatAlpha, seatScoreAlpha } from "./seat-alpha.js";
 import { cfg } from "./config.js";
 /* The cohort cycle's own constants. Imported, never re-declared: the ladder has exactly
    one definition (config.js) and the classification exactly one (calls.js GATE_CLASS).
@@ -1133,6 +1133,26 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             .includes(url.searchParams.get("cost")) ? url.searchParams.get("cost") : "exclude";
           try {
             return json(200, seatAlpha({ horizonMin, costPolicy, bootstrapSamples: 2000 }));
+          } catch (e) {
+            return json(400, { error: String(e?.message || e) });
+          }
+        }
+
+        /* The continuous form of the question above, and the one that can actually run:
+           the two-arm contrast refused on the live journal because the desk has APPROVED
+           TWO COINS EVER. Every seat still emits a score on every coin it judges, killed
+           ones included, so "does this seat's opinion track what the coin did?" has ~500
+           rows of power where the contrast has two. Per seat, so the partial panel a kill
+           leaves behind cannot masquerade as judgement. Same contract: GET, public,
+           aggregate, caveats travelling with the figure. */
+        if (url.pathname === "/api/decisions/seat-scores") {
+          if (req.method !== "GET") return json(405, { error: "method not allowed" });
+          const horizonMin = Math.max(1, Math.min(10_080,
+            Number(url.searchParams.get("horizon")) || 1440));
+          const costPolicy = ["exclude", "impute", "zero"]
+            .includes(url.searchParams.get("cost")) ? url.searchParams.get("cost") : "exclude";
+          try {
+            return json(200, seatScoreAlpha({ horizonMin, costPolicy, bootstrapSamples: 1500 }));
           } catch (e) {
             return json(400, { error: String(e?.message || e) });
           }

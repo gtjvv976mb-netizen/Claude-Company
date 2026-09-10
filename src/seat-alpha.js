@@ -347,3 +347,198 @@ export function killBreakdown({ horizonMin = 1440 } = {}) {
       ORDER BY n DESC`,
   ).all(horizonMin, OBSERVED);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+ * THE CONTINUOUS FORM — BECAUSE THE BINARY ONE CANNOT RUN
+ *
+ * seatAlpha() above compares approved against analyst-killed. Run against the live
+ * journal on 2026-09-10 it refused, and the refusal was the finding: the desk has
+ * APPROVED TWO COINS, EVER (182 decided, of which WATCH 126, VETOED 32, PASS 22,
+ * APPROVED 2; against 341 killed and 33,464 insufficient_coverage). A two-arm delta
+ * needs an arm, and there is not one. Waiting for approvals to accumulate is not a plan
+ * when the accounts are empty.
+ *
+ * But the question does not actually require the approval decision. The seats emit a
+ * SCORE on every coin they judge, and the useful question — does a seat's opinion carry
+ * information about what the coin then does? — is a correlation, not a contrast. That
+ * has 500-odd rows of power today instead of two.
+ *
+ * WHY PER SEAT AND NOT PER PANEL. A killed coin stops the pipeline where it was killed,
+ * so its panel is partial: two seats on some coins, four on others. A panel composite
+ * built from two seats is not on the same footing as one built from four, and comparing
+ * them would measure the seat mix as much as the judgement. Correlating WITHIN one
+ * seat's own population has no such confound — every point comes from the same seat
+ * scoring on the same dimension — and it answers the sharper question anyway, which is
+ * WHICH seat predicts. That is the input the ablation needs.
+ *
+ * SPEARMAN, NOT PEARSON. Memecoin forward returns are savagely skewed: measured on this
+ * journal at the 48h horizon, the killed population's MEAN net return is +140.6% while
+ * its MEDIAN is -6.6%. A Pearson correlation on those levels would be a report about
+ * three coins. Ranks are immune to that, and the question — do higher scores go with
+ * better outcomes? — is a question about order, not magnitude.
+ *
+ * The clustering and cost discipline is identical to seatAlpha(), and so is the refusal:
+ * a correlation from four cycles is not evidence.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+
+/** Ranks with ties averaged — ties are common here because seats favour round scores. */
+function ranks(xs) {
+  const idx = xs.map((v, i) => [v, i]).sort((a, b) => a[0] - b[0]);
+  const out = new Array(xs.length);
+  let i = 0;
+  while (i < idx.length) {
+    let j = i;
+    while (j + 1 < idx.length && idx[j + 1][0] === idx[i][0]) j++;
+    const r = (i + j) / 2 + 1;
+    for (let k = i; k <= j; k++) out[idx[k][1]] = r;
+    i = j + 1;
+  }
+  return out;
+}
+
+/** Spearman's rho on paired samples. Null when the sample is degenerate. */
+export function spearman(pairs) {
+  if (pairs.length < 3) return null;
+  const rx = ranks(pairs.map((p) => p[0]));
+  const ry = ranks(pairs.map((p) => p[1]));
+  const mx = mean(rx), my = mean(ry);
+  let num = 0, dx = 0, dy = 0;
+  for (let i = 0; i < rx.length; i++) {
+    const a = rx[i] - mx, b = ry[i] - my;
+    num += a * b; dx += a * a; dy += b * b;
+  }
+  if (dx === 0 || dy === 0) return null;      // every score identical, or every return
+  return num / Math.sqrt(dx * dy);
+}
+
+/** Resample whole cycles, recompute a statistic, return a percentile interval. */
+function bootstrapStat(items, statOf, { samples, seed }) {
+  const byCycle = new Map();
+  for (const it of items) {
+    if (!byCycle.has(it.cycle)) byCycle.set(it.cycle, []);
+    byCycle.get(it.cycle).push(it);
+  }
+  const cycles = [...byCycle.keys()];
+  const rand = mulberry32(seed);
+  const vals = [];
+  let skipped = 0;
+  for (let s = 0; s < samples; s++) {
+    const drawn = [];
+    for (let i = 0; i < cycles.length; i++) {
+      drawn.push(...byCycle.get(cycles[Math.floor(rand() * cycles.length)]));
+    }
+    const v = statOf(drawn);
+    if (v === null || !Number.isFinite(v)) { skipped++; continue; }
+    vals.push(v);
+  }
+  if (vals.length < Math.max(20, samples * 0.5)) {
+    return { ci95: null, skipped, usable: vals.length, cycles: cycles.length };
+  }
+  vals.sort((a, b) => a - b);
+  const at = (p) => vals[Math.min(vals.length - 1, Math.max(0, Math.floor(p * vals.length)))];
+  return { ci95: [at(0.025), at(0.975)], skipped, usable: vals.length, cycles: cycles.length };
+}
+
+const rhoOf = (items) => spearman(items.map((i) => [i.score, i.net]));
+
+/**
+ * Does each seat's score carry information about what the coin then did?
+ *
+ * Reads every seat-judged run (decided OR killed — both had seats return) with an
+ * observed mark at the horizon, pulls each seat's own score out of the stored record,
+ * and correlates score against net forward return within that seat's population.
+ */
+export function seatScoreAlpha({
+  horizonMin = 1440,
+  costPolicy = "exclude",
+  bootstrapSamples = 2000,
+  minCycles = 8,
+  minPerSeat = 30,
+  seed = 20260911,
+} = {}) {
+  if (!["exclude", "impute", "zero"].includes(costPolicy)) {
+    throw new Error(`invalid cost policy: ${costPolicy}`);
+  }
+
+  const rows = db.prepare(
+    `SELECT r.cycle, r.outcome, r.round_trip_cost_pct AS cost, r.record_json,
+            m.gross_return_pct AS gross
+       FROM decision_runs r
+       JOIN forward_marks m ON m.run_id = r.id
+      WHERE m.horizon_min=? AND m.data_status=? AND m.gross_return_pct IS NOT NULL
+            AND r.outcome IN ('decided','killed')
+      ORDER BY r.decided_at ASC`,
+  ).all(horizonMin, OBSERVED);
+
+  /* Cost first, on exactly the same rule as the two-arm form: an uncosted run is
+     dropped under the default rather than silently charged nothing. */
+  const measured = rows.map((r) => r.cost).filter((c) => Number.isFinite(c) && c >= 0);
+  const imputed = median(measured);
+  const bySeat = new Map();
+  let parsed = 0, unparsable = 0, droppedNoCost = 0;
+
+  for (const row of rows) {
+    const hasCost = Number.isFinite(row.cost) && row.cost >= 0;
+    if (!hasCost && (costPolicy === "exclude" || (costPolicy === "impute" && imputed === null))) {
+      droppedNoCost++; continue;
+    }
+    const charge = hasCost ? row.cost : (costPolicy === "impute" ? imputed : 0);
+    const net = Number(row.gross) - Math.max(0, charge);
+
+    let rec;
+    try { rec = JSON.parse(row.record_json); } catch { unparsable++; continue; }
+    const analysts = rec?.analysts;
+    if (!analysts || typeof analysts !== "object") { unparsable++; continue; }
+    parsed++;
+
+    for (const [seat, verdict] of Object.entries(analysts)) {
+      const score = Number(verdict?.score);
+      if (!Number.isFinite(score)) continue;
+      if (!bySeat.has(seat)) bySeat.set(seat, []);
+      bySeat.get(seat).push({ cycle: String(row.cycle), score, net });
+    }
+  }
+
+  const seats = {};
+  for (const [seat, items] of [...bySeat.entries()].sort((a, b) => b[1].length - a[1].length)) {
+    const cycles = new Set(items.map((i) => i.cycle)).size;
+    const rho = rhoOf(items);
+    const entry = {
+      n: items.length, cycles,
+      meanScore: mean(items.map((i) => i.score)),
+      medianNetPct: median(items.map((i) => i.net)),
+      rho, ci95: null, verdict: "INSUFFICIENT",
+    };
+    if (items.length >= minPerSeat && cycles >= minCycles && rho !== null) {
+      const b = bootstrapStat(items, rhoOf, { samples: bootstrapSamples, seed });
+      entry.ci95 = b.ci95;
+      entry.bootstrap = { usable: b.usable, skipped: b.skipped, resampledUnit: "cycle" };
+      if (!b.ci95) entry.verdict = "INSUFFICIENT";
+      else if (b.ci95[0] > 0) entry.verdict = "PREDICTS";
+      else if (b.ci95[1] < 0) entry.verdict = "ANTI_PREDICTS";
+      else entry.verdict = "NO_SIGNAL";
+    }
+    seats[seat] = entry;
+  }
+
+  return {
+    horizonMin, costPolicy,
+    runs: { matched: rows.length, parsed, unparsable, droppedNoCost },
+    seats,
+    thresholds: { minCycles, minPerSeat },
+    bootstrapSeed: seed,
+    caveats: [
+      "Spearman on ranks, not levels: this journal's 48h killed population has a mean " +
+      "net return of +140.6% against a median of -6.6%, so a correlation on levels " +
+      "would be a report about a handful of coins.",
+      "Correlation is computed WITHIN each seat's own population, so it is not " +
+      "confounded by the seat mix — a killed coin stops the pipeline and has a partial " +
+      "panel, which is why no panel-level composite is reported here.",
+      "Observational. A seat that scores high on coins that were going to run anyway " +
+      "shows a correlation without adding judgement; only the selection propensity " +
+      "recorded at decision time can separate those, and nothing writes it today.",
+      "A seat is scored on the coins IT saw. Seats that run late see a survivor " +
+      "population, so two seats' rho values are not directly comparable to each other.",
+    ],
+  };
+}

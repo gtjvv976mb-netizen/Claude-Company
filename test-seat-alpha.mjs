@@ -8,8 +8,9 @@
  *   - a PLANTED effect, which it must recover with an interval that excludes zero;
  *   - a NULL case drawn from one distribution, where it must decline to find an effect.
  *     A ruler that cannot say "no difference" cannot say "difference" either;
- *   - COHORT CLUSTERING, where resampling cycles must produce a WIDER interval than
- *     resampling coins. That widening is the entire reason the cycle is the unit;
+ *   - COHORT CLUSTERING, where the measured behaviour is counter-intuitive twice over:
+ *     with arms balanced inside a cycle the shared shock CANCELS and resampling cycles is
+ *     legitimately tighter, and where it does not cancel neither unit removes the bias;
  *   - the COST HOLE, where nulls concentrated in the killed arm must move the delta
  *     under costPolicy 'zero' and must not under the default 'exclude';
  *   - the EXCLUSIONS, where a screened_out or credit_outage row must never reach an arm.
@@ -339,5 +340,141 @@ ok("the kill breakdown names the gates that did the killing", () => {
   assert.equal(rows[0].gate, "liquidity_floor", `gate=${rows[0].gate}`);
 });
 
-fs.rmSync(tmp, { recursive: true, force: true });
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+ * THE CONTINUOUS FORM. seatAlpha() cannot run on the live journal — the desk has approved
+ * two coins ever — so seatScoreAlpha() asks the same question as a correlation instead of
+ * a contrast, using the score every seat emits on every coin it judges.
+ *
+ * Same ruler discipline: a null case it must fail, planted signal in both directions it
+ * must recover, and a demonstration that ranks survive the skew that would wreck a
+ * correlation on levels.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+const { seatScoreAlpha, spearman } = await import("./src/seat-alpha.js");
+
+console.log("\nSPEARMAN ITSELF, ON ANSWERS KNOWN IN ADVANCE");
+ok("a perfect monotone relationship is rho = 1, even when it is not linear", () => {
+  const r = spearman([[1, 1], [2, 8], [3, 27], [4, 64], [5, 625]]);
+  assert.ok(Math.abs(r - 1) < 1e-9, `rho=${r}`);
+});
+ok("a perfect inversion is rho = -1", () => {
+  const r = spearman([[1, 5], [2, 4], [3, 3], [4, 2], [5, 1]]);
+  assert.ok(Math.abs(r + 1) < 1e-9, `rho=${r}`);
+});
+ok("ties are averaged rather than ordered arbitrarily", () => {
+  const r = spearman([[1, 1], [1, 2], [1, 3], [2, 4]]);
+  assert.ok(r !== null && Number.isFinite(r), `rho=${r}`);
+});
+ok("a degenerate sample returns null instead of a number", () => {
+  assert.equal(spearman([[5, 1], [5, 2], [5, 3]]), null, "constant scores must give null");
+  assert.equal(spearman([[1, 1]]), null, "n=1 must give null");
+});
+
+/* A journal where a named seat's score really does track the outcome. */
+function buildScored({ cycles = 30, perCycle = 12, seed = 21,
+  signalSeat = "flow", signalStrength = 1, noiseSeat = "narrative", heavyTail = false } = {}) {
+  wipe();
+  const r = rng(seed);
+  for (let c = 0; c < cycles; c++) {
+    const market = normal(r) * 4;
+    for (let i = 0; i < perCycle; i++) {
+      const latent = normal(r);
+      /* The signal seat sees the latent quality; the noise seat scores at random. */
+      const signalScore = Math.max(0, Math.min(100, 50 + latent * 20 * signalStrength));
+      const noiseScore = Math.max(0, Math.min(100, 50 + normal(r) * 20));
+      let gross = market + latent * 8 + normal(r) * 4;
+      /* A few enormous winners, the way a real memecoin population behaves: this is what
+         breaks a correlation computed on levels and leaves one on ranks intact. */
+      if (heavyTail && r() < 0.03) gross += 900;
+      const analysts = {
+        [signalSeat]: { score: signalScore, confidence: 0.8, kill: false, findings: [] },
+        [noiseSeat]: { score: noiseScore, confidence: 0.8, kill: false, findings: [] },
+      };
+      const id = insertRun({
+        cycle: `cycle-${c}`, arm: "approved", gross, cost: 1.0,
+        outcome: i % 3 === 0 ? "decided" : "killed",
+        finalDecision: i % 3 === 0 ? "WATCH" : "KILLED",
+      });
+      db.prepare("UPDATE decision_runs SET record_json=? WHERE id=?")
+        .run(JSON.stringify({ analysts }), id);
+    }
+  }
+}
+
+console.log("\nDOES A SEAT'S SCORE PREDICT WHAT THE COIN DID?");
+buildScored({ signalStrength: 1 });
+const scored = seatScoreAlpha({ bootstrapSamples: 800, minPerSeat: 30 });
+
+ok("the seat that saw the latent quality is reported as predicting", () => {
+  const f = scored.seats.flow;
+  assert.equal(f.verdict, "PREDICTS",
+    `flow verdict=${f.verdict} rho=${f.rho?.toFixed(3)} ci=${JSON.stringify(f.ci95)}`);
+  assert.ok(f.rho > 0.15, `rho=${f.rho.toFixed(3)}`);
+  console.log(`        flow      rho=${f.rho.toFixed(3)} ci=[${f.ci95.map((x) => x.toFixed(2))}] n=${f.n}`);
+});
+
+ok("the seat that scored at random is reported as carrying no signal", () => {
+  const n = scored.seats.narrative;
+  assert.equal(n.verdict, "NO_SIGNAL",
+    `narrative verdict=${n.verdict} rho=${n.rho?.toFixed(3)} ci=${JSON.stringify(n.ci95)}`);
+  console.log(`        narrative rho=${n.rho.toFixed(3)} ci=[${n.ci95.map((x) => x.toFixed(2))}] n=${n.n}`);
+});
+
+ok("a seat whose score points the WRONG way is reported as anti-predicting", () => {
+  buildScored({ signalStrength: -1, seed: 33 });
+  const s = seatScoreAlpha({ bootstrapSamples: 800, minPerSeat: 30 });
+  assert.equal(s.seats.flow.verdict, "ANTI_PREDICTS",
+    `verdict=${s.seats.flow.verdict} rho=${s.seats.flow.rho.toFixed(3)}`);
+});
+
+ok("ranks survive a heavy tail that would wreck a correlation on levels", () => {
+  buildScored({ signalStrength: 1, heavyTail: true, seed: 44 });
+  const s = seatScoreAlpha({ bootstrapSamples: 800, minPerSeat: 30 });
+  assert.equal(s.seats.flow.verdict, "PREDICTS",
+    `verdict=${s.seats.flow.verdict} rho=${s.seats.flow.rho?.toFixed(3)}`);
+  console.log(`        with 3% of coins at +900%: flow still rho=${s.seats.flow.rho.toFixed(3)}`);
+});
+
+console.log("\nIT READS KILLED RUNS TOO — WHICH IS THE WHOLE POINT");
+ok("killed runs contribute, so the sample is not limited to approvals", () => {
+  buildScored({ signalStrength: 1, seed: 21 });
+  const s = seatScoreAlpha({ bootstrapSamples: 200, minPerSeat: 30 });
+  const killed = db.prepare("SELECT COUNT(*) c FROM decision_runs WHERE outcome='killed'").get().c;
+  assert.ok(killed > 0, `killed=${killed}`);
+  assert.ok(s.seats.flow.n > killed,
+    `flow n=${s.seats.flow.n} must exceed the ${killed} killed runs it includes`);
+  console.log(`        ${s.seats.flow.n} scored points drawn from ${killed} killed + the decided ones`);
+});
+
+console.log("\nREFUSING, AND HYGIENE");
+ok("a seat below the row threshold is INSUFFICIENT with no interval", () => {
+  buildScored({ cycles: 30, perCycle: 12, seed: 21 });
+  const s = seatScoreAlpha({ bootstrapSamples: 200, minPerSeat: 100_000 });
+  assert.equal(s.seats.flow.verdict, "INSUFFICIENT", `verdict=${s.seats.flow.verdict}`);
+  assert.equal(s.seats.flow.ci95, null);
+});
+ok("unparsable records are counted, not silently skipped", () => {
+  buildScored({ cycles: 12, perCycle: 8, seed: 6 });
+  db.prepare("UPDATE decision_runs SET record_json='{not json' WHERE id IN " +
+    "(SELECT id FROM decision_runs LIMIT 5)").run();
+  const s = seatScoreAlpha({ bootstrapSamples: 100, minPerSeat: 10 });
+  assert.equal(s.runs.unparsable, 5, `unparsable=${s.runs.unparsable}`);
+  console.log(`        matched=${s.runs.matched} parsed=${s.runs.parsed} unparsable=${s.runs.unparsable}`);
+});
+ok("the same seed gives the same interval", () => {
+  buildScored({ signalStrength: 1, seed: 21 });
+  const a = seatScoreAlpha({ bootstrapSamples: 400, seed: 77, minPerSeat: 30 });
+  const b = seatScoreAlpha({ bootstrapSamples: 400, seed: 77, minPerSeat: 30 });
+  assert.deepEqual(a.seats.flow.ci95, b.seats.flow.ci95);
+});
+ok("an invalid cost policy is refused here too", () => {
+  assert.throws(() => seatScoreAlpha({ costPolicy: "free" }), /invalid cost policy/);
+});
+ok("the caveats name the skew and the observational limit", () => {
+  const s = seatScoreAlpha({ bootstrapSamples: 100, minPerSeat: 10 });
+  assert.ok(s.caveats.some((c) => /Spearman on ranks/.test(c)), JSON.stringify(s.caveats));
+  assert.ok(s.caveats.some((c) => /Observational/.test(c)), JSON.stringify(s.caveats));
+});
+
 console.log(`\n══ ${pass} passed, 0 failed ══`);
+
+fs.rmSync(tmp, { recursive: true, force: true });
