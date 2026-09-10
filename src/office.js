@@ -11,6 +11,7 @@ import { bus, backlog, emit, runFor, chronicleRead } from "./lib/bus.js";
 import { census as funnelCensus } from "./funnel.js";
 import { spend, spendSince, spendBySeat, spendRows, openCreditBreakers } from "./lib/llm.js";
 import { decisionHistogram } from "./evaluation.js";
+import { seatAlpha } from "./seat-alpha.js";
 import { cfg } from "./config.js";
 /* The cohort cycle's own constants. Imported, never re-declared: the ladder has exactly
    one definition (config.js) and the classification exactly one (calls.js GATE_CLASS).
@@ -1109,6 +1110,32 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             publishableFraction: { pmPositive: pub.pmPositive, published: pub.published, f: pub.f },
             llmSpend: spendRows({ sinceMs, limit: queryLimit(url, 5000, 20_000) }),
           });
+        }
+
+        /* ── DO THE PAID SEATS BEAT THE FREE SCREEN? ──
+           The desk has never asked, and the published field is not encouraging: a census
+           of 19 closed-loop LLM trading studies found ZERO reporting the counterfactual
+           of what they refused. The rows to answer it have been accumulating the whole
+           time — recordDecision writes a decision_runs row and five forward horizons for
+           every coin, including every analyst kill.
+
+           Same contract as the histogram directly above: GET only, PUBLIC, and aggregate
+           BY CONSTRUCTION rather than by gate. Two arm summaries, a delta, an interval
+           and the caveats — no mints, no symbols, no record_json, no prompt text. The
+           caveats travel WITH the number on purpose: this is observational, the delta is
+           never alpha, and a reader who gets the figure without the qualification is a
+           reader who will act on it. */
+        if (url.pathname === "/api/decisions/seat-alpha") {
+          if (req.method !== "GET") return json(405, { error: "method not allowed" });
+          const horizonMin = Math.max(1, Math.min(10_080,
+            Number(url.searchParams.get("horizon")) || 1440));
+          const costPolicy = ["exclude", "impute", "zero"]
+            .includes(url.searchParams.get("cost")) ? url.searchParams.get("cost") : "exclude";
+          try {
+            return json(200, seatAlpha({ horizonMin, costPolicy, bootstrapSamples: 2000 }));
+          } catch (e) {
+            return json(400, { error: String(e?.message || e) });
+          }
         }
 
         if (url.pathname === "/api/leaderboard") return json(200, { floors: identity.leaderboard() });
