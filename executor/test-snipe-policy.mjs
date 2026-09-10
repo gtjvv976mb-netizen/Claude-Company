@@ -12,13 +12,18 @@
  *                     re-quoted price and being wrong costs a premature exit, not a loss.
  */
 import assert from "node:assert/strict";
-import { snipePolicy, freshSnipe, SNIPE_DEFAULTS, SNIPE_POLICY_VERSION } from "./snipe-policy.mjs";
+import { snipePolicy, freshSnipe, SNIPE_DEFAULTS, SNIPE_POLICY_VERSION,
+  frictionX, tightestFundableStopFrac } from "./snipe-policy.mjs";
 
 let pass = 0;
 const ok = (n, f) => { f(); console.log("  ok  ", n); pass++; };
 
 const T0 = 1_700_000_000_000;
-const open = (entry = 1.0) => freshSnipe({ entry, openedAt: T0, creator: "Dev111" });
+/* Live fill economics, so every threshold in these tests is the real one:
+   maxSolPerTrade 0.005 SOL, expectedNetworkFeeLamports 500_000 = 0.0005 SOL a leg. */
+const LIVE = { sizeSol: 0.005, feeSolPerLeg: 0.0005 };
+const FX = frictionX(LIVE);                       // 1.2222x
+const open = (entry = 1.0) => freshSnipe({ entry, openedAt: T0, creator: "Dev111", ...LIVE });
 
 /** Feed a sequence of marks, returning every decision. */
 function drive(pos, marks, { stepMs = 1000, ...rest } = {}) {
@@ -77,13 +82,13 @@ ok("a position cannot arm on its first print, however good", () => {
 /* ── 3. A GENUINE RUN ───────────────────────────────────────────────────────────────── */
 console.log("\nA GENUINE RUN ARMS, THEN TRAILS");
 ok("a sustained climb confirms, arms breakeven then the trail", () => {
-  const r = drive(open(), [1.1, 1.4, 1.45, 1.6, 2.0]);
+  const r = drive(open(), [1.1, 1.5, 1.7, 1.9, 2.2]);
   assert.ok(r.position.armedBreakeven, "breakeven never armed on a real run");
   assert.ok(r.position.armedTrail, "trail never armed on a real run");
   console.log(`        confirmed high ${r.position.high.toFixed(2)} from a climb to 2.0`);
 });
 ok("the trail sells 25% below the confirmed high", () => {
-  const r = drive(open(), [1.1, 1.4, 1.45, 1.6, 2.0]);
+  const r = drive(open(), [1.1, 1.5, 1.7, 1.9, 2.2]);
   const high = r.position.high;
   const d = snipePolicy({ position: r.position, mark: high * 0.74, nowMs: T0 + 9000 });
   assert.equal(d.action, "sell", `${d.action}: ${d.reason}`);
@@ -91,27 +96,67 @@ ok("the trail sells 25% below the confirmed high", () => {
   console.log(`        high ${high.toFixed(2)}, mark ${(high * 0.74).toFixed(2)} -> ${d.reason}`);
 });
 ok("the confirmed high never comes back down", () => {
-  const r = drive(open(), [1.1, 1.4, 1.45, 1.6, 2.0]);
+  const r = drive(open(), [1.1, 1.5, 1.7, 1.9, 2.2]);
   const peak = r.position.high;
   const after = drive(r.position, [0.9, 0.9, 0.9]);
   assert.ok(after.position.high >= peak, `high fell from ${peak} to ${after.position.high}`);
 });
-ok("breakeven, once armed, sells at entry rather than riding back to the stop", () => {
-  const r = drive(open(), [1.4, 1.4, 1.4]);
-  assert.ok(r.position.armedBreakeven, "did not arm");
-  const d = snipePolicy({ position: r.position, mark: 0.99, nowMs: T0 + 9000 });
-  assert.equal(d.action, "sell", `${d.action}: ${d.reason}`);
-  assert.match(d.reason, /breakeven/);
+ok("breakeven, once armed, sells at TRUE breakeven and not at entry", () => {
+  /* A high of 1.5 arms breakeven (>= fx*1.15 = 1.406) but NOT the trail (fx*1.30 =
+     1.589). That isolation is the point: at a higher confirmed high the trail sits
+     tighter than friction and would fire first, which would test the wrong rule. */
+  const r = drive(open(), [1.5, 1.5, 1.5]);
+  assert.ok(r.position.armedBreakeven, `did not arm; high=${r.position.high}`);
+  assert.equal(r.position.armedTrail, false,
+    `the trail armed too at high=${r.position.high}; this case must isolate breakeven`);
+  /* Just under friction must sell; just above it must not. Selling at 1.0x — the bug
+     this replaced — would realise -18.18% at live size. */
+  const below = snipePolicy({ position: r.position, mark: FX - 0.01, nowMs: T0 + 9000 });
+  const above = snipePolicy({ position: r.position, mark: FX + 0.05, nowMs: T0 + 9000 });
+  assert.equal(below.action, "sell", `${below.action}: ${below.reason}`);
+  assert.match(below.reason, /breakeven/);
+  assert.equal(above.action, "hold", `at ${(FX + 0.05).toFixed(3)}x it sold: ${above.reason}`);
+  console.log(`        breakeven sells at ${FX.toFixed(4)}x, not 1.0x — 1.0x would realise -18.18%`);
 });
 
 /* ── 4. FAST TO EXIT ────────────────────────────────────────────────────────────────── */
 console.log("\nTHE FAST HALF — NO CONFIRMATION REQUIRED TO LEAVE");
 ok("the hard stop fires on a RAW mark, with no confirmation window at all", () => {
-  const d = snipePolicy({ position: open(), mark: 0.5, nowMs: T0 + 1 });
+  const d = snipePolicy({ position: open(), mark: 0.15, nowMs: T0 + 1 });
   assert.equal(d.action, "sell", `${d.action}: ${d.reason}`);
   assert.equal(d.fraction, 1);
   assert.match(d.reason, /stop/);
-  console.log(`        first ever print at 0.5x -> ${d.reason}`);
+  console.log(`        first ever print at 0.15x -> ${d.reason}`);
+});
+/* THE STOP IS A CATASTROPHE BACKSTOP, NOT A RISK CONTROL, and that is forced by the fee
+   rail rather than chosen. minViableSolPerTrade caps fees at 25% of the STOP DISTANCE,
+   so a tighter stop needs a BIGGER position — and the live cap is 0.005 SOL. Pinning it
+   here means nobody can "tighten the stop to be safe" without the test showing them that
+   the position stops being fundable. */
+ok("the default stop is the tightest one the live cap can actually fund", () => {
+  const tightest = tightestFundableStopFrac({ sizeSol: 0.005 });
+  assert.ok(SNIPE_DEFAULTS.stopFrac >= tightest - 1e-9,
+    `default stop ${SNIPE_DEFAULTS.stopFrac} is TIGHTER than the fundable floor ${tightest}`);
+  console.log(`        live cap 0.005 SOL -> tightest fundable stop ${tightest.toFixed(2)}x, ` +
+    `default ${SNIPE_DEFAULTS.stopFrac}x`);
+});
+ok("a 0.70x stop — the first version's default — is NOT fundable at the live cap", () => {
+  const needed = (2 * 0.0005) / (0.25 * (1 - 0.70));
+  assert.ok(needed > 0.005,
+    `a 0.70x stop needs ${needed.toFixed(4)} SOL against a 0.005 cap`);
+  console.log(`        a 0.70x stop needs ${needed.toFixed(4)} SOL — ${(needed / 0.005).toFixed(1)}x the live cap`);
+});
+ok("a fill so small the fee eats it has NO breakeven, and says so", () => {
+  assert.equal(frictionX({ sizeSol: 0.0005, feeSolPerLeg: 0.0005 }), Infinity);
+  assert.equal(frictionX({ sizeSol: 0.0001, feeSolPerLeg: 0.0005 }), Infinity);
+  assert.equal(frictionX({ sizeSol: -1, feeSolPerLeg: 0.0005 }), null);
+});
+ok("a position with no fill economics falls back to live friction, never to 1.0x", () => {
+  const bare = freshSnipe({ entry: 1, openedAt: T0 });
+  const r = drive(bare, [1.5, 1.5, 1.5]);
+  assert.match(r.last.reason, /breakeven is 1\.2222x/, r.last.reason);
+  assert.ok(SNIPE_DEFAULTS.fallbackFrictionX > 1.2,
+    `fallback ${SNIPE_DEFAULTS.fallbackFrictionX} — a fallback of 1.0 is the bug it exists to prevent`);
 });
 ok("the creator selling exits immediately — the one signal a launch has", () => {
   const d = snipePolicy({ position: open(), mark: 3.0, nowMs: T0 + 1, creatorSold: true });

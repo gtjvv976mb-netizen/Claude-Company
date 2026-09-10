@@ -82,14 +82,48 @@
 
 export const SNIPE_POLICY_VERSION = "snipe-v1";
 
+/**
+ * THE ROUND TRIP IS THE DOMINANT TERM AT LIVE SIZE, AND IT REWRITES TWO DEFAULTS.
+ *
+ * Measured against the repo's own frozen rails, not chosen:
+ *   LIVE_LIMITS.maxSolPerTrade        = 0.005   SOL   (poller.mjs:155)
+ *   expectedNetworkFeeLamports        = 500_000       (poller.mjs:199) = 0.0005 SOL
+ *
+ * So a live position pays 0.0005 SOL to get in and again to get out: 0.001 SOL of
+ * friction on a 0.005 SOL position. TWENTY PERCENT, round trip.
+ *
+ * TWO CONSEQUENCES, both of which broke the first version of this file:
+ *
+ * 1. THE STOP CANNOT BE TIGHT, BECAUSE A TIGHT ONE CANNOT BE FUNDED.
+ *    strategy.mjs minViableSolPerTrade() caps fees at maxFeeShareOfStop (0.25) of the
+ *    STOP DISTANCE, so a tighter stop demands a LARGER position to stay inside that
+ *    share. Bisected against the real function: the tightest stop distance a 0.005 SOL
+ *    position can carry is 0.80 — a stop at 0.20x entry. A stop at 0.70x entry needs
+ *    0.0133 SOL, which is 2.7x the live cap, so it is not fundable at all.
+ *    THEREFORE THE PRICE STOP HERE IS A CATASTROPHE BACKSTOP, NOT A RISK CONTROL. The
+ *    real controls on this lane are the clock, the structural tripwires (creator sold,
+ *    hostile chain fact, collapsed sell side) and the size. Do not "tighten the stop"
+ *    to feel safer; it makes the position unfundable, which is not the same as safe.
+ *
+ * 2. "BREAKEVEN" IS NOT 1.0x. Selling at entry realises (s-f)/(s+f) - 1 = -18.18% at
+ *    live size. The true breakeven multiple is (size + fee) / (size - fee) = 1.2222x,
+ *    and it MOVES with fill size and observed fee, so it is computed per position by
+ *    frictionX() rather than stored as a constant. The first version of this file armed
+ *    a stop at entry and called it breakeven; it would have realised an 18% loss on
+ *    every position it "protected".
+ */
 export const SNIPE_DEFAULTS = Object.freeze({
-  /* Fraction of entry at which the position is abandoned outright. A launch that is
-     down this much is not coming back often enough to pay for waiting. */
-  stopFrac: 0.70,
-  /* Multiple of entry at which the stop is lifted to entry (breakeven). */
-  armBreakevenAt: 1.35,
-  /* Multiple at which a trailing stop starts following the confirmed high. */
-  armTrailAt: 1.50,
+  /* A stop at 0.20x entry. Wide because the fee rail forces it — see above. */
+  stopFrac: 0.20,
+  /* Multiple of entry at which the stop is lifted to TRUE breakeven. Expressed as a
+     multiple of frictionX, not of entry: arming below friction arms a loss. */
+  armBreakevenAtFrictionX: 1.15,
+  /* Multiple of frictionX at which a trailing stop starts following the confirmed high. */
+  armTrailAtFrictionX: 1.30,
+  /* Used only when the caller supplies no fill economics. It is the live-cap friction
+     (0.005 SOL at a 0.0005 SOL fee each way) and is deliberately NOT 1.0: a default of
+     1.0 is the bug this constant exists to prevent. */
+  fallbackFrictionX: 1.2222,
   /* How far below the confirmed high the trail sits. */
   trailFrac: 0.25,
   /* A sniper must not become a bag holder by inaction. If none of the triggers has
@@ -104,6 +138,38 @@ export const SNIPE_DEFAULTS = Object.freeze({
   liquidityFloorFrac: 0.10,
 });
 
+/**
+ * THE TRUE BREAKEVEN MULTIPLE for a fill: what the mark must reach for the position to
+ * return what it cost, once both legs of network fee are paid.
+ *
+ *   proceeds(m) = size*m - fee        outlay = size + fee
+ *   breakeven   => m = (size + fee) / (size - fee)
+ *
+ * At live size (0.005 SOL, 0.0005 SOL a leg) that is 1.2222x. A fill so small that the
+ * fee equals or exceeds it has NO breakeven multiple, and that is reported as Infinity
+ * rather than as a number that would let the caller arm something.
+ */
+export function frictionX({ sizeSol, feeSolPerLeg }) {
+  const s = Number(sizeSol), f = Number(feeSolPerLeg);
+  if (!Number.isFinite(s) || !Number.isFinite(f) || s <= 0 || f < 0) return null;
+  if (s <= f) return Infinity;
+  return (s + f) / (s - f);
+}
+
+/**
+ * The tightest stop DISTANCE a given position size can carry under the desk's own fee
+ * rail, by inversion of strategy.mjs minViableSolPerTrade():
+ *   minViable = 2*feeReserve / (maxFeeShareOfStop * stopDistance)  <=  size
+ * Returned as the stop LEVEL (fraction of entry), which is what this module uses.
+ */
+export function tightestFundableStopFrac({ sizeSol, feeReserveSol = 0.0005, maxFeeShareOfStop = 0.25 }) {
+  const s = Number(sizeSol);
+  if (!Number.isFinite(s) || s <= 0) return null;
+  const distance = (2 * feeReserveSol) / (maxFeeShareOfStop * s);
+  if (!Number.isFinite(distance) || distance >= 1) return 0;   // nothing is fundable
+  return 1 - distance;
+}
+
 const median = (xs) => {
   if (!xs.length) return null;
   const s = [...xs].sort((a, b) => a - b);
@@ -112,10 +178,16 @@ const median = (xs) => {
 };
 
 /** A fresh position. `marks` is the confirmation window's rolling history. */
-export const freshSnipe = ({ entry, openedAt, creator = null }) => Object.freeze({
+export const freshSnipe = ({ entry, openedAt, creator = null,
+  sizeSol = null, feeSolPerLeg = null }) => Object.freeze({
   entry: Number(entry),
   openedAt: Number(openedAt),
   creator,
+  /* The fill's own economics, so breakeven is this position's breakeven and not a
+     constant that was true of some other fill. Null means the caller did not supply
+     them and the conservative fallback is used. */
+  sizeSol: sizeSol === null ? null : Number(sizeSol),
+  feeSolPerLeg: feeSolPerLeg === null ? null : Number(feeSolPerLeg),
   high: 0,              // the CONFIRMED high-water, never lowered
   marks: [],            // rolling raw observations, newest last
   armedBreakeven: false,
@@ -146,6 +218,11 @@ export function snipePolicy({
   const p = position;
   if (!p || !(p.entry > 0)) throw new Error("snipePolicy: a position with an entry is required");
 
+  /* This position's own breakeven multiple. Every arm and the breakeven stop are
+     expressed against it, so a change in fill size or fee moves them together. */
+  const measured = frictionX({ sizeSol: p.sizeSol, feeSolPerLeg: p.feeSolPerLeg });
+  const fx = Number.isFinite(measured) && measured > 1 ? measured : cfg.fallbackFrictionX;
+
   /* A mark that is not a usable number decides nothing. It is not an exit signal — an
      unreadable price is the absence of information, not bad news — and it must not enter
      the confirmation window, where it would corrupt the median. */
@@ -170,8 +247,11 @@ export function snipePolicy({
   if (usable && mark <= p.entry * cfg.stopFrac) {
     return sell(1, `stop: ${(cfg.stopFrac * 100).toFixed(0)}% of entry`, next);
   }
-  if (p.armedBreakeven && usable && mark <= p.entry) {
-    return sell(1, "breakeven stop, armed earlier on a confirmed high", next);
+  /* AT frictionX, NOT AT ENTRY. Selling at entry returns less than the position cost,
+     because both legs of network fee are already spent. At live size that error is
+     -18.18%, and calling it "breakeven" is what makes it dangerous. */
+  if (p.armedBreakeven && usable && mark <= p.entry * fx) {
+    return sell(1, `breakeven stop at ${fx.toFixed(4)}x entry — the true round-trip cost, not 1.0x`, next);
   }
   if (p.armedTrail && p.high > 0 && usable && mark <= p.high * (1 - cfg.trailFrac)) {
     return sell(1, `trailing stop: ${(cfg.trailFrac * 100).toFixed(0)}% below a confirmed high of ${p.high}`, next);
@@ -189,10 +269,11 @@ export function snipePolicy({
     const confirmed = median(marks);
     if (confirmed > next.high) next.high = confirmed;
 
-    if (!next.armedBreakeven && next.high >= p.entry * cfg.armBreakevenAt) {
+    /* Arming below friction arms a loss, so both thresholds are multiples of fx. */
+    if (!next.armedBreakeven && next.high >= p.entry * fx * cfg.armBreakevenAtFrictionX) {
       next.armedBreakeven = true;
     }
-    if (!next.armedTrail && next.high >= p.entry * cfg.armTrailAt) {
+    if (!next.armedTrail && next.high >= p.entry * fx * cfg.armTrailAtFrictionX) {
       next.armedTrail = true;
     }
   }
@@ -200,7 +281,8 @@ export function snipePolicy({
   const armed = [next.armedBreakeven && "breakeven", next.armedTrail && "trail"].filter(Boolean);
   return hold(
     armed.length
-      ? `holding — ${armed.join(" and ")} armed against a confirmed high of ${next.high}`
-      : "holding — nothing confirmed yet",
+      ? `holding — ${armed.join(" and ")} armed against a confirmed high of ${next.high} ` +
+        `(breakeven is ${fx.toFixed(4)}x)`
+      : `holding — nothing confirmed yet (breakeven is ${fx.toFixed(4)}x)`,
     next);
 }
