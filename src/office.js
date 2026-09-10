@@ -12,6 +12,7 @@ import { census as funnelCensus } from "./funnel.js";
 import { spend, spendSince, spendBySeat, spendRows, openCreditBreakers } from "./lib/llm.js";
 import { decisionHistogram } from "./evaluation.js";
 import { seatAlpha, seatScoreAlpha } from "./seat-alpha.js";
+import { paperTrade } from "./paper-trade.js";
 import { cfg } from "./config.js";
 /* The cohort cycle's own constants. Imported, never re-declared: the ladder has exactly
    one definition (config.js) and the classification exactly one (calls.js GATE_CLASS).
@@ -1153,6 +1154,29 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             .includes(url.searchParams.get("cost")) ? url.searchParams.get("cost") : "exclude";
           try {
             return json(200, seatScoreAlpha({ horizonMin, costPolicy, bootstrapSamples: 1500 }));
+          } catch (e) {
+            return json(400, { error: String(e?.message || e) });
+          }
+        }
+
+        /* WOULD THIS HAVE MADE MONEY? Replays every closed call net of the round trip it
+           would have cost, scales it by the fill rate the bot actually achieves, and
+           charges the research bill over the same window — because the seats are bought
+           whether or not a call fills. The headline is BREAK-EVEN POSITION SIZE, and a
+           losing book is refused a number rather than handed one that looks like a plan.
+           Aggregate only: no mints, no per-call rows. */
+        if (url.pathname === "/api/decisions/paper-trade") {
+          if (req.method !== "GET") return json(405, { error: "method not allowed" });
+          const num = (k, d, lo, hi) => {
+            const v = Number(url.searchParams.get(k));
+            return Number.isFinite(v) && v >= lo && v <= hi ? v : d;
+          };
+          try {
+            return json(200, paperTrade({
+              fillRate: num("fill", 0.75, 0.01, 1),
+              extraSlipPct: num("slip", 0, 0, 50),
+              costPolicy: url.searchParams.get("cost") === "zero" ? "zero" : "exclude",
+            }));
           } catch (e) {
             return json(400, { error: String(e?.message || e) });
           }
