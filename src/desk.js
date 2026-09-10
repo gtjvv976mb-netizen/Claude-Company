@@ -1,3 +1,4 @@
+import { barPanel } from "./untrusted.js";
 import * as ds from "./data/dexscreener.js";
 import { gather, screen, enrichWithXRead, creatorHandle } from "./data/evidence.js";
 import { reputationFor } from "./devrep.js";
@@ -455,6 +456,33 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
     return rec;
   }
 
+  /* THE PROVENANCE BAR. Everything past this line is the case FOR a position: the
+     adversary attacks it, the risk seat sizes the argument, the PM decides on it. So
+     this is where attacker-authored text stops being allowed to argue.
+
+     A finding whose only source is a deployer-written path (the token name, the lore,
+     the socials, the X read — src/untrusted.js) is dropped before the panel is weighed,
+     so it cannot reach the Red Team or the PM as support. Kills are never barred and
+     never reach here anyway: the asymmetry is the design, because an injected kill costs
+     one cohort of provider spend while an injected pass ends with the bot spending real
+     SOL.
+
+     WHAT THIS DOES NOT DO, stated so nobody assumes otherwise: it strips the CLAIM, not
+     the seat's score. A seat that scored high partly on injected narrative keeps its
+     number, because rewriting a seat's score would be the desk inventing a verdict the
+     seat did not give. The bar makes the injected claim unusable as cited support and
+     journals that it fired; the count rising is the signal that somebody is trying it. */
+  const barKept = barPanel(analysts, {
+    onBar: (b) => emit("stage", { stage: "provenance_bar", mint, symbol: ev.symbol,
+      detail: `${b.seat}: a positive finding sourced only from deployer-written ` +
+        `${b.source} was dropped before the panel was weighed` }),
+  });
+  /* Written back INTO the same object rather than rebound: collect() closes over
+     `analysts`, and swapping the reference would leave that closure pointing at the
+     unbarred panel. */
+  for (const [seat, v] of Object.entries(barKept.analysts)) analysts[seat] = v;
+  const barredFindings = barKept.barred;
+
   // --- Stage 7-9: adversary, risk, decision. ---
   const weighted = composite(analysts);
   emit("stage", { stage: "redteam", mint, symbol: ev.symbol, weighted: Number(weighted.toFixed(1)) });
@@ -529,7 +557,7 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
   if (redteam.verdict === "refuted") {
     emit("stage", { stage: "decision_skipped", mint, symbol: ev.symbol,
       detail: `the red team refuted it on ${fatal.length} verified fatal attack${fatal.length === 1 ? "" : "s"} — Risk, the PM and Execution were not bought` });
-    const record = { mint, symbol: ev.symbol, outcome: "decided", weighted, ev, analysts,
+    const record = { mint, symbol: ev.symbol, outcome: "decided", weighted, ev, analysts, barredFindings,
       redteamRaw, redteam, risk: null, pm: null, ticket: null, compliance: null,
       finalDecision: "REFUTED", escalationLevel: plan.level, relaxations };
     record.reportFile = writeReport(cycle, record);
@@ -568,7 +596,7 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
       ?? "the rails sized this at $0";
     emit("stage", { stage: "pm_skipped", mint, symbol: ev.symbol,
       detail: `${railNote} — the PM and Execution were not bought` });
-    const record = { mint, symbol: ev.symbol, outcome: "decided", weighted, ev, analysts,
+    const record = { mint, symbol: ev.symbol, outcome: "decided", weighted, ev, analysts, barredFindings,
       redteamRaw, redteam, risk, pm: null, ticket: null, compliance: null,
       finalDecision: "ZERO_SIZE", escalationLevel: plan.level, relaxations };
     record.reportFile = writeReport(cycle, record);
@@ -615,7 +643,7 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
   let finalDecision = pm.decision;
   if (!comp.pass) finalDecision = "VETOED";
 
-  const record = { mint, symbol: ev.symbol, outcome: "decided", weighted, ev, analysts,
+  const record = { mint, symbol: ev.symbol, outcome: "decided", weighted, ev, analysts, barredFindings,
     redteamRaw, redteam, risk, pm, ticket, compliance: comp, finalDecision,
     // The escalation this workup was bought at, and what it bought. Both travel to
     // publishCall, which stamps them on the call.

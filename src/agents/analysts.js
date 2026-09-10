@@ -1,6 +1,7 @@
 import { ask, askWithWeb } from "../lib/llm.js";
 import { AnalystOut } from "./schemas.js";
 import { cfg } from "../config.js";
+import { datamarkEvidence } from "../untrusted.js";
 
 /* Not pretty-printed. The decision seats measured the indentation at roughly a quarter
    of their input tokens and dropped it; the five analyst seats, which run on every
@@ -10,7 +11,14 @@ import { cfg } from "../config.js";
    reads (ask({ shared }) — see seatTurn() in lib/llm.js), and a cache hit is a byte
    match: two copies that drifted by a character would silently cost every decision
    seat its read of the 8-24k-token bundle. test-bundle-cache-prefix.mjs pins the bytes. */
-export const bundle = (ev) => "=== EVIDENCE BUNDLE ===\n" + JSON.stringify(ev);
+/* DATAMARKED ON THE WAY IN. The deployer wrote ev.pair.baseToken.name, ev.lore,
+   ev.pair.socials and ev.xRead, and they profit if this desk buys — so those spans are
+   delimited and their interior whitespace replaced before any seat reads them
+   (src/untrusted.js). The transform is pure and deterministic, so the bundle is still a
+   byte-identical cache hit across every seat; it is applied HERE, in the one shared
+   definition, so no seat can be added that quietly reads the raw text instead. */
+export const bundle = (ev) =>
+  "=== EVIDENCE BUNDLE ===\n" + JSON.stringify(datamarkEvidence(ev));
 
 /* FORENSICS_SYSTEM — the Forensics seat's brief, hoisted to a named export.
    Every prompt this desk ships is swept for cost-conditioned imperatives by

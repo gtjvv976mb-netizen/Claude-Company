@@ -1,3 +1,4 @@
+import { UNTRUSTED_BRIEF } from "../untrusted.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { emit, runContext } from "./bus.js";
@@ -724,6 +725,8 @@ Operating rules for your reply:
   a URL you actually read, or the literal string "inference" when it is your judgment.
 - Be concrete and terse. A number with a source beats a paragraph of adjectives.
 - You are producing research for a human who will decide. You never execute anything.
+
+${UNTRUSTED_BRIEF}
 
 THIS DESK TRADES PUMP.FUN, AND IT TRADES A CLOCK.
 Every coin sits in one of six market-cap bands, and the bundle states which in
