@@ -475,6 +475,98 @@ ok("the caveats name the skew and the observational limit", () => {
   assert.ok(s.caveats.some((c) => /Observational/.test(c)), JSON.stringify(s.caveats));
 });
 
-console.log(`\n══ ${pass} passed, 0 failed ══`);
+
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+ * MULTIPLICITY. Five seats at one horizon is five intervals at 95%; swept across four
+ * horizons it is twenty, at which point roughly one spurious "predicts" is EXPECTED.
+ * Acting on a lone hit — retiring or reweighting a seat — is how a desk talks itself into
+ * a decision on noise. The correction is tested against answers known in advance.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+const { benjaminiHochberg } = await import("./src/seat-alpha.js");
+
+console.log("\nTHE FALSE-DISCOVERY CORRECTION, ON KNOWN CASES");
+ok("a single tiny p survives", () => {
+  const [e] = benjaminiHochberg([{ key: "a", p: 0.0001 }]);
+  assert.ok(e.survivesFDR, `q=${e.qValue}`);
+});
+/* THE CASE THAT MATTERS, and it is the one the seats actually present: ONE seat clears
+   its own interval while the rest are nowhere. Under BH that lone hit does NOT survive —
+   which is precisely the guard against retiring or reweighting a seat on noise. */
+ok("a lone borderline hit among four nulls does NOT survive", () => {
+  const out = benjaminiHochberg([
+    { key: "hit", p: 0.04 }, { key: "n1", p: 0.6 }, { key: "n2", p: 0.7 },
+    { key: "n3", p: 0.8 }, { key: "n4", p: 0.9 },
+  ]);
+  const hit = out.find((e) => e.key === "hit");
+  assert.ok(!hit.survivesFDR, `q=${hit.qValue}`);
+  assert.ok(Math.abs(hit.qValue - 0.2) < 1e-9, `q=${hit.qValue}, expected 0.04*5/1 = 0.20`);
+  console.log(`        p=0.04 alone among nulls -> q=${hit.qValue.toFixed(2)}, does not survive`);
+});
+/* MEASURED, AND NOT THE BONFERRONI INTUITION: five tests all at p=0.04 DO all survive,
+   because BH controls the false-discovery RATE, not the family-wise error rate, and five
+   p-values clustered at 0.04 are not what the null produces. Asserted so nobody "fixes"
+   the procedure into Bonferroni later and quietly loses the power to detect anything. */
+ok("five tests all at p=0.04 DO all survive — BH is not Bonferroni", () => {
+  const out = benjaminiHochberg(
+    ["a", "b", "c", "d", "e"].map((k) => ({ key: k, p: 0.04 })));
+  assert.equal(out.filter((e) => e.survivesFDR).length, 5,
+    `survivors=${out.filter((e) => e.survivesFDR).length}, q=${out[0].qValue}`);
+  console.log(`        five p=0.04 -> q=${out[0].qValue.toFixed(3)}, all survive (FDR, not FWER)`);
+});
+ok("a genuinely strong result still survives beside four null ones", () => {
+  const out = benjaminiHochberg([
+    { key: "strong", p: 0.0002 }, { key: "n1", p: 0.6 }, { key: "n2", p: 0.7 },
+    { key: "n3", p: 0.8 }, { key: "n4", p: 0.9 },
+  ]);
+  const s = out.find((e) => e.key === "strong");
+  assert.ok(s.survivesFDR, `q=${s.qValue}`);
+  assert.ok(out.filter((e) => e.survivesFDR).length === 1, JSON.stringify(out));
+});
+ok("q values are monotone in p — a larger p never gets a smaller q", () => {
+  const out = benjaminiHochberg([
+    { key: "a", p: 0.001 }, { key: "b", p: 0.01 }, { key: "c", p: 0.02 },
+    { key: "d", p: 0.3 }, { key: "e", p: 0.9 },
+  ]).filter((e) => Number.isFinite(e.p)).sort((a, b) => a.p - b.p);
+  for (let i = 1; i < out.length; i++) {
+    assert.ok(out[i].qValue >= out[i - 1].qValue - 1e-12,
+      `q not monotone: ${out[i - 1].key}=${out[i - 1].qValue} then ${out[i].key}=${out[i].qValue}`);
+  }
+});
+ok("an untestable entry is carried through, not dropped or counted", () => {
+  const out = benjaminiHochberg([{ key: "a", p: 0.001 }, { key: "b", p: null }]);
+  assert.equal(out.length, 2);
+  const b = out.find((e) => e.key === "b");
+  assert.equal(b.qValue, null);
+  assert.equal(b.survivesFDR, false);
+});
+
+console.log("\nTHE CORRECTION APPLIED TO THE SEATS");
+buildScored({ signalStrength: 1, seed: 21 });
+const corrected = seatScoreAlpha({ bootstrapSamples: 800, minPerSeat: 30 });
+ok("a real signal survives the correction and keeps its verdict", () => {
+  const f = corrected.seats.flow;
+  assert.equal(f.verdict, "PREDICTS", `verdict=${f.verdict} q=${f.qValue}`);
+  assert.ok(f.survivesFDR, `q=${f.qValue}`);
+  console.log(`        flow p=${f.p?.toFixed(4)} q=${f.qValue?.toFixed(4)} survives`);
+});
+ok("a seat that clears its own interval but not the family is renamed, not promoted", () => {
+  /* Constructed directly: the renaming rule is what stops a lone hit being acted on. */
+  const seats = {
+    a: { verdict: "PREDICTS", p: 0.04 }, b: { verdict: "PREDICTS", p: 0.045 },
+    c: { verdict: "NO_SIGNAL", p: 0.5 }, d: { verdict: "NO_SIGNAL", p: 0.6 },
+    e: { verdict: "NO_SIGNAL", p: 0.7 },
+  };
+  for (const x of benjaminiHochberg(Object.entries(seats).map(([key, v]) => ({ key, p: v.p })))) {
+    if (seats[x.key].verdict === "PREDICTS" && !x.survivesFDR) seats[x.key].verdict = "PREDICTS_UNCORRECTED";
+  }
+  assert.equal(seats.a.verdict, "PREDICTS_UNCORRECTED", seats.a.verdict);
+  assert.equal(seats.b.verdict, "PREDICTS_UNCORRECTED", seats.b.verdict);
+});
+ok("the caveats warn that a horizon sweep multiplies the family further", () => {
+  assert.ok(corrected.caveats.some((c) => /NOT independent/.test(c)),
+    JSON.stringify(corrected.caveats));
+});
 
 fs.rmSync(tmp, { recursive: true, force: true });
+console.log(`\n══ ${pass} passed, 0 failed ══`);

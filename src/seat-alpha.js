@@ -432,11 +432,49 @@ function bootstrapStat(items, statOf, { samples, seed }) {
     vals.push(v);
   }
   if (vals.length < Math.max(20, samples * 0.5)) {
-    return { ci95: null, skipped, usable: vals.length, cycles: cycles.length };
+    return { ci95: null, p: null, skipped, usable: vals.length, cycles: cycles.length };
   }
   vals.sort((a, b) => a - b);
   const at = (p) => vals[Math.min(vals.length - 1, Math.max(0, Math.floor(p * vals.length)))];
-  return { ci95: [at(0.025), at(0.975)], skipped, usable: vals.length, cycles: cycles.length };
+  /* A two-sided bootstrap p: how much of the resampled distribution sits on the far side
+     of zero, doubled. It inherits the cycle resampling, so it prices the cohort structure
+     the same way the interval does — which a textbook permutation on coins would not. */
+  const le = vals.filter((v) => v <= 0).length, ge = vals.filter((v) => v >= 0).length;
+  const pTwo = Math.min(1, 2 * Math.min(le, ge) / vals.length);
+  return { ci95: [at(0.025), at(0.975)], p: pTwo, skipped, usable: vals.length, cycles: cycles.length };
+}
+
+/**
+ * Benjamini-Hochberg across a family of tests, controlling the FALSE DISCOVERY RATE.
+ *
+ * WHY THIS IS NOT OPTIONAL HERE. Five seats scored at one horizon is five intervals at
+ * 95%, and the same seats swept across four horizons is twenty — at which point roughly
+ * one spurious "predicts" is EXPECTED from noise alone. Reading a lone hit as a finding,
+ * and then retiring or reweighting a seat on it, is the exact failure this desk already
+ * knows by another name: a number that has not been validated against a case whose answer
+ * is known. BH rather than Bonferroni because the seats are not independent tests of
+ * unrelated things — they score the same coins — and Bonferroni would be so conservative
+ * on five correlated tests that a real effect would not survive it either.
+ *
+ * Returns the input entries with `qValue` and `survivesFDR` attached.
+ */
+export function benjaminiHochberg(entries, { alpha = 0.05 } = {}) {
+  const testable = entries.filter((e) => Number.isFinite(e.p));
+  const m = testable.length;
+  if (!m) return entries.map((e) => ({ ...e, qValue: null, survivesFDR: false }));
+
+  const sorted = [...testable].sort((a, b) => a.p - b.p);
+  /* Step up from the largest p, carrying the running minimum, so q is monotone. */
+  let running = 1;
+  const q = new Map();
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    running = Math.min(running, (sorted[i].p * m) / (i + 1));
+    q.set(sorted[i].key, Math.min(1, running));
+  }
+  return entries.map((e) => {
+    const qv = q.has(e.key) ? q.get(e.key) : null;
+    return { ...e, qValue: qv, survivesFDR: qv !== null && qv <= alpha };
+  });
 }
 
 const rhoOf = (items) => spearman(items.map((i) => [i.score, i.net]));
@@ -512,6 +550,7 @@ export function seatScoreAlpha({
     if (items.length >= minPerSeat && cycles >= minCycles && rho !== null) {
       const b = bootstrapStat(items, rhoOf, { samples: bootstrapSamples, seed });
       entry.ci95 = b.ci95;
+      entry.p = b.p;
       entry.bootstrap = { usable: b.usable, skipped: b.skipped, resampledUnit: "cycle" };
       if (!b.ci95) entry.verdict = "INSUFFICIENT";
       else if (b.ci95[0] > 0) entry.verdict = "PREDICTS";
@@ -519,6 +558,20 @@ export function seatScoreAlpha({
       else entry.verdict = "NO_SIGNAL";
     }
     seats[seat] = entry;
+  }
+
+  /* THE FAMILY IS THE SEATS AT THIS HORIZON. Correct across it before any of these
+     verdicts is allowed to influence a decision about retiring or reweighting a seat. */
+  for (const e of benjaminiHochberg(
+    Object.entries(seats).map(([key, v]) => ({ key, p: v.p ?? null })))) {
+    seats[e.key].qValue = e.qValue;
+    seats[e.key].survivesFDR = e.survivesFDR;
+    if (seats[e.key].verdict === "PREDICTS" && !e.survivesFDR) {
+      seats[e.key].verdict = "PREDICTS_UNCORRECTED";
+    }
+    if (seats[e.key].verdict === "ANTI_PREDICTS" && !e.survivesFDR) {
+      seats[e.key].verdict = "ANTI_PREDICTS_UNCORRECTED";
+    }
   }
 
   return {
@@ -537,6 +590,10 @@ export function seatScoreAlpha({
       "Observational. A seat that scores high on coins that were going to run anyway " +
       "shows a correlation without adding judgement; only the selection propensity " +
       "recorded at decision time can separate those, and nothing writes it today.",
+      "Verdicts are corrected across the seats at this horizon (Benjamini-Hochberg, " +
+      "FDR 5%): a PREDICTS_UNCORRECTED seat cleared its own interval but not the family, " +
+      "and must not be acted on. Sweeping horizons multiplies the family further, and the " +
+      "horizons are NOT independent — they are the same runs marked at different times.",
       "A seat is scored on the coins IT saw. Seats that run late see a survivor " +
       "population, so two seats' rho values are not directly comparable to each other.",
     ],
