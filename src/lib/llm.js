@@ -936,6 +936,49 @@ export async function ask({
  * Two-step for the narrative seat: server-side web search cannot be combined with a
  * structured output format, so we search in one call and shape the result in a second.
  */
+/* CAN THE SEARCH CALL SHAPE ITS OWN ANSWER?
+ *
+ * askWithWeb used to ALWAYS spend a second billed request: one to search, then a whole
+ * separate ask() at effort low whose only job was to pour the notes into the schema —
+ * re-sending SHARED_RULES and the entire evidence bundle to do it. That is why the
+ * Narrative seat shows 732 spend rows for 366 runs, roughly 7.7% of every provider call
+ * on the desk, for a step that produces no new information.
+ *
+ * The current structured-output contract lists CITATIONS and message PREFILLING as
+ * incompatible with a format; tool use is not on that list. "Not listed as incompatible"
+ * is weaker than "documented as supported", and this desk cannot probe it without a
+ * funded account — so the code probes it ITSELF, once, in production, and adapts:
+ *
+ *   - the search request asks for the format;
+ *   - if the provider rejects the COMBINATION with a 400, this latch drops for the life
+ *     of the process, the request is rebuilt without it, and the old two-call path runs
+ *     exactly as before. Nothing breaks and nothing is lost but one refused request;
+ *   - if the answer comes back already in contract, the shaping call is skipped.
+ *
+ * A 400 here is our request being malformed, not the provider failing, so it must NOT be
+ * reported to the credit breaker — that would open the breaker on our own bug. */
+let WEB_STRUCTURED = true;
+export const webStructuredEnabled = () => WEB_STRUCTURED;
+export function resetWebStructured() { WEB_STRUCTURED = true; }
+const FORMAT_REJECTED = /output_config|output format|structured output|format.*not (?:supported|allowed)|incompatible/i;
+
+/** The same extraction ask() performs: SDK parse first, then the text block against Zod. */
+function parsedFrom(res, schema) {
+  if (!res || !schema) return null;
+  const direct = res.parsed_output ?? res.parsed ?? null;
+  if (direct) {
+    const c = schema.safeParse(direct);
+    return c.success ? c.data : null;
+  }
+  const text = (res.content || []).filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+  if (!text) return null;
+  const json = text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
+  let raw;
+  try { raw = JSON.parse(json); } catch { return null; }
+  const check = schema.safeParse(raw);
+  return check.success ? check.data : null;
+}
+
 export async function askWithWeb({ seat, model, effort, schema, prompt, system, shared, maxTokens = 16000 }) {
   /* The second Anthropic entry point, and it needs the breaker as much as ask() does:
      the narrative seat runs on every workup, so with the account dry it was a full
@@ -965,7 +1008,10 @@ export async function askWithWeb({ seat, model, effort, schema, prompt, system, 
       // max_uses 4 fed ~41k tokens of raw results back through the loop per run;
       // two searches answer "is there a story and is it true" or nothing will.
       tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 2 }],
-      output_config: { effort },
+      /* The format rides along unless this process has already learned it cannot. */
+      output_config: WEB_STRUCTURED && schema
+        ? { effort, format: betaZodOutputFormat(schema) }
+        : { effort },
       messages: [{ role: "user", content: seatTurn({ seat, system, shared, prompt }) }],
     };
     /* This call had NO credit handler at all: a dry account threw the provider's raw
@@ -993,6 +1039,16 @@ export async function askWithWeb({ seat, model, effort, schema, prompt, system, 
         emit("desk:out_of_credit", { seat });
         throw new OutOfCredit("the Anthropic balance is empty — the desk cannot think");
       }
+      /* The one-call probe failing is not a provider failure and not a seat failure: it
+         is this request asking for something the combination does not allow. Drop the
+         latch, leave the breaker alone, and go round again on the old two-call path. */
+      if (WEB_STRUCTURED && schema && FORMAT_REJECTED.test(String(err?.message))) {
+        WEB_STRUCTURED = false;
+        emit("seat:retry", { seat, attempt,
+          error: "structured output is not available alongside web search on this account " +
+            "— falling back to the two-call path for the rest of this process" });
+        continue;
+      }
       gate.failure(err);
       throw err;
     }
@@ -1015,6 +1071,19 @@ export async function askWithWeb({ seat, model, effort, schema, prompt, system, 
   for (const block of research.content) {
     if (block.type === "web_search_tool_result" && Array.isArray(block.content)) {
       for (const r of block.content) if (r.url) cited.push(`${r.title ?? ""} — ${r.url}`);
+    }
+  }
+
+  /* THE SAVED CALL. If the search request already answered in contract, the shaping
+     request buys nothing — and it is the whole of the Narrative seat's second bill.
+     A tool failure still goes the long way round: the fallback prompt below is the only
+     place that tells the seat it read NOTHING and must carry that at zero weight, and
+     losing that instruction would turn a failed search into silent absence-of-evidence. */
+  if (!searchError) {
+    const direct = parsedFrom(research, schema);
+    if (direct) {
+      emit("seat:done", { seat, usd: spend.usd });
+      return direct;
     }
   }
 

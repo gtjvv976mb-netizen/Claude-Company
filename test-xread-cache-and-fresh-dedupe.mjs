@@ -35,8 +35,22 @@ ok("past the TTL the read is re-bought, not replayed", () => {
   xreadCachePut(MINT_A, { verdict: "organic" }, [], t0);
   assert.equal(xreadCacheGet(MINT_A, t0 + XREAD_CACHE_TTL_MS + 1), null);
 });
-ok("the TTL is a real half hour by default", () => {
-  assert.equal(XREAD_CACHE_TTL_MS, 30 * 60_000);
+/* RE-ANCHORED 2026-09-11, and the property it guards is unchanged: the cache must be ON
+   for a duration long enough to matter. The literal moved 30 -> 45 minutes because the
+   old value carried a defect this file's own premise did not anticipate — the study it
+   supports lives 40 minutes (FUNNEL_STUDY_TTL_MIN), so a 30-minute cache expired TEN
+   MINUTES BEFORE the verdict it was backing and every study reaching its own expiry
+   re-bought the read. That is the same leak this file exists to close, one boundary
+   further out. The assertion now pins the RELATIONSHIP rather than the number, because
+   the two values lived in different files with nothing relating them, which is how they
+   drifted apart in the first place. */
+ok("the TTL outlives the study it supports, and is a real duration", () => {
+  const studyMs = Number(process.env.FUNNEL_STUDY_TTL_MIN || 40) * 60_000;
+  assert.ok(XREAD_CACHE_TTL_MS >= studyMs,
+    `cache ${XREAD_CACHE_TTL_MS / 60_000}min must be >= study ${studyMs / 60_000}min, ` +
+    "or every study that reaches its own expiry re-buys the read");
+  assert.ok(XREAD_CACHE_TTL_MS >= 20 * 60_000,
+    `cache ${XREAD_CACHE_TTL_MS / 60_000}min — too short to close the leak this file pins`);
 });
 ok("a failed read is never cached — the caller only puts on success", () => {
   xreadCacheReset();
@@ -87,4 +101,4 @@ ok("a recorded verdict makes recentlyJudged truthy for that mint and only that m
   assert.equal(store.recentlyJudged(MINT_B), null, "an unjudged mint must not be");
 });
 
-console.log(`\n${pass} passed — the fresh lane does not re-ask, and a read is bought once per coin per half hour\n`);
+console.log(`\n${pass} passed — the fresh lane does not re-ask, and a read is bought once per coin per cache window\n`);

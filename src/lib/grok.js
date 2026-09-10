@@ -199,7 +199,19 @@ export async function grokAsk({ seat, system, prompt, shape, validate, maxTokens
  * are never cached — a transient refusal must be retried, and the credit breaker already
  * stops a dead account from being hammered. Hits emit xread:cached rather than
  * seat:verdict so nothing that counts reads mistakes a replay for a purchase. */
-const XREAD_CACHE_MS = Math.max(0, Number(process.env.DESK_XREAD_CACHE_MINUTES ?? 30)) * 60_000;
+/* 45 MINUTES, AND THE NUMBER IS NOT ARBITRARY: IT MUST OUTLIVE THE STUDY IT SUPPORTS.
+ *
+ * It was 30 while FUNNEL_STUDY_TTL_MIN is 40, so the cache expired TEN MINUTES BEFORE the
+ * verdict it was backing. Every study that reached its own expiry therefore re-bought the
+ * X read deterministically — at $0.156 a read and ~26 reads per published call, the
+ * single dearest line on the desk paying twice for one question.
+ *
+ * The relationship, not the number, is the invariant: a read cached for less time than
+ * the study it feeds guarantees a re-purchase at the boundary. test-xread-cache-ttl.mjs
+ * asserts the ordering against the funnel's own TTL so the two cannot drift apart again,
+ * which is the actual failure — they were set in different files by different reasoning
+ * and nothing related them. */
+const XREAD_CACHE_MS = Math.max(0, Number(process.env.DESK_XREAD_CACHE_MINUTES ?? 45)) * 60_000;
 const XREAD_CACHE_MAX = 500;
 const XREAD_CACHE = new Map();   // mint -> { at, read, citations }
 export function xreadCacheGet(mint, now = Date.now()) {
