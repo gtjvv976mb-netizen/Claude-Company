@@ -841,5 +841,48 @@ const watchChecks = async () => {
 
 await watchChecks().catch((error) => { console.log("  FAIL  watch()\n         ", error.message); fail++; });
 
+/* ── A CURVE THAT IS NOT QUOTED IN SOL, FROM THE CHAIN ─────────────────────────────── */
+/* §6 listed "whether a V2 curve may be quoted in a mint other than SOL" as unproved. It is
+ * proved, and the answer is yes — which breaks the quote arithmetic, because on those
+ * trades TradeEvent.solAmount reads 0 while real value moves. Driven against the REAL
+ * bytes of a real mainnet SellV2 rather than a hand-built event: the bug is in what the
+ * chain emits versus what this decoder assumed, and a fabricated event would only test
+ * the assumption against itself. */
+{
+  const fx = JSON.parse(fs.readFileSync(new URL("./fixtures/pumpfun-nonsol-sellv2.json", import.meta.url), "utf8"));
+  const events = eventsFromLogs(fx.programDataLines.map((d) => "Program data: " + d));
+  const trade = events.find((e) => e.kind === "trade");
+  ok("a real non-SOL-quoted SellV2 decodes as a trade at all", () => {
+    assert.ok(trade, `no trade event in ${fx.signature.slice(0, 12)}…`);
+    assert.equal(trade.isBuy, false);
+  });
+  ok("...and its quote amount would go NEGATIVE, which is why it is refused not clamped", () => {
+    assert.equal(trade.curveQuoteRaw, 0n, `solAmount = ${trade.curveQuoteRaw}`);
+    assert.ok(trade.totalFeeRaw > 0n, "fees were charged, so value certainly moved");
+    assert.ok(trade.userQuoteRaw < 0n,
+      `userQuoteRaw = ${trade.userQuoteRaw}; if this is no longer negative the decoder changed`);
+    assert.equal(trade.quoteUsable, false,
+      "a negative quote amount was reported as usable — anything pricing a position on it is wrong");
+    assert.match(trade.quoteRefusal, /not quoted in SOL/);
+    console.log(`         ${fx.signature.slice(0, 12)}… slot ${fx.slot}: solAmount 0, fees ${trade.totalFeeRaw}, ` +
+      `userQuoteRaw ${trade.userQuoteRaw} -> quoteUsable false`);
+  });
+  ok("the number is NOT clamped to zero — a clamp would look like a free trade", () => {
+    /* Clamping would turn "this event cannot be priced" into "this trade returned nothing",
+       which is a fact, and a false one. The refusal keeps the raw arithmetic visible. */
+    assert.notEqual(trade.userQuoteRaw, 0n);
+  });
+  ok("a SOL-quoted trade is still usable, so the guard did not just disable pricing", () => {
+    /* The failure mode of a refusal is refusing everything. These are the control cases:
+       the same two real SOL-quoted events the rest of this file is built on. */
+    for (const [name, b64] of [["buy", TRADE_EVENT_BUY_B64], ["sell", TRADE_EVENT_SELL_B64]]) {
+      const normal = decodeTradeEvent(Buffer.from(b64, "base64"));
+      assert.equal(normal.quoteUsable, true, `a normal SOL-quoted ${name} was refused`);
+      assert.equal(normal.quoteRefusal, null);
+      assert.ok(normal.userQuoteRaw > 0n, `${name} userQuoteRaw = ${normal.userQuoteRaw}`);
+    }
+  });
+}
+
 console.log(`\n══ ${pass} passed, ${fail} failed ══\n`);
 process.exit(fail ? 1 : 0);

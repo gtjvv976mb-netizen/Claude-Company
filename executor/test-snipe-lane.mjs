@@ -970,5 +970,101 @@ section("12. THE LANE MODES AND THE STATS SURFACE");
     threw instanceof SnipeLaneError && threw.clause === "feed_missing", `clause ${threw?.clause}`);
 }
 
+section("13. THE KILL SWITCH REACHES WHAT IS ALREADY OPEN");
+
+{
+  /* THE BUG THIS PINS, fixed 2026-09-11 while arming the lane to trade.
+   *
+   * control() was consulted in handleNotice and NOWHERE ELSE. stepOne — the path that
+   * prices an open position and asks the determiner what to do with it — never read it.
+   * So the hard stop stopped new snipes and did exactly nothing to a position already
+   * held: an entry gate wearing a kill switch's name. It cost nothing while nothing could
+   * be held, and it is the first thing that would have cost something once one could.
+   *
+   * Asserted end to end through the real lane, not through snipePolicy directly, because
+   * the failure was never in the policy. The policy always had the branch it was given;
+   * the fact simply never arrived. */
+  const openLaneUnder = async (control) => {
+    let reserve = 110_014_725;
+    const lane = createSnipeLane({
+      venue: FAKE_VENUE, control, clock: makeClock(), cfg: { lane: "observe", forwardSamples: 9 },
+      state: {}, book: { deployedTodaySol: 0, attempts: {} },
+      readers: makeReaders([
+        { id: "a", slot: 900, accounts: () => [curveAccount({ ...HEALTHY_CURVE, realQuoteRaw: String(reserve) }), {}, mintAccount()] },
+        { id: "b", slot: 900, accounts: () => [curveAccount({ ...HEALTHY_CURVE, realQuoteRaw: String(reserve) }), {}, mintAccount()] },
+      ]),
+    });
+    await lane.handleNotice(noticeRecord(keyFor(81), { firstSlot: 896 }));
+    return lane;
+  };
+
+  const running = await openLaneUnder(OK_CONTROL);
+  const free = await running.tick();
+  ok("with the switch up, an open position is held and the window keeps running",
+    free[0].action === "hold" && running.openPositions().length === 1,
+    `action ${free[0].action}, ${running.openPositions().length} open`);
+
+  /* The switch goes down AFTER the position is open — the only case that matters. */
+  let down = false;
+  const stopped = await openLaneUnder(() => ({ hardStop: down, pauseEntries: false }));
+  ok("the position is open while the switch is still up", stopped.openPositions().length === 1,
+    `${stopped.openPositions().length} open`);
+  down = true;
+  const after = await stopped.tick();
+  ok("dropping the hard stop EXITS the open position, it does not merely stop new ones",
+    after[0].action === "sell" && after[0].closed === true && stopped.openPositions().length === 0,
+    `action ${after[0].action}, closed ${after[0].closed}, ${stopped.openPositions().length} still open`);
+  const row = stopped.rows().find((r) => r.mint === keyFor(81));
+  ok("…and the row records WHY, in the operator's own words",
+    /hard stop: the operator's switch is down/.test(String(row?.outcome?.reason || "")),
+    String(row?.outcome?.reason || "no reason recorded").slice(0, 96));
+
+  /* A stop pressed during an outage must not fire into the dark: blind is not a price,
+     and the rest of the fast half already refuses to act on an unreadable mark.
+     The mark is made GENUINELY unreadable — both endpoints return the same undecodable
+     bytes, so the endpoints AGREE (an disagreement would trip rugFlag and sell for a
+     different reason entirely, which would have made this assertion pass while testing
+     nothing). The first draft of this check asserted only that one decision came back;
+     it would have passed against a perfectly readable price. */
+  let blindDown = false, blindBytes = false;
+  const undecodable = () => ({ owner: VENUE_PROGRAM, data: Buffer.from("not-a-curve", "utf8") });
+  const blind = createSnipeLane({
+    venue: FAKE_VENUE, control: () => ({ hardStop: blindDown, pauseEntries: false }),
+    clock: makeClock(), cfg: { lane: "observe", forwardSamples: 9 },
+    state: {}, book: { deployedTodaySol: 0, attempts: {} },
+    readers: makeReaders([
+      { id: "a", slot: 900, accounts: () => [blindBytes ? undecodable() : curveAccount({ ...HEALTHY_CURVE }), {}, mintAccount()] },
+      { id: "b", slot: 900, accounts: () => [blindBytes ? undecodable() : curveAccount({ ...HEALTHY_CURVE }), {}, mintAccount()] },
+    ]),
+  });
+  await blind.handleNotice(noticeRecord(keyFor(82), { firstSlot: 896 }));
+  blindBytes = true; blindDown = true;
+  const blindStep = await blind.tick();
+  ok("a hard stop with no readable mark HOLDS — it waits for a price rather than firing blind",
+    blindStep.length === 1 && blindStep[0].markX === null && blindStep[0].action === "hold"
+      && blind.openPositions().length === 1,
+    `markX ${JSON.stringify(blindStep[0]?.markX)}, action ${blindStep[0]?.action}, ${blind.openPositions().length} still open`);
+  /* And once a price comes back, the same standing hard stop fires. Otherwise "waits for
+     a price" would be indistinguishable from "ignores the switch". */
+  blindBytes = false;
+  const blindAfter = await blind.tick();
+  ok("…and the moment a price returns, that same standing hard stop exits",
+    blindAfter[0].action === "sell" && blind.openPositions().length === 0,
+    `action ${blindAfter[0].action}, markX ${blindAfter[0].markX?.toFixed(4)}, ${blind.openPositions().length} open`);
+
+  /* THE CLASS OF BUG, not just this instance: every fact stepOne names in its call must be
+     a parameter bindDeterminer.step() actually destructures, or it vanishes in between
+     with no error anywhere. That silent drop is how the first wiring of hardStop looked
+     connected while reaching nothing. */
+  const laneSrc = fs.readFileSync(new URL("./snipe-lane.mjs", import.meta.url), "utf8");
+  const callBlock = laneSrc.slice(laneSrc.indexOf("const step = determiner.step({"));
+  const passed = [...callBlock.slice(0, callBlock.indexOf("});")).matchAll(/^\s*([a-zA-Z]\w*)\s*:/gm)].map((m) => m[1]);
+  const sigBlock = laneSrc.slice(laneSrc.indexOf("step({ position, markX, nowMs, cfg,"));
+  const accepted = new Set([...sigBlock.slice(0, sigBlock.indexOf("}) {")).matchAll(/([a-zA-Z]\w*)(?=\s*(?:=|,|\}))/g)].map((m) => m[1]));
+  const dropped = passed.filter((k) => !accepted.has(k));
+  ok("every fact stepOne passes the determiner is a fact the determiner accepts",
+    dropped.length === 0, dropped.length ? `SILENTLY DROPPED: ${dropped.join(", ")}` : `${passed.length} facts, none dropped`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

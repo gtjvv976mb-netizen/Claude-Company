@@ -7,6 +7,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { ROOT } from "./config.js";
+import { injectHawkStatus } from "../executor/hawk-status.mjs";
 import { bus, backlog, emit, runFor, chronicleRead } from "./lib/bus.js";
 import { census as funnelCensus } from "./funnel.js";
 import { spend, spendSince, spendBySeat, spendRows, openCreditBreakers } from "./lib/llm.js";
@@ -2320,6 +2321,14 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
     }
     const type = file.endsWith(".html") ? "text/html; charset=utf-8" : file.endsWith(".js") ? "text/javascript; charset=utf-8" : "text/plain; charset=utf-8";
     res.writeHead(200, { "content-type": type });
+    if (file.endsWith(".html")) {
+      /* The same substitution the static build does, for the same page. HAWK-AI's public
+         panel states nothing of its own: every row is a value executor/hawk-status.mjs
+         returned. This host and the built site must therefore tell the same story, which
+         is why both call one module rather than keeping a copy each. */
+      res.end(injectHawkStatus(fs.readFileSync(file, "utf8")));
+      return;
+    }
     res.end(fs.readFileSync(file));
   });
 

@@ -82,16 +82,32 @@ ok("the venue's buy encoder refuses — no verified layout, no signing", async (
     "buildBuy did not refuse on an unverified layout");
 });
 ok("the lane reports zero signed, zero sent, zero keypairs — as fields, not comments", () => {
+  /* THIS ASSERTION SPENT ITS WHOLE LIFE ASSERTING NOTHING, and printed ok every time.
+   *
+   * It read `const s = l.scorecard ? l.scorecard() : l.summary?.() ?? null;` and then
+   * guarded the three checks with `if (s)`. The lane exports NEITHER method — the real
+   * one is stats() — so s was null on every run, all three asserts were skipped, and the
+   * line reported ok. The single test whose job is to catch an executing lane signing
+   * has never once looked at the numbers it names.
+   *
+   * Fixed 2026-09-11 while arming this lane, which is what made it matter. The reader is
+   * now the real method and its ABSENCE is a failure, not a skip: an optional-chained
+   * probe for a field that must exist cannot fail, and a test that cannot fail is not a
+   * test. There is no `if` in this body on purpose. */
   const l = lane.createSnipeLane({
     venue: PUMPFUN_VENUE, readers, control, cfg: lane.snipeLaneConfig({ SNIPE_LANE: "observe" }),
   });
-  const s = l.scorecard ? l.scorecard() : l.summary?.() ?? null;
-  if (s) {
-    assert.equal(s.signed, 0, `signed=${s.signed}`);
-    assert.equal(s.sent, 0, `sent=${s.sent}`);
-    assert.equal(s.keypairsLoaded, 0, `keypairsLoaded=${s.keypairsLoaded}`);
-    console.log(`        signed=${s.signed} sent=${s.sent} keypairs=${s.keypairsLoaded}`);
-  }
+  assert.equal(typeof l.stats, "function",
+    "the lane stopped exporting stats() — the counters this test reads have moved, and a " +
+    "renamed reader is how this assertion went vacuous the first time");
+  const s = l.stats();
+  for (const field of ["signed", "sent", "keypairsLoaded"])
+    assert.ok(Object.hasOwn(s, field),
+      `stats() has no ${field} field — it must be a FIELD the test reads, not a claim in a comment`);
+  assert.strictEqual(s.signed, 0, `signed=${s.signed}`);
+  assert.strictEqual(s.sent, 0, `sent=${s.sent}`);
+  assert.strictEqual(s.keypairsLoaded, 0, `keypairsLoaded=${s.keypairsLoaded}`);
+  console.log(`        signed=${s.signed} sent=${s.sent} keypairs=${s.keypairsLoaded} (read from stats(), which exists)`);
 });
 
 console.log("\nIT CANNOT TAKE THE DESK DOWN");
@@ -101,13 +117,37 @@ ok("a lane that fails to construct is caught, logged, and not rethrown", () => {
   assert.doesNotMatch(m[0], /throw|process\.exit/,
     "the construction catch rethrows or exits — a lane that cannot start must not stop the desk");
 });
-ok("a tick that throws disables the lane and leaves the trading loop running", () => {
+ok("a tick that throws never propagates into the process, whatever else it does", () => {
   const m = block.match(/setInterval\(async \(\) => \{[\s\S]*?\}, snipeTickMs\)/);
   assert.ok(m, "the lane tick was not found");
-  assert.match(m[0], /laneFaulted = true/, "a faulting tick must latch the lane off");
   assert.doesNotMatch(m[0], /throw |process\.exit/,
     "the lane tick can propagate a throw into the process");
   assert.match(m[0], /the desk is unaffected/);
+});
+/* RE-ANCHORED 2026-09-11, from "a faulting tick disables the lane" to "a faulting tick
+   disables the lane ONLY IF NOTHING IS OPEN".
+   The old assertion pinned a latch that was correct for an observer and dangerous for
+   anything that can hold: any throw set laneFaulted permanently, so one transient RPC
+   error would leave a live position with nothing running to price it, stop it, take it,
+   or answer the hard stop — the lane sitting quietly disabled while the bag it opened
+   rode to zero. The desk-safety half of the old assertion is kept above, unchanged and
+   unweakened; what changed is the disable, which is now conditional on the book. */
+ok("...and it only disables the lane permanently when the book is EMPTY", () => {
+  const m = block.match(/setInterval\(async \(\) => \{[\s\S]*?\}, snipeTickMs\)/);
+  assert.match(m[0], /lane\.openPositions\(\)\.length/,
+    "the fault path must consult the book before deciding to give up");
+  const latch = m[0].slice(m[0].indexOf("catch"));
+  const guard = latch.match(/if \(open === 0\) \{[\s\S]*?\}/);
+  assert.ok(guard, "the permanent latch is not guarded by an empty book");
+  assert.match(guard[0], /laneFaulted = true/,
+    "with nothing open the lane should still give up permanently — that is cheap and correct");
+  /* And with something open it must RETRY rather than latch. */
+  const after = latch.slice(latch.indexOf("laneFaults += 1"));
+  assert.ok(after.length > 0, "there is no retry path for a fault with a position open");
+  assert.doesNotMatch(after, /laneFaulted = true/,
+    "the open-position path latches the lane off — that strands the position");
+  assert.match(after, /retrying in .*rather/,
+    "the retry must say why it is retrying; a silent backoff reads as a hang");
 });
 ok("the desk's own tick is untouched by any of it", () => {
   assert.match(poller, /setInterval\(tick, POLL_MS\);/,

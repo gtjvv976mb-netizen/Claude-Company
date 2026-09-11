@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { Keypair } from "@solana/web3.js";
 import {
   CURRENT_TX_ATTEMPT_PROTOCOL, ExecutionJournal, acquireProcessLock,
-  positionEntryBlock, trackedBalanceDecision,
+  positionEntryBlock, trackedBalanceDecision, INTENT_KINDS, POSITION_SCOPED_KINDS,
 } from "./journal.mjs";
 import { freshState } from "./strategy.mjs";
 
@@ -350,6 +350,78 @@ ok("recordSigned marks new attempts with the exported current protocol", () => {
     .get(migratedProtocolSpec.id).protocol, CURRENT_TX_ATTEMPT_PROTOCOL);
 });
 legacyProtocol.close();
+
+/* ── THE SNIPER'S INTENTS MUST NOT BLOCK THE DESK'S SAFETY EXITS ───────────────────── */
+/* hasConflictingIntent lets a PROVEN safety exit step past unresolved intents on OTHER
+ * mints, because the one thing that must never queue behind unrelated work is the sell
+ * that protects a position. It did that with an inline list of four kinds, written when
+ * four was all there were. snipe_entry and snipe_exit were added later and never
+ * classified, so they fell into the unknown-kind bucket — which blocks GLOBALLY.
+ *
+ * One unresolved sniper intent, on any coin, would have blocked EVERY desk safety exit on
+ * EVERY mint for as long as it stayed unresolved. It never bit because nothing has ever
+ * written a snipe intent; arming the sniper is what would have made it bite. */
+{
+  const cdir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-conflict-"));
+  const cj = new ExecutionJournal(path.join(cdir, "state.sqlite"), { wallet });
+  const WSOL = "So11111111111111111111111111111111111111112";
+  const heldMint = Keypair.generate().publicKey.toBase58();     // what the desk holds
+  const snipedMint = Keypair.generate().publicKey.toBase58();   // an unrelated coin
+
+  /* An unresolved sniper intent on the OTHER coin. The state is written directly because
+     what is under test is the conflict QUERY, not how a row reaches 'signed'. */
+  const snipe = cj.ensureIntent({
+    id: `snipe-entry:${snipedMint}`, kind: "snipe_entry", eventId: `9:snipe:${snipedMint}`,
+    feedId: 901, mint: snipedMint, inputMint: WSOL, outputMint: snipedMint,
+    amountRaw: "400000000", context: { callId: 9 },
+  });
+  cj.db.prepare("UPDATE intents SET state='submitted' WHERE id=?").run(snipe.id);
+
+  /* The desk's safety exit on the coin it actually holds: reducing the named position
+     into wrapped SOL, which is what earns the right to step past other mints. */
+  const deskExit = {
+    id: `risk-exit:${heldMint}`, kind: "risk_exit", eventId: `9:risk:${heldMint}`,
+    feedId: 902, mint: heldMint, inputMint: heldMint, outputMint: WSOL,
+    amountRaw: "1000000", context: { callId: 9, position: { mint: heldMint } },
+  };
+  ok("a desk safety exit is NOT blocked by an unresolved sniper intent on another mint", () => {
+    const blocker = cj.hasConflictingIntent(deskExit);
+    assert.equal(blocker, null,
+      `the desk's stop on ${heldMint.slice(0, 8)}… was blocked by ${blocker} — a sniper intent ` +
+      `on the unrelated coin ${snipedMint.slice(0, 8)}…`);
+  });
+
+  ok("...but it IS still blocked by an unresolved intent on the SAME mint", () => {
+    const same = cj.ensureIntent({
+      id: `snipe-entry:${heldMint}`, kind: "snipe_entry", eventId: `9:snipe:${heldMint}`,
+      feedId: 903, mint: heldMint, inputMint: WSOL, outputMint: heldMint,
+      amountRaw: "400000000", context: { callId: 9 },
+    });
+    cj.db.prepare("UPDATE intents SET state='submitted' WHERE id=?").run(same.id);
+    assert.equal(cj.hasConflictingIntent(deskExit), same.id,
+      "two unresolved transactions on ONE mint must still serialise — that lock is the point");
+  });
+
+  ok("a candidate that is NOT a proven safety exit still takes the global lock", () => {
+    /* The relaxation is earned by the route and the position snapshot, not by the kind.
+       An 'exit' that does not reduce the named position into wrapped SOL gets nothing. */
+    const notReally = { ...deskExit, id: "risk-exit:fake", eventId: "9:risk:fake",
+      feedId: 904, outputMint: snipedMint };
+    assert.ok(cj.hasConflictingIntent(notReally),
+      "a candidate calling itself an exit while routing somewhere other than wrapped SOL " +
+      "stepped past the global lock");
+  });
+
+  ok("every intent kind is classified deliberately, so a seventh cannot default to global", () => {
+    const unclassified = [...INTENT_KINDS].filter((k) => !POSITION_SCOPED_KINDS.includes(k));
+    assert.deepEqual(unclassified, [],
+      `${JSON.stringify(unclassified)} are unclassified, so they block EVERY safety exit on ` +
+      "EVERY mint. If that is deliberate for a new kind, say so here and list it.");
+    console.log(`       ${POSITION_SCOPED_KINDS.length} kinds, all position-scoped: ${POSITION_SCOPED_KINDS.join(", ")}`);
+  });
+  cj.close();
+  fs.rmSync(cdir, { recursive: true, force: true });
+}
 
 j.close();
 fs.rmSync(dir, { recursive: true, force: true });

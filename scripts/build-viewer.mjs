@@ -8,6 +8,7 @@ import { inlineThree } from "./inline-three.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(here, "..");
+const { hawkStatus, injectHawkStatus } = await import(path.join(ROOT, "executor", "hawk-status.mjs"));
 const VIEWER = path.join(ROOT, "viewer");
 const OUT = path.join(ROOT, "dist");
 
@@ -258,6 +259,12 @@ if (fs.existsSync(cnameSrc)) fs.copyFileSync(cnameSrc, path.join(OUT, "CNAME"));
 
 const built = [];
 
+/* HAWK-AI'S STATUS IS COMPUTED FROM THE EXECUTOR, NOT TYPED INTO THE PAGE — and it is
+ * computed by executor/hawk-status.mjs rather than here, because src/office.js serves the
+ * SAME page live and two copies of this would be two pages telling different stories. */
+const hawkStatusValue = hawkStatus();
+console.log(`hawk-ai status    armable=${hawkStatusValue.armable} blocking=[${hawkStatusValue.blocking.join(", ")}]`);
+
 for (const { src: name, out } of PAGES) {
   const src = path.join(VIEWER, name);
   if (!fs.existsSync(src)) continue;
@@ -272,6 +279,11 @@ for (const { src: name, out } of PAGES) {
      that is wrong the next time install.sh is touched, and a stale digest teaches
      people to ignore the check. The viewer tests the shape and hides it if unsubstituted. */
   html = html.replaceAll("__CLAUDE_COMPANY_INSTALLER_SHA256__", INSTALLER_SHA256);
+  /* See the note above hawkStatus: computed from the executor at build time so the public
+     panel cannot drift from the code it describes. JSON.stringify twice is deliberate —
+     the inner value is embedded as a STRING LITERAL and parsed at runtime, so no quote,
+     backslash or </script> in a refusal message can break out of the surrounding script. */
+  html = injectHawkStatus(html, hawkStatusValue);
   /* The one-command line names an origin, and a build published elsewhere (a staging
      host, a fork) must not send its readers to the production installer. The canonical
      URL is what the source file carries — so the test can pin the literal a reader

@@ -1,0 +1,1256 @@
+{
+  "capturedAt": "2026-09-11",
+  "cluster": "mainnet-beta",
+  "programId": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+  "rpcEndpoint": "https://api.mainnet-beta.solana.com",
+  "method": "getSignaturesForAddress on the program, then getTransaction {encoding:jsonParsed, maxSupportedTransactionVersion:0}; 414 transactions pulled, every pump.fun instruction in each decoded",
+  "note": "The keys `buy` and `sell` hold BuyV2 / SellV2 — the two instructions snipe-venue-pumpfun.mjs's refusal names by discriminator and account count. The live program ALSO executes the older Buy / Sell (18 / 16 accounts), which are far more common on the tape; they are recorded under legacyBuy / legacySell. Both pairs are live; a caller must choose one deliberately.",
+  "buy": {
+    "instruction": "buy_v2",
+    "loggedInstructionName": "BuyV2",
+    "discriminatorHex": "b817ee6167c5d33d",
+    "discriminatorDerivation": "sha256(\"global:buy_v2\")[0..8] — matches the bytes on chain AND the name the program logs",
+    "accountCount": 27,
+    "accountCountsObserved": {
+      "27": 4
+    },
+    "accounts": [
+      {
+        "index": 0,
+        "role": "global",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 1,
+        "role": "baseMint",
+        "isSigner": false,
+        "isWritable": true,
+        "isSignerObserved": [
+          true,
+          false
+        ],
+        "note_isSigner": "varied across landed samples — NOT required by the program",
+        "isWritableObserved": [
+          true,
+          false
+        ],
+        "note_isWritable": "varied across landed samples — the program accepted both, so writable is a superset not a requirement"
+      },
+      {
+        "index": 2,
+        "role": "quoteMint",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 3,
+        "role": "baseTokenProgram",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 4,
+        "role": "quoteTokenProgram",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 5,
+        "role": "associatedTokenProgram",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 6,
+        "role": "feeRecipient",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 7,
+        "role": "quoteTokenAccount<feeRecipient>",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 8,
+        "role": "secondaryFeeVault",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 9,
+        "role": "quoteTokenAccount<secondaryFeeVault>",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 10,
+        "role": "bondingCurve",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 11,
+        "role": "associatedBondingCurve",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 12,
+        "role": "quoteTokenAccount<bondingCurve>",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 13,
+        "role": "user",
+        "isSigner": true,
+        "isWritable": true
+      },
+      {
+        "index": 14,
+        "role": "associatedUser",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 15,
+        "role": "quoteTokenAccount<user>",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 16,
+        "role": "creatorVault",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 17,
+        "role": "quoteTokenAccount<creatorVault>",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 18,
+        "role": "UNIDENTIFIED_B",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 19,
+        "role": "globalVolumeAccumulator",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 20,
+        "role": "userVolumeAccumulator",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 21,
+        "role": "quoteTokenAccount<userVolumeAccumulator>",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 22,
+        "role": "feeConfig",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 23,
+        "role": "feeProgram",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 24,
+        "role": "systemProgram",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 25,
+        "role": "eventAuthority",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 26,
+        "role": "pumpFunProgram",
+        "isSigner": false,
+        "isWritable": false
+      }
+    ],
+    "args": [
+      {
+        "name": "amount",
+        "type": "u64",
+        "offset": 8,
+        "meaning": "base-token amount to receive (exact-out)"
+      },
+      {
+        "name": "maxSolCost",
+        "type": "u64",
+        "offset": 16,
+        "meaning": "ceiling on lamports the wallet may spend"
+      }
+    ],
+    "trailingInstructionDataObserved": {
+      "(no trailing bytes)": 4
+    },
+    "baseTokenProgramObserved": {
+      "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb": 4
+    },
+    "evidence": {
+      "samplesTotal": 4,
+      "samplesAtModalAccountCount": 4,
+      "topLevelSamples": 4,
+      "distinctSigners": 4,
+      "distinctMints": 4,
+      "accountMetaFlagsReadFrom": "4 TOP-LEVEL instruction(s) only — a parsed inner (CPI) instruction does not expose the metas the caller passed",
+      "arg0EqualsObservedTokenDelta": "4/4",
+      "arg1BoundsObservedLamportDelta": "4/4",
+      "arg1StrictlyBeyondActualSpend": "4/4 (a value that is merely a bound, never the executed amount)",
+      "accountOrderStable": true,
+      "accountOrderDifferences": "none — every index carried the same role in every sample at this account count",
+      "pdasDerivedAndMatched": [
+        "bondingCurve = findProgramAddress([\"bonding-curve\", mint], programId)",
+        "global = findProgramAddress([\"global\"], programId)",
+        "eventAuthority = findProgramAddress([\"__event_authority\"], programId)",
+        "globalVolumeAccumulator = findProgramAddress([\"global_volume_accumulator\"], programId)",
+        "userVolumeAccumulator = findProgramAddress([\"user_volume_accumulator\", user], programId)",
+        "creatorVault = findProgramAddress([\"creator-vault\", TradeEvent.creator], programId)",
+        "feeConfig = findProgramAddress([\"fee_config\", programId], pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ)"
+      ]
+    },
+    "samples": [
+      {
+        "signature": "woKwM9eKz2vfFkUPJsWaXxvjpqBTEnXVe4PSJD4GCUKkhU3WwrNZMnk16LAhWdeK8G4i6WtHtbGMKTtbwudyXXA",
+        "slot": 446084860,
+        "mint": "HXmrG1XUBjoSC1KzQ9cvfts5Bh7yr4PHPKjSaRjXpump",
+        "signer": "BUBBLEtr8BEJZ9PyC2DFYxG58r8tu5PiyAKMVm14hCg9",
+        "instructionLocation": "top-level instruction #4",
+        "argsDecoded": [
+          "2870432923624",
+          "400000000"
+        ],
+        "rawDataHex": "b817ee6167c5d33de87f22539c0200000084d71700000000",
+        "observedTokensDelivered": "2870432923624",
+        "observedLamportsSpent": "101250000",
+        "bondingCurveLamportDelta": "100000000",
+        "tradeEvent": {
+          "solAmount": "100000000",
+          "tokenAmount": "2870432923624",
+          "protocolFee": "950000",
+          "creatorFee": "300000",
+          "protocolFeeBps": "95",
+          "creatorFeeBps": "30"
+        },
+        "arg0EqualsObservedTokens": true,
+        "arg1BoundsObservedLamports": true,
+        "arg1StrictlyBeyondActual": true
+      },
+      {
+        "signature": "2Ht9aPg8ba2ehLYxvG4NbskMyPKzNqNq7iaVQfaqasA1BXWV7NGS6iSa2hHrtmT4LEZtnePUiSjzv12U9xX2dimM",
+        "slot": 446084874,
+        "mint": "5E6H41XP2pxrF7J2JJVWtnXdk7Va5bCjZDCU9VYRpump",
+        "signer": "7FVfSdnR9VPGjMtmBP1Hz9C2DFTpoNX8gVVRmnimnGt9",
+        "instructionLocation": "top-level instruction #4",
+        "argsDecoded": [
+          "2473245495739",
+          "18446744073709551615"
+        ],
+        "rawDataHex": "b817ee6167c5d33dbb51ebd83f020000ffffffffffffffff",
+        "observedTokensDelivered": "2473245495739",
+        "observedLamportsSpent": "70175578",
+        "bondingCurveLamportDelta": "70905128",
+        "tradeEvent": {
+          "solAmount": "69309212",
+          "tokenAmount": "2473245495739",
+          "protocolFee": "658438",
+          "creatorFee": "207928",
+          "protocolFeeBps": "95",
+          "creatorFeeBps": "30"
+        },
+        "arg0EqualsObservedTokens": true,
+        "arg1BoundsObservedLamports": true,
+        "arg1StrictlyBeyondActual": true
+      },
+      {
+        "signature": "62Wa5iQ3kDWf8WoonAjAjqQpy248fXZxTBUNjwD8bxG5Kg928zYN1kivcvCMpJtz3JLEG37qwseyB9NekLVUa3d1",
+        "slot": 446084838,
+        "mint": "HYbHDHUX4hRvZDMZnckRENZSFuQCzp56VT4MPLsTpump",
+        "signer": "7yh6q2HVMn911KeN4HJ6nQTaeUnsXJxtna48erfzW9p5",
+        "instructionLocation": "top-level instruction #4",
+        "argsDecoded": [
+          "7035992724623",
+          "18446744073709551615"
+        ],
+        "rawDataHex": "b817ee6167c5d33d8fd4d83166060000ffffffffffffffff",
+        "observedTokensDelivered": "7035992724623",
+        "observedLamportsSpent": "200492962",
+        "bondingCurveLamportDelta": "199613655",
+        "tradeEvent": {
+          "solAmount": "198017739",
+          "tokenAmount": "7035992724623",
+          "protocolFee": "1881169",
+          "creatorFee": "594054",
+          "protocolFeeBps": "95",
+          "creatorFeeBps": "30"
+        },
+        "arg0EqualsObservedTokens": true,
+        "arg1BoundsObservedLamports": true,
+        "arg1StrictlyBeyondActual": true
+      }
+    ]
+  },
+  "sell": {
+    "instruction": "sell_v2",
+    "loggedInstructionName": "SellV2",
+    "discriminatorHex": "5df6823ce7e940b2",
+    "discriminatorDerivation": "sha256(\"global:sell_v2\")[0..8] — matches the bytes on chain AND the name the program logs",
+    "accountCount": 26,
+    "accountCountsObserved": {
+      "26": 36,
+      "27": 1
+    },
+    "accounts": [
+      {
+        "index": 0,
+        "role": "global",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 1,
+        "role": "baseMint",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 2,
+        "role": "quoteMint",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 3,
+        "role": "baseTokenProgram",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 4,
+        "role": "quoteTokenProgram",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 5,
+        "role": "associatedTokenProgram",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 6,
+        "role": "feeRecipient",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 7,
+        "role": "quoteTokenAccount<feeRecipient>",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 8,
+        "role": "secondaryFeeVault",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 9,
+        "role": "quoteTokenAccount<secondaryFeeVault>",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 10,
+        "role": "bondingCurve",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 11,
+        "role": "associatedBondingCurve",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 12,
+        "role": "quoteTokenAccount<bondingCurve>",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 13,
+        "role": "user",
+        "isSigner": true,
+        "isWritable": true
+      },
+      {
+        "index": 14,
+        "role": "associatedUser",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 15,
+        "role": "quoteTokenAccount<user>",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 16,
+        "role": "creatorVault",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 17,
+        "role": "quoteTokenAccount<creatorVault>",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 18,
+        "role": "UNIDENTIFIED_B",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 19,
+        "role": "userVolumeAccumulator",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 20,
+        "role": "quoteTokenAccount<userVolumeAccumulator>",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 21,
+        "role": "feeConfig",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 22,
+        "role": "feeProgram",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 23,
+        "role": "systemProgram",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 24,
+        "role": "eventAuthority",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 25,
+        "role": "pumpFunProgram",
+        "isSigner": false,
+        "isWritable": false
+      }
+    ],
+    "args": [
+      {
+        "name": "amount",
+        "type": "u64",
+        "offset": 8,
+        "meaning": "base-token amount to sell (exact-in)"
+      },
+      {
+        "name": "minSolOutput",
+        "type": "u64",
+        "offset": 16,
+        "meaning": "floor on lamports the wallet must receive"
+      }
+    ],
+    "trailingInstructionDataObserved": {
+      "(no trailing bytes)": 37
+    },
+    "baseTokenProgramObserved": {
+      "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb": 33,
+      "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA": 3
+    },
+    "evidence": {
+      "samplesTotal": 37,
+      "samplesAtModalAccountCount": 36,
+      "topLevelSamples": 10,
+      "distinctSigners": 33,
+      "distinctMints": 23,
+      "accountMetaFlagsReadFrom": "10 TOP-LEVEL instruction(s) only — a parsed inner (CPI) instruction does not expose the metas the caller passed",
+      "arg0EqualsObservedTokenDelta": "36/36",
+      "arg1BoundsObservedLamportDelta": "31/36",
+      "arg1StrictlyBeyondActualSpend": "31/36 (a value that is merely a bound, never the executed amount)",
+      "accountOrderStable": true,
+      "accountOrderDifferences": "none — every index carried the same role in every sample at this account count",
+      "pdasDerivedAndMatched": [
+        "bondingCurve = findProgramAddress([\"bonding-curve\", mint], programId)",
+        "global = findProgramAddress([\"global\"], programId)",
+        "eventAuthority = findProgramAddress([\"__event_authority\"], programId)",
+        "globalVolumeAccumulator = findProgramAddress([\"global_volume_accumulator\"], programId)",
+        "userVolumeAccumulator = findProgramAddress([\"user_volume_accumulator\", user], programId)",
+        "creatorVault = findProgramAddress([\"creator-vault\", TradeEvent.creator], programId)",
+        "feeConfig = findProgramAddress([\"fee_config\", programId], pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ)"
+      ]
+    },
+    "samples": [
+      {
+        "signature": "23MjDk1HBbC4cLF8ubWnbP9BGnngjdqhbaB7jM1mUovZkL5RE7uTqFNW9pdN3gRpkKZ7AegwcgLDSdR6MSKbCjpT",
+        "slot": 446087660,
+        "mint": "EmBR5VCuaBeP8Hgo6iqTm6MwNkkSDxNMdtUtwv12pump",
+        "signer": "EHBXyytsGKi6ysifLg8hARzDdHvf9MS6E8i7S6cvYT5u",
+        "instructionLocation": "top-level instruction #2",
+        "argsDecoded": [
+          "108617666363",
+          "350659"
+        ],
+        "rawDataHex": "5df6823ce7e940b23b0f1e4a19000000c359050000000000",
+        "observedTokensDelivered": "108617666363",
+        "observedLamportsSpent": "701319",
+        "bondingCurveLamportDelta": "-710197",
+        "tradeEvent": {
+          "solAmount": "710197",
+          "tokenAmount": "108617666363",
+          "protocolFee": "6747",
+          "creatorFee": "2131",
+          "protocolFeeBps": "95",
+          "creatorFeeBps": "30"
+        },
+        "arg0EqualsObservedTokens": true,
+        "arg1BoundsObservedLamports": true,
+        "arg1StrictlyBeyondActual": true
+      },
+      {
+        "signature": "2SLeKJHbvgAkmPpjNE2rnKdUsgWcku6JHHcMm3cPvENY5JYvxjQYLzHDJPKc6PivGarV124HTq6z4GDmpoQCQVBj",
+        "slot": 446087657,
+        "mint": "1HQAydhWYYauYZYG9NDsLejMFeQ8L9XvYMfQT8FcNu7",
+        "signer": "NajoJR4TibdKnVmz4rNGiNVz2jrrYc5AXm5XbiBkpXH",
+        "instructionLocation": "top-level instruction #4",
+        "argsDecoded": [
+          "18628928624921",
+          "91478"
+        ],
+        "rawDataHex": "5df6823ce7e940b21959ac62f11000005665010000000000",
+        "observedTokensDelivered": "18628928624921",
+        "observedLamportsSpent": "907696885",
+        "bondingCurveLamportDelta": "-919186720",
+        "tradeEvent": {
+          "solAmount": "919186720",
+          "tokenAmount": "18628928624921",
+          "protocolFee": "8732274",
+          "creatorFee": "2757561",
+          "protocolFeeBps": "95",
+          "creatorFeeBps": "30"
+        },
+        "arg0EqualsObservedTokens": true,
+        "arg1BoundsObservedLamports": true,
+        "arg1StrictlyBeyondActual": true
+      },
+      {
+        "signature": "4V252LZ662kRx4tVi78eVfMc8yoPmxjSWxavzmUyEs6oPLQty5FDViZj8akWhEgDvwp8nYa1ckb3ifXhxUXzSYKc",
+        "slot": 446084838,
+        "mint": "DGKi37fe7pAbMsq1f3aaDWiabBTScQHrHE9xf6nppump",
+        "signer": "JDd3hy3gQn2V982mi1zqhNqUw1GfV2UL6g76STojCJPN",
+        "instructionLocation": "top-level instruction #2",
+        "argsDecoded": [
+          "151660777334045",
+          "1"
+        ],
+        "rawDataHex": "5df6823ce7e940b21d65c246ef8900000100000000000000",
+        "observedTokensDelivered": "151660777334045",
+        "observedLamportsSpent": "4895692500",
+        "bondingCurveLamportDelta": "-4957663292",
+        "tradeEvent": {
+          "solAmount": "4957663292",
+          "tokenAmount": "151660777334045",
+          "protocolFee": "47097802",
+          "creatorFee": "14872990",
+          "protocolFeeBps": "95",
+          "creatorFeeBps": "30"
+        },
+        "arg0EqualsObservedTokens": true,
+        "arg1BoundsObservedLamports": true,
+        "arg1StrictlyBeyondActual": true
+      }
+    ]
+  },
+  "legacyBuy": {
+    "instruction": "buy",
+    "loggedInstructionName": "Buy",
+    "discriminatorHex": "66063d1201daebea",
+    "discriminatorDerivation": "sha256(\"global:buy\")[0..8] — matches the bytes on chain AND the name the program logs",
+    "accountCount": 18,
+    "accountCountsObserved": {
+      "18": 106
+    },
+    "accounts": [
+      {
+        "index": 0,
+        "role": "global",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 1,
+        "role": "feeRecipient",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 2,
+        "role": "baseMint",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 3,
+        "role": "bondingCurve",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 4,
+        "role": "associatedBondingCurve",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 5,
+        "role": "associatedUser",
+        "isSigner": false,
+        "isWritable": true,
+        "rolesObserved": {
+          "associatedUser": 104,
+          "baseTokenAccount<user>": 2
+        }
+      },
+      {
+        "index": 6,
+        "role": "user",
+        "isSigner": true,
+        "isWritable": true
+      },
+      {
+        "index": 7,
+        "role": "systemProgram",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 8,
+        "role": "baseTokenProgram",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 9,
+        "role": "creatorVault",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 10,
+        "role": "eventAuthority",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 11,
+        "role": "pumpFunProgram",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 12,
+        "role": "globalVolumeAccumulator",
+        "isSigner": false,
+        "isWritable": true,
+        "isWritableObserved": [
+          false,
+          true
+        ],
+        "note_isWritable": "varied across landed samples — the program accepted both, so writable is a superset not a requirement"
+      },
+      {
+        "index": 13,
+        "role": "userVolumeAccumulator",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 14,
+        "role": "feeConfig",
+        "isSigner": false,
+        "isWritable": true,
+        "isWritableObserved": [
+          false,
+          true
+        ],
+        "note_isWritable": "varied across landed samples — the program accepted both, so writable is a superset not a requirement"
+      },
+      {
+        "index": 15,
+        "role": "feeProgram",
+        "isSigner": false,
+        "isWritable": true,
+        "isWritableObserved": [
+          false,
+          true
+        ],
+        "note_isWritable": "varied across landed samples — the program accepted both, so writable is a superset not a requirement"
+      },
+      {
+        "index": 16,
+        "role": "UNIDENTIFIED_A",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 17,
+        "role": "secondaryFeeVault",
+        "isSigner": false,
+        "isWritable": true
+      }
+    ],
+    "args": [
+      {
+        "name": "amount",
+        "type": "u64",
+        "offset": 8,
+        "meaning": "base-token amount to receive (exact-out)"
+      },
+      {
+        "name": "maxSolCost",
+        "type": "u64",
+        "offset": 16,
+        "meaning": "ceiling on lamports the wallet may spend"
+      }
+    ],
+    "trailingInstructionDataObserved": {
+      "00": 67,
+      "(no trailing bytes)": 36,
+      "01": 1,
+      "0101": 2
+    },
+    "baseTokenProgramObserved": {
+      "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb": 104,
+      "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA": 2
+    },
+    "evidence": {
+      "samplesTotal": 106,
+      "samplesAtModalAccountCount": 106,
+      "topLevelSamples": 14,
+      "distinctSigners": 40,
+      "distinctMints": 31,
+      "accountMetaFlagsReadFrom": "14 TOP-LEVEL instruction(s) only — a parsed inner (CPI) instruction does not expose the metas the caller passed",
+      "arg0EqualsObservedTokenDelta": "104/106",
+      "arg1BoundsObservedLamportDelta": "106/106",
+      "arg1StrictlyBeyondActualSpend": "38/106 (a value that is merely a bound, never the executed amount)",
+      "accountOrderStable": false,
+      "accountOrderDifferences": [
+        {
+          "index": 5,
+          "rolesObserved": {
+            "associatedUser": 104,
+            "baseTokenAccount<user>": 2
+          }
+        }
+      ],
+      "accountOrderDifferencesNote": "the POSITION did not move; what varied is the concrete account passed there (e.g. a non-ATA token account instead of the signer's ATA, or a base mint owned by legacy SPL instead of Token-2022). No index ever swapped roles with another index.",
+      "pdasDerivedAndMatched": [
+        "bondingCurve = findProgramAddress([\"bonding-curve\", mint], programId)",
+        "global = findProgramAddress([\"global\"], programId)",
+        "eventAuthority = findProgramAddress([\"__event_authority\"], programId)",
+        "globalVolumeAccumulator = findProgramAddress([\"global_volume_accumulator\"], programId)",
+        "userVolumeAccumulator = findProgramAddress([\"user_volume_accumulator\", user], programId)",
+        "creatorVault = findProgramAddress([\"creator-vault\", TradeEvent.creator], programId)",
+        "feeConfig = findProgramAddress([\"fee_config\", programId], pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ)"
+      ]
+    },
+    "samples": [
+      {
+        "signature": "2LeomYpEYJRgARHNzB7ZBGA2js8vrx4E4AgU7ND4UCgp7234dfWGCXvvRjsUJiLbi42qVzasFoZkTAZZhzNnzgin",
+        "slot": 446087658,
+        "mint": "37wuCa9gPxRJQ2G6nK8WDTZbQ25NcGL7uLp6HuSjpump",
+        "signer": "9qtoxCHwfjwKy2uLus3vtehGE7Xiybpf8mkM5gykdeWh",
+        "instructionLocation": "top-level instruction #3",
+        "argsDecoded": [
+          "10547584562600",
+          "15750000"
+        ],
+        "rawDataHex": "66063d1201daebeaa8f507cd970900007053f00000000000",
+        "observedTokensDelivered": "10547584562600",
+        "observedLamportsSpent": "14999999",
+        "bondingCurveLamportDelta": "14814813",
+        "tradeEvent": {
+          "solAmount": "14814813",
+          "tokenAmount": "10547584562600",
+          "protocolFee": "140741",
+          "creatorFee": "44445",
+          "protocolFeeBps": "95",
+          "creatorFeeBps": "30"
+        },
+        "arg0EqualsObservedTokens": true,
+        "arg1BoundsObservedLamports": true,
+        "arg1StrictlyBeyondActual": true
+      },
+      {
+        "signature": "3No8nTPBrpi7eF5uRt34xPDdXwDiGbdcxQHv6UiAgqQXuZeB6V2UbWARSAPYnqZBosEfqjpyFmn7qFqxaRw85sHJ",
+        "slot": 446084836,
+        "mint": "FnTvHnyzzmGfPU9Hdt8rqV83Vb4H42oRFUjeLqaEpump",
+        "signer": "AFUXTpZCAwEvMsyG9WSGgwSa4VRXW2FFHt5DovoyKTBa",
+        "instructionLocation": "top-level instruction #4",
+        "argsDecoded": [
+          "1358508000000",
+          "143000000"
+        ],
+        "rawDataHex": "66063d1201daebea0003634d3c010000c00186080000000000",
+        "observedTokensDelivered": "1358508000000",
+        "observedLamportsSpent": "102750673",
+        "bondingCurveLamportDelta": "101482145",
+        "tradeEvent": {
+          "solAmount": "101482145",
+          "tokenAmount": "1358508000000",
+          "protocolFee": "964081",
+          "creatorFee": "304447",
+          "protocolFeeBps": "95",
+          "creatorFeeBps": "30"
+        },
+        "arg0EqualsObservedTokens": true,
+        "arg1BoundsObservedLamports": true,
+        "arg1StrictlyBeyondActual": true
+      },
+      {
+        "signature": "49Fyasm2ZEX4qoJY1Aux74dtLN8njUAqeReMcQHcKiUsTcfQxw3ZznbFif9QB7LPNtThpVM5crLdqrVpyNrQJpVQ",
+        "slot": 446084870,
+        "mint": "8TKfTQ3ca21iCqbV8c9QqSrBWBEkB6qmquktT2C5pump",
+        "signer": "DPtAh5k7PkJiHVrFWuykaewEV7DasteaL7GQK3z9nhbe",
+        "instructionLocation": "top-level instruction #0",
+        "argsDecoded": [
+          "10000000000",
+          "3301638"
+        ],
+        "rawDataHex": "66063d1201daebea00e40b5402000000066132000000000001",
+        "observedTokensDelivered": "10000000000",
+        "observedLamportsSpent": "530623",
+        "bondingCurveLamportDelta": "524071",
+        "tradeEvent": {
+          "solAmount": "524071",
+          "tokenAmount": "10000000000",
+          "protocolFee": "4979",
+          "creatorFee": "1573",
+          "protocolFeeBps": "95",
+          "creatorFeeBps": "30"
+        },
+        "arg0EqualsObservedTokens": true,
+        "arg1BoundsObservedLamports": true,
+        "arg1StrictlyBeyondActual": true
+      }
+    ]
+  },
+  "legacySell": {
+    "instruction": "sell",
+    "loggedInstructionName": "Sell",
+    "discriminatorHex": "33e685a4017f83ad",
+    "discriminatorDerivation": "sha256(\"global:sell\")[0..8] — matches the bytes on chain AND the name the program logs",
+    "accountCount": 16,
+    "accountCountsObserved": {
+      "16": 104,
+      "17": 2
+    },
+    "accounts": [
+      {
+        "index": 0,
+        "role": "global",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 1,
+        "role": "feeRecipient",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 2,
+        "role": "baseMint",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 3,
+        "role": "bondingCurve",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 4,
+        "role": "associatedBondingCurve",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 5,
+        "role": "associatedUser",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 6,
+        "role": "user",
+        "isSigner": true,
+        "isWritable": true
+      },
+      {
+        "index": 7,
+        "role": "systemProgram",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 8,
+        "role": "creatorVault",
+        "isSigner": false,
+        "isWritable": true
+      },
+      {
+        "index": 9,
+        "role": "baseTokenProgram",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 10,
+        "role": "eventAuthority",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 11,
+        "role": "pumpFunProgram",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 12,
+        "role": "feeConfig",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 13,
+        "role": "feeProgram",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 14,
+        "role": "UNIDENTIFIED_A",
+        "isSigner": false,
+        "isWritable": false
+      },
+      {
+        "index": 15,
+        "role": "secondaryFeeVault",
+        "isSigner": false,
+        "isWritable": true
+      }
+    ],
+    "args": [
+      {
+        "name": "amount",
+        "type": "u64",
+        "offset": 8,
+        "meaning": "base-token amount to sell (exact-in)"
+      },
+      {
+        "name": "minSolOutput",
+        "type": "u64",
+        "offset": 16,
+        "meaning": "floor on lamports the wallet must receive"
+      }
+    ],
+    "trailingInstructionDataObserved": {
+      "(no trailing bytes)": 104,
+      "0100": 1,
+      "0101": 1
+    },
+    "baseTokenProgramObserved": {
+      "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb": 103,
+      "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA": 1
+    },
+    "evidence": {
+      "samplesTotal": 106,
+      "samplesAtModalAccountCount": 104,
+      "topLevelSamples": 12,
+      "distinctSigners": 35,
+      "distinctMints": 32,
+      "accountMetaFlagsReadFrom": "12 TOP-LEVEL instruction(s) only — a parsed inner (CPI) instruction does not expose the metas the caller passed",
+      "arg0EqualsObservedTokenDelta": "104/104",
+      "arg1BoundsObservedLamportDelta": "104/104",
+      "arg1StrictlyBeyondActualSpend": "39/104 (a value that is merely a bound, never the executed amount)",
+      "accountOrderStable": true,
+      "accountOrderDifferences": "none — every index carried the same role in every sample at this account count",
+      "pdasDerivedAndMatched": [
+        "bondingCurve = findProgramAddress([\"bonding-curve\", mint], programId)",
+        "global = findProgramAddress([\"global\"], programId)",
+        "eventAuthority = findProgramAddress([\"__event_authority\"], programId)",
+        "globalVolumeAccumulator = findProgramAddress([\"global_volume_accumulator\"], programId)",
+        "userVolumeAccumulator = findProgramAddress([\"user_volume_accumulator\", user], programId)",
+        "creatorVault = findProgramAddress([\"creator-vault\", TradeEvent.creator], programId)",
+        "feeConfig = findProgramAddress([\"fee_config\", programId], pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ)"
+      ]
+    },
+    "samples": [
+      {
+        "signature": "4KeFnGHx28xL3vWEkSehtgd8euoZ6fQ2LUxPZUtsQVMUPP9HpNH6vvE1ZYyeUY1ACkPNyJJW4rFeyycp1BfiZkYY",
+        "slot": 446084857,
+        "mint": "FnTvHnyzzmGfPU9Hdt8rqV83Vb4H42oRFUjeLqaEpump",
+        "signer": "FNvLdMfo2aB9xf14x4TFN3dr2TDpKz78Rji1k8bTx4bs",
+        "instructionLocation": "top-level instruction #2",
+        "argsDecoded": [
+          "12806740446785",
+          "112421917"
+        ],
+        "rawDataHex": "33e685a4017f83ad410e37cda50b00001d6cb30600000000",
+        "observedTokensDelivered": "12806740446785",
+        "observedLamportsSpent": "1121380235",
+        "bondingCurveLamportDelta": "-1135574922",
+        "tradeEvent": {
+          "solAmount": "1135574922",
+          "tokenAmount": "12806740446785",
+          "protocolFee": "10787962",
+          "creatorFee": "3406725",
+          "protocolFeeBps": "95",
+          "creatorFeeBps": "30"
+        },
+        "arg0EqualsObservedTokens": true,
+        "arg1BoundsObservedLamports": true,
+        "arg1StrictlyBeyondActual": true
+      },
+      {
+        "signature": "63rviFDqiQoQxh4fXKVVcd2LEKvJqDxbmbvASepLJZ4zppQujwuxWXd4Cek4AYZMjZ4aFMZxPXzqNBakyiFKoD5a",
+        "slot": 446084875,
+        "mint": "6T1BNshzGAKAHvJ3NZ5n62X2eg5rqqsMipUMZJvLpump",
+        "signer": "ACnBXPWodPvx2xCYsWAjnonW1NwrRjttLaR4t7aYcwXw",
+        "instructionLocation": "top-level instruction #2",
+        "argsDecoded": [
+          "2494113370",
+          "92362"
+        ],
+        "rawDataHex": "33e685a4017f83ad5a26a99400000000ca68010000000000",
+        "observedTokensDelivered": "2494113370",
+        "observedLamportsSpent": "94246",
+        "bondingCurveLamportDelta": "-95440",
+        "tradeEvent": {
+          "solAmount": "95440",
+          "tokenAmount": "2494113370",
+          "protocolFee": "907",
+          "creatorFee": "287",
+          "protocolFeeBps": "95",
+          "creatorFeeBps": "30"
+        },
+        "arg0EqualsObservedTokens": true,
+        "arg1BoundsObservedLamports": true,
+        "arg1StrictlyBeyondActual": true
+      },
+      {
+        "signature": "21vh8cFwurGfQneTSeMnSY4naiLtuofpSBGtHLfTBWTgQbyvVWPEna8ThjYyRXGWBPwR3m2eY1wodFQqTs9NPzfo",
+        "slot": 446087660,
+        "mint": "37wuCa9gPxRJQ2G6nK8WDTZbQ25NcGL7uLp6HuSjpump",
+        "signer": "Hj6VQ4Bd4s1YsxhTB3PmGYzhAwmBPt4hDn5o3zBMcaC5",
+        "instructionLocation": "top-level instruction #2",
+        "argsDecoded": [
+          "6654724099977",
+          "0"
+        ],
+        "rawDataHex": "33e685a4017f83ad894f776c0d0600000000000000000000",
+        "observedTokensDelivered": "6654724099977",
+        "observedLamportsSpent": "12727041",
+        "bondingCurveLamportDelta": "-12888144",
+        "tradeEvent": {
+          "solAmount": "12888144",
+          "tokenAmount": "6654724099977",
+          "protocolFee": "122438",
+          "creatorFee": "38665",
+          "protocolFeeBps": "95",
+          "creatorFeeBps": "30"
+        },
+        "arg0EqualsObservedTokens": true,
+        "arg1BoundsObservedLamports": true,
+        "arg1StrictlyBeyondActual": true
+      }
+    ]
+  },
+  "feeProgramId": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+  "feeRoutingProved": {
+    "claim": "feeRecipient lamport delta + secondaryFeeVault lamport delta === TradeEvent.fee, and creatorVault lamport delta === TradeEvent.creatorFee",
+    "result": "19/19 top-level legacy Buy/Sell samples checked at the time of writing; no exceptions"
+  },
+  "otherPumpfunInstructionsSeenOnTheTape": {
+    "buy": {
+      "discriminatorHex": "66063d1201daebea",
+      "accountCounts": [
+        18
+      ],
+      "samples": 106
+    },
+    "unknown:c2ab1c46684d5b2f": {
+      "discriminatorHex": "c2ab1c46684d5b2f",
+      "accountCounts": [
+        27
+      ],
+      "samples": 72
+    },
+    "sell": {
+      "discriminatorHex": "33e685a4017f83ad",
+      "accountCounts": [
+        16,
+        17
+      ],
+      "samples": 106
+    },
+    "sell_v2": {
+      "discriminatorHex": "5df6823ce7e940b2",
+      "accountCounts": [
+        26,
+        27
+      ],
+      "samples": 37
+    },
+    "close_user_volume_accumulator": {
+      "discriminatorHex": "f945a4da9667548a",
+      "accountCounts": [
+        4
+      ],
+      "samples": 13
+    },
+    "unknown:38fc74089edfcd5f": {
+      "discriminatorHex": "38fc74089edfcd5f",
+      "accountCounts": [
+        18
+      ],
+      "samples": 12
+    },
+    "create_v2": {
+      "discriminatorHex": "d6904cec5f8b31b4",
+      "accountCounts": [
+        16
+      ],
+      "samples": 3
+    },
+    "buy_v2": {
+      "discriminatorHex": "b817ee6167c5d33d",
+      "accountCounts": [
+        27
+      ],
+      "samples": 4
+    },
+    "unknown:7af3cc415e741d37": {
+      "discriminatorHex": "7af3cc415e741d37",
+      "accountCounts": [
+        10
+      ],
+      "samples": 3
+    },
+    "extend_account": {
+      "discriminatorHex": "ea66c2cb96483ee5",
+      "accountCounts": [
+        5
+      ],
+      "samples": 1
+    },
+    "unknown:cf118af204221338": {
+      "discriminatorHex": "cf118af204221338",
+      "accountCounts": [
+        10
+      ],
+      "samples": 2
+    },
+    "unknown:253a237ebe35e4c5": {
+      "discriminatorHex": "253a237ebe35e4c5",
+      "accountCounts": [
+        5
+      ],
+      "samples": 1
+    }
+  },
+  "accountRoleGlossary": {
+    "global": "findProgramAddress([\"global\"], programId) = 4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf — read and matched",
+    "baseMint": "the launch token; equals TradeEvent.mint in every sample",
+    "quoteMint": "V2 only, account index 2. WSOL (So111...112) on 32 of 37 SellV2 samples; on 5 it was a NON-SOL mint (Xsv9hRk1z5ystj9MhnA7Lq4vjSsLwzL2nxrwmwtD3re, XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB, XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W)",
+    "baseTokenProgram": "the token program that owns the base mint — Token-2022 (TokenzQd...) on 104/106 legacy Buy samples, legacy SPL (Tokenkeg...) on 2",
+    "quoteTokenProgram": "V2 only — the token program that owns the quote mint; legacy SPL for WSOL, Token-2022 for the non-SOL quotes seen",
+    "associatedTokenProgram": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL — present in V2 only; the legacy Buy/Sell do NOT carry it",
+    "bondingCurve": "findProgramAddress([\"bonding-curve\", mint], programId) — derived and matched in 100% of samples",
+    "associatedBondingCurve": "the bonding curve's base-mint associated token account",
+    "associatedUser": "the signer's base-mint associated token account; 2 of 106 legacy Buy samples passed a non-ATA token account here instead",
+    "user": "the trader; the only required signer",
+    "feeRecipient": "protocol fee destination; NOT constant — 13+ distinct values seen, and only some appear in the Global account's own list. TradeEvent.feeRecipient names the one that was used",
+    "secondaryFeeVault": "an account owned by the fee program pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ (208 bytes, discriminator 99a64790b3bd89fb). It takes the REST of TradeEvent.fee: feeRecipient delta + this delta === TradeEvent.fee, checked 19/19. 8 distinct values seen and NO derivation rule found",
+    "creatorVault": "findProgramAddress([\"creator-vault\", TradeEvent.creator], programId) — derived and matched; receives exactly TradeEvent.creatorFee",
+    "globalVolumeAccumulator": "findProgramAddress([\"global_volume_accumulator\"], programId)",
+    "userVolumeAccumulator": "findProgramAddress([\"user_volume_accumulator\", user], programId)",
+    "feeConfig": "findProgramAddress([\"fee_config\", programId], pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ) = 8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+    "feeProgram": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ — the buy CPIs into it (log: GetFeesWithQuoteMint) to compute the rate per swap",
+    "eventAuthority": "findProgramAddress([\"__event_authority\"], programId) = Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+    "quoteTokenAccount<X>": "X's token account for the QUOTE mint (V2 only)",
+    "UNIDENTIFIED_A": "legacy Buy index 16 / legacy Sell index 14. Read-only in most samples, zero lamport delta, near 1:1 with the signer (52 distinct values over 40 signers), and the two sampled addresses DO NOT EXIST on chain (getAccountInfo returned null). Off-curve, so a PDA — but no seed combination tried reproduces it. A builder CANNOT compute this account",
+    "UNIDENTIFIED_B": "V2 index 18. Read-only, zero lamport delta, 1:1 with the MINT on SellV2 (13 distinct values over 13 mints). No derivation found. A builder CANNOT compute this account",
+    "callerAppended:jitodontfront": "one legacy Sell had jitodontfront111111111111111111111111111111 appended as a 17th account — proof that callers do append their own remaining accounts, so a trailing account is not automatically part of the layout"
+  },
+  "nonSolQuotedCurvesExistOnMainnet": {
+    "finding": "YES — snipe-venue-pumpfun.mjs lists 'whether a V2 curve may be quoted in a mint other than SOL' as unproved. It is proved here: it can.",
+    "samples": [
+      "3isikUZT5kukyxzR9LcPk9TSpQFks1o8XiyPmKCtEmy8CUcmS91CWxQ7tzQC2ZwDXZCLVDfDQ99ngbh3Si4E3Cy5",
+      "4mrHo6gqgdK2",
+      "57Nobp5G6BXG"
+    ],
+    "quoteMintsSeen": [
+      "Xsv9hRk1z5ystj9MhnA7Lq4vjSsLwzL2nxrwmwtD3re",
+      "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",
+      "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W"
+    ],
+    "consequence": "On those trades TradeEvent.solAmount reads 0 while real value moved. decodeTradeEvent's userQuoteRaw = solAmount - fee - creatorFee would go NEGATIVE, and any mark built on it is wrong. The adapter's quote:{mint:WSOL} declaration does not hold for these curves."
+  },
+  "confidence": "unverified",
+  "unresolved": [
+    "CANNOT BUILD THE INSTRUCTION. The account ORDER is stable and every position is named, but three positions cannot be COMPUTED from a mint and a signer: UNIDENTIFIED_A (legacy Buy 16 / Sell 14), UNIDENTIFIED_B (V2 index 18), and secondaryFeeVault (legacy 17 / 15, V2 index 8). No PDA seed combination tried reproduces any of them, and they change from trade to trade. An encoder that omits or guesses them signs a transaction that will not do what was intended.",
+    "feeRecipient is not a constant and is not fully enumerable from the Global account: 13+ distinct values were observed at index 1 and only some appear in the Global account at the offsets snipe-venue-pumpfun.mjs decodes. A builder must learn which one is currently acceptable; this fixture does not answer that.",
+    "The legacy Buy/Sell instruction data is NOT a fixed 24 bytes. Observed: 24 (no trailing byte), 25 with trailing 00, 25 with trailing 01, 26 with trailing 0101. On Sell the 26-byte form came with a SEVENTEENTH account (userVolumeAccumulator inserted at index 14, shifting everything after it). The trailing argument therefore changes the account list, and no sample proves which encoding the program prefers.",
+    "Account metas were read ONLY from top-level instructions, because a jsonParsed inner (CPI) instruction does not expose the metas the caller passed. isWritable varied across landed top-level samples on several read-only slots (globalVolumeAccumulator, feeConfig, feeProgram on legacy Buy), so the values recorded are a safe superset, not the program's requirement.",
+    "BuyV2 has only 4 landed samples in this capture (4 signers, 4 mints) versus 106 for legacy Buy. Three is the bar the task set and it is met, but the confidence in BuyV2's stability is materially thinner than in the others.",
+    "The two arguments were identified on SOL-quoted trades. On the 5 non-SOL-quoted SellV2 samples TradeEvent.solAmount reads 0, so arg1 could not be bounded against an observed lamport delta there (31/36 matched; the 5 failures are exactly those).",
+    "The program exposes more trading instructions than the four recorded here — BuyExactSolIn (38fc74089edfcd5f, 18 accounts) and BuyExactQuoteInV2 (c2ab1c46684d5b2f, 27 accounts) take (quoteAmountIn, minBaseOut), the OPPOSITE argument order. Picking the wrong discriminator would swap a token amount for a lamport amount.",
+    "The account at V2 index 8 and legacy index 17 receives real lamports, so the program uses it; but it is one of a rotating set of 8 addresses with no rule found for which one a given trade must use."
+  ]
+}

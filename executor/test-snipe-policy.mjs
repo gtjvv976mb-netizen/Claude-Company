@@ -25,6 +25,18 @@ const LIVE = { sizeSol: 0.005, feeSolPerLeg: 0.0005 };
 const FX = frictionX(LIVE);                       // 1.2222x
 const open = (entry = 1.0) => freshSnipe({ entry, openedAt: T0, creator: "Dev111", ...LIVE });
 
+/* THE TAKE, PARKED — for the cases that are about ARMING, not about exiting.
+ *
+ * takeAtEntryX arrived 2026-09-11 as the owner's upside dial, and it is a SELL branch in
+ * the fast half: at the default of 2x, a sequence containing a 5.0 print now exits on the
+ * first tick and never reaches the confirmation window these cases exist to exercise.
+ * That is the take working correctly; it just makes it a poor instrument for studying the
+ * median. So the confirmation cases below park it above every mark they use and say so,
+ * rather than being quietly rewritten to marks that dodge it — and section 2b then
+ * asserts the take DOES fire on those same sequences, so the interaction is recorded
+ * instead of hidden. */
+const NO_TAKE = { config: { takeAtEntryX: 1e9 } };
+
 /** Feed a sequence of marks, returning every decision. */
 function drive(pos, marks, { stepMs = 1000, ...rest } = {}) {
   const out = [];
@@ -59,16 +71,35 @@ console.log("\nINTERLEAVED PRINTS — THE CASE CONSECUTIVE-CLEARING DROPS");
 ok("two independent highs that are NOT adjacent still confirm", () => {
   /* 5.0, 1.0, 5.0 contains two independent observations of the same high. The desk's
      "two CONSECUTIVE clearing ticks" rejects this; a median does not. */
-  const r = drive(open(), [5.0, 1.0, 5.0]);
+  const r = drive(open(), [5.0, 1.0, 5.0], NO_TAKE);
   assert.equal(r.position.high, 5.0, `high=${r.position.high}`);
   assert.ok(r.position.armedBreakeven && r.position.armedTrail,
     `breakeven=${r.position.armedBreakeven} trail=${r.position.armedTrail}`);
   console.log(`        marks 5.0, 1.0, 5.0 -> confirmed high ${r.position.high}, both armed`);
 });
+/* ── 2b. AND WITH THE TAKE IN PLACE, THOSE SAME SEQUENCES EXIT ─────────────────────── */
+ok("the sequences parked above DO take profit when the dial is live — the interaction, recorded", () => {
+  /* The mirror of NO_TAKE. If parking the take let a real behaviour go unasserted, this
+     is where it would hide, so the same marks are driven with the DEFAULT dial. */
+  for (const marks of [[5.0, 1.0, 5.0], [1.0, 1.0, 9.0], [1.1, 1.5, 1.7, 1.9, 2.2]]) {
+    const r = drive(open(), marks);
+    const first = r.decisions.find((d) => d.action === "sell");
+    assert.ok(first, `${JSON.stringify(marks)} never exited under the default take`);
+    assert.match(first.reason, /^take: 2x entry reached/,
+      `${JSON.stringify(marks)} exited on "${first.reason}" rather than the take`);
+    /* At the canary the round trip is 1.2222x, so the honest number is +63.64%, not +100%. */
+    assert.match(first.reason, /realizes 63\.64%/,
+      "the take must report what it REALIZES at this fill, not repeat the dial back");
+  }
+  const r = drive(open(), [1.1, 1.5, 1.7, 1.9, 2.2]);
+  const at = r.decisions.findIndex((d) => d.action === "sell");
+  console.log(`        1.1,1.5,1.7,1.9,2.2 -> take fires on mark ${[1.1, 1.5, 1.7, 1.9, 2.2][at]} (index ${at}), realizing 63.64% at a ${FX.toFixed(4)}x round trip`);
+});
+
 ok("a SINGLE observation still arms nothing, under this rule too", () => {
   /* The sloppy version of the argument above would justify arming on one print. It does
      not: one observation is not confirmation, and that is the whole incident. */
-  const r = drive(open(), [1.0, 1.0, 9.0]);
+  const r = drive(open(), [1.0, 1.0, 9.0], NO_TAKE);
   assert.equal(r.position.armedBreakeven, false,
     `a lone 9.0 armed breakeven — high=${r.position.high}`);
   console.log(`        marks 1.0, 1.0, 9.0 -> confirmed high ${r.position.high}, nothing armed`);
@@ -82,13 +113,13 @@ ok("a position cannot arm on its first print, however good", () => {
 /* ── 3. A GENUINE RUN ───────────────────────────────────────────────────────────────── */
 console.log("\nA GENUINE RUN ARMS, THEN TRAILS");
 ok("a sustained climb confirms, arms breakeven then the trail", () => {
-  const r = drive(open(), [1.1, 1.5, 1.7, 1.9, 2.2]);
+  const r = drive(open(), [1.1, 1.5, 1.7, 1.9, 2.2], NO_TAKE);
   assert.ok(r.position.armedBreakeven, "breakeven never armed on a real run");
   assert.ok(r.position.armedTrail, "trail never armed on a real run");
   console.log(`        confirmed high ${r.position.high.toFixed(2)} from a climb to 2.0`);
 });
 ok("the trail sells 25% below the confirmed high", () => {
-  const r = drive(open(), [1.1, 1.5, 1.7, 1.9, 2.2]);
+  const r = drive(open(), [1.1, 1.5, 1.7, 1.9, 2.2], NO_TAKE);
   const high = r.position.high;
   const d = snipePolicy({ position: r.position, mark: high * 0.74, nowMs: T0 + 9000 });
   assert.equal(d.action, "sell", `${d.action}: ${d.reason}`);
@@ -96,7 +127,7 @@ ok("the trail sells 25% below the confirmed high", () => {
   console.log(`        high ${high.toFixed(2)}, mark ${(high * 0.74).toFixed(2)} -> ${d.reason}`);
 });
 ok("the confirmed high never comes back down", () => {
-  const r = drive(open(), [1.1, 1.5, 1.7, 1.9, 2.2]);
+  const r = drive(open(), [1.1, 1.5, 1.7, 1.9, 2.2], NO_TAKE);
   const peak = r.position.high;
   const after = drive(r.position, [0.9, 0.9, 0.9]);
   assert.ok(after.position.high >= peak, `high fell from ${peak} to ${after.position.high}`);
@@ -198,7 +229,7 @@ ok("a null or NaN mark neither sells nor enters the confirmation window", () => 
   console.log(`        6 unusable marks: all hold, window unchanged at [${before}]`);
 });
 ok("a bad mark cannot drag the median down and un-arm a position", () => {
-  const r = drive(open(), [2.0, 2.0, 2.0]);
+  const r = drive(open(), [2.0, 2.0, 2.0], NO_TAKE);
   assert.ok(r.position.armedTrail, "did not arm");
   const d = snipePolicy({ position: r.position, mark: NaN, nowMs: T0 + 9000 });
   assert.equal(d.position.high, r.position.high, `high moved to ${d.position.high}`);
