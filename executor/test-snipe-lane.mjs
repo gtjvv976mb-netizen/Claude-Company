@@ -1066,5 +1066,70 @@ section("13. THE KILL SWITCH REACHES WHAT IS ALREADY OPEN");
     dropped.length === 0, dropped.length ? `SILENTLY DROPPED: ${dropped.join(", ")}` : `${passed.length} facts, none dropped`);
 }
 
+section("14. A DISAGREEMENT IS BLINDNESS BEFORE IT IS HOSTILITY");
+
+{
+  /* Two endpoints returning different bytes at the same slot was wired straight into
+     rugFlag, which sells the whole position. At ENTRY that refusal is right — nothing is
+     lost by not acting. On the EXIT path it means a full market liquidation of a real bag
+     on a transport hiccup, paying venue fee each way to act on a fact nobody established.
+     Now a disagreement blinds the mark (the policy holds on an unreadable price) and only
+     a RUN of them leaves. Both failure directions are asserted: a transient fault must not
+     liquidate, and sustained blindness must not be ridden out for ever. */
+  const laneWithSplit = (streakMax) => {
+    let split = false;
+    const lane = createSnipeLane({
+      venue: FAKE_VENUE, control: OK_CONTROL, clock: makeClock(),
+      cfg: { lane: "observe", forwardSamples: 40, disagreeStreakMax: streakMax },
+      state: {}, book: { deployedTodaySol: 0, attempts: {} },
+      readers: makeReaders([
+        { id: "a", slot: 900, accounts: () => [curveAccount({ ...HEALTHY_CURVE }), {}, mintAccount()] },
+        { id: "b", slot: 900, accounts: () => [curveAccount({ ...HEALTHY_CURVE,
+          realQuoteRaw: split ? "110014726" : "110014725" }), {}, mintAccount()] },
+      ]),
+    });
+    return { lane, setSplit: (v) => { split = v; } };
+  };
+
+  const { lane: transient, setSplit } = laneWithSplit(3);
+  await transient.handleNotice(noticeRecord(keyFor(91), { firstSlot: 896 }));
+  setSplit(true);
+  const t1 = await transient.tick();
+  ok("one disagreement blinds the mark instead of selling",
+    t1[0].action === "hold" && t1[0].markX === null && transient.openPositions().length === 1,
+    `action ${t1[0].action}, markX ${JSON.stringify(t1[0].markX)}, ${transient.openPositions().length} open`);
+  const t2 = await transient.tick();
+  ok("two in a row still holds — under the threshold",
+    t2[0].action === "hold" && transient.openPositions().length === 1, `action ${t2[0].action}`);
+  setSplit(false);
+  const t3 = await transient.tick();
+  ok("the endpoints agree again and the position is priced, never having been liquidated",
+    t3[0].action === "hold" && Number.isFinite(t3[0].markX) && transient.openPositions().length === 1,
+    `markX ${t3[0].markX?.toFixed(4)}, ${transient.openPositions().length} open`);
+
+  /* And the streak must RESET, or a lifetime total would eventually sell a healthy
+     position that had merely had a bad afternoon. */
+  setSplit(true);
+  await transient.tick();
+  await transient.tick();
+  ok("...and the streak reset, so two more disagreements do not reach the threshold",
+    transient.openPositions().length === 1, `${transient.openPositions().length} open`);
+
+  const { lane: blind, setSplit: blindSplit } = laneWithSplit(3);
+  await blind.handleNotice(noticeRecord(keyFor(92), { firstSlot: 896 }));
+  blindSplit(true);
+  await blind.tick(); await blind.tick();
+  ok("sustained blindness is NOT ridden out for ever — the third tick leaves",
+    blind.openPositions().length === 1, `${blind.openPositions().length} open before the third`);
+  const out = await blind.tick();
+  ok("...and it exits on the run, not on a price it could not read",
+    out[0].action === "sell" && blind.openPositions().length === 0,
+    `action ${out[0].action}, ${blind.openPositions().length} open`);
+  const row = blind.rows().find((r) => r.mint === keyFor(92));
+  ok("the row says it left on the chain fact, which is what a sustained split IS",
+    /chain fact turned hostile/.test(String(row?.outcome?.reason || "")),
+    String(row?.outcome?.reason || "none").slice(0, 80));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
