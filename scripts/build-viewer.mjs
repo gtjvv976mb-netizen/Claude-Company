@@ -175,6 +175,19 @@ const EXECUTOR_FILES = [
      scope, which makes it a RUNTIME import: an install that fetches this list without it
      dies at boot with a bare ReferenceError, exactly as entry-sizing.mjs would. */
   "network-fee-budget.mjs",
+  /* THE LAUNCH LANE. poller.mjs imports these DYNAMICALLY, inside the SNIPE_LANE branch,
+     so they are inert on an install that never sets the variable — but a dynamic import
+     that 404s is a runtime failure the moment somebody does set it, which is the worst
+     possible time to discover the file was never published. */
+  "snipe-lane.mjs",
+  "snipe-venue-pumpfun.mjs",
+  "snipe-venue.mjs",
+  "snipe-curve.mjs",
+  "snipe-entry.mjs",
+  "snipe-feed.mjs",
+  "snipe-book.mjs",
+  "snipe-shadow.mjs",
+  "snipe-policy.mjs",
   /* Desk-led exits (2026-09-05). The bot no longer carries an exit policy of its own —
      Shrek, call 55: it sold 03:01:42Z on its own normalised stop at -13.5% while the
      desk's determined stop_hit landed 03:10:24Z. When the desk is unreachable the bot

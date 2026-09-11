@@ -29,6 +29,16 @@ const need = ["poller.mjs", "journal.mjs", "jupiter.mjs", "token2022.mjs", "bala
   // sniper lane cannot drift apart on what a fee cap means. jupiter.mjs imports it at
   // module scope, so an install that fetches this list without it dies at boot.
   "network-fee-budget.mjs",
+  // the launch lane: dynamically imported by poller.mjs behind SNIPE_LANE
+  "snipe-lane.mjs",
+  "snipe-venue-pumpfun.mjs",
+  "snipe-venue.mjs",
+  "snipe-curve.mjs",
+  "snipe-entry.mjs",
+  "snipe-feed.mjs",
+  "snipe-book.mjs",
+  "snipe-shadow.mjs",
+  "snipe-policy.mjs",
   // desk-led-v4: the desk's ruler and the mirror evaluator ship with the trading process.
   "dexscreener-consensus.mjs", "desk-mirror.mjs",
   "package.json", "package-lock.json", "install.sh", "macos-launchagent.sh", "macos-release.sh", "launchd-runner.mjs"];
