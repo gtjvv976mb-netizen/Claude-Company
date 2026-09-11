@@ -75,11 +75,31 @@ ok("...and SNIPE_LANE=execute is refused at config parse, before construction", 
     "the environment produced an executing config — poller.mjs would hold it, however briefly");
   console.log("        SNIPE_LANE=execute cannot be parsed into a config at all");
 });
-ok("the venue's buy encoder refuses — no verified layout, no signing", async () => {
-  await assert.rejects(
-    async () => PUMPFUN_VENUE.buildBuy({}),
-    /not verified|refuses/i,
-    "buildBuy did not refuse on an unverified layout");
+/* RE-ANCHORED 2026-09-11. This asserted that the ADAPTER's buildBuy refuses because the
+ * layout was unverified. The layout is verified now — 30 mainnet occurrences re-encoded
+ * index-for-index — so the adapter builds bytes, and keeping the old assertion would have
+ * meant either a dead test or a venue that cannot do the thing it was proved to do.
+ *
+ * The lane-level fence is UNCHANGED and is what this asserts instead, because it was
+ * always the stronger of the two: observeOnlyVenue replaces buyIx, buildBuy and sellIx
+ * with throwers before the lane ever sees the adapter, so an observing lane cannot reach
+ * an encoder even when a working one exists two modules away. That is the property that
+ * survives the layout being proved, and it is the one that matters here. */
+ok("the LANE cannot reach an encoder, even now that a working one exists", () => {
+  const l = lane.createSnipeLane({
+    venue: PUMPFUN_VENUE, readers, control, cfg: lane.snipeLaneConfig({ SNIPE_LANE: "observe" }),
+  });
+  for (const method of ["buyIx", "buildBuy", "sellIx"]) {
+    assert.equal(typeof l.adapter[method], "function", `the facade dropped ${method} entirely`);
+    assert.throws(() => l.adapter[method]({}), (err) => err.clause === "signing_refused",
+      `the lane's ${method} did not refuse`);
+  }
+  /* And the adapter it was built FROM does encode — otherwise the facade would be
+     refusing something that was never there, which proves nothing. */
+  assert.equal(PUMPFUN_VENUE.layoutVerified, true);
+  assert.throws(() => PUMPFUN_VENUE.buildBuy({}), (err) => err.clause !== "signing_refused",
+    "the underlying adapter still refuses like a facade — then this test is vacuous");
+  console.log("        facade refuses buyIx/buildBuy/sellIx while the adapter beneath them encodes");
 });
 ok("the lane reports zero signed, zero sent, zero keypairs — as fields, not comments", () => {
   /* THIS ASSERTION SPENT ITS WHOLE LIFE ASSERTING NOTHING, and printed ok every time.

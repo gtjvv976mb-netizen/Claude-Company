@@ -48,7 +48,7 @@ import {
   PUMPFUN_LAYOUT_EVIDENCE, LAYOUT_UNVERIFIED_REASON, PumpfunVenueError,
   bondingCurveAddress, globalAddress, decodeBondingCurve, curveFromAccount, decodeGlobal,
   decodeCreateEvent, decodeTradeEvent, eventsFromLogs, noticesFromLogs,
-  quoteExactIn, quoteExactOut, sellExactIn, buyIx, buildBuy, sellIx, decodeBuyIx,
+  quoteExactIn, quoteExactOut, sellExactIn, buyIx, buildBuy, sellIx, decodeBuyIx, PUMPFUN_IX,
   exitRoute, isComplete, quoteReserveLamports, watch,
 } from "./snipe-venue-pumpfun.mjs";
 
@@ -574,29 +574,31 @@ ok("one malformed line does not blind the batch to a good launch beside it", () 
   console.log(`         broken line + real create -> ${got.length} notice (${got[0].mint.slice(0, 10)}…)`);
 });
 
-/* ── 11. THE THREE REFUSALS — THE POINT OF THE WHOLE FILE ──────────────────────────── */
-console.log("\n11. NOTHING HERE CAN ENCODE AN INSTRUCTION");
-ok("buyIx, buildBuy, sellIx and decodeBuyIx all refuse with layout_unverified", () => {
-  for (const [name, fn] of [["buyIx", buyIx], ["buildBuy", buildBuy], ["sellIx", sellIx],
-    ["decodeBuyIx", decodeBuyIx]]) {
-    const err = throws(() => fn({ curve: {}, mint: LAUNCH_MINT, wallet: "x", baseOutRaw: 1n, maxQuoteInRaw: 1n }));
+/* ── 11. WHAT THE ENCODERS REFUSE, NOW THAT THEY ENCODE ────────────────────────────── */
+/* RE-ANCHORED 2026-09-11. This section asserted that buyIx, buildBuy, sellIx and
+ * decodeBuyIx ALL refuse with layout_unverified, which was the correct assertion while the
+ * account order was unknown. It is now known: thirty mainnet occurrences re-encode exactly
+ * (see the round-trip block below), and the on-chain IDL names every position.
+ *
+ * The refusals did not go away — they moved to the things that are still genuinely unsafe,
+ * and there are more of them than there were. A missing argument, a stale creator, an
+ * unauthorised fee recipient and a destination the signer does not own are each refused by
+ * name. What is gone is the blanket "this venue cannot encode anything". */
+console.log("\n11. THE ENCODERS REFUSE WHAT IS STILL UNSAFE");
+ok("an encoder called with nothing at all still refuses, rather than emitting a guess", () => {
+  for (const [name, fn] of [["buyIx", buyIx], ["buildBuy", buildBuy], ["sellIx", sellIx]]) {
+    const err = throws(() => fn());
     assert.ok(err instanceof PumpfunVenueError, `${name} threw ${err && err.name}`);
-    assert.equal(err.clause, "layout_unverified", `${name} clause=${err.clause}`);
-    assert.equal(err.detail.method, name, `${name} detail.method=${err.detail.method}`);
-    assert.match(err.message, /ENTRY REFUSAL, not a best guess/, `${name} message=${err.message}`);
+    assert.ok(["account_missing", "arg_invalid", "stale_curve"].includes(err.clause),
+      `${name} refused with ${err.clause}, which is not one of the named input clauses`);
     console.log(`         ${name.padEnd(12)} -> ${err.clause}`);
   }
 });
-ok("the refusal names the real instruction discriminators it will NOT emit", () => {
-  const err = throws(() => buyIx());
-  assert.match(LAYOUT_UNVERIFIED_REASON, /b817ee6167c5d33d/, "BuyV2 discriminator missing from the reason");
-  assert.match(LAYOUT_UNVERIFIED_REASON, /5df6823ce7e940b2/, "SellV2 discriminator missing from the reason");
-  assert.equal(err.detail.evidence.buyV2.accountCount, 27, `buyV2 accounts=${err.detail.evidence.buyV2.accountCount}`);
-  assert.equal(err.detail.evidence.sellV2.accountCount, 26, `sellV2 accounts=${err.detail.evidence.sellV2.accountCount}`);
-  assert.ok(err.detail.unproved.length >= 1, "the refusal lists nothing as unproved");
-  console.log(`         BuyV2 ${err.detail.evidence.buyV2.discriminator} (${err.detail.evidence.buyV2.accountCount} accounts),` +
-    ` SellV2 ${err.detail.evidence.sellV2.discriminator} (${err.detail.evidence.sellV2.accountCount})`);
-  console.log(`         unproved: ${err.detail.unproved.join("; ")}`);
+ok("the discriminators it emits are the ones the tape proved, twice over", () => {
+  /* Each equals sha256("global:<name>")[0..8] AND the program logs that name. */
+  assert.equal(PUMPFUN_IX.buyV2.toString("hex"), "b817ee6167c5d33d");
+  assert.equal(PUMPFUN_IX.sellV2.toString("hex"), "5df6823ce7e940b2");
+  console.log(`         buy_v2 ${PUMPFUN_IX.buyV2.toString("hex")} · sell_v2 ${PUMPFUN_IX.sellV2.toString("hex")}`);
 });
 ok("the derived legacy discriminator is NOT the one the live program runs", () => {
   const legacyBuy = crypto.createHash("sha256").update("global:buy").digest().subarray(0, 8).toString("hex");
@@ -608,24 +610,46 @@ ok("the derived legacy discriminator is NOT the one the live program runs", () =
   console.log(`         global:buy    ${legacyBuy}  <- what an IDL reader would have emitted`);
   console.log(`         global:buy_v2 ${liveBuy}  <- what the chain actually ran`);
 });
-ok("the adapter declares layoutVerified false and offers NO layout proof", () => {
-  assert.equal(PUMPFUN_VENUE.layoutVerified, false, `layoutVerified=${PUMPFUN_VENUE.layoutVerified}`);
-  assert.equal(PUMPFUN_VENUE.layoutProof, undefined, "the adapter carries a layoutProof");
+/* RE-ANCHORED 2026-09-11, from "declares layoutVerified false and offers NO proof".
+   The account order was unknown when that was written and is known now; what this asserts
+   instead is that the claim is BACKED — a boolean anyone can flip is not evidence, so the
+   proof object must satisfy the contract's own shape and name the test that reproduces it. */
+ok("the adapter declares layoutVerified TRUE and backs it with a proof the contract accepts", () => {
+  assert.equal(PUMPFUN_VENUE.layoutVerified, true, `layoutVerified=${PUMPFUN_VENUE.layoutVerified}`);
+  const proof = PUMPFUN_VENUE.layoutProof;
+  assert.ok(proof, "layoutVerified is true with no proof — that is a claim, not evidence");
+  assert.equal(proof.cluster, "mainnet-beta", "a devnet proof is not the program the money meets");
+  assert.equal(proof.programId, PUMPFUN_PROGRAM_ID);
+  assert.match(proof.provedBy, /test-snipe-venue-pumpfun\.mjs/,
+    "the proof must name the test that reproduces it, so a reviewer can go and watch it happen");
+  const covered = new Set(proof.roundTrips.map((rt) => rt.method));
+  assert.deepEqual([...covered].sort(), ["buyIx", "decodeBuyIx", "sellIx"],
+    "a buy layout proved while the sell layout is guessed is a position with no door");
   assert.ok(Object.isFrozen(PUMPFUN_VENUE), "the adapter is not frozen — layoutVerified could be set at runtime");
-  assert.equal(PUMPFUN_VENUE.layoutEvidence.unproved.includes("BuyV2 / SellV2 account order"), true,
-    "the account order is not listed as unproved");
-  console.log(`         layoutVerified ${PUMPFUN_VENUE.layoutVerified}, layoutProof ${PUMPFUN_VENUE.layoutProof},` +
-    ` adapter frozen ${Object.isFrozen(PUMPFUN_VENUE)}`);
+  console.log(`         layoutVerified ${PUMPFUN_VENUE.layoutVerified}, ${proof.roundTrips.length} round trips on ${proof.cluster}`);
 });
-ok("THE MODULE NEVER WRITES A BYTE — it is structurally incapable of encoding", () => {
+/* RE-ANCHORED 2026-09-11, and this one is the important re-anchoring.
+ *
+ * It used to forbid Buffer.alloc, Buffer.concat and .write* — "structurally incapable of
+ * encoding" — which was a true and useful property while the layout was unproved. Writing
+ * instruction bytes is now this module's JOB, so keeping that list would have meant either
+ * a dead test or a venue that cannot do the thing it was verified to do.
+ *
+ * The property that still matters, and that was always the real one, is NARROWER AND
+ * UNCHANGED: this module may describe a transaction and may never authorise one. No
+ * keypair, no signing, no sending, no network, no filesystem, no randomness. An adapter
+ * that can build bytes but cannot sign them is exactly as safe as one that can do neither,
+ * and it is useful. */
+ok("IT MAY DESCRIBE A TRANSACTION AND MAY NEVER AUTHORISE ONE", () => {
   const src = fs.readFileSync(new URL("./snipe-venue-pumpfun.mjs", import.meta.url), "utf8");
   const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-  for (const forbidden of [/\.write[A-Z]/, /Buffer\.alloc/, /Buffer\.concat/, /TransactionInstruction/,
-    /Keypair/, /sendTransaction/, /sendRawTransaction/, /partialSign/, /\bsignTransaction\b/,
-    /Math\.random/, /node:fs/, /\bfetch\(/])
+  for (const forbidden of [/Keypair/, /sendTransaction/, /sendRawTransaction/, /partialSign/,
+    /\bsignTransaction\b/, /\bsign\(/, /secretKey/, /Math\.random/, /node:fs/, /\bfetch\(/])
     assert.doesNotMatch(code, forbidden, `the adapter reaches ${forbidden}`);
-  console.log(`         no write*, no Buffer.alloc/concat, no TransactionInstruction, no Keypair,`);
-  console.log(`         no send*, no sign*, no randomness, no fs, no fetch`);
+  /* And it must still be building bytes, or the re-anchoring above silently disabled the
+     encoder rather than re-scoping the rule. */
+  assert.match(code, /Buffer\.concat/, "the encoder stopped building instruction data");
+  console.log(`         encodes: yes · signs, sends, fetches, reads disk, or rolls dice: no`);
 });
 ok("and it imports nothing from the desk's exit path", () => {
   const src = fs.readFileSync(new URL("./snipe-venue-pumpfun.mjs", import.meta.url), "utf8");
@@ -636,7 +660,7 @@ ok("and it imports nothing from the desk's exit path", () => {
   console.log(`         no trade-policy.mjs, strategy.mjs or desk-mirror.mjs import`);
 });
 
-/* ── 12. THE VENUE CONTRACT — OBSERVE YES, EXECUTE NO ──────────────────────────────── */
+/* ── 12. THE VENUE CONTRACT — BOTH MODES, AND WHY ─────────────────────────────────── */
 console.log("\n12. THE CONTRACT — the fence, run against this adapter");
 ok("every required method is present, so the contract fails on the LAYOUT and not on shape", () => {
   const missing = REQUIRED_VENUE_METHODS.filter((m) => typeof PUMPFUN_VENUE[m] !== "function");
@@ -650,25 +674,38 @@ ok("observe is admissible", () => {
   assert.equal(v.detail.quoteOracle, PYTH_SOL_USD_CACHE_SOURCE, `oracle=${v.detail.quoteOracle}`);
   console.log(`         observe ok — quoted in ${v.detail.quoteSymbol} against ${v.detail.quoteOracle}`);
 });
-ok("EXECUTE IS REFUSED, on the layout clause and no other", () => {
+/* RE-ANCHORED 2026-09-11 from "EXECUTE IS REFUSED". It is certified now, and the useful
+   assertion is that the certification is EARNED: strip the proof and it refuses again. */
+ok("EXECUTE IS CERTIFIED — and only because the proof is there", () => {
   const v = venueContract(PUMPFUN_VENUE, { execute: true });
-  assert.equal(v.ok, false, "the contract certified an unverified venue for EXECUTE");
-  assert.equal(v.clause, "layout_unverified", `clause=${v.clause}`);
-  console.log(`         execute -> ${v.clause}`);
-  console.log(`         "${v.detail.message.slice(0, 96)}…"`);
+  assert.equal(v.ok, true, `execute refused with ${v.clause}: ${v.detail.message}`);
+  /* The counterfactual is the whole test. A certification that survives having its
+     evidence removed was never reading the evidence. */
+  const stripped = Object.freeze({ ...PUMPFUN_VENUE, layoutProof: undefined });
+  const s2 = venueContract(stripped, { execute: true });
+  assert.equal(s2.ok, false, "the contract certified a venue whose proof had been deleted");
+  assert.equal(s2.clause, "layout_proof_missing", `clause=${s2.clause}`);
+  const unverified = Object.freeze({ ...PUMPFUN_VENUE, layoutVerified: false });
+  assert.equal(venueContract(unverified, { execute: true }).clause, "layout_unverified");
+  console.log(`         execute -> certified; without the proof -> ${s2.clause}`);
 });
-ok("registerVenue accepts it for observe and throws for execute", () => {
+ok("registerVenue accepts it for BOTH modes now, and still refuses an unproved one", () => {
   const reg = createVenueRegistry();
   const rec = registerVenue(PUMPFUN_VENUE, { registry: reg });
   assert.equal(rec.adapter.id, PUMPFUN_VENUE_ID, `registered as ${rec.adapter.id}`);
   const reg2 = createVenueRegistry();
-  const err = throws(() => registerVenue(PUMPFUN_VENUE, { execute: true, registry: reg2 }));
+  const rec2 = registerVenue(PUMPFUN_VENUE, { execute: true, registry: reg2 });
+  assert.equal(rec2.adapter.id, PUMPFUN_VENUE_ID);
+  /* The registry must still be a gate, not a formality. */
+  const reg3 = createVenueRegistry();
+  const err = throws(() => registerVenue(Object.freeze({ ...PUMPFUN_VENUE, layoutVerified: false }),
+    { execute: true, registry: reg3 }));
   assert.ok(err instanceof VenueContractError, `threw ${err && err.name}`);
   assert.equal(err.clause, "layout_unverified", `clause=${err.clause}`);
-  assert.equal(reg2.size, 0, `a refused execute registration still stored ${reg2.size} venue(s)`);
-  console.log(`         observe: registered "${rec.adapter.id}"; execute: ${err.clause}, registry left empty`);
+  assert.equal(reg3.size, 0, `a refused execute registration still stored ${reg3.size} venue(s)`);
+  console.log(`         observe and execute both registered; an unproved twin: ${err.clause}, registry left empty`);
 });
-ok("venueFor matches on the account owner, and hands back NOTHING for execute", () => {
+ok("venueFor matches on the account owner and now serves execute too", () => {
   const reg = createVenueRegistry();
   registerVenue(PUMPFUN_VENUE, { registry: reg });
   const infos = [{ owner: PUMPFUN_PROGRAM_ID, data: LIVE() }, null];
@@ -676,10 +713,16 @@ ok("venueFor matches on the account owner, and hands back NOTHING for execute", 
   assert.equal(obs.ok, true, `observe lookup refused: ${obs.clause}`);
   assert.equal(obs.venue.id, PUMPFUN_VENUE_ID, `matched ${obs.venue && obs.venue.id}`);
   const exe = venueFor(LIVE_CURVE_MINT, infos, { execute: true, registry: reg });
-  assert.equal(exe.ok, false, "the execute lookup succeeded");
-  assert.equal(exe.venue, null, "a refused execute lookup handed back an adapter to call buyIx on");
-  assert.equal(exe.clause, "layout_unverified", `clause=${exe.clause}`);
-  console.log(`         observe -> ${obs.venue.id}; execute -> ${exe.clause}, venue ${exe.venue}`);
+  assert.equal(exe.ok, true, `the execute lookup refused: ${exe.clause}`);
+  assert.equal(exe.venue.id, PUMPFUN_VENUE_ID, "the execute lookup handed back no adapter");
+  /* And a registry holding only an UNPROVED twin still hands back nothing for execute, so
+     the lookup is reading the contract rather than the registry's optimism. */
+  const reg2 = createVenueRegistry();
+  registerVenue(Object.freeze({ ...PUMPFUN_VENUE, layoutVerified: false }), { registry: reg2 });
+  const denied = venueFor(LIVE_CURVE_MINT, infos, { execute: true, registry: reg2 });
+  assert.equal(denied.ok, false, "an unproved venue was handed back for execute");
+  assert.equal(denied.venue, null, "a refused execute lookup handed back an adapter to call buyIx on");
+  console.log(`         observe -> ${obs.venue.id}; execute -> ${exe.venue.id}; unproved twin -> ${denied.clause}`);
 });
 ok("a mint whose accounts belong to another program matches no venue", () => {
   const reg = createVenueRegistry();
@@ -881,6 +924,172 @@ await watchChecks().catch((error) => { console.log("  FAIL  watch()\n         ",
       assert.equal(normal.quoteRefusal, null);
       assert.ok(normal.userQuoteRaw > 0n, `${name} userQuoteRaw = ${normal.userQuoteRaw}`);
     }
+  });
+}
+
+/* ── THE ROUND TRIP THAT EARNS layoutVerified ──────────────────────────────────────── */
+/* Thirty real mainnet occurrences, re-encoded from (mint, signer, on-chain state) and
+ * compared index by index against the account list the chain actually accepted. This is
+ * the whole basis for layoutVerified: true. It is not a claim in a comment — it runs on
+ * every suite, and a drift breaks the build instead of a wallet.
+ *
+ * The file's own warning is the reason it is shaped this way: "a wrong discriminator or a
+ * transposed account in a hand-built buy does not refuse — it signs, it lands, and the
+ * money goes somewhere nobody planned." There is no quote to check against. This IS the
+ * check. */
+{
+  const cases = JSON.parse(fs.readFileSync(new URL("./fixtures/pumpfun-v2-encode-cases.json", import.meta.url), "utf8"));
+  const build = (c, over = {}) => {
+    const args = {
+      mint: c.mint, user: c.user,
+      curve: { creator: c.creator, quoteMint: c.quoteMint, complete: false },
+      curveReadSlot: c.slot, buildingForSlot: c.slot,
+      feeRecipient: c.feeRecipient, buybackFeeRecipient: c.buybackFeeRecipient,
+      baseTokenProgram: c.baseTokenProgram, quoteTokenProgram: c.quoteTokenProgram,
+      associatedBaseUser: c.associatedBaseUser, associatedBaseUserOwner: c.user,
+      globalFeeRecipients: cases.globalFeeRecipients,
+      amountRaw: 1n, maxQuoteInRaw: 2n, minQuoteOutRaw: 2n, ...over,
+    };
+    return c.side === "buy" ? buyIx(args) : sellIx(args);
+  };
+
+  ok("every one of the 30 mainnet cases re-encodes to the EXACT account list the chain took", () => {
+    let matched = 0, buys = 0, sells = 0, nonSol = 0;
+    for (const c of cases.cases) {
+      const mine = build(c).keys.map((k) => k.pubkey);
+      assert.equal(mine.length, c.accounts.length,
+        `${c.side} ${c.signature.slice(0, 12)}… produced ${mine.length} accounts, the chain took ${c.accounts.length}`);
+      for (let i = 0; i < mine.length; i++) {
+        assert.equal(mine[i], c.accounts[i],
+          `${c.side} ${c.signature.slice(0, 12)}… index ${i}: encoded ${mine[i]}, chain had ${c.accounts[i]}`);
+      }
+      matched++;
+      if (c.side === "buy") buys++; else sells++;
+      if (c.quoteMint) nonSol++;
+    }
+    assert.equal(matched, 30, `${matched} cases — the fixture changed size`);
+    console.log(`         ${matched}/${cases.cases.length} exact · ${buys} buy_v2, ${sells} sell_v2 · ${nonSol} on non-SOL-quoted curves`);
+  });
+
+  ok("the two sides differ by exactly one account, and it is global_volume_accumulator", () => {
+    /* buy_v2 carries it at 19 and sell_v2 does not, so every index after 18 shifts by one.
+       Asserted from the encoder's own output because an off-by-one in that tail is the
+       single easiest way to transpose a fee vault and a volume accumulator. */
+    /* Built from ONE case on both sides, so the two lists differ only by the instruction
+       shape and not by any input — otherwise a difference could be a different mint. */
+    const c = cases.cases.find((x) => x.side === "buy");
+    const asBuy = build(c).keys.map((k) => k.pubkey);
+    const asSell = build({ ...c, side: "sell" }).keys.map((k) => k.pubkey);
+    assert.equal(asBuy.length, 27);
+    assert.equal(asSell.length, 26);
+    for (let i = 0; i <= 18; i++)
+      assert.equal(asSell[i], asBuy[i], `the two sides diverge before index 19, at ${i}`);
+    for (let i = 19; i < 26; i++)
+      assert.equal(asSell[i], asBuy[i + 1],
+        `sell index ${i} is not buy index ${i + 1} — the one-account tail shift is wrong, ` +
+        "which is the easiest way to transpose a fee vault and a volume accumulator");
+    console.log(`         buy 27 · sell 26 · the extra is ${asBuy[19].slice(0, 10)}… (global_volume_accumulator)`);
+  });
+
+  ok("the payload is 24 bytes and decodes back to the arguments that made it", () => {
+    const c = cases.cases.find((x) => x.side === "buy");
+    const ix = build(c, { amountRaw: 123_456_789n, maxQuoteInRaw: 987_654_321n });
+    assert.equal(ix.data.length, 24);
+    const back = decodeBuyIx(ix);
+    assert.equal(back.instruction, "buy_v2");
+    assert.equal(back.amountRaw, 123_456_789n);
+    assert.equal(back.maxQuoteInRaw, 987_654_321n);
+    assert.equal(back.minQuoteOutRaw, null, "a buy has no floor — naming it one invites the opposite trade");
+    const sell = build(cases.cases.find((x) => x.side === "sell"), { amountRaw: 5n, minQuoteOutRaw: 7n });
+    const sback = decodeBuyIx(sell);
+    assert.equal(sback.instruction, "sell_v2");
+    assert.equal(sback.minQuoteOutRaw, 7n);
+    assert.equal(sback.maxQuoteInRaw, null);
+  });
+
+  ok("the decoder reads the BYTES, not the arguments it was handed", () => {
+    /* A decoder that trusted the caller would confirm any mistake the caller made, which
+       is the whole failure spec gate 20 exists to catch. Flip one byte; it must be seen. */
+    const ix = build(cases.cases.find((x) => x.side === "buy"), { amountRaw: 1n, maxQuoteInRaw: 1n });
+    const tampered = Buffer.from(ix.data); tampered[8] = 0xff;
+    assert.equal(decodeBuyIx({ data: tampered }).amountRaw, 255n);
+    const wrongDisc = Buffer.from(ix.data); wrongDisc[0] ^= 0xff;
+    assert.throws(() => decodeBuyIx({ data: wrongDisc }), /neither buy_v2 nor sell_v2/);
+    assert.throws(() => decodeBuyIx({ data: ix.data.subarray(0, 23) }), /24 bytes/);
+  });
+
+  /* ── THE THREE REFUSALS, each a measured way to lose money without an error ───────── */
+
+  ok("A STALE CREATOR IS REFUSED — the race is real and this is its proof", () => {
+    /* Measured: mint DNLwPEp8… was created at slot 446099885 and
+       migrate_bonding_curve_creator rewrote BondingCurve.creator at 446099886 — ONE SLOT
+       later, which is exactly a sniper's window. The two creators produce two different
+       vaults, and a transaction carrying the wrong one is a valid pubkey pointing at the
+       wrong account. This case mis-encoded by two positions on the first run, because the
+       verification sweep had recorded the POST-migration creator for a PRE-migration
+       transaction: the encoder was right and the input was from the future. */
+    const race = cases.creatorRace;
+    const c = cases.cases.find((x) => x.signature.startsWith("5GzeJnAbRL"));
+    assert.ok(race && c, "the creator-race case is no longer in the fixture");
+    const live = build(c).keys.map((k) => k.pubkey);
+    assert.equal(live[16], race.preMigrationCreatorVault,
+      "the case no longer encodes the vault that was live at its slot");
+    /* The same mint, the same everything, with the creator read one slot too late: a
+       DIFFERENT vault, silently. That is the whole hazard in two lines. */
+    const stale = build(c, { curve: { creator: race.postMigrationCreator.split(" ")[0], quoteMint: c.quoteMint } })
+      .keys.map((k) => k.pubkey);
+    assert.notEqual(stale[16], live[16],
+      "the two creator eras produced the SAME vault — then the race would not matter, and " +
+      "this fixture no longer demonstrates anything");
+    assert.equal(stale[16], race.postMigrationCreatorVault);
+    console.log(`         slot ${c.slot}: ${live[16].slice(0, 10)}… · after the ${race.migrateSlot} migration: ${stale[16].slice(0, 10)}…`);
+  });
+
+  ok("...and building without stating WHEN the curve was read is refused outright", () => {
+    const c = cases.cases.find((x) => x.side === "buy");
+    assert.throws(() => build(c, { curveReadSlot: undefined }), /curveReadSlot is required/);
+    assert.throws(() => build(c, { curveReadSlot: c.slot - 1, buildingForSlot: c.slot }),
+      /re-read the curve rather than assume the creator held still/);
+  });
+
+  ok("a fee recipient outside the Global account's sets is refused, naming the set", () => {
+    const c = cases.cases.find((x) => x.side === "buy");
+    const stranger = "So11111111111111111111111111111111111111112";
+    assert.throws(() => build(c, { feeRecipient: stranger }), /is not one of the 16/);
+    assert.throws(() => build(c, { buybackFeeRecipient: stranger }), /is not one of the 8/);
+    assert.throws(() => build(c, { buybackFeeRecipient: stranger }), /error 6057/);
+  });
+
+  ok("a destination the signer does not own is refused — the program will NOT refuse it", () => {
+    /* Proven on chain: two top-level buys paid from one wallet and delivered the tokens to
+       accounts owned by two OTHER wallets, with no error. The position can be handed away
+       silently, so this is the only place it can be caught. */
+    const c = cases.cases.find((x) => x.side === "buy");
+    assert.throws(() => build(c, { associatedBaseUserOwner: "11111111111111111111111111111111" }),
+      /not by the signer/);
+    assert.throws(() => build(c, { associatedBaseUserOwner: "11111111111111111111111111111111" }),
+      /loses the position silently/);
+  });
+
+  ok("the Global fee-recipient sets decode to 16 and 8 at the IDL's own offsets", () => {
+    assert.equal(cases.globalFeeRecipients.feeRecipients.length, 16);
+    assert.equal(cases.globalFeeRecipients.buybackFeeRecipients.length, 8);
+    /* And every observed recipient across all 30 cases is a member — which is what makes
+       the membership check a real gate rather than a formality. */
+    for (const c of cases.cases) {
+      assert.ok(cases.globalFeeRecipients.feeRecipients.includes(c.feeRecipient),
+        `${c.signature.slice(0, 12)}… used a fee recipient outside the set`);
+      assert.ok(cases.globalFeeRecipients.buybackFeeRecipients.includes(c.buybackFeeRecipient),
+        `${c.signature.slice(0, 12)}… used a buyback recipient outside the set`);
+    }
+  });
+
+  ok("LEGACY buy is still not emitted — 18 accounts, index 16 unnamed across 120 samples", () => {
+    /* The exclusion is measured, not cautious: 47 distinct values at index 16, none
+       reproduced by ~200k tested (program, seed) combinations. buyIx emits buy_v2. */
+    const ix = build(cases.cases.find((x) => x.side === "buy"));
+    assert.equal(ix.keys.length, 27, "buyIx emitted something other than the 27-account buy_v2");
+    assert.equal(ix.data.subarray(0, 8).toString("hex"), "b817ee6167c5d33d");
   });
 }
 

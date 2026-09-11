@@ -1,0 +1,318 @@
+{
+ "capturedAt": "2026-09-11T07:53:18.168Z",
+ "cluster": "mainnet-beta",
+ "rpcEndpoint": "https://api.mainnet-beta.solana.com  (public endpoint, READ ONLY: getSignaturesForAddress / getTransaction / getAccountInfo / getMultipleAccounts. Nothing was signed, sent or simulated.)",
+ "programId": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+ "instruction": "buy  (the LEGACY buy, not buy_v2 and not buy_exact_sol_in)",
+ "discriminatorHex": "66063d1201daebea",
+ "discriminatorEvidence": "sha256(\"global:buy\")[0..8]; the program logs \"Instruction: Buy\" and every decoded TradeEvent in all 120 samples carries ix_name=\"buy\"",
+ "idl": {
+  "source": "executor/fixtures/pumpfun-idl.json (pulled from the on-chain IDL account)",
+  "declaredAccountCount": 16
+ },
+ "method": "getSignaturesForAddress on the program, then getTransaction{encoding:jsonParsed,maxSupportedTransactionVersion:0}; EVERY instruction whose programId is the pump program and whose first 8 data bytes are 66063d1201daebea was decoded, top-level and inner alike. For each sample every IDL position was recomputed from (mint, signer, on-chain program state) and compared byte-for-byte against the observed pubkey.",
+ "samples": {
+  "total": 120,
+  "tapeA": {
+   "n": 106,
+   "slots": "446084836-446087660",
+   "utc": "2026-09-11T06:07:34Z - 06:22:26Z",
+   "source": "414 program transactions"
+  },
+  "tapeB": {
+   "n": 14,
+   "slots": "446098164-446098169",
+   "utc": "2026-09-11T07:17:37Z - 07:17:39Z",
+   "source": "70 program transactions pulled independently ~55 min later; ZERO overlapping signatures and ZERO overlapping mints with tape A"
+  },
+  "topLevel": 17,
+  "distinctSigners": 46,
+  "distinctMints": 40,
+  "topLevelDistinctSigners": 15,
+  "topLevelDistinctMints": 10
+ },
+ "observedAccountCounts": {
+  "18": 120
+ },
+ "globalAccountRead": {
+  "address": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+  "fee_recipient": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+  "fee_recipients": [
+   "7VtfL8fvgNfhz17qKRMjzQEXgbdpnHHHQRh54R9jP2RJ",
+   "7hTckgnGnLQR6sdH7YkqFTAA7VwTfYFaZ6EhEsU3saCX",
+   "9rPYyANsfQZw3DnDmKE3YCQF5E8oD89UXoHn9JFEhJUz",
+   "AVmoTthdrX6tKt4nDjco2D775W2YK3sDhxPcMmzUAmTY",
+   "CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM",
+   "FWsW1xNtWscwNmKv6wVsU1iTzRN6wmmk3MjxRP5tT7hz",
+   "G5UZAVbAf46s7cKWoyKu8kYTip9DGTpbLZ2qa9Aq69dP"
+  ],
+  "reserved_fee_recipient": "GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS",
+  "reserved_fee_recipients": [
+   "4budycTjhs9fD6xw62VBducVTNgMgJJ5BgtKq7mAZwn6",
+   "8SBKzEQU4nLSzcwF4a74F2iaUDQyTfjGndn6qUWBnrpR",
+   "4UQeTP1T39KZ9Sfxzo3WR5skgsaP6NZa87BAkuazLEKH",
+   "8sNeir4QsLsJdYpc9RZacohhK1Y5FLU3nC5LXgYB4aa6",
+   "Fh9HmeLNUMVCvejxCtCL2DbYaRyBFVJ5xrWkLnMH6fdk",
+   "463MEnMeGyJekNZFQSTUABBEbLnvMTALbT6ZmsxAbAdq",
+   "6AUH3WEHucYZyC61hqpqYUWVto5qA5hjHuNQ32GNnNxA"
+  ],
+  "buyback_fee_recipients": [
+   "5YxQFdt3Tr9zJLvkFccqXVUwhdTWJQc1fFg2YPbxvxeD",
+   "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+   "GXPFM2caqTtQYC2cJ5yJRi9VDkpsYZXzYdwYpGnLmtDL",
+   "3BpXnfJaUTiwXnJNe7Ej1rcbzqTTQUvLShZaWazebsVR",
+   "5cjcW9wExnJJiqgLjq7DEG75Pm6JBgE1hNv4B2vHXUW6",
+   "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+   "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+   "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW"
+  ],
+  "buyback_basis_points": "5000",
+  "whitelist_pda": "BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFezduWbtm2de6s"
+ },
+ "positions": [
+  {
+   "index": 0,
+   "idlName": "global",
+   "derivable": true,
+   "howDerived": "findProgramAddress([\"global\"], pumpProgram) — constant 4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+   "matched": 120,
+   "mismatched": 0,
+   "mismatches": []
+  },
+  {
+   "index": 1,
+   "idlName": "fee_recipient",
+   "derivable": true,
+   "howDerived": "READ from the Global account: any member of {fee_recipient} U fee_recipients[7] U {reserved_fee_recipient} U reserved_fee_recipients[7]. TradeEvent.feeRecipient names the one that was used.",
+   "matched": 120,
+   "mismatched": 0,
+   "mismatches": []
+  },
+  {
+   "index": 2,
+   "idlName": "mint",
+   "derivable": true,
+   "howDerived": "input (the coin you are buying)",
+   "matched": 120,
+   "mismatched": 0,
+   "mismatches": []
+  },
+  {
+   "index": 3,
+   "idlName": "bonding_curve",
+   "derivable": true,
+   "howDerived": "findProgramAddress([\"bonding-curve\", mint], pumpProgram)",
+   "matched": 120,
+   "mismatched": 0,
+   "mismatches": []
+  },
+  {
+   "index": 4,
+   "idlName": "associated_bonding_curve",
+   "derivable": true,
+   "howDerived": "ATA(bonding_curve, token_program, mint) under ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+   "matched": 120,
+   "mismatched": 0,
+   "mismatches": []
+  },
+  {
+   "index": 5,
+   "idlName": "associated_user",
+   "derivable": true,
+   "howDerived": "ATA(user, token_program, mint). NOT enforced by the program — see warnings.",
+   "matched": 118,
+   "mismatched": 2,
+   "mismatches": [
+    {
+     "signature": "67RZW5cPDh1ku6ZBvEF8r66apvFGRbQKPyL9qe47WqzRTC6aGbzbuzQm5YbyQN4WA6p6o2yqQhcz5yfCdWbXaA25",
+     "tape": "B",
+     "expected": "J7Zo3hH7R1yCtSBbNS6raM5Wi9usz9wqaekRJbicuouH",
+     "observed": "EiUhYsDhvHrp7ihkFFbhm4cKPZUszUMgPxTD7JdPenBg"
+    },
+    {
+     "signature": "mFFetn2nkN3Tx3GdUKYP1oDRZtp1NubUtDRe7cLATWk8GrQQP2Gnwthvr19C6r291Pn7ttRPJRgpKnxwjAxYSr5",
+     "tape": "B",
+     "expected": "J7Zo3hH7R1yCtSBbNS6raM5Wi9usz9wqaekRJbicuouH",
+     "observed": "6E67GQXHge7VpNhwpJWUY3SQE94jqRRRBTCFsYW43EEv"
+    }
+   ]
+  },
+  {
+   "index": 6,
+   "idlName": "user",
+   "derivable": true,
+   "howDerived": "the signer (the only signer)",
+   "matched": 120,
+   "mismatched": 0,
+   "mismatches": []
+  },
+  {
+   "index": 7,
+   "idlName": "system_program",
+   "derivable": true,
+   "howDerived": "constant 11111111111111111111111111111111",
+   "matched": 120,
+   "mismatched": 0,
+   "mismatches": []
+  },
+  {
+   "index": 8,
+   "idlName": "token_program",
+   "derivable": true,
+   "howDerived": "READ: the owner program of the mint account (Token-2022 on 118/120 samples, legacy SPL on 2)",
+   "matched": 120,
+   "mismatched": 0,
+   "mismatches": []
+  },
+  {
+   "index": 9,
+   "idlName": "creator_vault",
+   "derivable": true,
+   "howDerived": "findProgramAddress([\"creator-vault\", BondingCurve.creator], pumpProgram) — creator READ from the bonding-curve account (== TradeEvent.creator in 120/120)",
+   "matched": 120,
+   "mismatched": 0,
+   "mismatches": []
+  },
+  {
+   "index": 10,
+   "idlName": "event_authority",
+   "derivable": true,
+   "howDerived": "findProgramAddress([\"__event_authority\"], pumpProgram) — constant Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+   "matched": 120,
+   "mismatched": 0,
+   "mismatches": []
+  },
+  {
+   "index": 11,
+   "idlName": "program",
+   "derivable": true,
+   "howDerived": "constant 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+   "matched": 120,
+   "mismatched": 0,
+   "mismatches": []
+  },
+  {
+   "index": 12,
+   "idlName": "global_volume_accumulator",
+   "derivable": true,
+   "howDerived": "findProgramAddress([\"global_volume_accumulator\"], pumpProgram) — constant Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+   "matched": 120,
+   "mismatched": 0,
+   "mismatches": []
+  },
+  {
+   "index": 13,
+   "idlName": "user_volume_accumulator",
+   "derivable": true,
+   "howDerived": "findProgramAddress([\"user_volume_accumulator\", user], pumpProgram)",
+   "matched": 120,
+   "mismatched": 0,
+   "mismatches": []
+  },
+  {
+   "index": 14,
+   "idlName": "fee_config",
+   "derivable": true,
+   "howDerived": "findProgramAddress([\"fee_config\", pumpProgram], feeProgram) — constant 8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+   "matched": 120,
+   "mismatched": 0,
+   "mismatches": []
+  },
+  {
+   "index": 15,
+   "idlName": "fee_program",
+   "derivable": true,
+   "howDerived": "constant pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+   "matched": 120,
+   "mismatched": 0,
+   "mismatches": []
+  }
+ ],
+ "accountsBeyondTheIdl": {
+  "index16": {
+   "idlName": "(none - the IDL declares only 16 accounts)",
+   "identified": false,
+   "writableObserved": {
+    "readOnly": 116,
+    "writable": 4
+   },
+   "lamportDelta": "0 in 17/17 top-level samples - it never gains or loses lamports",
+   "existsOnChain": "NO. getMultipleAccounts returned null for all 47 distinct values.",
+   "onCurve": "NO - every value is off-curve, i.e. a program-derived address of some program",
+   "distinctValues": 47,
+   "shape": "a pure function of (mint, caller-family). 47 (family,mint) groups over 120 samples and EVERY group is single-valued.",
+   "decisiveEvidence": "For the 7 mints that were bought by BOTH the mayhem router (user = Global.whitelist_pda = the mayhem sol_vault BwWK17cb...) and by ordinary callers, the two families passed DIFFERENT addresses at index 16 and BOTH transactions landed. agreeCount=0/7. The deployed program therefore does not enforce one specific mint-derived key at index 16.",
+   "dualFamilyMints": [
+    {
+     "mint": "39mskvaR4LgofPtCoJQMoBbCqCMgzPBs7hSiSzYCGBVb",
+     "otherCallersValue": "9SotM3TXvrtnKkFiivc5r8MMLUBxGTYYYYrDKRDCVP1M",
+     "mayhemRouterValue": "HAhaUMNBUVM72FZTPBXUHnCFefw4mUYj4BiXQJCiZ5Mh",
+     "agree": false
+    },
+    {
+     "mint": "3Q7pgZKnFKajLwfzjciA8cZeouJ6khJ5wQrgLot9pump",
+     "otherCallersValue": "HoWke4YWSyozrABgK7PHubSc5ADvfkhBY3k1Sr6iu1Pq",
+     "mayhemRouterValue": "HFXuD3SC3Pv98wmA9AhuazmiXo4aT7inaPX5sHRNjEDn",
+     "agree": false
+    },
+    {
+     "mint": "37wuCa9gPxRJQ2G6nK8WDTZbQ25NcGL7uLp6HuSjpump",
+     "otherCallersValue": "8G9SzCoqvUkhzgccnSn7C6uK4ndc4FrS2wMZ3qTX4ThY",
+     "mayhemRouterValue": "9JtsdUSXCeCEH2YRW7tbXThK1GGX1QVpz1WF93A3bUVc",
+     "agree": false
+    },
+    {
+     "mint": "PxaALjDD8MYEcnKwcQHwj5DBvWeeZPNHmLHm2A1pump",
+     "otherCallersValue": "HjFovA9h5vYaQUfjSHmAh3T5abuPVUbB1GyquZfnga1Y",
+     "mayhemRouterValue": "F7kfUGUDmxh5cFZ7tTWh4dzdxSxzRkSYAhKSd4hJdS1u",
+     "agree": false
+    },
+    {
+     "mint": "9gCy5JqGNbXLVPnX1C6gdkrgN9Mt2FhN3wX8Mqtbpump",
+     "otherCallersValue": "DTXYpHaFVoCwTe2cLtaMFS9RrjmiDsNhXuwTD1DqcmJF",
+     "mayhemRouterValue": "G5QTc63R4j8GxzXhq2QjkzxFj6N69KvL3VjdNcv3faVS",
+     "agree": false
+    },
+    {
+     "mint": "FyPvsSr4K5ohfk4vTBXaxfxUwVbxgso7LYWYdfx8pump",
+     "otherCallersValue": "4L4nRmiksod2PCBJh1WhcbwhYJgmYoriZ2L1cqQPXAqd",
+     "mayhemRouterValue": "3hRZzvTSLkYTLMrq2GJ3uHfRQyVBdLhBJPex5k6rYa5E",
+     "agree": false
+    },
+    {
+     "mint": "52CAEmcg6b9bxXuFtpnyZgiG4zWqGkRQYCZXC19Hpump",
+     "otherCallersValue": "Fyj1HZPFafXJenjiRREh1PGQJ2QBPrDdhPZcyVbBNqVC",
+     "mayhemRouterValue": "JDs6njt7aqDeiNacYd8rJ93R58dohwezjoXC2QW3xkDm",
+     "agree": false
+    }
+   ],
+   "derivationSearchTried": "~200k combinations and none reproduced any observed value: 73 seed strings x 40 program ids (every program id seen on the tape) x 8 seed shapes; a full 0-255 bump sweep with createProgramAddress; all 1796 pubkeys on the tape used as a seed under 5 programs; every 2- and 3-seed permutation of the 22 accounts in the instruction; every ATA(owner, tokenProgram, mint/WSOL/zero) permutation. Explicitly ruled out: sharing_config = PDA([\"sharing-config\", mint], feeProgram) (confirmed correct by decoding buy_v2 in a live create transaction - it is EzeGHdPd... for mint 37wuCa9g..., while index 16 there is 8G9SzCoq...), mayhem_state = PDA([\"mayhem-state\", mint], MAyhSmz...), global_incentive_token_account = ATA(global_volume_accumulator, tokenProgram, mint).",
+   "conclusion": "UNIDENTIFIED. It cannot be computed. What CAN be said is that it is never written to, never moves lamports, never exists, and that the program accepted two different values for the same mint - so it is a caller-appended trailing (remaining) account, not a program-constrained one. That is an inference, not a proof: no sample with fewer than 18 accounts was found, so \"the program will accept the instruction without it\" is UNVERIFIED."
+  },
+  "index17": {
+   "idlName": "buyback_fee_recipient  (the name is taken from the IDL: buy_v2 account #8 carries exactly this role, and a live create transaction shows buy_v2 passing one of the same 8 addresses there)",
+   "identified": true,
+   "readableFrom": "Global.buyback_fee_recipients : [pubkey; 8]",
+   "inThatArray": "120/120",
+   "anyMemberAccepted": "YES - for a single mint (FnTvHnyzzmGfPU9Hdt8rqV83Vb4H42oRFUjeLqaEpump) four different members of the array were used across four landed buys, so the program validates membership, not identity",
+   "functionallyUsed": "YES - on 14/14 top-level samples the lamport delta of this account equals TradeEvent.buyback_fee EXACTLY. When BondingCurve.is_mayhem_mode is false, TradeEvent.buyback_fee_basis_points = 5000 and half of the protocol fee is routed here; when mayhem mode is true the buyback bps is 0 and the delta is 0.",
+   "writableObserved": "writable in every sample - it must be passed writable"
+  }
+ },
+ "args": {
+  "layout": "8-byte discriminator, then amount:u64 (base tokens to receive, exact-out), then max_sol_cost:u64 (lamport ceiling), then track_volume:OptionBool",
+  "instructionDataLengthsObserved": {
+   "24": "no track_volume byte at all (36 tape-A samples)",
+   "25": "one trailing byte, 00 (67) or 01 (1)",
+   "26": "two trailing bytes 0101 (2)"
+  },
+  "note": "all four encodings landed, so the program tolerates the trailing argument being absent"
+ },
+ "warnings": [
+  "INDEX 5 (associated_user) IS NOT CONSTRAINED TO THE SIGNER. Two top-level buys signed by s7epdqiFrL3jiPKx8eM6JEzJ2JbUpJA6kgCqDF1FfvQ (67RZW5cPDh1ku6ZBvEF8r66apvFGRbQKPyL9qe47WqzRTC6aGbzbuzQm5YbyQN4WA6p6o2yqQhcz5yfCdWbXaA25 and mFFetn2nkN3Tx3GdUKYP1oDRZtp1NubUtDRe7cLATWk8GrQQP2Gnwthvr19C6r291Pn7ttRPJRgpKnxwjAxYSr5) delivered the purchased tokens into token accounts owned by AsEqwGCNfnB4LK7ewMGc9i9LJ1nsQRNzBGrADY1GNm8Z and 8deJ9xeUvXSJwicYptA9mHsU2rN2pDx37KWzkDkEXhU6 - NOT the signer. The signer paid, a third party received. A wrong pubkey at index 5 therefore signs, lands, and hands the tokens to somebody else. Nothing on chain stops it.",
+  "The legacy buy does NOT carry the associated_token_program, so it cannot create the buyer ATA. The ATA must exist already or be created by a preceding instruction in the same transaction.",
+  "index 12 (global_volume_accumulator) was passed read-only in 34 samples and writable in 86; index 14/15 were writable in one sample each. Pass 12 and 13 WRITABLE (the superset that always landed) and 14/15 read-only.",
+  "creator_vault is derived from BondingCurve.creator, which CAN change (set_creator / migrate_bonding_curve_creator). One mint on the tape, PxaALjDD8MYEcnKwcQHwj5DBvWeeZPNHmLHm2A1pump, changed creator after its samples: deriving from the CURRENT curve gave the wrong vault for 2 old transactions. Read the curve at build time, and expect a stale value to fail the Anchor seeds check rather than misroute.",
+  "Do not confuse this discriminator with buy_exact_sol_in (38fc74089edfcd5f) which also takes 16 IDL accounts but the OPPOSITE argument order (sol in, min tokens out)."
+ ]
+}

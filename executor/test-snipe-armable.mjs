@@ -25,10 +25,15 @@ const itemOf = (r, name) => r.items.find((i) => i.name === name);
 const PROVED = { ...PUMPFUN_VENUE, layoutVerified: true, layoutProof: { provedBy: "a fixture, in this test only" } };
 
 console.log("\nTHE SHIPPED CONFIGURATION IS NOT ARMABLE, AND SAYS WHY");
-ok("the lane as it ships today is refused, on the one item nobody can reason past", () => {
+ok("the lane as it ships today is refused, on the one signal that is not connected", () => {
   const r = armabilityReport({ cfg: snipeLaneConfig({ SNIPE_LANE: "observe" }), venue: PUMPFUN_VENUE });
   assert.equal(r.armable, false);
-  assert.deepEqual([...r.blocking].sort(), ["exit_signals_are_wired", "venue_layout_is_proved"],
+  /* WAS ["exit_signals_are_wired", "venue_layout_is_proved"] until 2026-09-11, when the
+     pump.fun V2 layout was proved against 30 mainnet occurrences and the venue item
+     cleared. One item left, and it is a real one: creatorSold is a branch that cannot
+     fire. Updated here deliberately, because a blocking set that quietly shrinks is how
+     an arming gate stops being a gate. */
+  assert.deepEqual([...r.blocking].sort(), ["exit_signals_are_wired"],
     "the shipped lane's blocking set changed — if an item was cleared, say so here");
   console.log(`        blocking: ${r.blocking.join(", ")}`);
 });
@@ -107,38 +112,58 @@ ok("...and stating the stop explicitly clears THAT item, without clearing the re
 });
 
 console.log("\nTHE LAYOUT IS THE ONE NOBODY CAN REASON THEIR WAY PAST");
-ok("an unproved venue blocks, and the reason is the failure mode, not the rule", () => {
-  const r = armabilityReport({
-    cfg: snipeLaneConfig({ SNIPE_LANE: "observe" }), venue: PUMPFUN_VENUE });
-  assert.match(itemOf(r, "venue_layout_is_proved").detail,
-    /does not refuse, it signs and lands/);
+ok("the REAL venue now passes the layout item, naming what proved it", () => {
+  const r = armabilityReport({ cfg: snipeLaneConfig({ SNIPE_LANE: "observe" }), venue: PUMPFUN_VENUE });
+  const item = itemOf(r, "venue_layout_is_proved");
+  assert.equal(item.ok, true, `the layout item blocks: ${item.detail}`);
+  assert.match(item.detail, /test-snipe-venue-pumpfun/,
+    "a proved layout must name the test that reproduces it, not merely claim a proof exists");
+});
+ok("...and an UNPROVED venue still blocks, with the failure mode as the reason", () => {
+  const r = armabilityReport({ cfg: snipeLaneConfig({ SNIPE_LANE: "observe" }),
+    venue: { ...PUMPFUN_VENUE, layoutVerified: false, layoutProof: undefined } });
+  assert.match(itemOf(r, "venue_layout_is_proved").detail, /does not refuse, it signs and lands/);
 });
 ok("layoutVerified:true WITHOUT a proof object is not enough", () => {
-  /* A boolean anyone can flip is not evidence. The proof object is what a reviewer reads. */
+  /* A boolean anyone can flip is not evidence. The proof object is what a reviewer reads.
+     layoutProof must be deleted explicitly: the real adapter carries one now, so spreading
+     it and setting the flag would have tested nothing — which is exactly what this did for
+     one run after the layout was proved. */
   const r = armabilityReport({ cfg: snipeLaneConfig({ SNIPE_LANE: "observe" }),
-    venue: { ...PUMPFUN_VENUE, layoutVerified: true } });
-  assert.equal(itemOf(r, "venue_layout_is_proved").ok, false);
+    venue: { ...PUMPFUN_VENUE, layoutVerified: true, layoutProof: undefined } });
+  assert.equal(itemOf(r, "venue_layout_is_proved").ok, false,
+    "a layoutVerified flag with no proof object was accepted as evidence");
 });
 
 console.log("\nTHE REFUSAL NAMES EVERY UNMET ITEM, NOT THE FIRST");
-ok("assertArmable throws listing all of them at once", () => {
-  /* Driven against a config with TWO unmet items on purpose. The shipped lane now blocks
-     on one, and a test of "names every unmet item" that can only ever see one item is not
-     testing the property — it is testing that a list of length one has length one. */
+ok("assertArmable throws listing EVERY unmet item, not the first", () => {
+  /* THE PROPERTY, NOT A COUNT. Two earlier versions of this hard-coded the number of
+     blockers and both went stale within the hour — once when the daily cap became a
+     guarantee, once when the layout was proved. A test that has to be edited every time
+     the checklist improves is a test people learn to edit without reading.
+     So: build a config with several things wrong, then assert the message names exactly
+     the set the report says is blocking — no more, no fewer. */
   const twoProblems = { ...snipeLaneConfig({ SNIPE_LANE: "observe" }),
     maxSolPerTrade: SNIPE_OPERATOR_MAX.maxSolPerTrade + 1 };
-  assert.throws(
-    () => assertArmable({ cfg: twoProblems, venue: PUMPFUN_VENUE }),
-    (err) => err.clause === "not_armable"
-      && /size_within_operator_max/.test(err.message)
-      && /venue_layout_is_proved/.test(err.message)
-      /* THREE, not two: raising the size past the ceiling also trips the stop, because
-         stopFrac 0.20 is only fundable at the canary. That coupling is the feature, and
-         a test written expecting two would have been quietly wrong about it. */
-      && /stop_is_fundable/.test(err.message)
-      && err.detail.blocking.length === 4,
-    "a checklist that stops at the first failure makes arming an N-round guessing game");
+  const err = (() => {
+    try { assertArmable({ cfg: twoProblems, venue: PUMPFUN_VENUE }); return null; }
+    catch (e) { return e; }
+  })();
+  assert.ok(err, "a config with an over-ceiling size was declared armable");
+  assert.equal(err.clause, "not_armable");
+  const blocking = err.detail.blocking;
+  assert.ok(blocking.length >= 2,
+    `only ${blocking.length} item blocking — this case needs several to test the property at all`);
+  for (const name of blocking)
+    assert.ok(err.message.includes(name), `${name} is blocking but is not named in the refusal`);
+  /* And nothing that PASSED may be named, or "listing everything" would just be listing. */
+  const report = armabilityReport({ cfg: twoProblems, venue: PUMPFUN_VENUE });
+  for (const item of report.items.filter((i) => i.ok))
+    assert.ok(!err.message.includes(item.name + ":"),
+      `${item.name} passed but appears in the refusal`);
+  console.log(`        ${blocking.length} blocking, all named: ${blocking.join(", ")}`);
 });
+
 ok("...and the dead-branch item is a REAL blocker, not a note", () => {
   /* creatorSold is the branch snipe-policy calls "the one signal a launch has that no
      later market does", and stepOne passes it a literal false. The policy is fine; the

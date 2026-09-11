@@ -1,0 +1,5675 @@
+{
+ "generatedAt": "2026-09-11T07:48:54.898Z",
+ "cluster": "mainnet-beta",
+ "rpcEndpoint": "https://api.mainnet-beta.solana.com (public; read-only: getSignaturesForAddress, getTransaction, getAccountInfo, getMultipleAccounts. Nothing signed, sent or simulated.)",
+ "programId": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+ "instruction": "buy_v2",
+ "discriminatorHex": "b817ee6167c5d33d",
+ "idlAccountCount": 27,
+ "idlAccountOrderWithSeeds": [
+  {
+   "index": 0,
+   "name": "global",
+   "fixedAddress": null,
+   "idlWritable": false,
+   "idlSigner": false,
+   "pdaSeeds": [
+    "const:676c6f62616c"
+   ],
+   "pdaProgram": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+  },
+  {
+   "index": 1,
+   "name": "base_mint",
+   "fixedAddress": null,
+   "idlWritable": false,
+   "idlSigner": false,
+   "pdaSeeds": null,
+   "pdaProgram": null
+  },
+  {
+   "index": 2,
+   "name": "quote_mint",
+   "fixedAddress": null,
+   "idlWritable": false,
+   "idlSigner": false,
+   "pdaSeeds": null,
+   "pdaProgram": null
+  },
+  {
+   "index": 3,
+   "name": "base_token_program",
+   "fixedAddress": null,
+   "idlWritable": false,
+   "idlSigner": false,
+   "pdaSeeds": null,
+   "pdaProgram": null
+  },
+  {
+   "index": 4,
+   "name": "quote_token_program",
+   "fixedAddress": null,
+   "idlWritable": false,
+   "idlSigner": false,
+   "pdaSeeds": null,
+   "pdaProgram": null
+  },
+  {
+   "index": 5,
+   "name": "associated_token_program",
+   "fixedAddress": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+   "idlWritable": false,
+   "idlSigner": false,
+   "pdaSeeds": null,
+   "pdaProgram": null
+  },
+  {
+   "index": 6,
+   "name": "fee_recipient",
+   "fixedAddress": null,
+   "idlWritable": true,
+   "idlSigner": false,
+   "pdaSeeds": null,
+   "pdaProgram": null
+  },
+  {
+   "index": 7,
+   "name": "associated_quote_fee_recipient",
+   "fixedAddress": null,
+   "idlWritable": true,
+   "idlSigner": false,
+   "pdaSeeds": [
+    "account:fee_recipient",
+    "account:quote_token_program",
+    "account:quote_mint"
+   ],
+   "pdaProgram": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+  },
+  {
+   "index": 8,
+   "name": "buyback_fee_recipient",
+   "fixedAddress": null,
+   "idlWritable": true,
+   "idlSigner": false,
+   "pdaSeeds": null,
+   "pdaProgram": null
+  },
+  {
+   "index": 9,
+   "name": "associated_quote_buyback_fee_recipient",
+   "fixedAddress": null,
+   "idlWritable": true,
+   "idlSigner": false,
+   "pdaSeeds": [
+    "account:buyback_fee_recipient",
+    "account:quote_token_program",
+    "account:quote_mint"
+   ],
+   "pdaProgram": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+  },
+  {
+   "index": 10,
+   "name": "bonding_curve",
+   "fixedAddress": null,
+   "idlWritable": true,
+   "idlSigner": false,
+   "pdaSeeds": [
+    "const:626f6e64696e672d6375727665",
+    "account:base_mint"
+   ],
+   "pdaProgram": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+  },
+  {
+   "index": 11,
+   "name": "associated_base_bonding_curve",
+   "fixedAddress": null,
+   "idlWritable": true,
+   "idlSigner": false,
+   "pdaSeeds": [
+    "account:bonding_curve",
+    "account:base_token_program",
+    "account:base_mint"
+   ],
+   "pdaProgram": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+  },
+  {
+   "index": 12,
+   "name": "associated_quote_bonding_curve",
+   "fixedAddress": null,
+   "idlWritable": true,
+   "idlSigner": false,
+   "pdaSeeds": [
+    "account:bonding_curve",
+    "account:quote_token_program",
+    "account:quote_mint"
+   ],
+   "pdaProgram": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+  },
+  {
+   "index": 13,
+   "name": "user",
+   "fixedAddress": null,
+   "idlWritable": true,
+   "idlSigner": true,
+   "pdaSeeds": null,
+   "pdaProgram": null
+  },
+  {
+   "index": 14,
+   "name": "associated_base_user",
+   "fixedAddress": null,
+   "idlWritable": true,
+   "idlSigner": false,
+   "pdaSeeds": null,
+   "pdaProgram": null
+  },
+  {
+   "index": 15,
+   "name": "associated_quote_user",
+   "fixedAddress": null,
+   "idlWritable": true,
+   "idlSigner": false,
+   "pdaSeeds": [
+    "account:user",
+    "account:quote_token_program",
+    "account:quote_mint"
+   ],
+   "pdaProgram": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+  },
+  {
+   "index": 16,
+   "name": "creator_vault",
+   "fixedAddress": null,
+   "idlWritable": true,
+   "idlSigner": false,
+   "pdaSeeds": [
+    "const:63726561746f722d7661756c74",
+    "account:bonding_curve.creator"
+   ],
+   "pdaProgram": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+  },
+  {
+   "index": 17,
+   "name": "associated_creator_vault",
+   "fixedAddress": null,
+   "idlWritable": true,
+   "idlSigner": false,
+   "pdaSeeds": [
+    "account:creator_vault",
+    "account:quote_token_program",
+    "account:quote_mint"
+   ],
+   "pdaProgram": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+  },
+  {
+   "index": 18,
+   "name": "sharing_config",
+   "fixedAddress": null,
+   "idlWritable": false,
+   "idlSigner": false,
+   "pdaSeeds": [
+    "const:73686172696e672d636f6e666967",
+    "account:base_mint"
+   ],
+   "pdaProgram": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ"
+  },
+  {
+   "index": 19,
+   "name": "global_volume_accumulator",
+   "fixedAddress": null,
+   "idlWritable": false,
+   "idlSigner": false,
+   "pdaSeeds": [
+    "const:676c6f62616c5f766f6c756d655f616363756d756c61746f72"
+   ],
+   "pdaProgram": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+  },
+  {
+   "index": 20,
+   "name": "user_volume_accumulator",
+   "fixedAddress": null,
+   "idlWritable": true,
+   "idlSigner": false,
+   "pdaSeeds": [
+    "const:757365725f766f6c756d655f616363756d756c61746f72",
+    "account:user"
+   ],
+   "pdaProgram": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+  },
+  {
+   "index": 21,
+   "name": "associated_user_volume_accumulator",
+   "fixedAddress": null,
+   "idlWritable": true,
+   "idlSigner": false,
+   "pdaSeeds": [
+    "account:user_volume_accumulator",
+    "account:quote_token_program",
+    "account:quote_mint"
+   ],
+   "pdaProgram": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+  },
+  {
+   "index": 22,
+   "name": "fee_config",
+   "fixedAddress": null,
+   "idlWritable": false,
+   "idlSigner": false,
+   "pdaSeeds": [
+    "const:6665655f636f6e666967",
+    "const:0156e0f693665acf44db1568bf175baa5189cb97f5d2ff3b655d2bb6fd6d18b0"
+   ],
+   "pdaProgram": "account:fee_program"
+  },
+  {
+   "index": 23,
+   "name": "fee_program",
+   "fixedAddress": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+   "idlWritable": false,
+   "idlSigner": false,
+   "pdaSeeds": null,
+   "pdaProgram": null
+  },
+  {
+   "index": 24,
+   "name": "system_program",
+   "fixedAddress": "11111111111111111111111111111111",
+   "idlWritable": false,
+   "idlSigner": false,
+   "pdaSeeds": null,
+   "pdaProgram": null
+  },
+  {
+   "index": 25,
+   "name": "event_authority",
+   "fixedAddress": null,
+   "idlWritable": false,
+   "idlSigner": false,
+   "pdaSeeds": [
+    "const:5f5f6576656e745f617574686f72697479"
+   ],
+   "pdaProgram": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+  },
+  {
+   "index": 26,
+   "name": "program",
+   "fixedAddress": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+   "idlWritable": false,
+   "idlSigner": false,
+   "pdaSeeds": null,
+   "pdaProgram": null
+  }
+ ],
+ "sampleSummary": {
+  "occurrences": 13,
+  "topLevel": 8,
+  "distinctSigners": 13,
+  "distinctMints": 7,
+  "fullyMatched": 12,
+  "accountCountHistogram": {
+   "27": 10
+  },
+  "innerCpi": 5
+ },
+ "perPositionSummary": {
+  "0": {
+   "idlName": "global",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "PDA([\"global\"], pump)",
+   "failures": []
+  },
+  "1": {
+   "idlName": "base_mint",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "input (the mint being bought)",
+   "failures": []
+  },
+  "2": {
+   "idlName": "quote_mint",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "BondingCurve.quote_mint is the zero pubkey -> native SOL -> WSOL",
+   "failures": []
+  },
+  "3": {
+   "idlName": "base_token_program",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "owner of the base mint account",
+   "failures": []
+  },
+  "4": {
+   "idlName": "quote_token_program",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "owner of the quote mint account",
+   "failures": []
+  },
+  "5": {
+   "idlName": "associated_token_program",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "constant",
+   "failures": []
+  },
+  "6": {
+   "idlName": "fee_recipient",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "MEMBERSHIP pick from Global (fee_recipient | fee_recipients[7] | reserved_fee_recipient | reserved_fee_recipients[7])",
+   "failures": []
+  },
+  "7": {
+   "idlName": "associated_quote_fee_recipient",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "ATA(fee_recipient, quote_token_program, quote_mint)",
+   "failures": []
+  },
+  "8": {
+   "idlName": "buyback_fee_recipient",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "MEMBERSHIP pick from Global.buyback_fee_recipients[8]",
+   "failures": []
+  },
+  "9": {
+   "idlName": "associated_quote_buyback_fee_recipient",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "ATA(buyback_fee_recipient, quote_token_program, quote_mint)",
+   "failures": []
+  },
+  "10": {
+   "idlName": "bonding_curve",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "PDA([\"bonding-curve\", mint], pump)",
+   "failures": []
+  },
+  "11": {
+   "idlName": "associated_base_bonding_curve",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "ATA(bonding_curve, base_token_program, base_mint)",
+   "failures": []
+  },
+  "12": {
+   "idlName": "associated_quote_bonding_curve",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "ATA(bonding_curve, quote_token_program, quote_mint)",
+   "failures": []
+  },
+  "13": {
+   "idlName": "user",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "input (the signer)",
+   "failures": []
+  },
+  "14": {
+   "idlName": "associated_base_user",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "ATA(user, base_token_program, base_mint) — IDL declares NO pda here",
+   "failures": []
+  },
+  "15": {
+   "idlName": "associated_quote_user",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "ATA(user, quote_token_program, quote_mint)",
+   "failures": []
+  },
+  "16": {
+   "idlName": "creator_vault",
+   "matched": 12,
+   "of": 13,
+   "howDerived": "PDA([\"creator-vault\", BondingCurve.creator]) — curve read at analysis time",
+   "failures": [
+    {
+     "signature": "5GzeJnAbRLPzfAnnLYrR1YQxTdjhHySsws3Xm8G4fnERtDuVGm4NeCQaUSxqVfxW6hk3TBicT4P1xw67BigBekXZ",
+     "derived": "GPeXJFaK8q3kwzSX67r9jppTFKWWMWQgcTwuN2wVKMs4",
+     "observed": "rm9RgM964BmnaC3426ZM1rg7hpdSKuwkNrqAT2fMkXQ"
+    }
+   ]
+  },
+  "17": {
+   "idlName": "associated_creator_vault",
+   "matched": 12,
+   "of": 13,
+   "howDerived": "ATA(creator_vault, quote_token_program, quote_mint)",
+   "failures": [
+    {
+     "signature": "5GzeJnAbRLPzfAnnLYrR1YQxTdjhHySsws3Xm8G4fnERtDuVGm4NeCQaUSxqVfxW6hk3TBicT4P1xw67BigBekXZ",
+     "derived": "DaXRPhexDW2FdZfCcSZqimQWsmucFnPxQtVgNigns7f5",
+     "observed": "9NUwpjbckJ1RZp4Hx6tRgamqvfhZweT1tZzdcXnd2uyQ"
+    }
+   ]
+  },
+  "18": {
+   "idlName": "sharing_config",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "PDA([\"sharing-config\", base_mint], FEE PROGRAM)",
+   "failures": []
+  },
+  "19": {
+   "idlName": "global_volume_accumulator",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "PDA([\"global_volume_accumulator\"], pump)",
+   "failures": []
+  },
+  "20": {
+   "idlName": "user_volume_accumulator",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "PDA([\"user_volume_accumulator\", user], pump)",
+   "failures": []
+  },
+  "21": {
+   "idlName": "associated_user_volume_accumulator",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "ATA(user_volume_accumulator, quote_token_program, quote_mint)",
+   "failures": []
+  },
+  "22": {
+   "idlName": "fee_config",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "PDA([\"fee_config\", pump_program_id], FEE PROGRAM)",
+   "failures": []
+  },
+  "23": {
+   "idlName": "fee_program",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "constant",
+   "failures": []
+  },
+  "24": {
+   "idlName": "system_program",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "constant",
+   "failures": []
+  },
+  "25": {
+   "idlName": "event_authority",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "PDA([\"__event_authority\"], pump)",
+   "failures": []
+  },
+  "26": {
+   "idlName": "program",
+   "matched": 13,
+   "of": 13,
+   "howDerived": "constant",
+   "failures": []
+  }
+ },
+ "globalAccount": {
+  "pda": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+  "owner": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+  "dataLen": 1054,
+  "decoded": {
+   "initialized": true,
+   "authority": "FFWtrEQ4B4PKQoVuHYzZq8FabGkVatYzDpEVHsK5rrhF",
+   "fee_recipient": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+   "initial_virtual_token_reserves": "1073000000000000",
+   "initial_virtual_sol_reserves": "30000000000",
+   "initial_real_token_reserves": "793100000000000",
+   "token_total_supply": "1000000000000000",
+   "fee_basis_points": "95",
+   "withdraw_authority": "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg",
+   "enable_migrate": true,
+   "pool_migration_fee": "15000001",
+   "creator_fee_basis_points": "5",
+   "fee_recipients": [
+    "7VtfL8fvgNfhz17qKRMjzQEXgbdpnHHHQRh54R9jP2RJ",
+    "7hTckgnGnLQR6sdH7YkqFTAA7VwTfYFaZ6EhEsU3saCX",
+    "9rPYyANsfQZw3DnDmKE3YCQF5E8oD89UXoHn9JFEhJUz",
+    "AVmoTthdrX6tKt4nDjco2D775W2YK3sDhxPcMmzUAmTY",
+    "CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM",
+    "FWsW1xNtWscwNmKv6wVsU1iTzRN6wmmk3MjxRP5tT7hz",
+    "G5UZAVbAf46s7cKWoyKu8kYTip9DGTpbLZ2qa9Aq69dP"
+   ],
+   "set_creator_authority": "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg",
+   "admin_set_creator_authority": "UqN2p5bAzBqYdHXcgB6WLtuVrdvmy9JSAtgqZb3CMKw",
+   "create_v2_enabled": true,
+   "whitelist_pda": "BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFezduWbtm2de6s",
+   "reserved_fee_recipient": "GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS",
+   "mayhem_mode_enabled": true,
+   "reserved_fee_recipients": [
+    "4budycTjhs9fD6xw62VBducVTNgMgJJ5BgtKq7mAZwn6",
+    "8SBKzEQU4nLSzcwF4a74F2iaUDQyTfjGndn6qUWBnrpR",
+    "4UQeTP1T39KZ9Sfxzo3WR5skgsaP6NZa87BAkuazLEKH",
+    "8sNeir4QsLsJdYpc9RZacohhK1Y5FLU3nC5LXgYB4aa6",
+    "Fh9HmeLNUMVCvejxCtCL2DbYaRyBFVJ5xrWkLnMH6fdk",
+    "463MEnMeGyJekNZFQSTUABBEbLnvMTALbT6ZmsxAbAdq",
+    "6AUH3WEHucYZyC61hqpqYUWVto5qA5hjHuNQ32GNnNxA"
+   ],
+   "is_cashback_enabled": true,
+   "buyback_fee_recipients": [
+    "5YxQFdt3Tr9zJLvkFccqXVUwhdTWJQc1fFg2YPbxvxeD",
+    "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+    "GXPFM2caqTtQYC2cJ5yJRi9VDkpsYZXzYdwYpGnLmtDL",
+    "3BpXnfJaUTiwXnJNe7Ej1rcbzqTTQUvLShZaWazebsVR",
+    "5cjcW9wExnJJiqgLjq7DEG75Pm6JBgE1hNv4B2vHXUW6",
+    "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+    "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+    "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW"
+   ],
+   "buyback_basis_points": "5000",
+   "initial_virtual_quote_reserves": "4292000000",
+   "whitelisted_quote_mints": [
+    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+   ],
+   "_bytesConsumed": 1045,
+   "_len": 1054
+  }
+ },
+ "feeRecipientMembershipSet": [
+  {
+   "pubkey": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+   "globalField": "Global.fee_recipient"
+  },
+  {
+   "pubkey": "7VtfL8fvgNfhz17qKRMjzQEXgbdpnHHHQRh54R9jP2RJ",
+   "globalField": "Global.fee_recipients[0]"
+  },
+  {
+   "pubkey": "7hTckgnGnLQR6sdH7YkqFTAA7VwTfYFaZ6EhEsU3saCX",
+   "globalField": "Global.fee_recipients[1]"
+  },
+  {
+   "pubkey": "9rPYyANsfQZw3DnDmKE3YCQF5E8oD89UXoHn9JFEhJUz",
+   "globalField": "Global.fee_recipients[2]"
+  },
+  {
+   "pubkey": "AVmoTthdrX6tKt4nDjco2D775W2YK3sDhxPcMmzUAmTY",
+   "globalField": "Global.fee_recipients[3]"
+  },
+  {
+   "pubkey": "CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM",
+   "globalField": "Global.fee_recipients[4]"
+  },
+  {
+   "pubkey": "FWsW1xNtWscwNmKv6wVsU1iTzRN6wmmk3MjxRP5tT7hz",
+   "globalField": "Global.fee_recipients[5]"
+  },
+  {
+   "pubkey": "G5UZAVbAf46s7cKWoyKu8kYTip9DGTpbLZ2qa9Aq69dP",
+   "globalField": "Global.fee_recipients[6]"
+  },
+  {
+   "pubkey": "GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS",
+   "globalField": "Global.reserved_fee_recipient"
+  },
+  {
+   "pubkey": "4budycTjhs9fD6xw62VBducVTNgMgJJ5BgtKq7mAZwn6",
+   "globalField": "Global.reserved_fee_recipients[0]"
+  },
+  {
+   "pubkey": "8SBKzEQU4nLSzcwF4a74F2iaUDQyTfjGndn6qUWBnrpR",
+   "globalField": "Global.reserved_fee_recipients[1]"
+  },
+  {
+   "pubkey": "4UQeTP1T39KZ9Sfxzo3WR5skgsaP6NZa87BAkuazLEKH",
+   "globalField": "Global.reserved_fee_recipients[2]"
+  },
+  {
+   "pubkey": "8sNeir4QsLsJdYpc9RZacohhK1Y5FLU3nC5LXgYB4aa6",
+   "globalField": "Global.reserved_fee_recipients[3]"
+  },
+  {
+   "pubkey": "Fh9HmeLNUMVCvejxCtCL2DbYaRyBFVJ5xrWkLnMH6fdk",
+   "globalField": "Global.reserved_fee_recipients[4]"
+  },
+  {
+   "pubkey": "463MEnMeGyJekNZFQSTUABBEbLnvMTALbT6ZmsxAbAdq",
+   "globalField": "Global.reserved_fee_recipients[5]"
+  },
+  {
+   "pubkey": "6AUH3WEHucYZyC61hqpqYUWVto5qA5hjHuNQ32GNnNxA",
+   "globalField": "Global.reserved_fee_recipients[6]"
+  }
+ ],
+ "buybackFeeRecipientMembershipSet": [
+  {
+   "pubkey": "5YxQFdt3Tr9zJLvkFccqXVUwhdTWJQc1fFg2YPbxvxeD",
+   "globalField": "Global.buyback_fee_recipients[0]"
+  },
+  {
+   "pubkey": "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+   "globalField": "Global.buyback_fee_recipients[1]"
+  },
+  {
+   "pubkey": "GXPFM2caqTtQYC2cJ5yJRi9VDkpsYZXzYdwYpGnLmtDL",
+   "globalField": "Global.buyback_fee_recipients[2]"
+  },
+  {
+   "pubkey": "3BpXnfJaUTiwXnJNe7Ej1rcbzqTTQUvLShZaWazebsVR",
+   "globalField": "Global.buyback_fee_recipients[3]"
+  },
+  {
+   "pubkey": "5cjcW9wExnJJiqgLjq7DEG75Pm6JBgE1hNv4B2vHXUW6",
+   "globalField": "Global.buyback_fee_recipients[4]"
+  },
+  {
+   "pubkey": "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+   "globalField": "Global.buyback_fee_recipients[5]"
+  },
+  {
+   "pubkey": "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+   "globalField": "Global.buyback_fee_recipients[6]"
+  },
+  {
+   "pubkey": "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW",
+   "globalField": "Global.buyback_fee_recipients[7]"
+  }
+ ],
+ "samples": [
+  {
+   "signature": "3AX3rL1WtwRbsyVfcBF6EWwcsvNinDJNY4drijfx2h9LtR4tv3Nq5Xe6o2TGyrkcqz8NyxvMNDNg1Jvi57FKRWu9",
+   "slot": 446023264,
+   "blockTime": 1789087393,
+   "instructionPosition": "TOP-LEVEL #6",
+   "isTopLevel": true,
+   "signer": "D7ppNxdmcoVtEHsHjV47D8q2nGdoUjhdgPpKYmX9gwps",
+   "mint": "uKubAxmYJEABdmw6hqegbgghe6fcmaHqjKd2umjpump",
+   "accountCount": 27,
+   "instructionDataHex": "b817ee6167c5d33dfac8c7478100000038d28a0100000000",
+   "instructionDataBytes": 24,
+   "argAmount": "555255056634",
+   "argMaxSolCost": "25875000",
+   "bondingCurve": {
+    "creator": "EB9GaRfKcVuTKsNdmrfVzbSvyQr3es7o39bGBrzs1do7",
+    "quote_mint_field": "11111111111111111111111111111111",
+    "complete": false,
+    "is_mayhem_mode": false,
+    "is_cashback_coin": false,
+    "accountDataLen": 151
+   },
+   "sharingConfig": {
+    "pda": "EB9GaRfKcVuTKsNdmrfVzbSvyQr3es7o39bGBrzs1do7",
+    "status": 1,
+    "version": 2,
+    "mint": "uKubAxmYJEABdmw6hqegbgghe6fcmaHqjKd2umjpump",
+    "admin": "8tEh5ZzrxyLh12jfprebQEVjz9kgMgUcYLCHmeSME6E9",
+    "admin_revoked": true,
+    "shareholders": [
+     {
+      "address": "2k5hrzuykwyTbUe8L7UriYAQhr5hijNLgBvEB4B9pP5y",
+      "share_bps": 10000
+     }
+    ],
+    "accountDataLen": 1024
+   },
+   "creatorMigratedToSharingConfig": true,
+   "creatorSeedUsed": "EB9GaRfKcVuTKsNdmrfVzbSvyQr3es7o39bGBrzs1do7",
+   "creatorVaultIfSeededFromCurveCreator": "7Z7j9buB2QhSQmpP4h5vswNVhiojZ3dAUkmJDAANkqkf",
+   "quoteIsNativeSol": true,
+   "quoteMintUsed": "So11111111111111111111111111111111111111112",
+   "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "feeRecipientObserved": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+   "feeRecipientMembership": "Global.fee_recipient",
+   "buybackObserved": "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+   "buybackMembership": "Global.buyback_fee_recipients[5]",
+   "positionsMatched": 27,
+   "positionsTotal": 27,
+   "mismatches": [],
+   "positions": [
+    {
+     "index": 0,
+     "idlName": "global",
+     "derived": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "observed": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "match": true,
+     "howDerived": "PDA([\"global\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 1,
+     "idlName": "base_mint",
+     "derived": "uKubAxmYJEABdmw6hqegbgghe6fcmaHqjKd2umjpump",
+     "observed": "uKubAxmYJEABdmw6hqegbgghe6fcmaHqjKd2umjpump",
+     "match": true,
+     "howDerived": "input (the mint being bought)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 2,
+     "idlName": "quote_mint",
+     "derived": "So11111111111111111111111111111111111111112",
+     "observed": "So11111111111111111111111111111111111111112",
+     "match": true,
+     "howDerived": "BondingCurve.quote_mint is the zero pubkey -> native SOL -> WSOL",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 3,
+     "idlName": "base_token_program",
+     "derived": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "observed": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "match": true,
+     "howDerived": "owner of the base mint account",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 4,
+     "idlName": "quote_token_program",
+     "derived": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "observed": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "match": true,
+     "howDerived": "owner of the quote mint account",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 5,
+     "idlName": "associated_token_program",
+     "derived": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "observed": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 6,
+     "idlName": "fee_recipient",
+     "derived": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+     "observed": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global (fee_recipient | fee_recipients[7] | reserved_fee_recipient | reserved_fee_recipients[7])",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 7,
+     "idlName": "associated_quote_fee_recipient",
+     "derived": "94qWNrtmfn42h3ZjUZwWvK1MEo9uVmmrBPd2hpNjYDjb",
+     "observed": "94qWNrtmfn42h3ZjUZwWvK1MEo9uVmmrBPd2hpNjYDjb",
+     "match": true,
+     "howDerived": "ATA(fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 8,
+     "idlName": "buyback_fee_recipient",
+     "derived": "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+     "observed": "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global.buyback_fee_recipients[8]",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 9,
+     "idlName": "associated_quote_buyback_fee_recipient",
+     "derived": "CA7v8gHfbquYXyDnDx6QxWW8hmL1H7X6Y2RYDrGLnuck",
+     "observed": "CA7v8gHfbquYXyDnDx6QxWW8hmL1H7X6Y2RYDrGLnuck",
+     "match": true,
+     "howDerived": "ATA(buyback_fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 10,
+     "idlName": "bonding_curve",
+     "derived": "CbJtD7xgyJvzn4csGprZCL7iwoiByTFMw2GBFPwgTZY8",
+     "observed": "CbJtD7xgyJvzn4csGprZCL7iwoiByTFMw2GBFPwgTZY8",
+     "match": true,
+     "howDerived": "PDA([\"bonding-curve\", mint], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 11,
+     "idlName": "associated_base_bonding_curve",
+     "derived": "GPVTaygu1ybtoGsxU5oedALAv1ACxUCn67ujR8h5Gpzx",
+     "observed": "GPVTaygu1ybtoGsxU5oedALAv1ACxUCn67ujR8h5Gpzx",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, base_token_program, base_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 12,
+     "idlName": "associated_quote_bonding_curve",
+     "derived": "AKcwi9BPCUPBoBuz9uXHHYhpMeZnQ9e4mjA9WRSPdXZn",
+     "observed": "AKcwi9BPCUPBoBuz9uXHHYhpMeZnQ9e4mjA9WRSPdXZn",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 13,
+     "idlName": "user",
+     "derived": "D7ppNxdmcoVtEHsHjV47D8q2nGdoUjhdgPpKYmX9gwps",
+     "observed": "D7ppNxdmcoVtEHsHjV47D8q2nGdoUjhdgPpKYmX9gwps",
+     "match": true,
+     "howDerived": "input (the signer)",
+     "observedMeta": {
+      "signer": true,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 14,
+     "idlName": "associated_base_user",
+     "derived": "2HFo2ARyefKSqQJxNApNJzGtxqdAjCSk7CeGrz2T1uvM",
+     "observed": "2HFo2ARyefKSqQJxNApNJzGtxqdAjCSk7CeGrz2T1uvM",
+     "match": true,
+     "howDerived": "ATA(user, base_token_program, base_mint) — IDL declares NO pda here",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 15,
+     "idlName": "associated_quote_user",
+     "derived": "K67q8mQB7CkkWzZoQecvk4EQL28q9oThXJybLf4gLbL",
+     "observed": "K67q8mQB7CkkWzZoQecvk4EQL28q9oThXJybLf4gLbL",
+     "match": true,
+     "howDerived": "ATA(user, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 16,
+     "idlName": "creator_vault",
+     "derived": "7Z7j9buB2QhSQmpP4h5vswNVhiojZ3dAUkmJDAANkqkf",
+     "observed": "7Z7j9buB2QhSQmpP4h5vswNVhiojZ3dAUkmJDAANkqkf",
+     "match": true,
+     "howDerived": "PDA([\"creator-vault\", BondingCurve.creator]) — curve read at analysis time",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 17,
+     "idlName": "associated_creator_vault",
+     "derived": "3ZP8qUNitayhfHUiMkK3McedX9NJkJAqxhsWPwPX4kDp",
+     "observed": "3ZP8qUNitayhfHUiMkK3McedX9NJkJAqxhsWPwPX4kDp",
+     "match": true,
+     "howDerived": "ATA(creator_vault, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 18,
+     "idlName": "sharing_config",
+     "derived": "EB9GaRfKcVuTKsNdmrfVzbSvyQr3es7o39bGBrzs1do7",
+     "observed": "EB9GaRfKcVuTKsNdmrfVzbSvyQr3es7o39bGBrzs1do7",
+     "match": true,
+     "howDerived": "PDA([\"sharing-config\", base_mint], FEE PROGRAM)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 19,
+     "idlName": "global_volume_accumulator",
+     "derived": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "observed": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "match": true,
+     "howDerived": "PDA([\"global_volume_accumulator\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 20,
+     "idlName": "user_volume_accumulator",
+     "derived": "8bMkyRWssXPvQsuxvcW3e3x7YMWvqsz9GS8foA7DAeN5",
+     "observed": "8bMkyRWssXPvQsuxvcW3e3x7YMWvqsz9GS8foA7DAeN5",
+     "match": true,
+     "howDerived": "PDA([\"user_volume_accumulator\", user], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 21,
+     "idlName": "associated_user_volume_accumulator",
+     "derived": "38So81hkfHXtC3WsPAw4dp5VyJ4y5pGC1cX1eEpXp9Kt",
+     "observed": "38So81hkfHXtC3WsPAw4dp5VyJ4y5pGC1cX1eEpXp9Kt",
+     "match": true,
+     "howDerived": "ATA(user_volume_accumulator, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 22,
+     "idlName": "fee_config",
+     "derived": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "observed": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "match": true,
+     "howDerived": "PDA([\"fee_config\", pump_program_id], FEE PROGRAM)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 23,
+     "idlName": "fee_program",
+     "derived": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "observed": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 24,
+     "idlName": "system_program",
+     "derived": "11111111111111111111111111111111",
+     "observed": "11111111111111111111111111111111",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 25,
+     "idlName": "event_authority",
+     "derived": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "observed": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "match": true,
+     "howDerived": "PDA([\"__event_authority\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 26,
+     "idlName": "program",
+     "derived": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "observed": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    }
+   ]
+  },
+  {
+   "signature": "62Wa5iQ3kDWf8WoonAjAjqQpy248fXZxTBUNjwD8bxG5Kg928zYN1kivcvCMpJtz3JLEG37qwseyB9NekLVUa3d1",
+   "slot": 446084838,
+   "blockTime": 1789106855,
+   "instructionPosition": "TOP-LEVEL #4",
+   "isTopLevel": true,
+   "signer": "7yh6q2HVMn911KeN4HJ6nQTaeUnsXJxtna48erfzW9p5",
+   "mint": "HYbHDHUX4hRvZDMZnckRENZSFuQCzp56VT4MPLsTpump",
+   "accountCount": 27,
+   "instructionDataHex": "b817ee6167c5d33d8fd4d83166060000ffffffffffffffff",
+   "instructionDataBytes": 24,
+   "argAmount": "7035992724623",
+   "argMaxSolCost": "18446744073709551615",
+   "bondingCurve": {
+    "creator": "7yh6q2HVMn911KeN4HJ6nQTaeUnsXJxtna48erfzW9p5",
+    "quote_mint_field": "11111111111111111111111111111111",
+    "complete": false,
+    "is_mayhem_mode": true,
+    "is_cashback_coin": false,
+    "accountDataLen": 124
+   },
+   "sharingConfig": {
+    "pda": "9R4epYWEWKc6v51BcCUmNrRkmEcxLGRRurZT6kL1QEMo",
+    "exists": false
+   },
+   "creatorMigratedToSharingConfig": false,
+   "creatorSeedUsed": "7yh6q2HVMn911KeN4HJ6nQTaeUnsXJxtna48erfzW9p5",
+   "creatorVaultIfSeededFromCurveCreator": "8Ad4n8KBkx1TatSaEpnRp43zEv1JsAUa5ai65wTGkJ26",
+   "quoteIsNativeSol": true,
+   "quoteMintUsed": "So11111111111111111111111111111111111111112",
+   "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "feeRecipientObserved": "6AUH3WEHucYZyC61hqpqYUWVto5qA5hjHuNQ32GNnNxA",
+   "feeRecipientMembership": "Global.reserved_fee_recipients[6]",
+   "buybackObserved": "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+   "buybackMembership": "Global.buyback_fee_recipients[6]",
+   "positionsMatched": 27,
+   "positionsTotal": 27,
+   "mismatches": [],
+   "positions": [
+    {
+     "index": 0,
+     "idlName": "global",
+     "derived": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "observed": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "match": true,
+     "howDerived": "PDA([\"global\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 1,
+     "idlName": "base_mint",
+     "derived": "HYbHDHUX4hRvZDMZnckRENZSFuQCzp56VT4MPLsTpump",
+     "observed": "HYbHDHUX4hRvZDMZnckRENZSFuQCzp56VT4MPLsTpump",
+     "match": true,
+     "howDerived": "input (the mint being bought)",
+     "observedMeta": {
+      "signer": true,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 2,
+     "idlName": "quote_mint",
+     "derived": "So11111111111111111111111111111111111111112",
+     "observed": "So11111111111111111111111111111111111111112",
+     "match": true,
+     "howDerived": "BondingCurve.quote_mint is the zero pubkey -> native SOL -> WSOL",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 3,
+     "idlName": "base_token_program",
+     "derived": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "observed": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "match": true,
+     "howDerived": "owner of the base mint account",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 4,
+     "idlName": "quote_token_program",
+     "derived": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "observed": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "match": true,
+     "howDerived": "owner of the quote mint account",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 5,
+     "idlName": "associated_token_program",
+     "derived": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "observed": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 6,
+     "idlName": "fee_recipient",
+     "derived": "6AUH3WEHucYZyC61hqpqYUWVto5qA5hjHuNQ32GNnNxA",
+     "observed": "6AUH3WEHucYZyC61hqpqYUWVto5qA5hjHuNQ32GNnNxA",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global (fee_recipient | fee_recipients[7] | reserved_fee_recipient | reserved_fee_recipients[7])",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 7,
+     "idlName": "associated_quote_fee_recipient",
+     "derived": "ghSBUgyxyvyurm1vJBkU4rUyLJoUipCZhFeiBogKCSy",
+     "observed": "ghSBUgyxyvyurm1vJBkU4rUyLJoUipCZhFeiBogKCSy",
+     "match": true,
+     "howDerived": "ATA(fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 8,
+     "idlName": "buyback_fee_recipient",
+     "derived": "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+     "observed": "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global.buyback_fee_recipients[8]",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 9,
+     "idlName": "associated_quote_buyback_fee_recipient",
+     "derived": "CASRL2zkwDnppxEFQ4LgdwgR9pdz5Q8R8nEMKVZ9QoLp",
+     "observed": "CASRL2zkwDnppxEFQ4LgdwgR9pdz5Q8R8nEMKVZ9QoLp",
+     "match": true,
+     "howDerived": "ATA(buyback_fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 10,
+     "idlName": "bonding_curve",
+     "derived": "7pqUtTUHFdz5yvc7P2uyir9PdhBzJ4DnZkkbooeo9b6",
+     "observed": "7pqUtTUHFdz5yvc7P2uyir9PdhBzJ4DnZkkbooeo9b6",
+     "match": true,
+     "howDerived": "PDA([\"bonding-curve\", mint], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 11,
+     "idlName": "associated_base_bonding_curve",
+     "derived": "CLNZCdU1jFiNQ3QqXct6tbubpUsf8UgyGJ6zj5g9jsXJ",
+     "observed": "CLNZCdU1jFiNQ3QqXct6tbubpUsf8UgyGJ6zj5g9jsXJ",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, base_token_program, base_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 12,
+     "idlName": "associated_quote_bonding_curve",
+     "derived": "5iTWcFrri9QhnpTBVMbxPePqo7PcJiqLWcRgwQ9YWJAx",
+     "observed": "5iTWcFrri9QhnpTBVMbxPePqo7PcJiqLWcRgwQ9YWJAx",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 13,
+     "idlName": "user",
+     "derived": "7yh6q2HVMn911KeN4HJ6nQTaeUnsXJxtna48erfzW9p5",
+     "observed": "7yh6q2HVMn911KeN4HJ6nQTaeUnsXJxtna48erfzW9p5",
+     "match": true,
+     "howDerived": "input (the signer)",
+     "observedMeta": {
+      "signer": true,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 14,
+     "idlName": "associated_base_user",
+     "derived": "D7rq2gRBueKhw6bkWUEM1bHXhCjJEoxJpmN8kJ2fRwrb",
+     "observed": "D7rq2gRBueKhw6bkWUEM1bHXhCjJEoxJpmN8kJ2fRwrb",
+     "match": true,
+     "howDerived": "ATA(user, base_token_program, base_mint) — IDL declares NO pda here",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 15,
+     "idlName": "associated_quote_user",
+     "derived": "Cg5aXgtzkb64ihouYxjwXWP6e6jaEd4QFEuvvPfAexfP",
+     "observed": "Cg5aXgtzkb64ihouYxjwXWP6e6jaEd4QFEuvvPfAexfP",
+     "match": true,
+     "howDerived": "ATA(user, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 16,
+     "idlName": "creator_vault",
+     "derived": "8Ad4n8KBkx1TatSaEpnRp43zEv1JsAUa5ai65wTGkJ26",
+     "observed": "8Ad4n8KBkx1TatSaEpnRp43zEv1JsAUa5ai65wTGkJ26",
+     "match": true,
+     "howDerived": "PDA([\"creator-vault\", BondingCurve.creator]) — curve read at analysis time",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 17,
+     "idlName": "associated_creator_vault",
+     "derived": "2Yz52krcDxS6gfUjQn4p3QL4xDSux9koKer8YjUV6QCZ",
+     "observed": "2Yz52krcDxS6gfUjQn4p3QL4xDSux9koKer8YjUV6QCZ",
+     "match": true,
+     "howDerived": "ATA(creator_vault, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 18,
+     "idlName": "sharing_config",
+     "derived": "9R4epYWEWKc6v51BcCUmNrRkmEcxLGRRurZT6kL1QEMo",
+     "observed": "9R4epYWEWKc6v51BcCUmNrRkmEcxLGRRurZT6kL1QEMo",
+     "match": true,
+     "howDerived": "PDA([\"sharing-config\", base_mint], FEE PROGRAM)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 19,
+     "idlName": "global_volume_accumulator",
+     "derived": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "observed": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "match": true,
+     "howDerived": "PDA([\"global_volume_accumulator\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 20,
+     "idlName": "user_volume_accumulator",
+     "derived": "2wLjp2EXeiQBh2sBaFwhP7JaNyB66HG8jEV6CLVNAZyK",
+     "observed": "2wLjp2EXeiQBh2sBaFwhP7JaNyB66HG8jEV6CLVNAZyK",
+     "match": true,
+     "howDerived": "PDA([\"user_volume_accumulator\", user], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 21,
+     "idlName": "associated_user_volume_accumulator",
+     "derived": "FwtiPeSiWPsGpKi4enXaF2oEKFzLwu5G4xMfHfq8KaKz",
+     "observed": "FwtiPeSiWPsGpKi4enXaF2oEKFzLwu5G4xMfHfq8KaKz",
+     "match": true,
+     "howDerived": "ATA(user_volume_accumulator, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 22,
+     "idlName": "fee_config",
+     "derived": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "observed": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "match": true,
+     "howDerived": "PDA([\"fee_config\", pump_program_id], FEE PROGRAM)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 23,
+     "idlName": "fee_program",
+     "derived": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "observed": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 24,
+     "idlName": "system_program",
+     "derived": "11111111111111111111111111111111",
+     "observed": "11111111111111111111111111111111",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 25,
+     "idlName": "event_authority",
+     "derived": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "observed": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "match": true,
+     "howDerived": "PDA([\"__event_authority\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 26,
+     "idlName": "program",
+     "derived": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "observed": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    }
+   ]
+  },
+  {
+   "signature": "2Ht9aPg8ba2ehLYxvG4NbskMyPKzNqNq7iaVQfaqasA1BXWV7NGS6iSa2hHrtmT4LEZtnePUiSjzv12U9xX2dimM",
+   "slot": 446084874,
+   "blockTime": 1789106866,
+   "instructionPosition": "TOP-LEVEL #4",
+   "isTopLevel": true,
+   "signer": "7FVfSdnR9VPGjMtmBP1Hz9C2DFTpoNX8gVVRmnimnGt9",
+   "mint": "5E6H41XP2pxrF7J2JJVWtnXdk7Va5bCjZDCU9VYRpump",
+   "accountCount": 27,
+   "instructionDataHex": "b817ee6167c5d33dbb51ebd83f020000ffffffffffffffff",
+   "instructionDataBytes": 24,
+   "argAmount": "2473245495739",
+   "argMaxSolCost": "18446744073709551615",
+   "bondingCurve": {
+    "creator": "7FVfSdnR9VPGjMtmBP1Hz9C2DFTpoNX8gVVRmnimnGt9",
+    "quote_mint_field": "11111111111111111111111111111111",
+    "complete": false,
+    "is_mayhem_mode": true,
+    "is_cashback_coin": false,
+    "accountDataLen": 124
+   },
+   "sharingConfig": {
+    "pda": "FAZMVbZ5p6WmUR7scK8u217Wx57adCHn4nMMcCmDLW71",
+    "exists": false
+   },
+   "creatorMigratedToSharingConfig": false,
+   "creatorSeedUsed": "7FVfSdnR9VPGjMtmBP1Hz9C2DFTpoNX8gVVRmnimnGt9",
+   "creatorVaultIfSeededFromCurveCreator": "J4L2vJBD7qHGEHDUewBUa2M6qqi8E77jm7sHHLaCdYc7",
+   "quoteIsNativeSol": true,
+   "quoteMintUsed": "So11111111111111111111111111111111111111112",
+   "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "feeRecipientObserved": "Fh9HmeLNUMVCvejxCtCL2DbYaRyBFVJ5xrWkLnMH6fdk",
+   "feeRecipientMembership": "Global.reserved_fee_recipients[4]",
+   "buybackObserved": "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+   "buybackMembership": "Global.buyback_fee_recipients[6]",
+   "positionsMatched": 27,
+   "positionsTotal": 27,
+   "mismatches": [],
+   "positions": [
+    {
+     "index": 0,
+     "idlName": "global",
+     "derived": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "observed": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "match": true,
+     "howDerived": "PDA([\"global\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 1,
+     "idlName": "base_mint",
+     "derived": "5E6H41XP2pxrF7J2JJVWtnXdk7Va5bCjZDCU9VYRpump",
+     "observed": "5E6H41XP2pxrF7J2JJVWtnXdk7Va5bCjZDCU9VYRpump",
+     "match": true,
+     "howDerived": "input (the mint being bought)",
+     "observedMeta": {
+      "signer": true,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 2,
+     "idlName": "quote_mint",
+     "derived": "So11111111111111111111111111111111111111112",
+     "observed": "So11111111111111111111111111111111111111112",
+     "match": true,
+     "howDerived": "BondingCurve.quote_mint is the zero pubkey -> native SOL -> WSOL",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 3,
+     "idlName": "base_token_program",
+     "derived": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "observed": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "match": true,
+     "howDerived": "owner of the base mint account",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 4,
+     "idlName": "quote_token_program",
+     "derived": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "observed": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "match": true,
+     "howDerived": "owner of the quote mint account",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 5,
+     "idlName": "associated_token_program",
+     "derived": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "observed": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 6,
+     "idlName": "fee_recipient",
+     "derived": "Fh9HmeLNUMVCvejxCtCL2DbYaRyBFVJ5xrWkLnMH6fdk",
+     "observed": "Fh9HmeLNUMVCvejxCtCL2DbYaRyBFVJ5xrWkLnMH6fdk",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global (fee_recipient | fee_recipients[7] | reserved_fee_recipient | reserved_fee_recipients[7])",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 7,
+     "idlName": "associated_quote_fee_recipient",
+     "derived": "2i3uCDzDhr3pSvMPF5uBpUckLAv7XGdo2a8soiqNJMHk",
+     "observed": "2i3uCDzDhr3pSvMPF5uBpUckLAv7XGdo2a8soiqNJMHk",
+     "match": true,
+     "howDerived": "ATA(fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 8,
+     "idlName": "buyback_fee_recipient",
+     "derived": "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+     "observed": "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global.buyback_fee_recipients[8]",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 9,
+     "idlName": "associated_quote_buyback_fee_recipient",
+     "derived": "CASRL2zkwDnppxEFQ4LgdwgR9pdz5Q8R8nEMKVZ9QoLp",
+     "observed": "CASRL2zkwDnppxEFQ4LgdwgR9pdz5Q8R8nEMKVZ9QoLp",
+     "match": true,
+     "howDerived": "ATA(buyback_fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 10,
+     "idlName": "bonding_curve",
+     "derived": "Chc1igQUPG3LvwgPrUUCp5YvCjixAytiKbjGMd4bDmin",
+     "observed": "Chc1igQUPG3LvwgPrUUCp5YvCjixAytiKbjGMd4bDmin",
+     "match": true,
+     "howDerived": "PDA([\"bonding-curve\", mint], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 11,
+     "idlName": "associated_base_bonding_curve",
+     "derived": "5QnkwiLPLiKQckPE6nyeY88cNTAKgxQtyLurpjYPWSjd",
+     "observed": "5QnkwiLPLiKQckPE6nyeY88cNTAKgxQtyLurpjYPWSjd",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, base_token_program, base_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 12,
+     "idlName": "associated_quote_bonding_curve",
+     "derived": "GieP41hsJ4WUr5S4p34M97JcMW7qwD5D2Md8i25zTrfe",
+     "observed": "GieP41hsJ4WUr5S4p34M97JcMW7qwD5D2Md8i25zTrfe",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 13,
+     "idlName": "user",
+     "derived": "7FVfSdnR9VPGjMtmBP1Hz9C2DFTpoNX8gVVRmnimnGt9",
+     "observed": "7FVfSdnR9VPGjMtmBP1Hz9C2DFTpoNX8gVVRmnimnGt9",
+     "match": true,
+     "howDerived": "input (the signer)",
+     "observedMeta": {
+      "signer": true,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 14,
+     "idlName": "associated_base_user",
+     "derived": "9sHQu7D7ako3kzoHe6TuKtpwtcu4bB2Huo9pEXU4TwSD",
+     "observed": "9sHQu7D7ako3kzoHe6TuKtpwtcu4bB2Huo9pEXU4TwSD",
+     "match": true,
+     "howDerived": "ATA(user, base_token_program, base_mint) — IDL declares NO pda here",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 15,
+     "idlName": "associated_quote_user",
+     "derived": "4FmqKzVFvKNWFPCyL8MTSK3e67kXUZYyf4oSTAdpwyDj",
+     "observed": "4FmqKzVFvKNWFPCyL8MTSK3e67kXUZYyf4oSTAdpwyDj",
+     "match": true,
+     "howDerived": "ATA(user, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 16,
+     "idlName": "creator_vault",
+     "derived": "J4L2vJBD7qHGEHDUewBUa2M6qqi8E77jm7sHHLaCdYc7",
+     "observed": "J4L2vJBD7qHGEHDUewBUa2M6qqi8E77jm7sHHLaCdYc7",
+     "match": true,
+     "howDerived": "PDA([\"creator-vault\", BondingCurve.creator]) — curve read at analysis time",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 17,
+     "idlName": "associated_creator_vault",
+     "derived": "6pDVXgLiZ3R3mMKn6DMBAR9WEC9nYAEq9R6X5Jgmdpbr",
+     "observed": "6pDVXgLiZ3R3mMKn6DMBAR9WEC9nYAEq9R6X5Jgmdpbr",
+     "match": true,
+     "howDerived": "ATA(creator_vault, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 18,
+     "idlName": "sharing_config",
+     "derived": "FAZMVbZ5p6WmUR7scK8u217Wx57adCHn4nMMcCmDLW71",
+     "observed": "FAZMVbZ5p6WmUR7scK8u217Wx57adCHn4nMMcCmDLW71",
+     "match": true,
+     "howDerived": "PDA([\"sharing-config\", base_mint], FEE PROGRAM)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 19,
+     "idlName": "global_volume_accumulator",
+     "derived": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "observed": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "match": true,
+     "howDerived": "PDA([\"global_volume_accumulator\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 20,
+     "idlName": "user_volume_accumulator",
+     "derived": "H4JZBMaD6bHkHKUwjPUBj5JtGK9d2Nd8KYW2WacagHx6",
+     "observed": "H4JZBMaD6bHkHKUwjPUBj5JtGK9d2Nd8KYW2WacagHx6",
+     "match": true,
+     "howDerived": "PDA([\"user_volume_accumulator\", user], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 21,
+     "idlName": "associated_user_volume_accumulator",
+     "derived": "BUTinLebmCaPZVsu7rWa8Fh8umsewaaMhdsXdgSv8xmV",
+     "observed": "BUTinLebmCaPZVsu7rWa8Fh8umsewaaMhdsXdgSv8xmV",
+     "match": true,
+     "howDerived": "ATA(user_volume_accumulator, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 22,
+     "idlName": "fee_config",
+     "derived": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "observed": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "match": true,
+     "howDerived": "PDA([\"fee_config\", pump_program_id], FEE PROGRAM)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 23,
+     "idlName": "fee_program",
+     "derived": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "observed": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 24,
+     "idlName": "system_program",
+     "derived": "11111111111111111111111111111111",
+     "observed": "11111111111111111111111111111111",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 25,
+     "idlName": "event_authority",
+     "derived": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "observed": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "match": true,
+     "howDerived": "PDA([\"__event_authority\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 26,
+     "idlName": "program",
+     "derived": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "observed": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    }
+   ]
+  },
+  {
+   "signature": "5GzeJnAbRLPzfAnnLYrR1YQxTdjhHySsws3Xm8G4fnERtDuVGm4NeCQaUSxqVfxW6hk3TBicT4P1xw67BigBekXZ",
+   "slot": 446099885,
+   "blockTime": 1789111599,
+   "instructionPosition": "TOP-LEVEL #5",
+   "isTopLevel": true,
+   "signer": "ypnQLY2y3Jrh8y5Akgn7ndNuygXCKPXuMJhpipDy6kN",
+   "mint": "DNLwPEp8DTn3nK2kD9FYGBkxpx9K41qr2UFJr27hpump",
+   "accountCount": 27,
+   "instructionDataHex": "b817ee6167c5d33d3a86594677100000de51650500000000",
+   "instructionDataBytes": 24,
+   "argAmount": "18104467424826",
+   "argMaxSolCost": "90526174",
+   "bondingCurve": {
+    "creator": "BL3opBvWBtiXEiGwhBZD9Tx1doaMWYPoeXtiSF1o5dW9",
+    "quote_mint_field": "Xs151QeqTCiuKtinzfRATnUESM2xTU6V9Wy8Vy538ci",
+    "complete": false,
+    "is_mayhem_mode": false,
+    "is_cashback_coin": false,
+    "accountDataLen": 151
+   },
+   "sharingConfig": {
+    "pda": "BL3opBvWBtiXEiGwhBZD9Tx1doaMWYPoeXtiSF1o5dW9",
+    "status": 1,
+    "version": 2,
+    "mint": "DNLwPEp8DTn3nK2kD9FYGBkxpx9K41qr2UFJr27hpump",
+    "admin": "FDfyqqenHVySjjyo4etCgBzxZNfUXUMaZo8ifKpDJGUf",
+    "admin_revoked": true,
+    "shareholders": [
+     {
+      "address": "2k5hrzuykwyTbUe8L7UriYAQhr5hijNLgBvEB4B9pP5y",
+      "share_bps": 10000
+     }
+    ],
+    "accountDataLen": 1024
+   },
+   "creatorMigratedToSharingConfig": true,
+   "creatorSeedUsed": "BL3opBvWBtiXEiGwhBZD9Tx1doaMWYPoeXtiSF1o5dW9",
+   "creatorVaultIfSeededFromCurveCreator": "GPeXJFaK8q3kwzSX67r9jppTFKWWMWQgcTwuN2wVKMs4",
+   "quoteIsNativeSol": false,
+   "quoteMintUsed": "Xs151QeqTCiuKtinzfRATnUESM2xTU6V9Wy8Vy538ci",
+   "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "quoteTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "feeRecipientObserved": "G5UZAVbAf46s7cKWoyKu8kYTip9DGTpbLZ2qa9Aq69dP",
+   "feeRecipientMembership": "Global.fee_recipients[6]",
+   "buybackObserved": "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+   "buybackMembership": "Global.buyback_fee_recipients[6]",
+   "positionsMatched": 25,
+   "positionsTotal": 27,
+   "mismatches": [
+    {
+     "index": 16,
+     "idlName": "creator_vault",
+     "derived": "GPeXJFaK8q3kwzSX67r9jppTFKWWMWQgcTwuN2wVKMs4",
+     "observed": "rm9RgM964BmnaC3426ZM1rg7hpdSKuwkNrqAT2fMkXQ"
+    },
+    {
+     "index": 17,
+     "idlName": "associated_creator_vault",
+     "derived": "DaXRPhexDW2FdZfCcSZqimQWsmucFnPxQtVgNigns7f5",
+     "observed": "9NUwpjbckJ1RZp4Hx6tRgamqvfhZweT1tZzdcXnd2uyQ"
+    }
+   ],
+   "positions": [
+    {
+     "index": 0,
+     "idlName": "global",
+     "derived": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "observed": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "match": true,
+     "howDerived": "PDA([\"global\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 1,
+     "idlName": "base_mint",
+     "derived": "DNLwPEp8DTn3nK2kD9FYGBkxpx9K41qr2UFJr27hpump",
+     "observed": "DNLwPEp8DTn3nK2kD9FYGBkxpx9K41qr2UFJr27hpump",
+     "match": true,
+     "howDerived": "input (the mint being bought)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 2,
+     "idlName": "quote_mint",
+     "derived": "Xs151QeqTCiuKtinzfRATnUESM2xTU6V9Wy8Vy538ci",
+     "observed": "Xs151QeqTCiuKtinzfRATnUESM2xTU6V9Wy8Vy538ci",
+     "match": true,
+     "howDerived": "BondingCurve.quote_mint (offset 83)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 3,
+     "idlName": "base_token_program",
+     "derived": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "observed": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "match": true,
+     "howDerived": "owner of the base mint account",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 4,
+     "idlName": "quote_token_program",
+     "derived": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "observed": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "match": true,
+     "howDerived": "owner of the quote mint account",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 5,
+     "idlName": "associated_token_program",
+     "derived": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "observed": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 6,
+     "idlName": "fee_recipient",
+     "derived": "G5UZAVbAf46s7cKWoyKu8kYTip9DGTpbLZ2qa9Aq69dP",
+     "observed": "G5UZAVbAf46s7cKWoyKu8kYTip9DGTpbLZ2qa9Aq69dP",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global (fee_recipient | fee_recipients[7] | reserved_fee_recipient | reserved_fee_recipients[7])",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 7,
+     "idlName": "associated_quote_fee_recipient",
+     "derived": "7K2dwbfd58AFjxXW2LBgpdE2847hG8742dTkhypTfvKX",
+     "observed": "7K2dwbfd58AFjxXW2LBgpdE2847hG8742dTkhypTfvKX",
+     "match": true,
+     "howDerived": "ATA(fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 8,
+     "idlName": "buyback_fee_recipient",
+     "derived": "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+     "observed": "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global.buyback_fee_recipients[8]",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 9,
+     "idlName": "associated_quote_buyback_fee_recipient",
+     "derived": "G7L881vNtv23grzm1VC6B9wr9gyZmjSoY9Gbh3tRbLM8",
+     "observed": "G7L881vNtv23grzm1VC6B9wr9gyZmjSoY9Gbh3tRbLM8",
+     "match": true,
+     "howDerived": "ATA(buyback_fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 10,
+     "idlName": "bonding_curve",
+     "derived": "Dp6D1ouSVaymWgxvFKjeam2cwS1yPmG4MsMu4pSMN5tx",
+     "observed": "Dp6D1ouSVaymWgxvFKjeam2cwS1yPmG4MsMu4pSMN5tx",
+     "match": true,
+     "howDerived": "PDA([\"bonding-curve\", mint], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 11,
+     "idlName": "associated_base_bonding_curve",
+     "derived": "EynEFcmZkpLtwtX389yubctde6FCWR4fg8zPqc3DgTXL",
+     "observed": "EynEFcmZkpLtwtX389yubctde6FCWR4fg8zPqc3DgTXL",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, base_token_program, base_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 12,
+     "idlName": "associated_quote_bonding_curve",
+     "derived": "7ofrhTDAjBqiAHbYUJBHh1mNUuRLDfC4kFe5bQ3nTAoP",
+     "observed": "7ofrhTDAjBqiAHbYUJBHh1mNUuRLDfC4kFe5bQ3nTAoP",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 13,
+     "idlName": "user",
+     "derived": "ypnQLY2y3Jrh8y5Akgn7ndNuygXCKPXuMJhpipDy6kN",
+     "observed": "ypnQLY2y3Jrh8y5Akgn7ndNuygXCKPXuMJhpipDy6kN",
+     "match": true,
+     "howDerived": "input (the signer)",
+     "observedMeta": {
+      "signer": true,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 14,
+     "idlName": "associated_base_user",
+     "derived": "8dEXBjYLVkQGwrgwAjmGkH1e8W9d4E1oBd4F4rUVoPR2",
+     "observed": "8dEXBjYLVkQGwrgwAjmGkH1e8W9d4E1oBd4F4rUVoPR2",
+     "match": true,
+     "howDerived": "ATA(user, base_token_program, base_mint) — IDL declares NO pda here",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 15,
+     "idlName": "associated_quote_user",
+     "derived": "BaZsg33EgV4HuBc8FerhnV2FPt4qVWswFkwyyUD5Xgxq",
+     "observed": "BaZsg33EgV4HuBc8FerhnV2FPt4qVWswFkwyyUD5Xgxq",
+     "match": true,
+     "howDerived": "ATA(user, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 16,
+     "idlName": "creator_vault",
+     "derived": "GPeXJFaK8q3kwzSX67r9jppTFKWWMWQgcTwuN2wVKMs4",
+     "observed": "rm9RgM964BmnaC3426ZM1rg7hpdSKuwkNrqAT2fMkXQ",
+     "match": false,
+     "howDerived": "PDA([\"creator-vault\", BondingCurve.creator]) — curve read at analysis time",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 17,
+     "idlName": "associated_creator_vault",
+     "derived": "DaXRPhexDW2FdZfCcSZqimQWsmucFnPxQtVgNigns7f5",
+     "observed": "9NUwpjbckJ1RZp4Hx6tRgamqvfhZweT1tZzdcXnd2uyQ",
+     "match": false,
+     "howDerived": "ATA(creator_vault, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 18,
+     "idlName": "sharing_config",
+     "derived": "BL3opBvWBtiXEiGwhBZD9Tx1doaMWYPoeXtiSF1o5dW9",
+     "observed": "BL3opBvWBtiXEiGwhBZD9Tx1doaMWYPoeXtiSF1o5dW9",
+     "match": true,
+     "howDerived": "PDA([\"sharing-config\", base_mint], FEE PROGRAM)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 19,
+     "idlName": "global_volume_accumulator",
+     "derived": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "observed": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "match": true,
+     "howDerived": "PDA([\"global_volume_accumulator\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 20,
+     "idlName": "user_volume_accumulator",
+     "derived": "9yfUK5rRiBoRBChR2wr3V8L9NzruinqUmpFo9hrwi2VU",
+     "observed": "9yfUK5rRiBoRBChR2wr3V8L9NzruinqUmpFo9hrwi2VU",
+     "match": true,
+     "howDerived": "PDA([\"user_volume_accumulator\", user], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 21,
+     "idlName": "associated_user_volume_accumulator",
+     "derived": "5wTHWK6ZKJUMS1YaYtRiYxcGZL8cXiGD3y9W8t33vpWz",
+     "observed": "5wTHWK6ZKJUMS1YaYtRiYxcGZL8cXiGD3y9W8t33vpWz",
+     "match": true,
+     "howDerived": "ATA(user_volume_accumulator, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 22,
+     "idlName": "fee_config",
+     "derived": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "observed": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "match": true,
+     "howDerived": "PDA([\"fee_config\", pump_program_id], FEE PROGRAM)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 23,
+     "idlName": "fee_program",
+     "derived": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "observed": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 24,
+     "idlName": "system_program",
+     "derived": "11111111111111111111111111111111",
+     "observed": "11111111111111111111111111111111",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 25,
+     "idlName": "event_authority",
+     "derived": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "observed": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "match": true,
+     "howDerived": "PDA([\"__event_authority\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 26,
+     "idlName": "program",
+     "derived": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "observed": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    }
+   ]
+  },
+  {
+   "signature": "3dNrDrNCQ3Wti4B3NN4dbFmyYSuDGw4bYMpbwET6E2RrqQg8q2za7uJucsCoz86HufgiircbxgsbX7c7WKD2W4a5",
+   "slot": 446099884,
+   "blockTime": 1789111599,
+   "instructionPosition": "TOP-LEVEL #4",
+   "isTopLevel": true,
+   "signer": "7NpGDZpccpgwc3Xf9MSHZHdKUnmoqp6iyRZa5WxTeyLj",
+   "mint": "6QS4sy89qpVJDpUcfHmnxvixFQdCPDUJpGVpw92gpump",
+   "accountCount": 27,
+   "instructionDataHex": "b817ee6167c5d33dbb51ebd83f020000ffffffffffffffff",
+   "instructionDataBytes": 24,
+   "argAmount": "2473245495739",
+   "argMaxSolCost": "18446744073709551615",
+   "bondingCurve": {
+    "creator": "7NpGDZpccpgwc3Xf9MSHZHdKUnmoqp6iyRZa5WxTeyLj",
+    "quote_mint_field": "11111111111111111111111111111111",
+    "complete": false,
+    "is_mayhem_mode": true,
+    "is_cashback_coin": false,
+    "accountDataLen": 124
+   },
+   "sharingConfig": {
+    "pda": "9KxUprqL4rytfjs21HRvCjQfTgqoNofNX1rvmnJQN3NC",
+    "exists": false
+   },
+   "creatorMigratedToSharingConfig": false,
+   "creatorSeedUsed": "7NpGDZpccpgwc3Xf9MSHZHdKUnmoqp6iyRZa5WxTeyLj",
+   "creatorVaultIfSeededFromCurveCreator": "GBN8uYw6236GxshFhRtn65M6Keqz1axcJefEdGxx9tWe",
+   "quoteIsNativeSol": true,
+   "quoteMintUsed": "So11111111111111111111111111111111111111112",
+   "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "feeRecipientObserved": "6AUH3WEHucYZyC61hqpqYUWVto5qA5hjHuNQ32GNnNxA",
+   "feeRecipientMembership": "Global.reserved_fee_recipients[6]",
+   "buybackObserved": "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+   "buybackMembership": "Global.buyback_fee_recipients[5]",
+   "positionsMatched": 27,
+   "positionsTotal": 27,
+   "mismatches": [],
+   "positions": [
+    {
+     "index": 0,
+     "idlName": "global",
+     "derived": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "observed": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "match": true,
+     "howDerived": "PDA([\"global\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 1,
+     "idlName": "base_mint",
+     "derived": "6QS4sy89qpVJDpUcfHmnxvixFQdCPDUJpGVpw92gpump",
+     "observed": "6QS4sy89qpVJDpUcfHmnxvixFQdCPDUJpGVpw92gpump",
+     "match": true,
+     "howDerived": "input (the mint being bought)",
+     "observedMeta": {
+      "signer": true,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 2,
+     "idlName": "quote_mint",
+     "derived": "So11111111111111111111111111111111111111112",
+     "observed": "So11111111111111111111111111111111111111112",
+     "match": true,
+     "howDerived": "BondingCurve.quote_mint is the zero pubkey -> native SOL -> WSOL",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 3,
+     "idlName": "base_token_program",
+     "derived": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "observed": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "match": true,
+     "howDerived": "owner of the base mint account",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 4,
+     "idlName": "quote_token_program",
+     "derived": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "observed": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "match": true,
+     "howDerived": "owner of the quote mint account",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 5,
+     "idlName": "associated_token_program",
+     "derived": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "observed": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 6,
+     "idlName": "fee_recipient",
+     "derived": "6AUH3WEHucYZyC61hqpqYUWVto5qA5hjHuNQ32GNnNxA",
+     "observed": "6AUH3WEHucYZyC61hqpqYUWVto5qA5hjHuNQ32GNnNxA",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global (fee_recipient | fee_recipients[7] | reserved_fee_recipient | reserved_fee_recipients[7])",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 7,
+     "idlName": "associated_quote_fee_recipient",
+     "derived": "ghSBUgyxyvyurm1vJBkU4rUyLJoUipCZhFeiBogKCSy",
+     "observed": "ghSBUgyxyvyurm1vJBkU4rUyLJoUipCZhFeiBogKCSy",
+     "match": true,
+     "howDerived": "ATA(fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 8,
+     "idlName": "buyback_fee_recipient",
+     "derived": "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+     "observed": "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global.buyback_fee_recipients[8]",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 9,
+     "idlName": "associated_quote_buyback_fee_recipient",
+     "derived": "CA7v8gHfbquYXyDnDx6QxWW8hmL1H7X6Y2RYDrGLnuck",
+     "observed": "CA7v8gHfbquYXyDnDx6QxWW8hmL1H7X6Y2RYDrGLnuck",
+     "match": true,
+     "howDerived": "ATA(buyback_fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 10,
+     "idlName": "bonding_curve",
+     "derived": "FXqEFCdRpyZU1jAfXBNzkdP1LzY7PniQDawW1GcE7Fns",
+     "observed": "FXqEFCdRpyZU1jAfXBNzkdP1LzY7PniQDawW1GcE7Fns",
+     "match": true,
+     "howDerived": "PDA([\"bonding-curve\", mint], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 11,
+     "idlName": "associated_base_bonding_curve",
+     "derived": "GmYnmLEdCGZDMuDdcnjVQKyfQz39YRnQkP7Rtx2a19XH",
+     "observed": "GmYnmLEdCGZDMuDdcnjVQKyfQz39YRnQkP7Rtx2a19XH",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, base_token_program, base_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 12,
+     "idlName": "associated_quote_bonding_curve",
+     "derived": "Fu2339FRAq25uqjgN2ECVSTKy3zWwEacpdiAjNAm9Zjw",
+     "observed": "Fu2339FRAq25uqjgN2ECVSTKy3zWwEacpdiAjNAm9Zjw",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 13,
+     "idlName": "user",
+     "derived": "7NpGDZpccpgwc3Xf9MSHZHdKUnmoqp6iyRZa5WxTeyLj",
+     "observed": "7NpGDZpccpgwc3Xf9MSHZHdKUnmoqp6iyRZa5WxTeyLj",
+     "match": true,
+     "howDerived": "input (the signer)",
+     "observedMeta": {
+      "signer": true,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 14,
+     "idlName": "associated_base_user",
+     "derived": "9oV823EzGeA9swQN9kdRpDzZidSuxoTyGgH9oaRskJR2",
+     "observed": "9oV823EzGeA9swQN9kdRpDzZidSuxoTyGgH9oaRskJR2",
+     "match": true,
+     "howDerived": "ATA(user, base_token_program, base_mint) — IDL declares NO pda here",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 15,
+     "idlName": "associated_quote_user",
+     "derived": "E6zfrLevu4jB4Y4dnJL3FbQbipXuw1F9Ao6mf3rRNBuj",
+     "observed": "E6zfrLevu4jB4Y4dnJL3FbQbipXuw1F9Ao6mf3rRNBuj",
+     "match": true,
+     "howDerived": "ATA(user, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 16,
+     "idlName": "creator_vault",
+     "derived": "GBN8uYw6236GxshFhRtn65M6Keqz1axcJefEdGxx9tWe",
+     "observed": "GBN8uYw6236GxshFhRtn65M6Keqz1axcJefEdGxx9tWe",
+     "match": true,
+     "howDerived": "PDA([\"creator-vault\", BondingCurve.creator]) — curve read at analysis time",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 17,
+     "idlName": "associated_creator_vault",
+     "derived": "HRjt5Z4tAZJf55YK5uqcDJLeByMMiGz9zPHY34fY1uoL",
+     "observed": "HRjt5Z4tAZJf55YK5uqcDJLeByMMiGz9zPHY34fY1uoL",
+     "match": true,
+     "howDerived": "ATA(creator_vault, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 18,
+     "idlName": "sharing_config",
+     "derived": "9KxUprqL4rytfjs21HRvCjQfTgqoNofNX1rvmnJQN3NC",
+     "observed": "9KxUprqL4rytfjs21HRvCjQfTgqoNofNX1rvmnJQN3NC",
+     "match": true,
+     "howDerived": "PDA([\"sharing-config\", base_mint], FEE PROGRAM)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 19,
+     "idlName": "global_volume_accumulator",
+     "derived": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "observed": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "match": true,
+     "howDerived": "PDA([\"global_volume_accumulator\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 20,
+     "idlName": "user_volume_accumulator",
+     "derived": "9jKHP2FeA2d6mSk1jtcSJ8xF5EGfSoYv6sFR2RGjcQd5",
+     "observed": "9jKHP2FeA2d6mSk1jtcSJ8xF5EGfSoYv6sFR2RGjcQd5",
+     "match": true,
+     "howDerived": "PDA([\"user_volume_accumulator\", user], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 21,
+     "idlName": "associated_user_volume_accumulator",
+     "derived": "2gnHZ4jW5xnoMgpUVZ49LfWTj1UBWrU4UDPCsUrMNSdU",
+     "observed": "2gnHZ4jW5xnoMgpUVZ49LfWTj1UBWrU4UDPCsUrMNSdU",
+     "match": true,
+     "howDerived": "ATA(user_volume_accumulator, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 22,
+     "idlName": "fee_config",
+     "derived": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "observed": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "match": true,
+     "howDerived": "PDA([\"fee_config\", pump_program_id], FEE PROGRAM)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 23,
+     "idlName": "fee_program",
+     "derived": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "observed": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 24,
+     "idlName": "system_program",
+     "derived": "11111111111111111111111111111111",
+     "observed": "11111111111111111111111111111111",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 25,
+     "idlName": "event_authority",
+     "derived": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "observed": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "match": true,
+     "howDerived": "PDA([\"__event_authority\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 26,
+     "idlName": "program",
+     "derived": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "observed": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    }
+   ]
+  },
+  {
+   "signature": "ZA2rEdcoMTcNqu1QXAvYoAkN9JNVi2BNwWm7wNTqMNojtiL1zdtevZUVJWKQnhWWZkdGytL2X82iuRGNyyhmtqQ",
+   "slot": 446085049,
+   "blockTime": 1789106921,
+   "instructionPosition": "TOP-LEVEL (harvested by top-level-only scanner; index not recorded)",
+   "isTopLevel": true,
+   "signer": "EThJsHRjMSEU6VTuugWdurkj8C5RtzagivsD4fjtRSz2",
+   "mint": "HXmrG1XUBjoSC1KzQ9cvfts5Bh7yr4PHPKjSaRjXpump",
+   "accountCount": 27,
+   "instructionDataHex": "b817ee6167c5d33d8ed92182a204000030e7220c00000000",
+   "instructionDataBytes": 24,
+   "argAmount": "5096014469518",
+   "argMaxSolCost": "203614000",
+   "bondingCurve": {
+    "creator": "2JP3njhGa5aXQhUtrKYWA9ZEyiDJRuNtkLuDkVcBue6E",
+    "quote_mint_field": "11111111111111111111111111111111",
+    "complete": false,
+    "is_mayhem_mode": false,
+    "is_cashback_coin": false,
+    "accountDataLen": 124
+   },
+   "sharingConfig": {
+    "pda": "H1kLpLh6ENzVK5tUVztta2FCsWVBb9Taqc964eU1Ptzz",
+    "exists": false
+   },
+   "creatorMigratedToSharingConfig": false,
+   "creatorSeedUsed": "2JP3njhGa5aXQhUtrKYWA9ZEyiDJRuNtkLuDkVcBue6E",
+   "creatorVaultIfSeededFromCurveCreator": "9yC91vhrE3SeQxDM9yn9Jm8J8jVzJ2NUfgMSW18QPHt5",
+   "quoteIsNativeSol": true,
+   "quoteMintUsed": "So11111111111111111111111111111111111111112",
+   "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "feeRecipientObserved": "9rPYyANsfQZw3DnDmKE3YCQF5E8oD89UXoHn9JFEhJUz",
+   "feeRecipientMembership": "Global.fee_recipients[2]",
+   "buybackObserved": "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW",
+   "buybackMembership": "Global.buyback_fee_recipients[7]",
+   "positionsMatched": 27,
+   "positionsTotal": 27,
+   "mismatches": [],
+   "positions": [
+    {
+     "index": 0,
+     "idlName": "global",
+     "derived": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "observed": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "match": true,
+     "howDerived": "PDA([\"global\"], pump)",
+     "observedMeta": null
+    },
+    {
+     "index": 1,
+     "idlName": "base_mint",
+     "derived": "HXmrG1XUBjoSC1KzQ9cvfts5Bh7yr4PHPKjSaRjXpump",
+     "observed": "HXmrG1XUBjoSC1KzQ9cvfts5Bh7yr4PHPKjSaRjXpump",
+     "match": true,
+     "howDerived": "input (the mint being bought)",
+     "observedMeta": null
+    },
+    {
+     "index": 2,
+     "idlName": "quote_mint",
+     "derived": "So11111111111111111111111111111111111111112",
+     "observed": "So11111111111111111111111111111111111111112",
+     "match": true,
+     "howDerived": "BondingCurve.quote_mint is the zero pubkey -> native SOL -> WSOL",
+     "observedMeta": null
+    },
+    {
+     "index": 3,
+     "idlName": "base_token_program",
+     "derived": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "observed": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "match": true,
+     "howDerived": "owner of the base mint account",
+     "observedMeta": null
+    },
+    {
+     "index": 4,
+     "idlName": "quote_token_program",
+     "derived": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "observed": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "match": true,
+     "howDerived": "owner of the quote mint account",
+     "observedMeta": null
+    },
+    {
+     "index": 5,
+     "idlName": "associated_token_program",
+     "derived": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "observed": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": null
+    },
+    {
+     "index": 6,
+     "idlName": "fee_recipient",
+     "derived": "9rPYyANsfQZw3DnDmKE3YCQF5E8oD89UXoHn9JFEhJUz",
+     "observed": "9rPYyANsfQZw3DnDmKE3YCQF5E8oD89UXoHn9JFEhJUz",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global (fee_recipient | fee_recipients[7] | reserved_fee_recipient | reserved_fee_recipients[7])",
+     "observedMeta": null
+    },
+    {
+     "index": 7,
+     "idlName": "associated_quote_fee_recipient",
+     "derived": "Bvtgim23rfocUzxVX9j9QFxTbBnH8JZxnaGLCEkXvjKS",
+     "observed": "Bvtgim23rfocUzxVX9j9QFxTbBnH8JZxnaGLCEkXvjKS",
+     "match": true,
+     "howDerived": "ATA(fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": null
+    },
+    {
+     "index": 8,
+     "idlName": "buyback_fee_recipient",
+     "derived": "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW",
+     "observed": "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global.buyback_fee_recipients[8]",
+     "observedMeta": null
+    },
+    {
+     "index": 9,
+     "idlName": "associated_quote_buyback_fee_recipient",
+     "derived": "qkYdTGRPHbWTWuBMz45bCiU6a23axRqf6sBHm9295WY",
+     "observed": "qkYdTGRPHbWTWuBMz45bCiU6a23axRqf6sBHm9295WY",
+     "match": true,
+     "howDerived": "ATA(buyback_fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": null
+    },
+    {
+     "index": 10,
+     "idlName": "bonding_curve",
+     "derived": "BwSL3pLnS1gJYfDx8Zc8Xb7mKeLhD9SHKjWQLJpKSR5A",
+     "observed": "BwSL3pLnS1gJYfDx8Zc8Xb7mKeLhD9SHKjWQLJpKSR5A",
+     "match": true,
+     "howDerived": "PDA([\"bonding-curve\", mint], pump)",
+     "observedMeta": null
+    },
+    {
+     "index": 11,
+     "idlName": "associated_base_bonding_curve",
+     "derived": "9pH8BvHyPeUn1vkwnf244UP9funkthLbAFnyu5ECUaPY",
+     "observed": "9pH8BvHyPeUn1vkwnf244UP9funkthLbAFnyu5ECUaPY",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, base_token_program, base_mint)",
+     "observedMeta": null
+    },
+    {
+     "index": 12,
+     "idlName": "associated_quote_bonding_curve",
+     "derived": "GAtZbmpiZo7YVgZAzs3spoS6Lvogx1U8qWxHbCFNub3S",
+     "observed": "GAtZbmpiZo7YVgZAzs3spoS6Lvogx1U8qWxHbCFNub3S",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, quote_token_program, quote_mint)",
+     "observedMeta": null
+    },
+    {
+     "index": 13,
+     "idlName": "user",
+     "derived": "EThJsHRjMSEU6VTuugWdurkj8C5RtzagivsD4fjtRSz2",
+     "observed": "EThJsHRjMSEU6VTuugWdurkj8C5RtzagivsD4fjtRSz2",
+     "match": true,
+     "howDerived": "input (the signer)",
+     "observedMeta": null
+    },
+    {
+     "index": 14,
+     "idlName": "associated_base_user",
+     "derived": "H8ZNA6XzMfPHvPZerzrMkzGykEYYN6SQwQj4qS5QXckg",
+     "observed": "H8ZNA6XzMfPHvPZerzrMkzGykEYYN6SQwQj4qS5QXckg",
+     "match": true,
+     "howDerived": "ATA(user, base_token_program, base_mint) — IDL declares NO pda here",
+     "observedMeta": null
+    },
+    {
+     "index": 15,
+     "idlName": "associated_quote_user",
+     "derived": "8eDNfma1fb162XZoPdSBnZ4WmUjDAGoPFFcrQEzgPsWX",
+     "observed": "8eDNfma1fb162XZoPdSBnZ4WmUjDAGoPFFcrQEzgPsWX",
+     "match": true,
+     "howDerived": "ATA(user, quote_token_program, quote_mint)",
+     "observedMeta": null
+    },
+    {
+     "index": 16,
+     "idlName": "creator_vault",
+     "derived": "9yC91vhrE3SeQxDM9yn9Jm8J8jVzJ2NUfgMSW18QPHt5",
+     "observed": "9yC91vhrE3SeQxDM9yn9Jm8J8jVzJ2NUfgMSW18QPHt5",
+     "match": true,
+     "howDerived": "PDA([\"creator-vault\", BondingCurve.creator]) — curve read at analysis time",
+     "observedMeta": null
+    },
+    {
+     "index": 17,
+     "idlName": "associated_creator_vault",
+     "derived": "ESiS4nVbPTHiW2kiqHmeQqq4wTk1L9e3tk6q7tvv6eWF",
+     "observed": "ESiS4nVbPTHiW2kiqHmeQqq4wTk1L9e3tk6q7tvv6eWF",
+     "match": true,
+     "howDerived": "ATA(creator_vault, quote_token_program, quote_mint)",
+     "observedMeta": null
+    },
+    {
+     "index": 18,
+     "idlName": "sharing_config",
+     "derived": "H1kLpLh6ENzVK5tUVztta2FCsWVBb9Taqc964eU1Ptzz",
+     "observed": "H1kLpLh6ENzVK5tUVztta2FCsWVBb9Taqc964eU1Ptzz",
+     "match": true,
+     "howDerived": "PDA([\"sharing-config\", base_mint], FEE PROGRAM)",
+     "observedMeta": null
+    },
+    {
+     "index": 19,
+     "idlName": "global_volume_accumulator",
+     "derived": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "observed": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "match": true,
+     "howDerived": "PDA([\"global_volume_accumulator\"], pump)",
+     "observedMeta": null
+    },
+    {
+     "index": 20,
+     "idlName": "user_volume_accumulator",
+     "derived": "GG4hFr5A3SofCKy3uoThuF4DNYZyjhM7FcVY5UmV52sa",
+     "observed": "GG4hFr5A3SofCKy3uoThuF4DNYZyjhM7FcVY5UmV52sa",
+     "match": true,
+     "howDerived": "PDA([\"user_volume_accumulator\", user], pump)",
+     "observedMeta": null
+    },
+    {
+     "index": 21,
+     "idlName": "associated_user_volume_accumulator",
+     "derived": "7VJX4YqhpreiW7ti4Spa98iYF84gUhfi9hK5EnSADbcw",
+     "observed": "7VJX4YqhpreiW7ti4Spa98iYF84gUhfi9hK5EnSADbcw",
+     "match": true,
+     "howDerived": "ATA(user_volume_accumulator, quote_token_program, quote_mint)",
+     "observedMeta": null
+    },
+    {
+     "index": 22,
+     "idlName": "fee_config",
+     "derived": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "observed": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "match": true,
+     "howDerived": "PDA([\"fee_config\", pump_program_id], FEE PROGRAM)",
+     "observedMeta": null
+    },
+    {
+     "index": 23,
+     "idlName": "fee_program",
+     "derived": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "observed": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": null
+    },
+    {
+     "index": 24,
+     "idlName": "system_program",
+     "derived": "11111111111111111111111111111111",
+     "observed": "11111111111111111111111111111111",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": null
+    },
+    {
+     "index": 25,
+     "idlName": "event_authority",
+     "derived": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "observed": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "match": true,
+     "howDerived": "PDA([\"__event_authority\"], pump)",
+     "observedMeta": null
+    },
+    {
+     "index": 26,
+     "idlName": "program",
+     "derived": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "observed": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": null
+    }
+   ]
+  },
+  {
+   "signature": "36jeBCpCxP9bxHfG6EXFHJk1v4WDGobo6sVfBoB85g9EjYzkduEiE7Go3AaTjZPE1TNoc371T9UZYXrBM3hcpmN9",
+   "slot": 446084952,
+   "blockTime": 1789106891,
+   "instructionPosition": "TOP-LEVEL (harvested by top-level-only scanner; index not recorded)",
+   "isTopLevel": true,
+   "signer": "BXaJgW7MoyndH3YeGgLGKZHkbvNHYdgZTihqQV73pLF8",
+   "mint": "HXmrG1XUBjoSC1KzQ9cvfts5Bh7yr4PHPKjSaRjXpump",
+   "accountCount": 27,
+   "instructionDataHex": "b817ee6167c5d33d26fd5bec2401000080f0fa0200000000",
+   "instructionDataBytes": 24,
+   "argAmount": "1258095901990",
+   "argMaxSolCost": "50000000",
+   "bondingCurve": {
+    "creator": "2JP3njhGa5aXQhUtrKYWA9ZEyiDJRuNtkLuDkVcBue6E",
+    "quote_mint_field": "11111111111111111111111111111111",
+    "complete": false,
+    "is_mayhem_mode": false,
+    "is_cashback_coin": false,
+    "accountDataLen": 124
+   },
+   "sharingConfig": {
+    "pda": "H1kLpLh6ENzVK5tUVztta2FCsWVBb9Taqc964eU1Ptzz",
+    "exists": false
+   },
+   "creatorMigratedToSharingConfig": false,
+   "creatorSeedUsed": "2JP3njhGa5aXQhUtrKYWA9ZEyiDJRuNtkLuDkVcBue6E",
+   "creatorVaultIfSeededFromCurveCreator": "9yC91vhrE3SeQxDM9yn9Jm8J8jVzJ2NUfgMSW18QPHt5",
+   "quoteIsNativeSol": true,
+   "quoteMintUsed": "So11111111111111111111111111111111111111112",
+   "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "feeRecipientObserved": "CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM",
+   "feeRecipientMembership": "Global.fee_recipients[4]",
+   "buybackObserved": "5YxQFdt3Tr9zJLvkFccqXVUwhdTWJQc1fFg2YPbxvxeD",
+   "buybackMembership": "Global.buyback_fee_recipients[0]",
+   "positionsMatched": 27,
+   "positionsTotal": 27,
+   "mismatches": [],
+   "positions": [
+    {
+     "index": 0,
+     "idlName": "global",
+     "derived": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "observed": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "match": true,
+     "howDerived": "PDA([\"global\"], pump)",
+     "observedMeta": null
+    },
+    {
+     "index": 1,
+     "idlName": "base_mint",
+     "derived": "HXmrG1XUBjoSC1KzQ9cvfts5Bh7yr4PHPKjSaRjXpump",
+     "observed": "HXmrG1XUBjoSC1KzQ9cvfts5Bh7yr4PHPKjSaRjXpump",
+     "match": true,
+     "howDerived": "input (the mint being bought)",
+     "observedMeta": null
+    },
+    {
+     "index": 2,
+     "idlName": "quote_mint",
+     "derived": "So11111111111111111111111111111111111111112",
+     "observed": "So11111111111111111111111111111111111111112",
+     "match": true,
+     "howDerived": "BondingCurve.quote_mint is the zero pubkey -> native SOL -> WSOL",
+     "observedMeta": null
+    },
+    {
+     "index": 3,
+     "idlName": "base_token_program",
+     "derived": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "observed": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "match": true,
+     "howDerived": "owner of the base mint account",
+     "observedMeta": null
+    },
+    {
+     "index": 4,
+     "idlName": "quote_token_program",
+     "derived": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "observed": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "match": true,
+     "howDerived": "owner of the quote mint account",
+     "observedMeta": null
+    },
+    {
+     "index": 5,
+     "idlName": "associated_token_program",
+     "derived": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "observed": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": null
+    },
+    {
+     "index": 6,
+     "idlName": "fee_recipient",
+     "derived": "CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM",
+     "observed": "CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global (fee_recipient | fee_recipients[7] | reserved_fee_recipient | reserved_fee_recipients[7])",
+     "observedMeta": null
+    },
+    {
+     "index": 7,
+     "idlName": "associated_quote_fee_recipient",
+     "derived": "CGEWR6pxwgQvYKeX4pZDqpZtWYPvyTjiAsw86SNzJtGy",
+     "observed": "CGEWR6pxwgQvYKeX4pZDqpZtWYPvyTjiAsw86SNzJtGy",
+     "match": true,
+     "howDerived": "ATA(fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": null
+    },
+    {
+     "index": 8,
+     "idlName": "buyback_fee_recipient",
+     "derived": "5YxQFdt3Tr9zJLvkFccqXVUwhdTWJQc1fFg2YPbxvxeD",
+     "observed": "5YxQFdt3Tr9zJLvkFccqXVUwhdTWJQc1fFg2YPbxvxeD",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global.buyback_fee_recipients[8]",
+     "observedMeta": null
+    },
+    {
+     "index": 9,
+     "idlName": "associated_quote_buyback_fee_recipient",
+     "derived": "HjQjngTDqoHE6aaGhUqfz9aQ7WZcBRjy5xB8PScLSr8i",
+     "observed": "HjQjngTDqoHE6aaGhUqfz9aQ7WZcBRjy5xB8PScLSr8i",
+     "match": true,
+     "howDerived": "ATA(buyback_fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": null
+    },
+    {
+     "index": 10,
+     "idlName": "bonding_curve",
+     "derived": "BwSL3pLnS1gJYfDx8Zc8Xb7mKeLhD9SHKjWQLJpKSR5A",
+     "observed": "BwSL3pLnS1gJYfDx8Zc8Xb7mKeLhD9SHKjWQLJpKSR5A",
+     "match": true,
+     "howDerived": "PDA([\"bonding-curve\", mint], pump)",
+     "observedMeta": null
+    },
+    {
+     "index": 11,
+     "idlName": "associated_base_bonding_curve",
+     "derived": "9pH8BvHyPeUn1vkwnf244UP9funkthLbAFnyu5ECUaPY",
+     "observed": "9pH8BvHyPeUn1vkwnf244UP9funkthLbAFnyu5ECUaPY",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, base_token_program, base_mint)",
+     "observedMeta": null
+    },
+    {
+     "index": 12,
+     "idlName": "associated_quote_bonding_curve",
+     "derived": "GAtZbmpiZo7YVgZAzs3spoS6Lvogx1U8qWxHbCFNub3S",
+     "observed": "GAtZbmpiZo7YVgZAzs3spoS6Lvogx1U8qWxHbCFNub3S",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, quote_token_program, quote_mint)",
+     "observedMeta": null
+    },
+    {
+     "index": 13,
+     "idlName": "user",
+     "derived": "BXaJgW7MoyndH3YeGgLGKZHkbvNHYdgZTihqQV73pLF8",
+     "observed": "BXaJgW7MoyndH3YeGgLGKZHkbvNHYdgZTihqQV73pLF8",
+     "match": true,
+     "howDerived": "input (the signer)",
+     "observedMeta": null
+    },
+    {
+     "index": 14,
+     "idlName": "associated_base_user",
+     "derived": "7WAJt7Aho7KeNvmWBijx2zJLEjvZcw6Zji1dx46JYyaQ",
+     "observed": "7WAJt7Aho7KeNvmWBijx2zJLEjvZcw6Zji1dx46JYyaQ",
+     "match": true,
+     "howDerived": "ATA(user, base_token_program, base_mint) — IDL declares NO pda here",
+     "observedMeta": null
+    },
+    {
+     "index": 15,
+     "idlName": "associated_quote_user",
+     "derived": "CQuzzoZ1evyYc7pBuf5McYAP4CB5vAmKLVraSPW6RJsE",
+     "observed": "CQuzzoZ1evyYc7pBuf5McYAP4CB5vAmKLVraSPW6RJsE",
+     "match": true,
+     "howDerived": "ATA(user, quote_token_program, quote_mint)",
+     "observedMeta": null
+    },
+    {
+     "index": 16,
+     "idlName": "creator_vault",
+     "derived": "9yC91vhrE3SeQxDM9yn9Jm8J8jVzJ2NUfgMSW18QPHt5",
+     "observed": "9yC91vhrE3SeQxDM9yn9Jm8J8jVzJ2NUfgMSW18QPHt5",
+     "match": true,
+     "howDerived": "PDA([\"creator-vault\", BondingCurve.creator]) — curve read at analysis time",
+     "observedMeta": null
+    },
+    {
+     "index": 17,
+     "idlName": "associated_creator_vault",
+     "derived": "ESiS4nVbPTHiW2kiqHmeQqq4wTk1L9e3tk6q7tvv6eWF",
+     "observed": "ESiS4nVbPTHiW2kiqHmeQqq4wTk1L9e3tk6q7tvv6eWF",
+     "match": true,
+     "howDerived": "ATA(creator_vault, quote_token_program, quote_mint)",
+     "observedMeta": null
+    },
+    {
+     "index": 18,
+     "idlName": "sharing_config",
+     "derived": "H1kLpLh6ENzVK5tUVztta2FCsWVBb9Taqc964eU1Ptzz",
+     "observed": "H1kLpLh6ENzVK5tUVztta2FCsWVBb9Taqc964eU1Ptzz",
+     "match": true,
+     "howDerived": "PDA([\"sharing-config\", base_mint], FEE PROGRAM)",
+     "observedMeta": null
+    },
+    {
+     "index": 19,
+     "idlName": "global_volume_accumulator",
+     "derived": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "observed": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "match": true,
+     "howDerived": "PDA([\"global_volume_accumulator\"], pump)",
+     "observedMeta": null
+    },
+    {
+     "index": 20,
+     "idlName": "user_volume_accumulator",
+     "derived": "6PRh8NbvdYna5HVbvvpetV1RCkP8sj2CdRRX2g7bNV8f",
+     "observed": "6PRh8NbvdYna5HVbvvpetV1RCkP8sj2CdRRX2g7bNV8f",
+     "match": true,
+     "howDerived": "PDA([\"user_volume_accumulator\", user], pump)",
+     "observedMeta": null
+    },
+    {
+     "index": 21,
+     "idlName": "associated_user_volume_accumulator",
+     "derived": "cChkbxeGBancxvTh2BNvN1NNQokv4o53yVojmegtmjr",
+     "observed": "cChkbxeGBancxvTh2BNvN1NNQokv4o53yVojmegtmjr",
+     "match": true,
+     "howDerived": "ATA(user_volume_accumulator, quote_token_program, quote_mint)",
+     "observedMeta": null
+    },
+    {
+     "index": 22,
+     "idlName": "fee_config",
+     "derived": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "observed": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "match": true,
+     "howDerived": "PDA([\"fee_config\", pump_program_id], FEE PROGRAM)",
+     "observedMeta": null
+    },
+    {
+     "index": 23,
+     "idlName": "fee_program",
+     "derived": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "observed": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": null
+    },
+    {
+     "index": 24,
+     "idlName": "system_program",
+     "derived": "11111111111111111111111111111111",
+     "observed": "11111111111111111111111111111111",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": null
+    },
+    {
+     "index": 25,
+     "idlName": "event_authority",
+     "derived": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "observed": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "match": true,
+     "howDerived": "PDA([\"__event_authority\"], pump)",
+     "observedMeta": null
+    },
+    {
+     "index": 26,
+     "idlName": "program",
+     "derived": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "observed": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": null
+    }
+   ]
+  },
+  {
+   "signature": "woKwM9eKz2vfFkUPJsWaXxvjpqBTEnXVe4PSJD4GCUKkhU3WwrNZMnk16LAhWdeK8G4i6WtHtbGMKTtbwudyXXA",
+   "slot": 446084860,
+   "blockTime": 1789106862,
+   "instructionPosition": "TOP-LEVEL (harvested by top-level-only scanner; index not recorded)",
+   "isTopLevel": true,
+   "signer": "BUBBLEtr8BEJZ9PyC2DFYxG58r8tu5PiyAKMVm14hCg9",
+   "mint": "HXmrG1XUBjoSC1KzQ9cvfts5Bh7yr4PHPKjSaRjXpump",
+   "accountCount": 27,
+   "instructionDataHex": "b817ee6167c5d33de87f22539c0200000084d71700000000",
+   "instructionDataBytes": 24,
+   "argAmount": "2870432923624",
+   "argMaxSolCost": "400000000",
+   "bondingCurve": {
+    "creator": "2JP3njhGa5aXQhUtrKYWA9ZEyiDJRuNtkLuDkVcBue6E",
+    "quote_mint_field": "11111111111111111111111111111111",
+    "complete": false,
+    "is_mayhem_mode": false,
+    "is_cashback_coin": false,
+    "accountDataLen": 124
+   },
+   "sharingConfig": {
+    "pda": "H1kLpLh6ENzVK5tUVztta2FCsWVBb9Taqc964eU1Ptzz",
+    "exists": false
+   },
+   "creatorMigratedToSharingConfig": false,
+   "creatorSeedUsed": "2JP3njhGa5aXQhUtrKYWA9ZEyiDJRuNtkLuDkVcBue6E",
+   "creatorVaultIfSeededFromCurveCreator": "9yC91vhrE3SeQxDM9yn9Jm8J8jVzJ2NUfgMSW18QPHt5",
+   "quoteIsNativeSol": true,
+   "quoteMintUsed": "So11111111111111111111111111111111111111112",
+   "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "feeRecipientObserved": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+   "feeRecipientMembership": "Global.fee_recipient",
+   "buybackObserved": "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+   "buybackMembership": "Global.buyback_fee_recipients[1]",
+   "positionsMatched": 27,
+   "positionsTotal": 27,
+   "mismatches": [],
+   "positions": [
+    {
+     "index": 0,
+     "idlName": "global",
+     "derived": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "observed": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "match": true,
+     "howDerived": "PDA([\"global\"], pump)",
+     "observedMeta": null
+    },
+    {
+     "index": 1,
+     "idlName": "base_mint",
+     "derived": "HXmrG1XUBjoSC1KzQ9cvfts5Bh7yr4PHPKjSaRjXpump",
+     "observed": "HXmrG1XUBjoSC1KzQ9cvfts5Bh7yr4PHPKjSaRjXpump",
+     "match": true,
+     "howDerived": "input (the mint being bought)",
+     "observedMeta": null
+    },
+    {
+     "index": 2,
+     "idlName": "quote_mint",
+     "derived": "So11111111111111111111111111111111111111112",
+     "observed": "So11111111111111111111111111111111111111112",
+     "match": true,
+     "howDerived": "BondingCurve.quote_mint is the zero pubkey -> native SOL -> WSOL",
+     "observedMeta": null
+    },
+    {
+     "index": 3,
+     "idlName": "base_token_program",
+     "derived": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "observed": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "match": true,
+     "howDerived": "owner of the base mint account",
+     "observedMeta": null
+    },
+    {
+     "index": 4,
+     "idlName": "quote_token_program",
+     "derived": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "observed": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "match": true,
+     "howDerived": "owner of the quote mint account",
+     "observedMeta": null
+    },
+    {
+     "index": 5,
+     "idlName": "associated_token_program",
+     "derived": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "observed": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": null
+    },
+    {
+     "index": 6,
+     "idlName": "fee_recipient",
+     "derived": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+     "observed": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global (fee_recipient | fee_recipients[7] | reserved_fee_recipient | reserved_fee_recipients[7])",
+     "observedMeta": null
+    },
+    {
+     "index": 7,
+     "idlName": "associated_quote_fee_recipient",
+     "derived": "94qWNrtmfn42h3ZjUZwWvK1MEo9uVmmrBPd2hpNjYDjb",
+     "observed": "94qWNrtmfn42h3ZjUZwWvK1MEo9uVmmrBPd2hpNjYDjb",
+     "match": true,
+     "howDerived": "ATA(fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": null
+    },
+    {
+     "index": 8,
+     "idlName": "buyback_fee_recipient",
+     "derived": "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+     "observed": "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global.buyback_fee_recipients[8]",
+     "observedMeta": null
+    },
+    {
+     "index": 9,
+     "idlName": "associated_quote_buyback_fee_recipient",
+     "derived": "GAFuhgcd328SkkBYHpfadzmef9hTGAFRCi9QoCnsZQug",
+     "observed": "GAFuhgcd328SkkBYHpfadzmef9hTGAFRCi9QoCnsZQug",
+     "match": true,
+     "howDerived": "ATA(buyback_fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": null
+    },
+    {
+     "index": 10,
+     "idlName": "bonding_curve",
+     "derived": "BwSL3pLnS1gJYfDx8Zc8Xb7mKeLhD9SHKjWQLJpKSR5A",
+     "observed": "BwSL3pLnS1gJYfDx8Zc8Xb7mKeLhD9SHKjWQLJpKSR5A",
+     "match": true,
+     "howDerived": "PDA([\"bonding-curve\", mint], pump)",
+     "observedMeta": null
+    },
+    {
+     "index": 11,
+     "idlName": "associated_base_bonding_curve",
+     "derived": "9pH8BvHyPeUn1vkwnf244UP9funkthLbAFnyu5ECUaPY",
+     "observed": "9pH8BvHyPeUn1vkwnf244UP9funkthLbAFnyu5ECUaPY",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, base_token_program, base_mint)",
+     "observedMeta": null
+    },
+    {
+     "index": 12,
+     "idlName": "associated_quote_bonding_curve",
+     "derived": "GAtZbmpiZo7YVgZAzs3spoS6Lvogx1U8qWxHbCFNub3S",
+     "observed": "GAtZbmpiZo7YVgZAzs3spoS6Lvogx1U8qWxHbCFNub3S",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, quote_token_program, quote_mint)",
+     "observedMeta": null
+    },
+    {
+     "index": 13,
+     "idlName": "user",
+     "derived": "BUBBLEtr8BEJZ9PyC2DFYxG58r8tu5PiyAKMVm14hCg9",
+     "observed": "BUBBLEtr8BEJZ9PyC2DFYxG58r8tu5PiyAKMVm14hCg9",
+     "match": true,
+     "howDerived": "input (the signer)",
+     "observedMeta": null
+    },
+    {
+     "index": 14,
+     "idlName": "associated_base_user",
+     "derived": "EZ3Jq7dT5eDk2PzSgHDXXXKtjBJJGWnSdH76imy8iXZC",
+     "observed": "EZ3Jq7dT5eDk2PzSgHDXXXKtjBJJGWnSdH76imy8iXZC",
+     "match": true,
+     "howDerived": "ATA(user, base_token_program, base_mint) — IDL declares NO pda here",
+     "observedMeta": null
+    },
+    {
+     "index": 15,
+     "idlName": "associated_quote_user",
+     "derived": "3ZyBS2skcnMLXKCAFN9igAHKQdzFC74PHHu4tGPESjoB",
+     "observed": "3ZyBS2skcnMLXKCAFN9igAHKQdzFC74PHHu4tGPESjoB",
+     "match": true,
+     "howDerived": "ATA(user, quote_token_program, quote_mint)",
+     "observedMeta": null
+    },
+    {
+     "index": 16,
+     "idlName": "creator_vault",
+     "derived": "9yC91vhrE3SeQxDM9yn9Jm8J8jVzJ2NUfgMSW18QPHt5",
+     "observed": "9yC91vhrE3SeQxDM9yn9Jm8J8jVzJ2NUfgMSW18QPHt5",
+     "match": true,
+     "howDerived": "PDA([\"creator-vault\", BondingCurve.creator]) — curve read at analysis time",
+     "observedMeta": null
+    },
+    {
+     "index": 17,
+     "idlName": "associated_creator_vault",
+     "derived": "ESiS4nVbPTHiW2kiqHmeQqq4wTk1L9e3tk6q7tvv6eWF",
+     "observed": "ESiS4nVbPTHiW2kiqHmeQqq4wTk1L9e3tk6q7tvv6eWF",
+     "match": true,
+     "howDerived": "ATA(creator_vault, quote_token_program, quote_mint)",
+     "observedMeta": null
+    },
+    {
+     "index": 18,
+     "idlName": "sharing_config",
+     "derived": "H1kLpLh6ENzVK5tUVztta2FCsWVBb9Taqc964eU1Ptzz",
+     "observed": "H1kLpLh6ENzVK5tUVztta2FCsWVBb9Taqc964eU1Ptzz",
+     "match": true,
+     "howDerived": "PDA([\"sharing-config\", base_mint], FEE PROGRAM)",
+     "observedMeta": null
+    },
+    {
+     "index": 19,
+     "idlName": "global_volume_accumulator",
+     "derived": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "observed": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "match": true,
+     "howDerived": "PDA([\"global_volume_accumulator\"], pump)",
+     "observedMeta": null
+    },
+    {
+     "index": 20,
+     "idlName": "user_volume_accumulator",
+     "derived": "C4bWjc6MmGFC9QP88oYJCYvA1cCiKNyv5GGvDPxd138Z",
+     "observed": "C4bWjc6MmGFC9QP88oYJCYvA1cCiKNyv5GGvDPxd138Z",
+     "match": true,
+     "howDerived": "PDA([\"user_volume_accumulator\", user], pump)",
+     "observedMeta": null
+    },
+    {
+     "index": 21,
+     "idlName": "associated_user_volume_accumulator",
+     "derived": "6vuA4KTuSV7ufMvczCitaeS57gXUXEPZ8u4euzAab1t3",
+     "observed": "6vuA4KTuSV7ufMvczCitaeS57gXUXEPZ8u4euzAab1t3",
+     "match": true,
+     "howDerived": "ATA(user_volume_accumulator, quote_token_program, quote_mint)",
+     "observedMeta": null
+    },
+    {
+     "index": 22,
+     "idlName": "fee_config",
+     "derived": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "observed": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "match": true,
+     "howDerived": "PDA([\"fee_config\", pump_program_id], FEE PROGRAM)",
+     "observedMeta": null
+    },
+    {
+     "index": 23,
+     "idlName": "fee_program",
+     "derived": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "observed": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": null
+    },
+    {
+     "index": 24,
+     "idlName": "system_program",
+     "derived": "11111111111111111111111111111111",
+     "observed": "11111111111111111111111111111111",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": null
+    },
+    {
+     "index": 25,
+     "idlName": "event_authority",
+     "derived": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "observed": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "match": true,
+     "howDerived": "PDA([\"__event_authority\"], pump)",
+     "observedMeta": null
+    },
+    {
+     "index": 26,
+     "idlName": "program",
+     "derived": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "observed": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": null
+    }
+   ]
+  },
+  {
+   "signature": "3H2JoJ7Q7ZkgHVXBmEBvBFCkZhXnAnRtt5d9shRuTuAveu9F2RoGPBFPcy7ahgwbudV6bXHChyPAYNwGx3F9apzW",
+   "slot": 446099890,
+   "blockTime": 1789111600,
+   "instructionPosition": "INNER/CPI inner#6",
+   "isTopLevel": false,
+   "signer": "XuGJNri1sXE4CLYzk3wwrECPn2bPSKcmKJuXzn6R6oj",
+   "mint": "DNLwPEp8DTn3nK2kD9FYGBkxpx9K41qr2UFJr27hpump",
+   "accountCount": 27,
+   "instructionDataHex": "b817ee6167c5d33df5abe2017b1500005b2f060800000000",
+   "instructionDataBytes": 24,
+   "argAmount": "23618056793077",
+   "argMaxSolCost": "134623067",
+   "bondingCurve": {
+    "creator": "BL3opBvWBtiXEiGwhBZD9Tx1doaMWYPoeXtiSF1o5dW9",
+    "quote_mint_field": "Xs151QeqTCiuKtinzfRATnUESM2xTU6V9Wy8Vy538ci",
+    "complete": false,
+    "is_mayhem_mode": false,
+    "is_cashback_coin": false,
+    "accountDataLen": 151
+   },
+   "sharingConfig": {
+    "pda": "BL3opBvWBtiXEiGwhBZD9Tx1doaMWYPoeXtiSF1o5dW9",
+    "status": 1,
+    "version": 2,
+    "mint": "DNLwPEp8DTn3nK2kD9FYGBkxpx9K41qr2UFJr27hpump",
+    "admin": "FDfyqqenHVySjjyo4etCgBzxZNfUXUMaZo8ifKpDJGUf",
+    "admin_revoked": true,
+    "shareholders": [
+     {
+      "address": "2k5hrzuykwyTbUe8L7UriYAQhr5hijNLgBvEB4B9pP5y",
+      "share_bps": 10000
+     }
+    ],
+    "accountDataLen": 1024
+   },
+   "creatorMigratedToSharingConfig": true,
+   "creatorSeedUsed": "BL3opBvWBtiXEiGwhBZD9Tx1doaMWYPoeXtiSF1o5dW9",
+   "creatorVaultIfSeededFromCurveCreator": "GPeXJFaK8q3kwzSX67r9jppTFKWWMWQgcTwuN2wVKMs4",
+   "quoteIsNativeSol": false,
+   "quoteMintUsed": "Xs151QeqTCiuKtinzfRATnUESM2xTU6V9Wy8Vy538ci",
+   "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "quoteTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "feeRecipientObserved": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+   "feeRecipientMembership": "Global.fee_recipient",
+   "buybackObserved": "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+   "buybackMembership": "Global.buyback_fee_recipients[1]",
+   "positionsMatched": 27,
+   "positionsTotal": 27,
+   "mismatches": [],
+   "positions": [
+    {
+     "index": 0,
+     "idlName": "global",
+     "derived": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "observed": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "match": true,
+     "howDerived": "PDA([\"global\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 1,
+     "idlName": "base_mint",
+     "derived": "DNLwPEp8DTn3nK2kD9FYGBkxpx9K41qr2UFJr27hpump",
+     "observed": "DNLwPEp8DTn3nK2kD9FYGBkxpx9K41qr2UFJr27hpump",
+     "match": true,
+     "howDerived": "input (the mint being bought)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 2,
+     "idlName": "quote_mint",
+     "derived": "Xs151QeqTCiuKtinzfRATnUESM2xTU6V9Wy8Vy538ci",
+     "observed": "Xs151QeqTCiuKtinzfRATnUESM2xTU6V9Wy8Vy538ci",
+     "match": true,
+     "howDerived": "BondingCurve.quote_mint (offset 83)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 3,
+     "idlName": "base_token_program",
+     "derived": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "observed": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "match": true,
+     "howDerived": "owner of the base mint account",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 4,
+     "idlName": "quote_token_program",
+     "derived": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "observed": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "match": true,
+     "howDerived": "owner of the quote mint account",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 5,
+     "idlName": "associated_token_program",
+     "derived": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "observed": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 6,
+     "idlName": "fee_recipient",
+     "derived": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+     "observed": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global (fee_recipient | fee_recipients[7] | reserved_fee_recipient | reserved_fee_recipients[7])",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 7,
+     "idlName": "associated_quote_fee_recipient",
+     "derived": "7dpyckFiXgYeEpom1SBBg3Ho8TZDQQMQqr7BvXKMhGhc",
+     "observed": "7dpyckFiXgYeEpom1SBBg3Ho8TZDQQMQqr7BvXKMhGhc",
+     "match": true,
+     "howDerived": "ATA(fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 8,
+     "idlName": "buyback_fee_recipient",
+     "derived": "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+     "observed": "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global.buyback_fee_recipients[8]",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 9,
+     "idlName": "associated_quote_buyback_fee_recipient",
+     "derived": "BEmzzJaJqsUBgGCL8jA4Ee28p5sfKkFgTmmBJVmMjsQU",
+     "observed": "BEmzzJaJqsUBgGCL8jA4Ee28p5sfKkFgTmmBJVmMjsQU",
+     "match": true,
+     "howDerived": "ATA(buyback_fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 10,
+     "idlName": "bonding_curve",
+     "derived": "Dp6D1ouSVaymWgxvFKjeam2cwS1yPmG4MsMu4pSMN5tx",
+     "observed": "Dp6D1ouSVaymWgxvFKjeam2cwS1yPmG4MsMu4pSMN5tx",
+     "match": true,
+     "howDerived": "PDA([\"bonding-curve\", mint], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 11,
+     "idlName": "associated_base_bonding_curve",
+     "derived": "EynEFcmZkpLtwtX389yubctde6FCWR4fg8zPqc3DgTXL",
+     "observed": "EynEFcmZkpLtwtX389yubctde6FCWR4fg8zPqc3DgTXL",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, base_token_program, base_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 12,
+     "idlName": "associated_quote_bonding_curve",
+     "derived": "7ofrhTDAjBqiAHbYUJBHh1mNUuRLDfC4kFe5bQ3nTAoP",
+     "observed": "7ofrhTDAjBqiAHbYUJBHh1mNUuRLDfC4kFe5bQ3nTAoP",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 13,
+     "idlName": "user",
+     "derived": "XuGJNri1sXE4CLYzk3wwrECPn2bPSKcmKJuXzn6R6oj",
+     "observed": "XuGJNri1sXE4CLYzk3wwrECPn2bPSKcmKJuXzn6R6oj",
+     "match": true,
+     "howDerived": "input (the signer)",
+     "observedMeta": {
+      "signer": true,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 14,
+     "idlName": "associated_base_user",
+     "derived": "724pP8jDfwDNC1AxPun7zU4gRndFXCbWg8Dj9MUKL2fB",
+     "observed": "724pP8jDfwDNC1AxPun7zU4gRndFXCbWg8Dj9MUKL2fB",
+     "match": true,
+     "howDerived": "ATA(user, base_token_program, base_mint) — IDL declares NO pda here",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 15,
+     "idlName": "associated_quote_user",
+     "derived": "DJoksVWHAzhF8uksRHNKKj9BPoTAHVuWoSWoToG5Yfik",
+     "observed": "DJoksVWHAzhF8uksRHNKKj9BPoTAHVuWoSWoToG5Yfik",
+     "match": true,
+     "howDerived": "ATA(user, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 16,
+     "idlName": "creator_vault",
+     "derived": "GPeXJFaK8q3kwzSX67r9jppTFKWWMWQgcTwuN2wVKMs4",
+     "observed": "GPeXJFaK8q3kwzSX67r9jppTFKWWMWQgcTwuN2wVKMs4",
+     "match": true,
+     "howDerived": "PDA([\"creator-vault\", BondingCurve.creator]) — curve read at analysis time",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 17,
+     "idlName": "associated_creator_vault",
+     "derived": "DaXRPhexDW2FdZfCcSZqimQWsmucFnPxQtVgNigns7f5",
+     "observed": "DaXRPhexDW2FdZfCcSZqimQWsmucFnPxQtVgNigns7f5",
+     "match": true,
+     "howDerived": "ATA(creator_vault, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 18,
+     "idlName": "sharing_config",
+     "derived": "BL3opBvWBtiXEiGwhBZD9Tx1doaMWYPoeXtiSF1o5dW9",
+     "observed": "BL3opBvWBtiXEiGwhBZD9Tx1doaMWYPoeXtiSF1o5dW9",
+     "match": true,
+     "howDerived": "PDA([\"sharing-config\", base_mint], FEE PROGRAM)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 19,
+     "idlName": "global_volume_accumulator",
+     "derived": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "observed": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "match": true,
+     "howDerived": "PDA([\"global_volume_accumulator\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 20,
+     "idlName": "user_volume_accumulator",
+     "derived": "FHsAxr16FoyYHJMV1vjdoYvSuHfnknZt16KuZ6iuyTtK",
+     "observed": "FHsAxr16FoyYHJMV1vjdoYvSuHfnknZt16KuZ6iuyTtK",
+     "match": true,
+     "howDerived": "PDA([\"user_volume_accumulator\", user], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 21,
+     "idlName": "associated_user_volume_accumulator",
+     "derived": "6U8Zeid4AqV5XDp6tfwdGF1fBm9YEHQp5QKXhss2pgr8",
+     "observed": "6U8Zeid4AqV5XDp6tfwdGF1fBm9YEHQp5QKXhss2pgr8",
+     "match": true,
+     "howDerived": "ATA(user_volume_accumulator, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 22,
+     "idlName": "fee_config",
+     "derived": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "observed": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "match": true,
+     "howDerived": "PDA([\"fee_config\", pump_program_id], FEE PROGRAM)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 23,
+     "idlName": "fee_program",
+     "derived": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "observed": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 24,
+     "idlName": "system_program",
+     "derived": "11111111111111111111111111111111",
+     "observed": "11111111111111111111111111111111",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 25,
+     "idlName": "event_authority",
+     "derived": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "observed": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "match": true,
+     "howDerived": "PDA([\"__event_authority\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 26,
+     "idlName": "program",
+     "derived": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "observed": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    }
+   ]
+  },
+  {
+   "signature": "21DSEVnWt7rdK87vJhhwScBBDnDdkWrHfMMTSuphAJuK4yqkpcMxLUua3hWu7voGKBtks9MJQTMvPbUGGRGuQuJn",
+   "slot": 446099890,
+   "blockTime": 1789111600,
+   "instructionPosition": "INNER/CPI inner#6",
+   "isTopLevel": false,
+   "signer": "7sdSCoRGMjn1X777UbfjAfteADGuycjHgVaFs1FyGF5h",
+   "mint": "DNLwPEp8DTn3nK2kD9FYGBkxpx9K41qr2UFJr27hpump",
+   "accountCount": 27,
+   "instructionDataHex": "b817ee6167c5d33dc91c6617dc14000052c4640700000000",
+   "instructionDataBytes": 24,
+   "argAmount": "22935517928649",
+   "argMaxSolCost": "124044370",
+   "bondingCurve": {
+    "creator": "BL3opBvWBtiXEiGwhBZD9Tx1doaMWYPoeXtiSF1o5dW9",
+    "quote_mint_field": "Xs151QeqTCiuKtinzfRATnUESM2xTU6V9Wy8Vy538ci",
+    "complete": false,
+    "is_mayhem_mode": false,
+    "is_cashback_coin": false,
+    "accountDataLen": 151
+   },
+   "sharingConfig": {
+    "pda": "BL3opBvWBtiXEiGwhBZD9Tx1doaMWYPoeXtiSF1o5dW9",
+    "status": 1,
+    "version": 2,
+    "mint": "DNLwPEp8DTn3nK2kD9FYGBkxpx9K41qr2UFJr27hpump",
+    "admin": "FDfyqqenHVySjjyo4etCgBzxZNfUXUMaZo8ifKpDJGUf",
+    "admin_revoked": true,
+    "shareholders": [
+     {
+      "address": "2k5hrzuykwyTbUe8L7UriYAQhr5hijNLgBvEB4B9pP5y",
+      "share_bps": 10000
+     }
+    ],
+    "accountDataLen": 1024
+   },
+   "creatorMigratedToSharingConfig": true,
+   "creatorSeedUsed": "BL3opBvWBtiXEiGwhBZD9Tx1doaMWYPoeXtiSF1o5dW9",
+   "creatorVaultIfSeededFromCurveCreator": "GPeXJFaK8q3kwzSX67r9jppTFKWWMWQgcTwuN2wVKMs4",
+   "quoteIsNativeSol": false,
+   "quoteMintUsed": "Xs151QeqTCiuKtinzfRATnUESM2xTU6V9Wy8Vy538ci",
+   "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "quoteTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "feeRecipientObserved": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+   "feeRecipientMembership": "Global.fee_recipient",
+   "buybackObserved": "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+   "buybackMembership": "Global.buyback_fee_recipients[1]",
+   "positionsMatched": 27,
+   "positionsTotal": 27,
+   "mismatches": [],
+   "positions": [
+    {
+     "index": 0,
+     "idlName": "global",
+     "derived": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "observed": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "match": true,
+     "howDerived": "PDA([\"global\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 1,
+     "idlName": "base_mint",
+     "derived": "DNLwPEp8DTn3nK2kD9FYGBkxpx9K41qr2UFJr27hpump",
+     "observed": "DNLwPEp8DTn3nK2kD9FYGBkxpx9K41qr2UFJr27hpump",
+     "match": true,
+     "howDerived": "input (the mint being bought)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 2,
+     "idlName": "quote_mint",
+     "derived": "Xs151QeqTCiuKtinzfRATnUESM2xTU6V9Wy8Vy538ci",
+     "observed": "Xs151QeqTCiuKtinzfRATnUESM2xTU6V9Wy8Vy538ci",
+     "match": true,
+     "howDerived": "BondingCurve.quote_mint (offset 83)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 3,
+     "idlName": "base_token_program",
+     "derived": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "observed": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "match": true,
+     "howDerived": "owner of the base mint account",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 4,
+     "idlName": "quote_token_program",
+     "derived": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "observed": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "match": true,
+     "howDerived": "owner of the quote mint account",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 5,
+     "idlName": "associated_token_program",
+     "derived": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "observed": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 6,
+     "idlName": "fee_recipient",
+     "derived": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+     "observed": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global (fee_recipient | fee_recipients[7] | reserved_fee_recipient | reserved_fee_recipients[7])",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 7,
+     "idlName": "associated_quote_fee_recipient",
+     "derived": "7dpyckFiXgYeEpom1SBBg3Ho8TZDQQMQqr7BvXKMhGhc",
+     "observed": "7dpyckFiXgYeEpom1SBBg3Ho8TZDQQMQqr7BvXKMhGhc",
+     "match": true,
+     "howDerived": "ATA(fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 8,
+     "idlName": "buyback_fee_recipient",
+     "derived": "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+     "observed": "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global.buyback_fee_recipients[8]",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 9,
+     "idlName": "associated_quote_buyback_fee_recipient",
+     "derived": "BEmzzJaJqsUBgGCL8jA4Ee28p5sfKkFgTmmBJVmMjsQU",
+     "observed": "BEmzzJaJqsUBgGCL8jA4Ee28p5sfKkFgTmmBJVmMjsQU",
+     "match": true,
+     "howDerived": "ATA(buyback_fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 10,
+     "idlName": "bonding_curve",
+     "derived": "Dp6D1ouSVaymWgxvFKjeam2cwS1yPmG4MsMu4pSMN5tx",
+     "observed": "Dp6D1ouSVaymWgxvFKjeam2cwS1yPmG4MsMu4pSMN5tx",
+     "match": true,
+     "howDerived": "PDA([\"bonding-curve\", mint], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 11,
+     "idlName": "associated_base_bonding_curve",
+     "derived": "EynEFcmZkpLtwtX389yubctde6FCWR4fg8zPqc3DgTXL",
+     "observed": "EynEFcmZkpLtwtX389yubctde6FCWR4fg8zPqc3DgTXL",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, base_token_program, base_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 12,
+     "idlName": "associated_quote_bonding_curve",
+     "derived": "7ofrhTDAjBqiAHbYUJBHh1mNUuRLDfC4kFe5bQ3nTAoP",
+     "observed": "7ofrhTDAjBqiAHbYUJBHh1mNUuRLDfC4kFe5bQ3nTAoP",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 13,
+     "idlName": "user",
+     "derived": "7sdSCoRGMjn1X777UbfjAfteADGuycjHgVaFs1FyGF5h",
+     "observed": "7sdSCoRGMjn1X777UbfjAfteADGuycjHgVaFs1FyGF5h",
+     "match": true,
+     "howDerived": "input (the signer)",
+     "observedMeta": {
+      "signer": true,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 14,
+     "idlName": "associated_base_user",
+     "derived": "52pHrg8bWmWkmu3YYGxf9PREfdhExbb3Twa3pYUyhhmo",
+     "observed": "52pHrg8bWmWkmu3YYGxf9PREfdhExbb3Twa3pYUyhhmo",
+     "match": true,
+     "howDerived": "ATA(user, base_token_program, base_mint) — IDL declares NO pda here",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 15,
+     "idlName": "associated_quote_user",
+     "derived": "3A7vYiVBLXUTS4hJ82mnVSy2NMbcNGZRjBzHg8EX2Lxs",
+     "observed": "3A7vYiVBLXUTS4hJ82mnVSy2NMbcNGZRjBzHg8EX2Lxs",
+     "match": true,
+     "howDerived": "ATA(user, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 16,
+     "idlName": "creator_vault",
+     "derived": "GPeXJFaK8q3kwzSX67r9jppTFKWWMWQgcTwuN2wVKMs4",
+     "observed": "GPeXJFaK8q3kwzSX67r9jppTFKWWMWQgcTwuN2wVKMs4",
+     "match": true,
+     "howDerived": "PDA([\"creator-vault\", BondingCurve.creator]) — curve read at analysis time",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 17,
+     "idlName": "associated_creator_vault",
+     "derived": "DaXRPhexDW2FdZfCcSZqimQWsmucFnPxQtVgNigns7f5",
+     "observed": "DaXRPhexDW2FdZfCcSZqimQWsmucFnPxQtVgNigns7f5",
+     "match": true,
+     "howDerived": "ATA(creator_vault, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 18,
+     "idlName": "sharing_config",
+     "derived": "BL3opBvWBtiXEiGwhBZD9Tx1doaMWYPoeXtiSF1o5dW9",
+     "observed": "BL3opBvWBtiXEiGwhBZD9Tx1doaMWYPoeXtiSF1o5dW9",
+     "match": true,
+     "howDerived": "PDA([\"sharing-config\", base_mint], FEE PROGRAM)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 19,
+     "idlName": "global_volume_accumulator",
+     "derived": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "observed": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "match": true,
+     "howDerived": "PDA([\"global_volume_accumulator\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 20,
+     "idlName": "user_volume_accumulator",
+     "derived": "97fBEBf2DYnT5EHecsKeHJcvhEexigPZE1bsABJGaqiJ",
+     "observed": "97fBEBf2DYnT5EHecsKeHJcvhEexigPZE1bsABJGaqiJ",
+     "match": true,
+     "howDerived": "PDA([\"user_volume_accumulator\", user], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 21,
+     "idlName": "associated_user_volume_accumulator",
+     "derived": "CPLxD6xj9Lpgrwc2ZG5Lwefyn7vPgCv1A4bjq3n9updZ",
+     "observed": "CPLxD6xj9Lpgrwc2ZG5Lwefyn7vPgCv1A4bjq3n9updZ",
+     "match": true,
+     "howDerived": "ATA(user_volume_accumulator, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 22,
+     "idlName": "fee_config",
+     "derived": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "observed": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "match": true,
+     "howDerived": "PDA([\"fee_config\", pump_program_id], FEE PROGRAM)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 23,
+     "idlName": "fee_program",
+     "derived": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "observed": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 24,
+     "idlName": "system_program",
+     "derived": "11111111111111111111111111111111",
+     "observed": "11111111111111111111111111111111",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 25,
+     "idlName": "event_authority",
+     "derived": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "observed": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "match": true,
+     "howDerived": "PDA([\"__event_authority\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 26,
+     "idlName": "program",
+     "derived": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "observed": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    }
+   ]
+  },
+  {
+   "signature": "4dJgrPAd6a5VCqcauUAz1jt4kk3VV16DtaScnLmDzVjiFEfBiS6vwSRdY8Fum1bWp9diUVmLtULYCDnwhEv75Lm6",
+   "slot": 446099884,
+   "blockTime": 1789111599,
+   "instructionPosition": "INNER/CPI inner#6",
+   "isTopLevel": false,
+   "signer": "9zVVZBof1tMqjUH5URVakSUs6HyZwDwg5yh5uH2zTws7",
+   "mint": "7sN4EYXxULGKDf57LcmcyuyBb5GaPcHNMf5UuVSLpump",
+   "accountCount": 27,
+   "instructionDataHex": "b817ee6167c5d33d364bbca2970900001deb4b0000000000",
+   "instructionDataBytes": 24,
+   "argAmount": "10546874960694",
+   "argMaxSolCost": "4975389",
+   "bondingCurve": {
+    "creator": "9GJuiuoPoJTaufspcXFKKq6wuSMafXyKVo3Qje9r9ZXa",
+    "quote_mint_field": "MGMuubtUEirmkhfEQdmGUh4pr7HuUdMWcZXFtpPbVJD",
+    "complete": false,
+    "is_mayhem_mode": false,
+    "is_cashback_coin": false,
+    "accountDataLen": 151
+   },
+   "sharingConfig": {
+    "pda": "9GJuiuoPoJTaufspcXFKKq6wuSMafXyKVo3Qje9r9ZXa",
+    "status": 1,
+    "version": 2,
+    "mint": "7sN4EYXxULGKDf57LcmcyuyBb5GaPcHNMf5UuVSLpump",
+    "admin": "GdwgnJDXEWH118V4wtN16xPkmKBMnJzFubqoi1dUW3WL",
+    "admin_revoked": true,
+    "shareholders": [
+     {
+      "address": "2k5hrzuykwyTbUe8L7UriYAQhr5hijNLgBvEB4B9pP5y",
+      "share_bps": 10000
+     }
+    ],
+    "accountDataLen": 1024
+   },
+   "creatorMigratedToSharingConfig": true,
+   "creatorSeedUsed": "9GJuiuoPoJTaufspcXFKKq6wuSMafXyKVo3Qje9r9ZXa",
+   "creatorVaultIfSeededFromCurveCreator": "FwHtioUfEPtWHRwgz4tABB98KXjrffMJVVxXruf9sZjR",
+   "quoteIsNativeSol": false,
+   "quoteMintUsed": "MGMuubtUEirmkhfEQdmGUh4pr7HuUdMWcZXFtpPbVJD",
+   "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "quoteTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "feeRecipientObserved": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+   "feeRecipientMembership": "Global.fee_recipient",
+   "buybackObserved": "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+   "buybackMembership": "Global.buyback_fee_recipients[1]",
+   "positionsMatched": 27,
+   "positionsTotal": 27,
+   "mismatches": [],
+   "positions": [
+    {
+     "index": 0,
+     "idlName": "global",
+     "derived": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "observed": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "match": true,
+     "howDerived": "PDA([\"global\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 1,
+     "idlName": "base_mint",
+     "derived": "7sN4EYXxULGKDf57LcmcyuyBb5GaPcHNMf5UuVSLpump",
+     "observed": "7sN4EYXxULGKDf57LcmcyuyBb5GaPcHNMf5UuVSLpump",
+     "match": true,
+     "howDerived": "input (the mint being bought)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 2,
+     "idlName": "quote_mint",
+     "derived": "MGMuubtUEirmkhfEQdmGUh4pr7HuUdMWcZXFtpPbVJD",
+     "observed": "MGMuubtUEirmkhfEQdmGUh4pr7HuUdMWcZXFtpPbVJD",
+     "match": true,
+     "howDerived": "BondingCurve.quote_mint (offset 83)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 3,
+     "idlName": "base_token_program",
+     "derived": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "observed": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "match": true,
+     "howDerived": "owner of the base mint account",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 4,
+     "idlName": "quote_token_program",
+     "derived": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "observed": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "match": true,
+     "howDerived": "owner of the quote mint account",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 5,
+     "idlName": "associated_token_program",
+     "derived": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "observed": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 6,
+     "idlName": "fee_recipient",
+     "derived": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+     "observed": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global (fee_recipient | fee_recipients[7] | reserved_fee_recipient | reserved_fee_recipients[7])",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 7,
+     "idlName": "associated_quote_fee_recipient",
+     "derived": "A7R3R9QxQniqzRrroQwhw8C2WGgkDfEAF6cor6MNTJKk",
+     "observed": "A7R3R9QxQniqzRrroQwhw8C2WGgkDfEAF6cor6MNTJKk",
+     "match": true,
+     "howDerived": "ATA(fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 8,
+     "idlName": "buyback_fee_recipient",
+     "derived": "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+     "observed": "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global.buyback_fee_recipients[8]",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 9,
+     "idlName": "associated_quote_buyback_fee_recipient",
+     "derived": "6emBfwwNPqMyQDrBFAJyx88W7V8nuLuS1pLptndpvCgv",
+     "observed": "6emBfwwNPqMyQDrBFAJyx88W7V8nuLuS1pLptndpvCgv",
+     "match": true,
+     "howDerived": "ATA(buyback_fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 10,
+     "idlName": "bonding_curve",
+     "derived": "HvqEjFJJL6uQdzc6PARLWBWMiVGqQpTibsduid1CLbwy",
+     "observed": "HvqEjFJJL6uQdzc6PARLWBWMiVGqQpTibsduid1CLbwy",
+     "match": true,
+     "howDerived": "PDA([\"bonding-curve\", mint], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 11,
+     "idlName": "associated_base_bonding_curve",
+     "derived": "Lp4AHEUXVCqnXcw1GKX7FHNiwzXvWNz7HfxDvYFEzhZ",
+     "observed": "Lp4AHEUXVCqnXcw1GKX7FHNiwzXvWNz7HfxDvYFEzhZ",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, base_token_program, base_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 12,
+     "idlName": "associated_quote_bonding_curve",
+     "derived": "A7dPb6cUYhXDAKib1fo4GrvgcyB8bDn7Bkfz51Ur7KX7",
+     "observed": "A7dPb6cUYhXDAKib1fo4GrvgcyB8bDn7Bkfz51Ur7KX7",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 13,
+     "idlName": "user",
+     "derived": "9zVVZBof1tMqjUH5URVakSUs6HyZwDwg5yh5uH2zTws7",
+     "observed": "9zVVZBof1tMqjUH5URVakSUs6HyZwDwg5yh5uH2zTws7",
+     "match": true,
+     "howDerived": "input (the signer)",
+     "observedMeta": {
+      "signer": true,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 14,
+     "idlName": "associated_base_user",
+     "derived": "BqsJD7RTAFYaWRUVEPdju3Q8siypeg3usCzJjZM4odCv",
+     "observed": "BqsJD7RTAFYaWRUVEPdju3Q8siypeg3usCzJjZM4odCv",
+     "match": true,
+     "howDerived": "ATA(user, base_token_program, base_mint) — IDL declares NO pda here",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 15,
+     "idlName": "associated_quote_user",
+     "derived": "CkdgyN8YKCJzovxdEHKmY9QZkT3ELnMeXVyHiMZbbEVT",
+     "observed": "CkdgyN8YKCJzovxdEHKmY9QZkT3ELnMeXVyHiMZbbEVT",
+     "match": true,
+     "howDerived": "ATA(user, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 16,
+     "idlName": "creator_vault",
+     "derived": "FwHtioUfEPtWHRwgz4tABB98KXjrffMJVVxXruf9sZjR",
+     "observed": "FwHtioUfEPtWHRwgz4tABB98KXjrffMJVVxXruf9sZjR",
+     "match": true,
+     "howDerived": "PDA([\"creator-vault\", BondingCurve.creator]) — curve read at analysis time",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 17,
+     "idlName": "associated_creator_vault",
+     "derived": "BwscdDfiwgFUkcv1o6cZcq65W49dgrsaiaa3ngfnD4nW",
+     "observed": "BwscdDfiwgFUkcv1o6cZcq65W49dgrsaiaa3ngfnD4nW",
+     "match": true,
+     "howDerived": "ATA(creator_vault, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 18,
+     "idlName": "sharing_config",
+     "derived": "9GJuiuoPoJTaufspcXFKKq6wuSMafXyKVo3Qje9r9ZXa",
+     "observed": "9GJuiuoPoJTaufspcXFKKq6wuSMafXyKVo3Qje9r9ZXa",
+     "match": true,
+     "howDerived": "PDA([\"sharing-config\", base_mint], FEE PROGRAM)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 19,
+     "idlName": "global_volume_accumulator",
+     "derived": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "observed": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "match": true,
+     "howDerived": "PDA([\"global_volume_accumulator\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 20,
+     "idlName": "user_volume_accumulator",
+     "derived": "2mAzZrPek817qPqEiLz6ZcNPygD3nDVH78ih3XGsKaKa",
+     "observed": "2mAzZrPek817qPqEiLz6ZcNPygD3nDVH78ih3XGsKaKa",
+     "match": true,
+     "howDerived": "PDA([\"user_volume_accumulator\", user], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 21,
+     "idlName": "associated_user_volume_accumulator",
+     "derived": "HmZdhCStqonLeCgwiHbsi8HQYqU8fgrravXi8s7hCXgA",
+     "observed": "HmZdhCStqonLeCgwiHbsi8HQYqU8fgrravXi8s7hCXgA",
+     "match": true,
+     "howDerived": "ATA(user_volume_accumulator, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 22,
+     "idlName": "fee_config",
+     "derived": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "observed": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "match": true,
+     "howDerived": "PDA([\"fee_config\", pump_program_id], FEE PROGRAM)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 23,
+     "idlName": "fee_program",
+     "derived": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "observed": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 24,
+     "idlName": "system_program",
+     "derived": "11111111111111111111111111111111",
+     "observed": "11111111111111111111111111111111",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 25,
+     "idlName": "event_authority",
+     "derived": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "observed": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "match": true,
+     "howDerived": "PDA([\"__event_authority\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 26,
+     "idlName": "program",
+     "derived": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "observed": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    }
+   ]
+  },
+  {
+   "signature": "3LLcYnzoqFnPwQFxiC623UshJVNGojm8G1ssYyXj3evrKuPDpcpJmx6rJdQ2FRwZUR6oZ1aGwQXL1oRPSX6euL94",
+   "slot": 446099884,
+   "blockTime": 1789111599,
+   "instructionPosition": "INNER/CPI inner#6",
+   "isTopLevel": false,
+   "signer": "8KkfNTAinwQwfgScSndgQSe6hUfJBA8Qg2mUt26yjAN6",
+   "mint": "7sN4EYXxULGKDf57LcmcyuyBb5GaPcHNMf5UuVSLpump",
+   "accountCount": 27,
+   "instructionDataHex": "b817ee6167c5d33d2b49a94f950a00003b1d500000000000",
+   "instructionDataBytes": 24,
+   "argAmount": "11636402899243",
+   "argMaxSolCost": "5250363",
+   "bondingCurve": {
+    "creator": "9GJuiuoPoJTaufspcXFKKq6wuSMafXyKVo3Qje9r9ZXa",
+    "quote_mint_field": "MGMuubtUEirmkhfEQdmGUh4pr7HuUdMWcZXFtpPbVJD",
+    "complete": false,
+    "is_mayhem_mode": false,
+    "is_cashback_coin": false,
+    "accountDataLen": 151
+   },
+   "sharingConfig": {
+    "pda": "9GJuiuoPoJTaufspcXFKKq6wuSMafXyKVo3Qje9r9ZXa",
+    "status": 1,
+    "version": 2,
+    "mint": "7sN4EYXxULGKDf57LcmcyuyBb5GaPcHNMf5UuVSLpump",
+    "admin": "GdwgnJDXEWH118V4wtN16xPkmKBMnJzFubqoi1dUW3WL",
+    "admin_revoked": true,
+    "shareholders": [
+     {
+      "address": "2k5hrzuykwyTbUe8L7UriYAQhr5hijNLgBvEB4B9pP5y",
+      "share_bps": 10000
+     }
+    ],
+    "accountDataLen": 1024
+   },
+   "creatorMigratedToSharingConfig": true,
+   "creatorSeedUsed": "9GJuiuoPoJTaufspcXFKKq6wuSMafXyKVo3Qje9r9ZXa",
+   "creatorVaultIfSeededFromCurveCreator": "FwHtioUfEPtWHRwgz4tABB98KXjrffMJVVxXruf9sZjR",
+   "quoteIsNativeSol": false,
+   "quoteMintUsed": "MGMuubtUEirmkhfEQdmGUh4pr7HuUdMWcZXFtpPbVJD",
+   "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "quoteTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "feeRecipientObserved": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+   "feeRecipientMembership": "Global.fee_recipient",
+   "buybackObserved": "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+   "buybackMembership": "Global.buyback_fee_recipients[1]",
+   "positionsMatched": 27,
+   "positionsTotal": 27,
+   "mismatches": [],
+   "positions": [
+    {
+     "index": 0,
+     "idlName": "global",
+     "derived": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "observed": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "match": true,
+     "howDerived": "PDA([\"global\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 1,
+     "idlName": "base_mint",
+     "derived": "7sN4EYXxULGKDf57LcmcyuyBb5GaPcHNMf5UuVSLpump",
+     "observed": "7sN4EYXxULGKDf57LcmcyuyBb5GaPcHNMf5UuVSLpump",
+     "match": true,
+     "howDerived": "input (the mint being bought)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 2,
+     "idlName": "quote_mint",
+     "derived": "MGMuubtUEirmkhfEQdmGUh4pr7HuUdMWcZXFtpPbVJD",
+     "observed": "MGMuubtUEirmkhfEQdmGUh4pr7HuUdMWcZXFtpPbVJD",
+     "match": true,
+     "howDerived": "BondingCurve.quote_mint (offset 83)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 3,
+     "idlName": "base_token_program",
+     "derived": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "observed": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "match": true,
+     "howDerived": "owner of the base mint account",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 4,
+     "idlName": "quote_token_program",
+     "derived": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "observed": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "match": true,
+     "howDerived": "owner of the quote mint account",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 5,
+     "idlName": "associated_token_program",
+     "derived": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "observed": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 6,
+     "idlName": "fee_recipient",
+     "derived": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+     "observed": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global (fee_recipient | fee_recipients[7] | reserved_fee_recipient | reserved_fee_recipients[7])",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 7,
+     "idlName": "associated_quote_fee_recipient",
+     "derived": "A7R3R9QxQniqzRrroQwhw8C2WGgkDfEAF6cor6MNTJKk",
+     "observed": "A7R3R9QxQniqzRrroQwhw8C2WGgkDfEAF6cor6MNTJKk",
+     "match": true,
+     "howDerived": "ATA(fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 8,
+     "idlName": "buyback_fee_recipient",
+     "derived": "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+     "observed": "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global.buyback_fee_recipients[8]",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 9,
+     "idlName": "associated_quote_buyback_fee_recipient",
+     "derived": "6emBfwwNPqMyQDrBFAJyx88W7V8nuLuS1pLptndpvCgv",
+     "observed": "6emBfwwNPqMyQDrBFAJyx88W7V8nuLuS1pLptndpvCgv",
+     "match": true,
+     "howDerived": "ATA(buyback_fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 10,
+     "idlName": "bonding_curve",
+     "derived": "HvqEjFJJL6uQdzc6PARLWBWMiVGqQpTibsduid1CLbwy",
+     "observed": "HvqEjFJJL6uQdzc6PARLWBWMiVGqQpTibsduid1CLbwy",
+     "match": true,
+     "howDerived": "PDA([\"bonding-curve\", mint], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 11,
+     "idlName": "associated_base_bonding_curve",
+     "derived": "Lp4AHEUXVCqnXcw1GKX7FHNiwzXvWNz7HfxDvYFEzhZ",
+     "observed": "Lp4AHEUXVCqnXcw1GKX7FHNiwzXvWNz7HfxDvYFEzhZ",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, base_token_program, base_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 12,
+     "idlName": "associated_quote_bonding_curve",
+     "derived": "A7dPb6cUYhXDAKib1fo4GrvgcyB8bDn7Bkfz51Ur7KX7",
+     "observed": "A7dPb6cUYhXDAKib1fo4GrvgcyB8bDn7Bkfz51Ur7KX7",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 13,
+     "idlName": "user",
+     "derived": "8KkfNTAinwQwfgScSndgQSe6hUfJBA8Qg2mUt26yjAN6",
+     "observed": "8KkfNTAinwQwfgScSndgQSe6hUfJBA8Qg2mUt26yjAN6",
+     "match": true,
+     "howDerived": "input (the signer)",
+     "observedMeta": {
+      "signer": true,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 14,
+     "idlName": "associated_base_user",
+     "derived": "4Mup26wjH5huicJcwsJ9UjMUJ3NsDCZfLt4URzwGyWoc",
+     "observed": "4Mup26wjH5huicJcwsJ9UjMUJ3NsDCZfLt4URzwGyWoc",
+     "match": true,
+     "howDerived": "ATA(user, base_token_program, base_mint) — IDL declares NO pda here",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 15,
+     "idlName": "associated_quote_user",
+     "derived": "37ABzm3pLgaEsTgFALWQ4DufMU7yxvYKtuCgPHRVLYKj",
+     "observed": "37ABzm3pLgaEsTgFALWQ4DufMU7yxvYKtuCgPHRVLYKj",
+     "match": true,
+     "howDerived": "ATA(user, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 16,
+     "idlName": "creator_vault",
+     "derived": "FwHtioUfEPtWHRwgz4tABB98KXjrffMJVVxXruf9sZjR",
+     "observed": "FwHtioUfEPtWHRwgz4tABB98KXjrffMJVVxXruf9sZjR",
+     "match": true,
+     "howDerived": "PDA([\"creator-vault\", BondingCurve.creator]) — curve read at analysis time",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 17,
+     "idlName": "associated_creator_vault",
+     "derived": "BwscdDfiwgFUkcv1o6cZcq65W49dgrsaiaa3ngfnD4nW",
+     "observed": "BwscdDfiwgFUkcv1o6cZcq65W49dgrsaiaa3ngfnD4nW",
+     "match": true,
+     "howDerived": "ATA(creator_vault, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 18,
+     "idlName": "sharing_config",
+     "derived": "9GJuiuoPoJTaufspcXFKKq6wuSMafXyKVo3Qje9r9ZXa",
+     "observed": "9GJuiuoPoJTaufspcXFKKq6wuSMafXyKVo3Qje9r9ZXa",
+     "match": true,
+     "howDerived": "PDA([\"sharing-config\", base_mint], FEE PROGRAM)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 19,
+     "idlName": "global_volume_accumulator",
+     "derived": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "observed": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "match": true,
+     "howDerived": "PDA([\"global_volume_accumulator\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 20,
+     "idlName": "user_volume_accumulator",
+     "derived": "3ur2KS1jYbaovJQ9PRUWTFLZPcThEHjf96Hv1RuA3fkL",
+     "observed": "3ur2KS1jYbaovJQ9PRUWTFLZPcThEHjf96Hv1RuA3fkL",
+     "match": true,
+     "howDerived": "PDA([\"user_volume_accumulator\", user], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 21,
+     "idlName": "associated_user_volume_accumulator",
+     "derived": "4sDQxtYwdbQNDW17G6Jt3gPDUqcUcNNAUgXGMSCdZprs",
+     "observed": "4sDQxtYwdbQNDW17G6Jt3gPDUqcUcNNAUgXGMSCdZprs",
+     "match": true,
+     "howDerived": "ATA(user_volume_accumulator, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 22,
+     "idlName": "fee_config",
+     "derived": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "observed": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "match": true,
+     "howDerived": "PDA([\"fee_config\", pump_program_id], FEE PROGRAM)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 23,
+     "idlName": "fee_program",
+     "derived": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "observed": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 24,
+     "idlName": "system_program",
+     "derived": "11111111111111111111111111111111",
+     "observed": "11111111111111111111111111111111",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 25,
+     "idlName": "event_authority",
+     "derived": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "observed": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "match": true,
+     "howDerived": "PDA([\"__event_authority\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 26,
+     "idlName": "program",
+     "derived": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "observed": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    }
+   ]
+  },
+  {
+   "signature": "6X2yg8UAar7ZYHvr7WHQSjdS2CpRfBwabXLR16oPyyb3RCqwHsY8mkTCt9UU8K9Ror3SZoViFPxHXqYkvUnuXKq",
+   "slot": 446099884,
+   "blockTime": 1789111599,
+   "instructionPosition": "INNER/CPI inner#6",
+   "isTopLevel": false,
+   "signer": "3vsX7ptYqQJP4gk9sxALjmZ8T2MNB9p1bybmPZ1H3Mri",
+   "mint": "7sN4EYXxULGKDf57LcmcyuyBb5GaPcHNMf5UuVSLpump",
+   "accountCount": 27,
+   "instructionDataHex": "b817ee6167c5d33ddecaea7e2a090000687c420000000000",
+   "instructionDataBytes": 24,
+   "argAmount": "10078122592990",
+   "argMaxSolCost": "4357224",
+   "bondingCurve": {
+    "creator": "9GJuiuoPoJTaufspcXFKKq6wuSMafXyKVo3Qje9r9ZXa",
+    "quote_mint_field": "MGMuubtUEirmkhfEQdmGUh4pr7HuUdMWcZXFtpPbVJD",
+    "complete": false,
+    "is_mayhem_mode": false,
+    "is_cashback_coin": false,
+    "accountDataLen": 151
+   },
+   "sharingConfig": {
+    "pda": "9GJuiuoPoJTaufspcXFKKq6wuSMafXyKVo3Qje9r9ZXa",
+    "status": 1,
+    "version": 2,
+    "mint": "7sN4EYXxULGKDf57LcmcyuyBb5GaPcHNMf5UuVSLpump",
+    "admin": "GdwgnJDXEWH118V4wtN16xPkmKBMnJzFubqoi1dUW3WL",
+    "admin_revoked": true,
+    "shareholders": [
+     {
+      "address": "2k5hrzuykwyTbUe8L7UriYAQhr5hijNLgBvEB4B9pP5y",
+      "share_bps": 10000
+     }
+    ],
+    "accountDataLen": 1024
+   },
+   "creatorMigratedToSharingConfig": true,
+   "creatorSeedUsed": "9GJuiuoPoJTaufspcXFKKq6wuSMafXyKVo3Qje9r9ZXa",
+   "creatorVaultIfSeededFromCurveCreator": "FwHtioUfEPtWHRwgz4tABB98KXjrffMJVVxXruf9sZjR",
+   "quoteIsNativeSol": false,
+   "quoteMintUsed": "MGMuubtUEirmkhfEQdmGUh4pr7HuUdMWcZXFtpPbVJD",
+   "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "quoteTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "feeRecipientObserved": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+   "feeRecipientMembership": "Global.fee_recipient",
+   "buybackObserved": "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+   "buybackMembership": "Global.buyback_fee_recipients[1]",
+   "positionsMatched": 27,
+   "positionsTotal": 27,
+   "mismatches": [],
+   "positions": [
+    {
+     "index": 0,
+     "idlName": "global",
+     "derived": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "observed": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+     "match": true,
+     "howDerived": "PDA([\"global\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 1,
+     "idlName": "base_mint",
+     "derived": "7sN4EYXxULGKDf57LcmcyuyBb5GaPcHNMf5UuVSLpump",
+     "observed": "7sN4EYXxULGKDf57LcmcyuyBb5GaPcHNMf5UuVSLpump",
+     "match": true,
+     "howDerived": "input (the mint being bought)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 2,
+     "idlName": "quote_mint",
+     "derived": "MGMuubtUEirmkhfEQdmGUh4pr7HuUdMWcZXFtpPbVJD",
+     "observed": "MGMuubtUEirmkhfEQdmGUh4pr7HuUdMWcZXFtpPbVJD",
+     "match": true,
+     "howDerived": "BondingCurve.quote_mint (offset 83)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 3,
+     "idlName": "base_token_program",
+     "derived": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "observed": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "match": true,
+     "howDerived": "owner of the base mint account",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 4,
+     "idlName": "quote_token_program",
+     "derived": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "observed": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "match": true,
+     "howDerived": "owner of the quote mint account",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 5,
+     "idlName": "associated_token_program",
+     "derived": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "observed": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 6,
+     "idlName": "fee_recipient",
+     "derived": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+     "observed": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global (fee_recipient | fee_recipients[7] | reserved_fee_recipient | reserved_fee_recipients[7])",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 7,
+     "idlName": "associated_quote_fee_recipient",
+     "derived": "A7R3R9QxQniqzRrroQwhw8C2WGgkDfEAF6cor6MNTJKk",
+     "observed": "A7R3R9QxQniqzRrroQwhw8C2WGgkDfEAF6cor6MNTJKk",
+     "match": true,
+     "howDerived": "ATA(fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 8,
+     "idlName": "buyback_fee_recipient",
+     "derived": "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+     "observed": "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+     "match": true,
+     "howDerived": "MEMBERSHIP pick from Global.buyback_fee_recipients[8]",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 9,
+     "idlName": "associated_quote_buyback_fee_recipient",
+     "derived": "6emBfwwNPqMyQDrBFAJyx88W7V8nuLuS1pLptndpvCgv",
+     "observed": "6emBfwwNPqMyQDrBFAJyx88W7V8nuLuS1pLptndpvCgv",
+     "match": true,
+     "howDerived": "ATA(buyback_fee_recipient, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 10,
+     "idlName": "bonding_curve",
+     "derived": "HvqEjFJJL6uQdzc6PARLWBWMiVGqQpTibsduid1CLbwy",
+     "observed": "HvqEjFJJL6uQdzc6PARLWBWMiVGqQpTibsduid1CLbwy",
+     "match": true,
+     "howDerived": "PDA([\"bonding-curve\", mint], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 11,
+     "idlName": "associated_base_bonding_curve",
+     "derived": "Lp4AHEUXVCqnXcw1GKX7FHNiwzXvWNz7HfxDvYFEzhZ",
+     "observed": "Lp4AHEUXVCqnXcw1GKX7FHNiwzXvWNz7HfxDvYFEzhZ",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, base_token_program, base_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 12,
+     "idlName": "associated_quote_bonding_curve",
+     "derived": "A7dPb6cUYhXDAKib1fo4GrvgcyB8bDn7Bkfz51Ur7KX7",
+     "observed": "A7dPb6cUYhXDAKib1fo4GrvgcyB8bDn7Bkfz51Ur7KX7",
+     "match": true,
+     "howDerived": "ATA(bonding_curve, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 13,
+     "idlName": "user",
+     "derived": "3vsX7ptYqQJP4gk9sxALjmZ8T2MNB9p1bybmPZ1H3Mri",
+     "observed": "3vsX7ptYqQJP4gk9sxALjmZ8T2MNB9p1bybmPZ1H3Mri",
+     "match": true,
+     "howDerived": "input (the signer)",
+     "observedMeta": {
+      "signer": true,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 14,
+     "idlName": "associated_base_user",
+     "derived": "6fpeMqcCD5WykQy6WC8cxRLgZXL4MrvSmrgWLKzMxpJj",
+     "observed": "6fpeMqcCD5WykQy6WC8cxRLgZXL4MrvSmrgWLKzMxpJj",
+     "match": true,
+     "howDerived": "ATA(user, base_token_program, base_mint) — IDL declares NO pda here",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 15,
+     "idlName": "associated_quote_user",
+     "derived": "BnEZa1Xy8oDAL6mssQjm3mMvAChjNCXLfecRMkrhCt8M",
+     "observed": "BnEZa1Xy8oDAL6mssQjm3mMvAChjNCXLfecRMkrhCt8M",
+     "match": true,
+     "howDerived": "ATA(user, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 16,
+     "idlName": "creator_vault",
+     "derived": "FwHtioUfEPtWHRwgz4tABB98KXjrffMJVVxXruf9sZjR",
+     "observed": "FwHtioUfEPtWHRwgz4tABB98KXjrffMJVVxXruf9sZjR",
+     "match": true,
+     "howDerived": "PDA([\"creator-vault\", BondingCurve.creator]) — curve read at analysis time",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 17,
+     "idlName": "associated_creator_vault",
+     "derived": "BwscdDfiwgFUkcv1o6cZcq65W49dgrsaiaa3ngfnD4nW",
+     "observed": "BwscdDfiwgFUkcv1o6cZcq65W49dgrsaiaa3ngfnD4nW",
+     "match": true,
+     "howDerived": "ATA(creator_vault, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 18,
+     "idlName": "sharing_config",
+     "derived": "9GJuiuoPoJTaufspcXFKKq6wuSMafXyKVo3Qje9r9ZXa",
+     "observed": "9GJuiuoPoJTaufspcXFKKq6wuSMafXyKVo3Qje9r9ZXa",
+     "match": true,
+     "howDerived": "PDA([\"sharing-config\", base_mint], FEE PROGRAM)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 19,
+     "idlName": "global_volume_accumulator",
+     "derived": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "observed": "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+     "match": true,
+     "howDerived": "PDA([\"global_volume_accumulator\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 20,
+     "idlName": "user_volume_accumulator",
+     "derived": "6gkimoWzrARmMSTC5F8ivguzcE9ZsNPt7amRP4cGo6KH",
+     "observed": "6gkimoWzrARmMSTC5F8ivguzcE9ZsNPt7amRP4cGo6KH",
+     "match": true,
+     "howDerived": "PDA([\"user_volume_accumulator\", user], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 21,
+     "idlName": "associated_user_volume_accumulator",
+     "derived": "3SdR8LadmzhPd9sdXNEVKsygYHrxFRSdzcGvtRP2DUye",
+     "observed": "3SdR8LadmzhPd9sdXNEVKsygYHrxFRSdzcGvtRP2DUye",
+     "match": true,
+     "howDerived": "ATA(user_volume_accumulator, quote_token_program, quote_mint)",
+     "observedMeta": {
+      "signer": false,
+      "writable": true,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 22,
+     "idlName": "fee_config",
+     "derived": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "observed": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+     "match": true,
+     "howDerived": "PDA([\"fee_config\", pump_program_id], FEE PROGRAM)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 23,
+     "idlName": "fee_program",
+     "derived": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "observed": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 24,
+     "idlName": "system_program",
+     "derived": "11111111111111111111111111111111",
+     "observed": "11111111111111111111111111111111",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "transaction"
+     }
+    },
+    {
+     "index": 25,
+     "idlName": "event_authority",
+     "derived": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "observed": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+     "match": true,
+     "howDerived": "PDA([\"__event_authority\"], pump)",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    },
+    {
+     "index": 26,
+     "idlName": "program",
+     "derived": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "observed": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+     "match": true,
+     "howDerived": "constant",
+     "observedMeta": {
+      "signer": false,
+      "writable": false,
+      "keySource": "lookupTable"
+     }
+    }
+   ]
+  }
+ ],
+ "methodNotes": [
+  "Every account meta shown was read from a transaction message (encoding:json) and resolved through the header + meta.loadedAddresses, so writable/signer flags are the real ones the caller set. For INNER/CPI occurrences the pubkey ORDER is exactly what the caller passed to the CPI; the per-account is_signer/is_writable a CPI sets are not observable, so flags are reported only for top-level occurrences.",
+  "Nothing was signed, sent or simulated. Only getSignaturesForAddress / getTransaction / getAccountInfo / getMultipleAccounts were used, against https://api.mainnet-beta.solana.com ."
+ ],
+ "derivationRules": {
+  "quoteMint": "BondingCurve has TWO live account lengths. A 124-byte curve reads all-zero at the quote_mint field (offset 83) and the transaction passes WSOL So111...112 with quote_token_program = TokenkegQfe... A 151-byte curve holds a real quote mint at offset 83 and the transaction passes exactly that mint, with quote_token_program = the owner of that mint account (Token-2022 in both non-SOL samples). Rule: quote_mint = curve.quote_mint unless it is the zero pubkey, in which case WSOL. Matched 13/13.",
+  "baseTokenProgram": "owner of the base mint account. TokenzQdB (Token-2022) in 13/13 samples.",
+  "creatorVault": "PDA([\"creator-vault\", BondingCurve.creator], pump) where BondingCurve.creator is read at the moment the transaction EXECUTES. See creatorVaultRaceProof: the one sample that did not reproduce from a later read is explained by a migrate_bonding_curve_creator that landed one slot after that trade.",
+  "feeRecipient": "NOT derivable. It is a MEMBERSHIP choice from the Global account: fee_recipient, fee_recipients[0..6], reserved_fee_recipient, reserved_fee_recipients[0..6] — 16 pubkeys. 13/13 observed values were in that set. Four buy_v2 in ONE slot (446099884) used two different values, so it is the caller’s choice and not a slot- or time-derived rotation.",
+  "buybackFeeRecipient": "NOT derivable. MEMBERSHIP choice from Global.buyback_fee_recipients[0..7]. 13/13 observed values were in that set; error 6057 BuybackFeeRecipientNotAuthorized is the program’s own membership check. Two different values were used in the same slot 446099884.",
+  "associatedBaseUser": "The IDL declares NO pda for index 14, but the canonical ATA(user, base_token_program, base_mint) matched 13/13. An encoder passes its OWN token account here, so this position is under the caller’s control regardless.",
+  "sharingConfig": "PDA([\"sharing-config\", base_mint]) derived under the FEE program pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ — NOT under the pump program. Matched 13/13. The account is frequently UNINITIALIZED (does not exist on chain); the IDL says so explicitly and the address is still required."
+ },
+ "creatorVaultRaceProof": {
+  "mint": "DNLwPEp8DTn3nK2kD9FYGBkxpx9K41qr2UFJr27hpump",
+  "bondingCurve": "Dp6D1ouSVaymWgxvFKjeam2cwS1yPmG4MsMu4pSMN5tx",
+  "whatHappened": "The curve was created (create_v2) at slot 446099885 and migrate_bonding_curve_creator ran at slot 446099886, which rewrote BondingCurve.creator from the deployer to the sharing-config PDA. Every buy_v2 at or before 446099885 carried the vault seeded from the deployer; every buy_v2 from 446099889 on carried the vault seeded from the sharing-config PDA. No transaction ever carried the other one.",
+  "migrateSignature": "VYpojpNMPCfz9kKPYHopWU5F1mPgXbrUF4buM3bnLW9avZFtdpEiQSLpopWTfBpw8XTG1S8PWvwLxZqC6ujCZbw",
+  "migrateSlot": 446099886,
+  "preMigrationCreator": "FDfyqqenHVySjjyo4etCgBzxZNfUXUMaZo8ifKpDJGUf",
+  "preMigrationCreatorVault": "rm9RgM964BmnaC3426ZM1rg7hpdSKuwkNrqAT2fMkXQ",
+  "postMigrationCreator": "BL3opBvWBtiXEiGwhBZD9Tx1doaMWYPoeXtiSF1o5dW9 (== the sharing-config PDA for this mint)",
+  "postMigrationCreatorVault": "GPeXJFaK8q3kwzSX67r9jppTFKWWMWQgcTwuN2wVKMs4",
+  "tradeEventCross_check": "TradeEvent.creator in 5GzeJnAbRLPz (slot 446099885) = FDfyqqen...; in 3H2JoJ7Q7Zkg and 21DSEVnWt7rd (slot 446099890) = BL3opBvW... Each equals the seed that reproduces the observed index 16.",
+  "observedSplit": [
+   {
+    "slot": 446099885,
+    "signatures": [
+     "4XUfD5yaoTNY",
+     "5GzeJnAbRLPz",
+     "44wxdYw2B12g",
+     "5tiQStbHVBhA"
+    ],
+    "vaultUsed": "pre-migration"
+   },
+   {
+    "slot": 446099889,
+    "signatures": [
+     "4fjivGTPG8wf",
+     "5aPQ7Wr3VJan"
+    ],
+    "instruction": "buy_exact_quote_in_v2",
+    "vaultUsed": "post-migration"
+   },
+   {
+    "slot": 446099890,
+    "signatures": [
+     "3H2JoJ7Q7Zkg",
+     "21DSEVnWt7rd"
+    ],
+    "vaultUsed": "post-migration"
+   },
+   {
+    "slot": 446099894,
+    "signatures": [
+     "4Uzoh2Fgk7R4"
+    ],
+    "vaultUsed": "post-migration"
+   },
+   {
+    "slot": 446099903,
+    "signatures": [
+     "A1wVZKFcRTeL",
+     "2ybS159VUMZD"
+    ],
+    "vaultUsed": "post-migration"
+   },
+   {
+    "slot": 446099905,
+    "signatures": [
+     "5jhAq44TfUEf"
+    ],
+    "vaultUsed": "post-migration"
+   }
+  ],
+  "consequenceForAnEncoder": "BondingCurve.creator is MUTABLE and it changed within one slot of a launch on an actively traded mint. An encoder must read the curve as late as possible and accept a race: if the creator migrates between the read and the landing, the creator_vault (and its ATA) in the already-signed transaction are stale."
+ },
+ "accountExistenceProbe": {
+  "note": "getMultipleAccounts over the accounts of sample woKwM9eKz2vf, run after that transaction landed. Several derived positions DO NOT EXIST on chain; that is normal and is not evidence against the derivation.",
+  "results": {
+   "7 associated_quote_fee_recipient": "owner TokenkegQfe..., 165 bytes (a live WSOL token account)",
+   "9 associated_quote_buyback_fee_recipient": "owner TokenkegQfe..., 165 bytes",
+   "11 associated_base_bonding_curve": "owner TokenzQdB... (Token-2022), 170 bytes",
+   "12 associated_quote_bonding_curve": "DOES NOT EXIST — the SOL-quote ATAs are opened and closed inside the transaction",
+   "14 associated_base_user": "DOES NOT EXIST (buyer later closed it)",
+   "15 associated_quote_user": "DOES NOT EXIST — transient",
+   "16 creator_vault": "owner 11111111111111111111111111111111, 0 bytes, 50,847,090 lamports — a native-SOL vault PDA",
+   "17 associated_creator_vault": "DOES NOT EXIST — transient",
+   "18 sharing_config": "DOES NOT EXIST — uninitialised, exactly as the IDL docs say it may be",
+   "20 user_volume_accumulator": "owner 6EF8rre..., 137 bytes",
+   "22 fee_config": "owner pfeeUxB6..., 4097 bytes"
+  }
+ },
+ "failedTransactionScan": {
+  "method": "182 FAILED transactions pulled from the pump program tape and decoded",
+  "buyV2FailuresFound": 2,
+  "buyV2FailureCodes": [
+   "Custom 6002 TooMuchSolRequired (slippage)",
+   "Custom 6002 TooMuchSolRequired (slippage)"
+  ],
+  "whatThisDoesNotShow": "No transaction in any scan passed a WRONG account, so there is NO direct evidence about whether the deployed program enforces the declared seed constraint on creator_vault. If it does, a stale creator_vault fails the transaction (safe). If it does not, the creator fee is paid to the wrong PDA. THIS IS UNVERIFIED."
+ },
+ "residualRisks": [
+  "creator_vault / associated_creator_vault race: BondingCurve.creator is mutable (migrate_bonding_curve_creator, set_creator, admin_set_creator) and was observed changing ONE SLOT after a launch. Whether a stale value is rejected or silently misroutes the creator fee is UNVERIFIED (see failedTransactionScan).",
+  "fee_recipient and buyback_fee_recipient are membership picks, not derivations. The Global account must be re-read; if pump.fun rotates those arrays between the read and the landing, an authorised-at-read-time pick can become unauthorised.",
+  "buy_exact_quote_in_v2 (c2ab1c46684d5b2f) also carries 27 accounts in the SAME order, and its arguments are (quote_amount_in, min_base_out) — the OPPOSITE order to buy_v2 (amount, max_sol_cost). Account-count is not a safe discriminator between the two; only the 8-byte discriminator is.",
+  "Every sample was Token-2022 base (TokenzQdB...). No buy_v2 on a legacy-SPL base mint was observed, so the base_token_program = mint-owner rule is measured only on Token-2022.",
+  "Quote assets other than SOL are live: two of the seven mints were quoted in Xs151QeqTCiuKtinzfRATnUESM2xTU6V9Wy8Vy538ci and MGMuubtUEirmkhfEQdmGUh4pr7HuUdMWcZXFtpPbVJD, both Token-2022. A bot that assumes SOL will mis-size those trades even though the account list is right."
+ ],
+ "verdict": {
+  "verdict": "encoder_buildable",
+  "forWhichPositions": "All 27. 25 are derivable from (mint, signer, program state) alone; 2 (index 6 fee_recipient, index 8 buyback_fee_recipient) are not derivable but are READ from named fields of the Global account and any member of those sets is accepted.",
+  "evidence": "13 independent buy_v2 occurrences, 13 distinct signers, 7 distinct mints, 8 top-level. 12 of 13 reproduced all 27 positions exactly. The 13th differs only at index 16/17 and is explained, with the migrate transaction and the TradeEvent creator field, by a creator migration that landed one slot later.",
+  "conditions": [
+   "Read Global, the bonding curve, the mint and the quote mint immediately before building — the curve creator and the quote mint are both state, not constants.",
+   "Pick fee_recipient and buyback_fee_recipient from the Global arrays that were just read; do not hard-code them.",
+   "Match on the 8-byte discriminator b817ee6167c5d33d, never on the account count.",
+   "Treat the creator race as a live failure mode until enforcement of the seed constraint is proved."
+  ]
+ }
+}
