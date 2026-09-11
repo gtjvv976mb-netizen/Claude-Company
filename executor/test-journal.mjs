@@ -423,6 +423,75 @@ legacyProtocol.close();
   fs.rmSync(cdir, { recursive: true, force: true });
 }
 
+/* ── THE SNIPER'S BOOK SURVIVES A RESTART ──────────────────────────────────────────── */
+/* S.snipes was persisted nowhere. An executing lane restarted mid-position forgot it held
+ * anything — no cost basis, no armed flags, no confirmed high, and nothing running that
+ * would ever sell it. For an OBSERVING lane it silently truncated the shadow book at every
+ * restart, which is the evidence the decision to arm is supposed to rest on. */
+{
+  const sdir = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-snipes-"));
+  const sfile = path.join(sdir, "state.sqlite");
+  const mintA = Keypair.generate().publicKey.toBase58();
+  const mintB = Keypair.generate().publicKey.toBase58();
+  const snipe = (mint) => ({ mint, lane: "snipe", venue: "pumpfun", entry: 1,
+    openedAt: 1_700_000_000_000, sizeSol: 0.005, feeSolPerLeg: 0.0005,
+    qtyRaw: "2198264641494", entryInputLamports: "5000000", high: 1.4, armedBreakeven: true });
+
+  let sj = new ExecutionJournal(sfile, { wallet });
+  ok("a fresh journal has an empty snipe book, not a missing one", () => {
+    assert.deepEqual(sj.snapshot().snipes, {},
+      "snapshot() must always carry the key, or the poller's S.snipes ||= {} hides a load failure");
+  });
+
+  sj.saveRuntime({ snipes: { [mintA]: snipe(mintA), [mintB]: snipe(mintB) } });
+  sj.close();
+
+  sj = new ExecutionJournal(sfile, { wallet });
+  ok("two open snipes come back across a close and reopen", () => {
+    const back = sj.snapshot().snipes;
+    assert.deepEqual(Object.keys(back).sort(), [mintA, mintB].sort());
+    assert.equal(back[mintA].qtyRaw, "2198264641494", "the mark's first operand did not survive");
+    assert.equal(back[mintA].entryInputLamports, "5000000", "the mark's second operand did not survive");
+    assert.equal(back[mintA].armedBreakeven, true, "an armed flag did not survive — the stop would re-arm from scratch");
+    assert.equal(back[mintA].high, 1.4, "the confirmed high did not survive — the trail would follow a new high");
+  });
+
+  ok("closing one snipe REAPS its row, so a boot cannot resurrect it", () => {
+    /* A row left behind is re-opened as a live position by the next boot, and the lane
+       then tries to sell something it no longer holds. */
+    sj.saveRuntime({ snipes: { [mintB]: snipe(mintB) } });
+    sj.close();
+    sj = new ExecutionJournal(sfile, { wallet });
+    assert.deepEqual(Object.keys(sj.snapshot().snipes), [mintB]);
+  });
+
+  ok("the two books stay separate on disk — a snipe never lands in positions", () => {
+    /* openList() is Object.values(S.positions). If a snipe reached that table it would be
+       visible to all six of its consumers, which is the leak clause 1 exists to prevent. */
+    assert.deepEqual(sj.snapshot().positions, {},
+      "a snipe was written into the desk's position book");
+    assert.equal(sj.db.prepare("SELECT COUNT(*) c FROM positions").get().c, 0);
+    assert.equal(sj.db.prepare("SELECT COUNT(*) c FROM snipes").get().c, 1);
+  });
+
+  ok("a row that cannot be MARKED is refused rather than stored", () => {
+    /* qtyRaw and entryInputLamports are the two operands of the mark. A row missing either
+       comes back after a restart as a position nothing can price — which is the same as
+       having no exit for it. */
+    for (const missing of ["qtyRaw", "entryInputLamports"]) {
+      const bad = { ...snipe(mintA) }; delete bad[missing];
+      assert.throws(() => sj.saveRuntime({ snipes: { [mintA]: bad } }),
+        new RegExp(`invalid ${missing}`), `a snipe with no ${missing} was accepted`);
+    }
+    const wrongKey = snipe(mintA);
+    assert.throws(() => sj.saveRuntime({ snipes: { [mintB]: wrongKey } }), /contains mint/);
+    assert.throws(() => sj.saveRuntime({ snipes: { [mintA]: { ...snipe(mintA), entry: 0 } } }),
+      /non-positive entry/);
+  });
+  sj.close();
+  fs.rmSync(sdir, { recursive: true, force: true });
+}
+
 j.close();
 fs.rmSync(dir, { recursive: true, force: true });
 console.log(`\n${tests} journal safety checks passed\n`);
