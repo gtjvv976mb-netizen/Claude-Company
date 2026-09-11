@@ -25,6 +25,10 @@ const need = ["poller.mjs", "journal.mjs", "jupiter.mjs", "token2022.mjs", "bala
   "entry-contract.mjs",
   // the route-sizing ladder: imported by poller.mjs to bind the AMOUNT that gets signed
   "entry-sizing.mjs",
+  // the network-fee ceiling, lifted out of jupiter.mjs so the swap envelope and the
+  // sniper lane cannot drift apart on what a fee cap means. jupiter.mjs imports it at
+  // module scope, so an install that fetches this list without it dies at boot.
+  "network-fee-budget.mjs",
   // desk-led-v4: the desk's ruler and the mirror evaluator ship with the trading process.
   "dexscreener-consensus.mjs", "desk-mirror.mjs",
   "package.json", "package-lock.json", "install.sh", "macos-launchagent.sh", "macos-release.sh", "launchd-runner.mjs"];

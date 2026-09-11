@@ -821,8 +821,14 @@ function clearBalanceBlock(pos) {
  * the latch and the intent it will submit can never disagree about which it is. */
 const exitKindForIntentId = (intentId) => {
   const id = String(intentId || "");
+  /* snipe-exit: MUST be named here and not left to fall through. The final branch is a
+     DEFAULT, not a match — every unrecognised prefix is stamped "risk_exit" — so without
+     this clause a snipe latch would carry the desk's kind, and desk-mirror.mjs
+     mirrorLatchExpiry would reason about it as a risk_exit determination. A lane is not
+     told apart by where the code lives; it is told apart by what the record says. */
   return id.startsWith("desk-exit:") ? "desk_exit"
-    : id.startsWith("mirror-exit:") ? "mirror_exit" : "risk_exit";
+    : id.startsWith("mirror-exit:") ? "mirror_exit"
+    : id.startsWith("snipe-exit:") ? "snipe_exit" : "risk_exit";
 };
 
 function latchExit(pos, why, intentId, trigger = null, meta = {}) {

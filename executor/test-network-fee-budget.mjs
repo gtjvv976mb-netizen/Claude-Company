@@ -277,26 +277,49 @@ ok("the constant and all four message strings still match jupiter.mjs, character
       `jupiter.mjs declares ${theirs} and network-fee-budget.mjs ${MAX_GROSS_RENT_LAMPORTS} — one ceiling, two copies, drifted`);
     console.log(`       MAX_GROSS_RENT_LAMPORTS ${theirs} in both files`);
   } else {
-    /* The wiring step may delete jupiter's copy and re-export this one. That is fine —
-       but then the re-export must exist, or test-live-execution.mjs loses its import. */
-    assert.match(jupiter, /export \{[^}]*MAX_GROSS_RENT_LAMPORTS[^}]*\} from "\.\/network-fee-budget\.mjs"/,
-      "jupiter.mjs no longer declares MAX_GROSS_RENT_LAMPORTS and does not re-export it from network-fee-budget.mjs");
-    console.log("       jupiter.mjs re-exports MAX_GROSS_RENT_LAMPORTS from the lifted module");
+    /* The wiring step deleted jupiter's copy. What must survive is that jupiter still
+       EXPORTS the name — poller.mjs and live-roundtrip-test.mjs import it from there — and
+       that both paths resolve to ONE value.
+
+       RE-ANCHORED 2026-09-11, and the original form was actively wrong: this asserted the
+       `export { X } from "./network-fee-budget.mjs"` shape, which is a pure re-export and
+       does NOT bind the name locally. jupiter.mjs USES the constant in its own scope, so
+       that shape boots the installed bot straight into a ReferenceError. The correct
+       wiring imports it AND re-exports it. Asserting the VALUES rather than the syntax
+       admits either form and would have caught the broken one, which the syntax pin did
+       not — it demanded it. */
+    assert.match(jupiter, /MAX_GROSS_RENT_LAMPORTS/,
+      "jupiter.mjs no longer references MAX_GROSS_RENT_LAMPORTS at all");
+    console.log("       jupiter.mjs takes MAX_GROSS_RENT_LAMPORTS from the lifted module");
   }
 
   const lifted = read("network-fee-budget.mjs");
   /* Taken from the running code, not from the header comment: a copy of the block also
      appears in the header for the record, so count occurrences in the source below the
      comment by matching the template literally in both files. */
+  /* THE GATE's OWN MESSAGES — these moved with the block and must now exist in exactly
+     one place. */
   const TEMPLATES = [
     "throw new Error(\"Jupiter returned a negative fee estimate\");",
     "throw new Error(`non-rent network fees ${networkFees} lamports exceed cap ${cfg.maxNetworkFeeLamports}`);",
     "throw new Error(`estimated network fees exceed ${maxNetworkFeePct}% of the trade basis`);",
-    "throw new Error(`${name} must be finite`);",
   ];
+  /* A GENERAL HELPER, NOT PART OF THE GATE. jupiter.mjs uses finite() in many places
+     beyond the fee block, so it legitimately keeps its own; the lifted module needs one
+     to stand alone. Two copies are correct here — what must hold is that they still SAY
+     the same thing, so a fee refused in one lane reads the same as in the other. */
+  const SHARED_HELPER = "throw new Error(`${name} must be finite`);";
+  assert.ok(jupiter.includes(SHARED_HELPER) && lifted.includes(SHARED_HELPER),
+    "the finite() helper message differs between jupiter.mjs and network-fee-budget.mjs");
+  /* RE-ANCHORED 2026-09-11. Before the wiring both files held the block, and the point was
+     that the copies had not drifted. Now there is ONE copy, which is the whole aim of the
+     lift — so the property becomes: the lifted module still carries each message verbatim,
+     and jupiter.mjs no longer carries a SECOND copy of it. The second half is the stronger
+     half: it is what fails if somebody later pastes the block back inline. */
   for (const template of TEMPLATES) {
-    assert.ok(jupiter.includes(template), `jupiter.mjs no longer contains: ${template}`);
     assert.ok(lifted.includes(template), `network-fee-budget.mjs no longer contains: ${template}`);
+    assert.ok(!jupiter.includes(template),
+      `jupiter.mjs has grown its own copy of: ${template} — one ceiling, two copies, free to drift`);
   }
   /* The rent message is the one line the lift rewrote — same TEXT, one resolved variable
      instead of two `??` expressions — so it is pinned by behaviour above and by shape here. */
@@ -326,3 +349,22 @@ ok("the function is pure: it mutates nothing it is given and returns a frozen re
 });
 
 console.log(`\n${pass} passed — one network-fee ceiling, two callers, no drift\n`);
+
+/* THE PROPERTY THE SYNTAX PIN WAS REACHING FOR, CHECKED BEHAVIOURALLY.
+ *
+ * poller.mjs and live-roundtrip-test.mjs import MAX_GROSS_RENT_LAMPORTS from jupiter.mjs;
+ * test-snipe-entry.mjs imports it from network-fee-budget.mjs. Two import paths for one
+ * ceiling is how two lanes come to disagree about a cap, so the values are compared
+ * directly — and a module that merely re-exports without binding locally is caught here
+ * too, because loading jupiter.mjs at all would throw. */
+{
+  const jup = await import("./jupiter.mjs");
+  const budget = await import("./network-fee-budget.mjs");
+  ok("both import paths resolve to one and the same ceiling", () => {
+    assert.equal(typeof jup.MAX_GROSS_RENT_LAMPORTS, "number",
+      `jupiter.mjs exports ${typeof jup.MAX_GROSS_RENT_LAMPORTS}`);
+    assert.equal(jup.MAX_GROSS_RENT_LAMPORTS, budget.MAX_GROSS_RENT_LAMPORTS,
+      `jupiter ${jup.MAX_GROSS_RENT_LAMPORTS} vs budget ${budget.MAX_GROSS_RENT_LAMPORTS}`);
+    console.log(`       both paths -> ${jup.MAX_GROSS_RENT_LAMPORTS}`);
+  });
+}

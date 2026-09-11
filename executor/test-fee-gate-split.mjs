@@ -53,8 +53,16 @@ console.log("\nTHE TWO NUMBERS ARE SEPARATE, AND POINT OPPOSITE WAYS");
   ok("the gate constant never reaches the cost model",
     !/worstFeeRatio = 2 \* jupiter\.cfg\.maxNetworkFeeLamports/.test(entryPath) &&
     !/expectedNetworkFeeLamports: jupiter\.cfg\.maxNetworkFeeLamports/.test(poller));
+  /* RE-ANCHORED 2026-09-11. The gate was lifted verbatim out of jupiter.mjs into
+     network-fee-budget.mjs so the swap envelope and the sniper lane cannot drift apart on
+     what a fee cap means. It is enforced exactly as before — the same comparison, the same
+     constant — but from one module with two callers, so the pin follows it there and also
+     asserts jupiter still CALLS it. Looking only in jupiter.mjs would now pass if the
+     call were deleted, which is the opposite of what this guards. */
   ok("the gate itself is still enforced, unchanged",
     /if \(networkFees > cfg\.maxNetworkFeeLamports\)/.test(
+      fs.readFileSync(new URL("./network-fee-budget.mjs", import.meta.url), "utf8")) &&
+    /assertNetworkFeeBudget\(\{/.test(
       fs.readFileSync(new URL("./jupiter.mjs", import.meta.url), "utf8")));
   ok("a fee-model refusal names itself instead of blaming the desk",
     /dominant term: \$\{worstFeeRatio >/.test(entryPath));

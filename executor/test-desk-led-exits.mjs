@@ -244,10 +244,17 @@ console.log("\n5. mirror_exit IS AN EXIT KIND, EXEMPT FROM RE-VALIDATION");
   /* The prefix→kind mapping is now ONE expression (exitKindForIntentId), used by sellAll
    * for the intent and by latchExit for the latch's stamp, so a latch can never disagree
    * with the intent it will submit about which kind of determination it carries. */
+  /* RE-ANCHORED 2026-09-11. The old pin required `"mirror_exit" : "risk_exit"` to be
+     ADJACENT, which broke when the sniper lane inserted its own prefix between them. The
+     property it guards is unchanged and is now checked as three separate facts — each
+     prefix maps to its own kind, and an unrecognised one still DEFAULTS to risk_exit —
+     rather than as one brittle adjacency. This is stronger: it would catch a prefix being
+     dropped, which the adjacency form would not. */
   ok("sellAll maps mirror-exit:* ids to kind mirror_exit",
     /const kind = exitKindForIntentId\(suppliedIntentId\);/.test(sell) &&
-      /id\.startsWith\("mirror-exit:"\) \? "mirror_exit" : "risk_exit";/.test(src) &&
-      /id\.startsWith\("desk-exit:"\) \? "desk_exit"/.test(src));
+      /id\.startsWith\("mirror-exit:"\)\s*\?\s*"mirror_exit"/.test(src) &&
+      /id\.startsWith\("desk-exit:"\)\s*\?\s*"desk_exit"/.test(src) &&
+      /:\s*"risk_exit";/.test(src));
   ok("...and latchExit stamps the latch with that same expression",
     /pos\.exitExecutionKind \|\|= exitKindForIntentId\(intentId\);/.test(src));
   ok("...and carries the desk's code into the intent context", /deskCode: meta\?\.deskCode \?\? pos\.exitExecutionDeskCode \?\? null/.test(sell));

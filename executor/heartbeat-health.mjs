@@ -10,7 +10,7 @@ const POSITION_FLAGS = ["callIdentityIncomplete", "accountingIncomplete", "balan
   "riskDataUnavailable", "exitExecutionRequired", "manualExitRequired"];
 
 const TRADING_RUNTIME_FILES = Object.freeze([
-  "poller.mjs", "journal.mjs", "jupiter.mjs", "balance-verification.mjs",
+  "poller.mjs", "journal.mjs", "jupiter.mjs", "network-fee-budget.mjs", "balance-verification.mjs",
   "entry-quote-guard.mjs", "exit-trigger.mjs", "feed-drain.mjs", "sol-usd-oracle.mjs",
   "heartbeat-health.mjs", "sleep-assertion.mjs", "strategy.mjs", "trade-policy.mjs",
   // desk-led-v4: both are loaded by the trading process, so both are part of its identity.

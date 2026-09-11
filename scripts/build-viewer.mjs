@@ -170,6 +170,11 @@ const EXECUTOR_FILES = [
   "entry-contract.mjs",
   /* And the route-sizing ladder it imports — same 404-aborts-the-install failure mode. */
   "entry-sizing.mjs",
+  /* The network-fee ceiling, lifted out of jupiter.mjs so the sniper lane and the swap
+     envelope cannot drift apart on what a fee cap means. jupiter.mjs imports it at module
+     scope, which makes it a RUNTIME import: an install that fetches this list without it
+     dies at boot with a bare ReferenceError, exactly as entry-sizing.mjs would. */
+  "network-fee-budget.mjs",
   /* Desk-led exits (2026-09-05). The bot no longer carries an exit policy of its own —
      Shrek, call 55: it sold 03:01:42Z on its own normalised stop at -13.5% while the
      desk's determined stop_hit landed 03:10:24Z. When the desk is unreachable the bot
