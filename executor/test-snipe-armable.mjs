@@ -10,7 +10,8 @@
  * which is exactly why none of them had been noticed.
  */
 import assert from "node:assert/strict";
-import { armabilityReport, assertArmable, snipeLaneConfig, SNIPE_OPERATOR_MAX } from "./snipe-lane.mjs";
+import { armabilityReport, assertArmable, snipeLaneConfig, effectiveLaneConfig,
+  SNIPE_OPERATOR_MAX } from "./snipe-lane.mjs";
 import { PUMPFUN_VENUE } from "./snipe-venue-pumpfun.mjs";
 import { SNIPE_DEFAULTS } from "./snipe-policy.mjs";
 
@@ -24,10 +25,11 @@ const itemOf = (r, name) => r.items.find((i) => i.name === name);
 const PROVED = { ...PUMPFUN_VENUE, layoutVerified: true, layoutProof: { provedBy: "a fixture, in this test only" } };
 
 console.log("\nTHE SHIPPED CONFIGURATION IS NOT ARMABLE, AND SAYS WHY");
-ok("the lane as it ships today is refused, on two named items", () => {
+ok("the lane as it ships today is refused, on the one item nobody can reason past", () => {
   const r = armabilityReport({ cfg: snipeLaneConfig({ SNIPE_LANE: "observe" }), venue: PUMPFUN_VENUE });
   assert.equal(r.armable, false);
-  assert.deepEqual([...r.blocking].sort(), ["daily_cap_is_charged", "venue_layout_is_proved"]);
+  assert.deepEqual([...r.blocking].sort(), ["venue_layout_is_proved"],
+    "the shipped lane's blocking set changed — if an item was cleared, say so here");
   console.log(`        blocking: ${r.blocking.join(", ")}`);
 });
 
@@ -41,24 +43,38 @@ ok("...and every item carries a detail a human can act on, not just a boolean", 
 });
 
 console.log("\nA DAILY CAP THAT CANNOT SEE THE SPEND IS NOT A DAILY CAP");
-ok("chargeDailyCap off blocks arming, and the reason names the consequence", () => {
+/* THIS STARTED AS A CHECKLIST ITEM AND BECAME A GUARANTEE, which is the better outcome.
+ *
+ * chargeDailyCap defaults false. That default is CORRECT for a shadow book — one that
+ * silenced itself after two notices would measure nothing — and catastrophic for a lane
+ * with a wallet, because deployedTodaySol then stays 0 for ever and dailySolCap never
+ * binds, whatever it is set to. The first version of this file asserted that the flag
+ * being off BLOCKED arming, i.e. that a person had to remember it.
+ *
+ * The one flag whose misconfiguration removes a money cap entirely should not be a flag.
+ * effectiveLaneConfig() now forces it on for execute, so the mode decides and the operator
+ * cannot set it wrong. These assertions moved from "the list catches it" to "it cannot
+ * happen", and the last one is what fails if that forcing is ever removed. */
+ok("an observe lane keeps the shadow-book default, so the book still measures", () => {
+  assert.equal(effectiveLaneConfig({ lane: "observe", chargeDailyCap: false }).chargeDailyCap, false);
+});
+ok("an EXECUTING lane charges its daily cap however it was configured", () => {
+  for (const stated of [false, undefined, null, 0, ""]) {
+    assert.equal(effectiveLaneConfig({ lane: "execute", chargeDailyCap: stated }).chargeDailyCap, true,
+      `an executing lane configured chargeDailyCap=${JSON.stringify(stated)} would spend with no daily cap`);
+  }
+});
+ok("...so the checklist item passes by construction, and says which", () => {
   const r = armabilityReport({ cfg: snipeLaneConfig({ SNIPE_LANE: "observe" }), venue: PROVED });
   const item = itemOf(r, "daily_cap_is_charged");
-  assert.equal(item.ok, false);
-  assert.match(item.detail, /deployedTodaySol stays 0 and dailySolCap NEVER binds/);
-  /* The default is not a mistake — it is right for a shadow book and wrong for a wallet. */
-  assert.match(item.detail, /correct for a shadow book/);
-});
-ok("...and turning it on clears that item", () => {
-  const r = armabilityReport({
-    cfg: snipeLaneConfig({ SNIPE_LANE: "observe", SNIPE_CHARGE_DAILY_CAP: "1" }), venue: PROVED });
-  assert.equal(itemOf(r, "daily_cap_is_charged").ok, true);
+  assert.equal(item.ok, true);
+  assert.match(item.detail, /the mode forces the charge on/);
 });
 
 console.log("\nTHE OWNER'S TWO DIALS, CHECKED AGAINST EACH OTHER");
 ok("a 2x take at the canary passes and reports what it REALLY pays", () => {
   const r = armabilityReport({
-    cfg: snipeLaneConfig({ SNIPE_LANE: "observe", SNIPE_CHARGE_DAILY_CAP: "1" }), venue: PROVED });
+    cfg: snipeLaneConfig({ SNIPE_LANE: "observe" }), venue: PROVED });
   assert.match(itemOf(r, "take_is_fundable").detail, /2x take realizes 63\.64% at a 1\.2222x round trip/);
 });
 
@@ -69,8 +85,7 @@ ok("RAISING THE SIZE BLOCKS ON THE STOP, because 0.20 was never a risk appetite"
      an 80% drawdown on a position eighty times larger — a default outliving its own
      arithmetic. Arming must not be possible without looking at it. */
   const r = armabilityReport({
-    cfg: snipeLaneConfig({ SNIPE_LANE: "observe", SNIPE_CHARGE_DAILY_CAP: "1",
-      SNIPE_MAX_SOL_PER_TRADE: "0.4" }),
+    cfg: snipeLaneConfig({ SNIPE_LANE: "observe", SNIPE_MAX_SOL_PER_TRADE: "0.4" }),
     venue: PROVED });
   assert.equal(r.armable, false);
   assert.deepEqual(r.blocking, ["stop_is_fundable"]);
@@ -83,8 +98,7 @@ ok("RAISING THE SIZE BLOCKS ON THE STOP, because 0.20 was never a risk appetite"
 
 ok("...and stating the stop explicitly for that size clears it", () => {
   const r = armabilityReport({
-    cfg: snipeLaneConfig({ SNIPE_LANE: "observe", SNIPE_CHARGE_DAILY_CAP: "1",
-      SNIPE_MAX_SOL_PER_TRADE: "0.4" }),
+    cfg: snipeLaneConfig({ SNIPE_LANE: "observe", SNIPE_MAX_SOL_PER_TRADE: "0.4" }),
     venue: PROVED, stopExplicit: true });
   assert.equal(r.armable, true, `still blocking on ${r.blocking.join(", ")}`);
   console.log(`        armable at ${SNIPE_OPERATOR_MAX.maxSolPerTrade} SOL once the stop is stated`);
@@ -93,30 +107,39 @@ ok("...and stating the stop explicitly for that size clears it", () => {
 console.log("\nTHE LAYOUT IS THE ONE NOBODY CAN REASON THEIR WAY PAST");
 ok("an unproved venue blocks, and the reason is the failure mode, not the rule", () => {
   const r = armabilityReport({
-    cfg: snipeLaneConfig({ SNIPE_LANE: "observe", SNIPE_CHARGE_DAILY_CAP: "1" }), venue: PUMPFUN_VENUE });
+    cfg: snipeLaneConfig({ SNIPE_LANE: "observe" }), venue: PUMPFUN_VENUE });
   assert.match(itemOf(r, "venue_layout_is_proved").detail,
     /does not refuse, it signs and lands/);
 });
 ok("layoutVerified:true WITHOUT a proof object is not enough", () => {
   /* A boolean anyone can flip is not evidence. The proof object is what a reviewer reads. */
-  const r = armabilityReport({ cfg: snipeLaneConfig({ SNIPE_LANE: "observe", SNIPE_CHARGE_DAILY_CAP: "1" }),
+  const r = armabilityReport({ cfg: snipeLaneConfig({ SNIPE_LANE: "observe" }),
     venue: { ...PUMPFUN_VENUE, layoutVerified: true } });
   assert.equal(itemOf(r, "venue_layout_is_proved").ok, false);
 });
 
 console.log("\nTHE REFUSAL NAMES EVERY UNMET ITEM, NOT THE FIRST");
 ok("assertArmable throws listing all of them at once", () => {
+  /* Driven against a config with TWO unmet items on purpose. The shipped lane now blocks
+     on one, and a test of "names every unmet item" that can only ever see one item is not
+     testing the property — it is testing that a list of length one has length one. */
+  const twoProblems = { ...snipeLaneConfig({ SNIPE_LANE: "observe" }),
+    maxSolPerTrade: SNIPE_OPERATOR_MAX.maxSolPerTrade + 1 };
   assert.throws(
-    () => assertArmable({ cfg: snipeLaneConfig({ SNIPE_LANE: "observe" }), venue: PUMPFUN_VENUE }),
+    () => assertArmable({ cfg: twoProblems, venue: PUMPFUN_VENUE }),
     (err) => err.clause === "not_armable"
-      && /daily_cap_is_charged/.test(err.message)
-      && /venue_layout_is_proved/.test(err.message),
+      && /size_within_operator_max/.test(err.message)
+      && /venue_layout_is_proved/.test(err.message)
+      /* THREE, not two: raising the size past the ceiling also trips the stop, because
+         stopFrac 0.20 is only fundable at the canary. That coupling is the feature, and
+         a test written expecting two would have been quietly wrong about it. */
+      && /stop_is_fundable/.test(err.message)
+      && err.detail.blocking.length === 3,
     "a checklist that stops at the first failure makes arming an N-round guessing game");
 });
 ok("...and passes through when everything is met", () => {
   const r = assertArmable({
-    cfg: snipeLaneConfig({ SNIPE_LANE: "observe", SNIPE_CHARGE_DAILY_CAP: "1",
-      SNIPE_MAX_SOL_PER_TRADE: "0.4" }),
+    cfg: snipeLaneConfig({ SNIPE_LANE: "observe", SNIPE_MAX_SOL_PER_TRADE: "0.4" }),
     venue: PROVED, stopExplicit: true });
   assert.equal(r.armable, true);
 });
@@ -128,7 +151,7 @@ ok("a config built around the parser still fails the size item", () => {
      than trusting that every path came through the parser. */
   const overSize = SNIPE_OPERATOR_MAX.maxSolPerTrade + 1;
   const r = armabilityReport({
-    cfg: { ...snipeLaneConfig({ SNIPE_LANE: "observe", SNIPE_CHARGE_DAILY_CAP: "1" }), maxSolPerTrade: overSize },
+    cfg: { ...snipeLaneConfig({ SNIPE_LANE: "observe" }), maxSolPerTrade: overSize },
     venue: PROVED });
   assert.equal(itemOf(r, "size_within_operator_max").ok, false);
   assert.match(itemOf(r, "size_within_operator_max").detail, /operator maximum of 0\.4 SOL/);
