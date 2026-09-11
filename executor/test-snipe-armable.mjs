@@ -24,18 +24,48 @@ const itemOf = (r, name) => r.items.find((i) => i.name === name);
    whether someone had verified pump.fun that week. */
 const PROVED = { ...PUMPFUN_VENUE, layoutVerified: true, layoutProof: { provedBy: "a fixture, in this test only" } };
 
-console.log("\nTHE SHIPPED CONFIGURATION IS NOT ARMABLE, AND SAYS WHY");
-ok("the lane as it ships today is refused, on the one signal that is not connected", () => {
+console.log("\nTHE CHECKLIST IS CLEAR, AND EVERY ITEM MUST STILL BE ABLE TO BLOCK");
+ok("the lane as it ships today meets every item on the list", () => {
+  /* THE BLOCKING SET, IN ORDER, AS IT EMPTIED — each entry cleared by work, not by edit:
+       both items          -> daily_cap_is_charged became a guarantee (the MODE forces the
+                              charge on, so it cannot be configured off on a lane that spends)
+       venue_layout        -> the pump.fun V2 layout proved against 30 mainnet occurrences,
+                              re-encoded index-for-index on every run
+       exit_signals        -> creatorSold wired: the deployer's token balance, watched
+                              unanimously across endpoints, against a baseline
+     This assertion is updated deliberately every time, because a blocking set that
+     quietly shrinks is exactly how an arming gate stops being a gate. */
   const r = armabilityReport({ cfg: snipeLaneConfig({ SNIPE_LANE: "observe" }), venue: PUMPFUN_VENUE });
-  assert.equal(r.armable, false);
-  /* WAS ["exit_signals_are_wired", "venue_layout_is_proved"] until 2026-09-11, when the
-     pump.fun V2 layout was proved against 30 mainnet occurrences and the venue item
-     cleared. One item left, and it is a real one: creatorSold is a branch that cannot
-     fire. Updated here deliberately, because a blocking set that quietly shrinks is how
-     an arming gate stops being a gate. */
-  assert.deepEqual([...r.blocking].sort(), ["exit_signals_are_wired"],
-    "the shipped lane's blocking set changed — if an item was cleared, say so here");
-  console.log(`        blocking: ${r.blocking.join(", ")}`);
+  assert.deepEqual([...r.blocking], [],
+    `still blocking on ${r.blocking.join(", ")} — if an item regressed, fix it rather than this line`);
+  assert.equal(r.armable, true);
+  console.log(`        ${r.items.length} items, none blocking`);
+});
+ok("...and EVERY item can still block, so a clear list is a result and not a formality", () => {
+  /* The danger of a checklist that passes is that nobody notices when it stops checking.
+     Each item is broken in turn and must be the one that blocks. */
+  const base = snipeLaneConfig({ SNIPE_LANE: "observe" });
+  const breakers = {
+    size_within_operator_max: [{ ...base, maxSolPerTrade: 99 }, PUMPFUN_VENUE, false],
+    daily_cap_is_charged: [{ ...base, chargeDailyCap: false, lane: "observe" }, PUMPFUN_VENUE, false],
+    take_is_fundable: [{ ...base, policy: { takeAtEntryX: 1.01 } }, PUMPFUN_VENUE, false],
+    stop_is_fundable: [{ ...base, maxSolPerTrade: 0.4 }, PUMPFUN_VENUE, false],
+    venue_layout_is_proved: [base, { ...PUMPFUN_VENUE, layoutVerified: false, layoutProof: undefined }, false],
+  };
+  for (const [name, [cfg, venue, stopExplicit]] of Object.entries(breakers)) {
+    const r = armabilityReport({ cfg, venue, stopExplicit });
+    if (name === "daily_cap_is_charged") {
+      /* THE EXCEPTION, AND IT IS THE POINT OF THAT ITEM: this one CANNOT be broken from a
+         config any more, because the mode decides it. Asserting it still blocks would be
+         asserting the bug back into existence. */
+      assert.equal(r.blocking.includes(name), false,
+        "the daily cap became configurable again — the mode is supposed to force it");
+      continue;
+    }
+    assert.ok(r.blocking.includes(name),
+      `${name} was broken deliberately and the checklist did not block on it; blocking = ${r.blocking.join(", ") || "nothing"}`);
+  }
+  console.log(`        4 items broken in turn, each caught; daily_cap is unbreakable by design`);
 });
 
 ok("...and every item carries a detail a human can act on, not just a boolean", () => {
@@ -105,8 +135,8 @@ ok("...and stating the stop explicitly clears THAT item, without clearing the re
   const r = armabilityReport({
     cfg: snipeLaneConfig({ SNIPE_LANE: "observe", SNIPE_MAX_SOL_PER_TRADE: "0.4" }),
     venue: PROVED, stopExplicit: true });
-  assert.deepEqual(r.blocking, ["exit_signals_are_wired"],
-    `expected only the unwired-signal item to remain, got ${r.blocking.join(", ")}`);
+  assert.deepEqual(r.blocking, [],
+    `stating the stop should leave nothing blocking at this size, got ${r.blocking.join(", ")}`);
   console.log(`        at ${SNIPE_OPERATOR_MAX.maxSolPerTrade} SOL the stop item clears once stated; ` +
     `${r.blocking.length} item(s) still blocking`);
 });
@@ -164,21 +194,32 @@ ok("assertArmable throws listing EVERY unmet item, not the first", () => {
   console.log(`        ${blocking.length} blocking, all named: ${blocking.join(", ")}`);
 });
 
-ok("...and the dead-branch item is a REAL blocker, not a note", () => {
-  /* creatorSold is the branch snipe-policy calls "the one signal a launch has that no
-     later market does", and stepOne passes it a literal false. The policy is fine; the
-     fact never arrives. A dead branch reads as a protection to whoever reviews the exits,
-     so arming blocks on it rather than mentioning it. */
-  assert.equal(LANE_SIGNALS.creatorSold, "unwired");
+ok("...and the signal that WAS dead is now connected, with the others", () => {
+  /* WAS "the dead-branch item is a REAL blocker". creatorSold — the branch snipe-policy
+     calls "the one signal a launch has that no later market does" — was handed a literal
+     false by stepOne, so it could not fire. It is wired now: the deployer's token balance,
+     read alongside the curve and witnessed unanimously across every endpoint, because a
+     fall in it sells the whole position.
+     The item stays on the checklist. Its job was never to be permanently red; it was to
+     make a dead branch impossible to mistake for a protection. */
+  for (const [name, state] of Object.entries(LANE_SIGNALS))
+    assert.equal(state, "wired", `${name} is ${state}`);
   const r = armabilityReport({
     cfg: snipeLaneConfig({ SNIPE_LANE: "observe", SNIPE_MAX_SOL_PER_TRADE: "0.4" }),
     venue: PROVED, stopExplicit: true });
-  assert.equal(r.armable, false);
+  assert.equal(itemOf(r, "exit_signals_are_wired").ok, true);
+  assert.match(itemOf(r, "exit_signals_are_wired").detail, /all 8 exit signals reach the determiner/);
+  console.log(`        ${Object.keys(LANE_SIGNALS).length} signals, all wired: ${Object.keys(LANE_SIGNALS).join(", ")}`);
+});
+ok("...and un-wiring ANY one of them blocks arming again", () => {
+  /* The item must still be able to go red, or it is decoration. Driven through the real
+     report by handing it a signal table with one entry knocked out. */
+  const r = armabilityReport({
+    cfg: snipeLaneConfig({ SNIPE_LANE: "observe" }), venue: PROVED,
+    signals: { ...LANE_SIGNALS, creatorSold: "unwired" } });
+  assert.equal(r.armable, false, "a lane with a dead exit branch was declared armable");
+  assert.deepEqual(r.blocking, ["exit_signals_are_wired"]);
   assert.match(itemOf(r, "exit_signals_are_wired").detail, /creatorSold is a branch that cannot fire/);
-  /* And every other signal IS wired, so this item is not a blanket "nothing works". */
-  const wired = Object.entries(LANE_SIGNALS).filter(([, v]) => v === "wired").map(([k]) => k);
-  assert.ok(wired.length >= 7, `only ${wired.length} signals wired: ${wired.join(", ")}`);
-  console.log(`        ${wired.length} wired (${wired.join(", ")}), 1 unwired (creatorSold)`);
 });
 
 console.log("\nTHE SIZE CEILING IS IN THE CHECKLIST TOO, NOT ONLY IN THE PARSER");

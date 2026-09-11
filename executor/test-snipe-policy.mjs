@@ -189,11 +189,25 @@ ok("a position with no fill economics falls back to live friction, never to 1.0x
   assert.ok(SNIPE_DEFAULTS.fallbackFrictionX > 1.2,
     `fallback ${SNIPE_DEFAULTS.fallbackFrictionX} — a fallback of 1.0 is the bug it exists to prevent`);
 });
-ok("the creator selling exits immediately — the one signal a launch has", () => {
+ok("the creator getting out exits immediately — the one signal a launch has", () => {
   const d = snipePolicy({ position: open(), mark: 3.0, nowMs: T0 + 1, creatorSold: true });
   assert.equal(d.action, "sell", `${d.action}: ${d.reason}`);
-  assert.match(d.reason, /creator sold/);
-  console.log(`        up 3x and the creator sells -> ${d.reason}`);
+  /* WAS /creator sold/. The caller detects this by watching the deployer's token balance,
+     and on chain a sale and a transfer to a fresh wallet are indistinguishable — on a
+     launch the second is the first with an extra step. "Sold" was a narrower claim than
+     the evidence supports, so the record says "is out" and carries the measurement. */
+  assert.match(d.reason, /creator is out/);
+  console.log(`        up 3x and the creator exits -> ${d.reason}`);
+});
+ok("...and the caller's own measurement is appended verbatim when it has one", () => {
+  /* The policy is handed a boolean and must not invent the evidence for it; when the
+     caller measured something, the record carries what they measured. */
+  const d = snipePolicy({ position: open(), mark: 3.0, nowMs: T0 + 1, creatorSold: true,
+    creatorSoldDetail: "the deployer's balance fell 50.0% (1000000 -> 500000)" });
+  assert.match(d.reason, /balance fell 50\.0% \(1000000 -> 500000\)$/);
+  /* And with no detail it says nothing extra, rather than a trailing colon. */
+  assert.doesNotMatch(snipePolicy({ position: open(), mark: 3.0, nowMs: T0 + 1, creatorSold: true }).reason,
+    /:\s*$/);
 });
 ok("a hostile chain fact exits on the FACT, not on the price", () => {
   const d = snipePolicy({ position: open(), mark: 10.0, nowMs: T0 + 1, rugFlag: true });

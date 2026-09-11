@@ -44,7 +44,7 @@ import { fileURLToPath } from "node:url";
 import bs58 from "bs58";
 
 import {
-  LANE_REFUSED_VENUE_METHODS, SNIPE_ENV, SNIPE_LANE_DEFAULTS, SNIPE_LANE_MODES, SNIPE_LANE_VERSION,
+  LANE_REFUSED_VENUE_METHODS, LANE_SIGNALS, SNIPE_ENV, SNIPE_LANE_DEFAULTS, SNIPE_LANE_MODES, SNIPE_LANE_VERSION,
   SnipeLaneError, bindDeterminer, createSnipeLane, observeOnlyVenue, readAcrossEndpoints, snipeLaneConfig,
 } from "./snipe-lane.mjs";
 import {
@@ -141,6 +141,24 @@ const FAKE_VENUE = Object.freeze({
 
   async *watch() { /* the lane never calls this; the feed owns the transport */ },
   accountsFor(mint) { return [`curve:${mint}`, `global:${mint}`, `mint:${mint}`]; },
+  /* The management read: the three above plus the deployer's two candidate token
+     accounts, exactly as the real adapter shapes it. */
+  accountsForHeld(mint, { creator } = {}) {
+    const base = [`curve:${mint}`, `global:${mint}`, `mint:${mint}`];
+    if (!creator) return base;
+    return [...base, `ata-legacy:${creator}:${mint}`, `ata-2022:${creator}:${mint}`];
+  },
+  /* A stand-in for the SPL decode, with the same contract: null unless these bytes really
+     are a token account for THIS mint and owner. */
+  decodeTokenAmount(account, { mint, owner } = {}) {
+    if (!account?.data) return null;
+    let raw;
+    try { raw = JSON.parse(Buffer.from(account.data).toString("utf8")); } catch { return null; }
+    if (raw.kind !== "token-account") return null;
+    if (mint && raw.mint !== mint) return null;
+    if (owner && raw.owner !== owner) return null;
+    return BigInt(raw.amount);
+  },
   curveFromAccount(account, { feeBps = null, mint = null } = {}) {
     if (!account?.data) return null;
     let raw;
@@ -1129,6 +1147,125 @@ section("14. A DISAGREEMENT IS BLINDNESS BEFORE IT IS HOSTILITY");
   ok("the row says it left on the chain fact, which is what a sustained split IS",
     /chain fact turned hostile/.test(String(row?.outcome?.reason || "")),
     String(row?.outcome?.reason || "none").slice(0, 80));
+}
+
+section("15. THE DEPLOYER GETTING OUT — the branch that could not fire");
+
+{
+  /* snipe-policy calls this "the one signal a launch has that no later market does", and
+     stepOne passed it a literal false: the branch existed and was unreachable. A dead
+     branch reads as a protection to whoever reviews the exits, which is why arming blocked
+     on it until it was connected. These are the tests that connected it. */
+  const CREATOR = keyFor(200);
+  const tokenAccount = (mint, owner, amount) => ({
+    owner: VENUE_PROGRAM,
+    data: Buffer.from(JSON.stringify({ kind: "token-account", mint, owner, amount: String(amount) }), "utf8"),
+  });
+  const laneWatching = (mint, balances, { creator = CREATOR, cfg = {} } = {}) => {
+    /* balances is read fresh on every tick, and per endpoint, so a test can move the
+       deployer's balance or make two nodes disagree about it. */
+    const accountsFor = (endpoint) => () => [
+      curveAccount({ ...HEALTHY_CURVE, creator }), {}, mintAccount(),
+      tokenAccount(mint, creator, balances[endpoint] ?? balances.both),
+      { owner: VENUE_PROGRAM, data: Buffer.from("not-a-token-account", "utf8") },
+    ];
+    return createSnipeLane({
+      venue: FAKE_VENUE, control: OK_CONTROL, clock: makeClock(),
+      cfg: { lane: "observe", forwardSamples: 40, ...cfg },
+      state: {}, book: { deployedTodaySol: 0, attempts: {} },
+      readers: makeReaders([
+        { id: "a", slot: 900, accounts: accountsFor("a") },
+        { id: "b", slot: 900, accounts: accountsFor("b") },
+      ]),
+    });
+  };
+  /* The FEED's creator wins over the curve's on the open path
+     (`record?.creator ?? curve?.creator`), so the notice has to carry it. The first draft
+     of these tests set it only on the curve and every case silently reported "no signal" —
+     which was decodeTokenAmount's owner guard doing exactly its job: refusing to read a
+     balance out of an account belonging to somebody else. */
+  const noticeFor = (mint, creator) => noticeRecord(mint, { firstSlot: 896, creator });
+
+  {
+    const mint = keyFor(201);
+    const balances = { both: 1_000_000n };
+    const lane = laneWatching(mint, balances);
+    await lane.handleNotice(noticeFor(mint, CREATOR));
+    const t1 = await lane.tick();
+    ok("the first readable tick takes a baseline and holds",
+      t1[0].action === "hold" && lane.openPositions().length === 1, `action ${t1[0].action}`);
+
+    balances.both = 950_000n;                    // 5% out — under the 10% threshold
+    const t2 = await lane.tick();
+    ok("a 5% fall is under the threshold and does NOT sell the position",
+      t2[0].action === "hold" && lane.openPositions().length === 1,
+      `action ${t2[0].action}, ${lane.openPositions().length} open`);
+
+    balances.both = 500_000n;                    // 50% out
+    const t3 = await lane.tick();
+    ok("a 50% fall sells the whole position",
+      t3[0].action === "sell" && lane.openPositions().length === 0,
+      `action ${t3[0].action}, ${lane.openPositions().length} open`);
+    const row = lane.rows().find((r) => r.mint === mint);
+    ok("…and the reason says what was MEASURED, not the narrower claim 'sold'",
+      /balance fell 50\.0%/.test(String(row?.outcome?.reason || ""))
+        && /sold or moved out/.test(String(row?.outcome?.reason || "")),
+      String(row?.outcome?.reason || "none").slice(0, 104));
+  }
+
+  {
+    /* THE LIQUIDATION GUARD. This signal sells everything, and the two extra addresses
+       ride outside readAcrossEndpoints' own digest check — which judges accounts[0] and
+       nothing else. One node claiming the deployer dumped must not be able to sell a
+       real position. */
+    const mint = keyFor(202);
+    const balances = { both: 1_000_000n };
+    const lane = laneWatching(mint, balances);
+    await lane.handleNotice(noticeFor(mint, CREATOR));
+    await lane.tick();
+    delete balances.both; balances.a = 1_000_000n; balances.b = 10n;   // one node lies
+    const t = await lane.tick();
+    ok("ONE endpoint claiming a collapse does not sell — the balance needs unanimity",
+      t[0].action === "hold" && lane.openPositions().length === 1,
+      `action ${t[0].action}, ${lane.openPositions().length} open`);
+    balances.a = 10n;                                                   // now both agree
+    const t2 = await lane.tick();
+    ok("…and when both endpoints agree on the collapse, it sells",
+      t2[0].action === "sell" && lane.openPositions().length === 0,
+      `action ${t2[0].action}, ${lane.openPositions().length} open`);
+  }
+
+  {
+    /* "The creator holds nothing" is not "the creator has not sold". Measured on mainnet:
+       of four sampled deployers, two had no token account for their own mint and two held
+       exactly zero. A zero baseline can never fall. */
+    const mint = keyFor(203);
+    const lane = laneWatching(mint, { both: 0n });
+    await lane.handleNotice(noticeFor(mint, CREATOR));
+    await lane.tick();
+    const t = await lane.tick();
+    ok("a deployer holding nothing never triggers the signal",
+      t[0].action === "hold" && lane.openPositions().length === 1, `action ${t[0].action}`);
+    const row = lane.rows().find((r) => r.mint === mint);
+    const noted = (row?.forward || []).some((f) => /held nothing/.test(String(f.creatorNote || "")));
+    ok("…and the record SAYS it is inapplicable rather than staying silent", noted,
+      String((row?.forward || []).map((f) => f.creatorNote).filter(Boolean)[0] || "nothing recorded"));
+  }
+
+  {
+    /* A position with no recorded creator must simply have no signal — not a crash, and
+       not a false positive. */
+    const mint = keyFor(204);
+    const lane = laneWatching(mint, { both: 1_000_000n }, { creator: null });
+    await lane.handleNotice(noticeFor(mint, null));
+    const t = await lane.tick();
+    ok("a fill with no creator recorded ticks normally with the signal simply absent",
+      t[0].action === "hold" && Number.isFinite(t[0].markX), `action ${t[0].action}, markX ${t[0].markX}`);
+  }
+
+  ok("LANE_SIGNALS now reports every exit signal wired",
+    Object.values(LANE_SIGNALS).every((v) => v === "wired"),
+    Object.entries(LANE_SIGNALS).filter(([, v]) => v !== "wired").map(([k]) => k).join(", ") || "all wired");
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
