@@ -11,7 +11,7 @@
  */
 import assert from "node:assert/strict";
 import { armabilityReport, assertArmable, snipeLaneConfig, effectiveLaneConfig,
-  SNIPE_OPERATOR_MAX } from "./snipe-lane.mjs";
+  LANE_SIGNALS, SNIPE_OPERATOR_MAX } from "./snipe-lane.mjs";
 import { PUMPFUN_VENUE } from "./snipe-venue-pumpfun.mjs";
 import { SNIPE_DEFAULTS } from "./snipe-policy.mjs";
 
@@ -28,7 +28,7 @@ console.log("\nTHE SHIPPED CONFIGURATION IS NOT ARMABLE, AND SAYS WHY");
 ok("the lane as it ships today is refused, on the one item nobody can reason past", () => {
   const r = armabilityReport({ cfg: snipeLaneConfig({ SNIPE_LANE: "observe" }), venue: PUMPFUN_VENUE });
   assert.equal(r.armable, false);
-  assert.deepEqual([...r.blocking].sort(), ["venue_layout_is_proved"],
+  assert.deepEqual([...r.blocking].sort(), ["exit_signals_are_wired", "venue_layout_is_proved"],
     "the shipped lane's blocking set changed — if an item was cleared, say so here");
   console.log(`        blocking: ${r.blocking.join(", ")}`);
 });
@@ -39,7 +39,7 @@ ok("...and every item carries a detail a human can act on, not just a boolean", 
     assert.equal(typeof i.detail, "string");
     assert.ok(i.detail.length > 30, `${i.name} says only "${i.detail}"`);
   }
-  assert.equal(r.items.length, 5, `${r.items.length} items — the checklist changed size`);
+  assert.equal(r.items.length, 6, `${r.items.length} items — the checklist changed size`);
 });
 
 console.log("\nA DAILY CAP THAT CANNOT SEE THE SPEND IS NOT A DAILY CAP");
@@ -88,7 +88,7 @@ ok("RAISING THE SIZE BLOCKS ON THE STOP, because 0.20 was never a risk appetite"
     cfg: snipeLaneConfig({ SNIPE_LANE: "observe", SNIPE_MAX_SOL_PER_TRADE: "0.4" }),
     venue: PROVED });
   assert.equal(r.armable, false);
-  assert.deepEqual(r.blocking, ["stop_is_fundable"]);
+  assert.ok(r.blocking.includes("stop_is_fundable"), `blocking ${r.blocking.join(", ")}`);
   assert.match(itemOf(r, "stop_is_fundable").detail, /80% drawdown before it speaks/);
   /* And at that size the SAME 2x take is worth far more, which is the other half. */
   assert.match(itemOf(r, "take_is_fundable").detail, /2x take realizes 99\.50% at a 1\.0025x round trip/);
@@ -96,12 +96,14 @@ ok("RAISING THE SIZE BLOCKS ON THE STOP, because 0.20 was never a risk appetite"
   console.log(`        0.4 SOL: ${itemOf(r, "stop_is_fundable").detail.slice(0, 104)}`);
 });
 
-ok("...and stating the stop explicitly for that size clears it", () => {
+ok("...and stating the stop explicitly clears THAT item, without clearing the rest", () => {
   const r = armabilityReport({
     cfg: snipeLaneConfig({ SNIPE_LANE: "observe", SNIPE_MAX_SOL_PER_TRADE: "0.4" }),
     venue: PROVED, stopExplicit: true });
-  assert.equal(r.armable, true, `still blocking on ${r.blocking.join(", ")}`);
-  console.log(`        armable at ${SNIPE_OPERATOR_MAX.maxSolPerTrade} SOL once the stop is stated`);
+  assert.deepEqual(r.blocking, ["exit_signals_are_wired"],
+    `expected only the unwired-signal item to remain, got ${r.blocking.join(", ")}`);
+  console.log(`        at ${SNIPE_OPERATOR_MAX.maxSolPerTrade} SOL the stop item clears once stated; ` +
+    `${r.blocking.length} item(s) still blocking`);
 });
 
 console.log("\nTHE LAYOUT IS THE ONE NOBODY CAN REASON THEIR WAY PAST");
@@ -134,14 +136,24 @@ ok("assertArmable throws listing all of them at once", () => {
          stopFrac 0.20 is only fundable at the canary. That coupling is the feature, and
          a test written expecting two would have been quietly wrong about it. */
       && /stop_is_fundable/.test(err.message)
-      && err.detail.blocking.length === 3,
+      && err.detail.blocking.length === 4,
     "a checklist that stops at the first failure makes arming an N-round guessing game");
 });
-ok("...and passes through when everything is met", () => {
-  const r = assertArmable({
+ok("...and the dead-branch item is a REAL blocker, not a note", () => {
+  /* creatorSold is the branch snipe-policy calls "the one signal a launch has that no
+     later market does", and stepOne passes it a literal false. The policy is fine; the
+     fact never arrives. A dead branch reads as a protection to whoever reviews the exits,
+     so arming blocks on it rather than mentioning it. */
+  assert.equal(LANE_SIGNALS.creatorSold, "unwired");
+  const r = armabilityReport({
     cfg: snipeLaneConfig({ SNIPE_LANE: "observe", SNIPE_MAX_SOL_PER_TRADE: "0.4" }),
     venue: PROVED, stopExplicit: true });
-  assert.equal(r.armable, true);
+  assert.equal(r.armable, false);
+  assert.match(itemOf(r, "exit_signals_are_wired").detail, /creatorSold is a branch that cannot fire/);
+  /* And every other signal IS wired, so this item is not a blanket "nothing works". */
+  const wired = Object.entries(LANE_SIGNALS).filter(([, v]) => v === "wired").map(([k]) => k);
+  assert.ok(wired.length >= 7, `only ${wired.length} signals wired: ${wired.join(", ")}`);
+  console.log(`        ${wired.length} wired (${wired.join(", ")}), 1 unwired (creatorSold)`);
 });
 
 console.log("\nTHE SIZE CEILING IS IN THE CHECKLIST TOO, NOT ONLY IN THE PARSER");
