@@ -27,6 +27,10 @@ const runtimeFiles = [
   "trade-policy.mjs",
   // desk-led-v4: the desk's ruler and the mirror evaluator are runtime files too.
   "dexscreener-consensus.mjs", "desk-mirror.mjs",
+  // The launch lane, now that it can sign: validated like jupiter.mjs, for the same reason.
+  "snipe-execute.mjs", "snipe-lane.mjs", "snipe-venue-pumpfun.mjs", "snipe-venue.mjs",
+  "snipe-curve.mjs", "snipe-entry.mjs", "snipe-feed.mjs", "snipe-book.mjs",
+  "snipe-shadow.mjs", "snipe-policy.mjs",
   "package.json", "package-lock.json",
 ];
 let failures = 0;

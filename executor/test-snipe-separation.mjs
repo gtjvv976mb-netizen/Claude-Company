@@ -36,7 +36,7 @@ const codeOf = (src) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*
 const DESK_FILES = ["strategy.mjs", "trade-policy.mjs", "desk-mirror.mjs"];
 const LANE_FILES = ["snipe-policy.mjs", "snipe-curve.mjs", "snipe-venue.mjs",
   "snipe-venue-pumpfun.mjs", "snipe-feed.mjs", "snipe-entry.mjs", "snipe-book.mjs",
-  "snipe-lane.mjs", "snipe-shadow.mjs"];
+  "snipe-lane.mjs", "snipe-shadow.mjs", "snipe-execute.mjs"];
 
 /* ── 3. THE SOURCE BOUNDARY, BOTH DIRECTIONS ───────────────────────────────────────── */
 console.log("\nTHE SOURCE BOUNDARY");

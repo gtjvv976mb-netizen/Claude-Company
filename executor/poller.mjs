@@ -414,7 +414,7 @@ if (EXECUTE) {
  * number and stopped the day after roughly two stop-outs on a 0.4 position. At 0.4 the
  * percentage becomes the binding one (0.399 on this balance), which is the owner's
  * original "stop after losing 20% of the SOL" rule actually taking effect. */
-const OPERATOR_MAX = Object.freeze({ maxSolPerTrade: 0.4, dailySolCap: 1000, dailyLossLimitSol: 0.4 });
+const OPERATOR_MAX = Object.freeze({ maxSolPerTrade: 1, dailySolCap: 1000, dailyLossLimitSol: 0.4 });
 const capsAckSentence = (wallet, trade, daily, loss) =>
   `I acknowledge WALL-ST-E caps v2 for ${wallet}: ${trade} SOL per trade, ${daily} SOL per day, ${loss} SOL rolling realized-loss entry brake`;
 
@@ -1246,6 +1246,13 @@ function accountConfirmedIntents() {
   let count = 0;
   for (const intent of journal.pendingIntents()) {
     if (intent.state !== "confirmed") continue;
+    /* The sniper accounts its own fills (snipe-execute.mjs): its position lives under
+       S.snipes, which this file's entry and exit accounting cannot see by construction
+       (test-snipe-separation.mjs clause 1). Left to fall through, a confirmed snipe_entry
+       would have been quarantined as "unsupported kind" on every tick, and a snipe_exit
+       would have been handed to applyConfirmedExit to look for a desk position that does
+       not exist. Neither is this loop's row. */
+    if (String(intent.kind).startsWith("snipe_")) continue;
     try {
       if (intent.kind === "entry") applyConfirmedEntry(intent);
       else if (EXIT_INTENT_KINDS.includes(intent.kind)) applyConfirmedExit(intent);
@@ -3208,18 +3215,21 @@ setInterval(tick, POLL_MS);
 /* ── THE LAUNCH LANE, OBSERVE-ONLY AND OFF UNLESS ASKED FOR ──────────────────────────
  *
  * A second lane in this process, watching pump.fun launches and recording what it WOULD
- * have done. It has no desk, so it carries its own exit determiner (snipe-policy.mjs);
- * it shares no book, no engine and no config namespace with the desk
- * (test-snipe-separation.mjs holds all six clauses).
+ * have done — or, once the owner arms it, doing it. It has no desk, so it carries its own
+ * exit determiner (snipe-policy.mjs); it shares no book, no engine and no config
+ * namespace with the desk (test-snipe-separation.mjs holds all six clauses).
  *
  * FOUR PROPERTIES, EACH DELIBERATE:
  *
  * 1. OFF BY DEFAULT. Absent SNIPE_LANE the block below does nothing at all — not a
  *    timer, not a socket, not an import side effect. An installed bot that never sets
  *    the variable behaves exactly as it did before this existed.
- * 2. NOTHING SIGNS. createSnipeLane REFUSES lane=execute outright: there is no signing
- *    path in the lane and no keypair is loaded on it. Arming is a separate owner
- *    decision, not a flag flip, and the lane cannot be talked into it from here.
+ * 2. THE LANE CANNOT SIGN; ONLY THE PORT CAN. createSnipeLane refuses lane=execute unless
+ *    it is handed a signing port (snipe-execute.mjs), its arming checklist is clear, and
+ *    SNIPE_LIVE_ACK is the owner's typed sentence for THIS wallet and THESE caps. The port
+ *    is built here only on a live install — EXECUTE=1, two private RPCs, the wallet
+ *    acknowledgement — and it runs the desk's own entry boundary (pause, hard stop, the
+ *    launchd power proof) before every buy. A flag alone still arms nothing.
  * 3. ITS OWN TWO ENDPOINTS, UNCONDITIONALLY. secondaryConn above is null whenever
  *    EXECUTE is off — which is exactly the configuration the observe lane ships in — so
  *    the lane opens its own pair. A shadow book that validated a two-endpoint witness
@@ -3227,15 +3237,53 @@ setInterval(tick, POLL_MS);
  * 4. IT CANNOT TAKE THE DESK DOWN. Construction and every tick are wrapped: a lane that
  *    throws is logged and disabled, and the trading loop above continues untouched. An
  *    observation lane is worth exactly nothing if it can stop the bot that earns.
+ *
+ * AND IT IS FED. Until 2026-09-12 this block constructed the lane and never built a feed
+ * or called start(): the lane ticked an empty book and heard no launch, in either mode.
+ * The feed is the venue's own logsSubscribe over this bot's RPC WebSocket, with the
+ * pump.fun listing poll as corroboration, exactly as snipe-feed.mjs composes them.
  */
 const SNIPE_LANE_MODE = String(process.env.SNIPE_LANE || "off").trim().toLowerCase();
 if (SNIPE_LANE_MODE !== "off") {
   try {
-    const [{ createSnipeLane, snipeLaneConfig }, { PUMPFUN_VENUE }] = await Promise.all([
+    const [{ createSnipeLane, snipeLaneConfig }, { PUMPFUN_VENUE }, feedMod] = await Promise.all([
       import("./snipe-lane.mjs"),
       import("./snipe-venue-pumpfun.mjs"),
+      import("./snipe-feed.mjs"),
     ]);
     const laneCfg = snipeLaneConfig(process.env);
+    /* THE SIGNING PORT, on a live install only. Everything it needs is the desk's: the
+       key, both private RPCs, the journal, the sentinel readers, the entry boundary and
+       the runtime the accounting writes. Absent EXECUTE=1 there is no key to hand it, and
+       the lane refuses execute for want of a port before anything else is checked. */
+    let snipeExecutor = null;
+    if (laneCfg.lane === "execute") {
+      if (!EXECUTE) throw new Error("SNIPE_LANE=execute needs a live install (EXECUTE=1); the sniper signs with the desk's wallet and gates");
+      if (RPC === SECONDARY_RPC) throw new Error("SNIPE_LANE=execute needs SOLANA_RPC_SECONDARY distinct from SOLANA_RPC: both providers simulate and both send, and one node must not be the whole story");
+      const { createSnipeExecutor } = await import("./snipe-execute.mjs");
+      /* ITS OWN PAIR for the signing path too, opened on the same two endpoints the live
+         desk already proved distinct. The lane's rule (its readers never borrow the desk's
+         secondary) holds here for the same reason: nothing the sniper does may depend on
+         a connection the desk's mode decides whether to open. */
+      snipeExecutor = createSnipeExecutor({
+        keypair: kp, journal, venue: PUMPFUN_VENUE,
+        connections: [new Connection(RPC, solanaRpcConnectionConfig()), new Connection(SECONDARY_RPC, solanaRpcConnectionConfig())],
+        cfg: { priorityFeeLamports: laneCfg.priorityFeeLamports, maxNetworkFeeLamports: laneCfg.maxNetworkFeeLamports,
+          maxRentLamports: laneCfg.maxRentLamports },
+        control: () => ({ hardStop: hardStop() === true, pauseEntries: pauseEntries() === true }),
+        boundary: ({ side }) => {
+          if (side !== "buy") return;
+          assertEntriesUnpaused();
+          if (process.env["WALLSTE_SUPERVISOR"] === "launchd") {
+            requireMacEntryPower({ ownerPid: process.pid, lockFile: LOCK_FILE, pauseEntriesFile: PAUSE_ENTRIES_FILE });
+            assertEntriesUnpaused();
+          }
+        },
+        runtime: () => S,
+        persist: () => save(),
+        log: (msg) => log(`[snipe] ${msg}`),
+      });
+    }
     /* Its own pair, never the desk's — see property 3. The lane reads through a narrow
        {id, read} port rather than a Connection: it needs the SLOT alongside the accounts
        (the witness rule compares reads BY SLOT, and a read whose slot is unknown cannot
@@ -3257,10 +3305,29 @@ if (SNIPE_LANE_MODE !== "off") {
       laneReader("primary", RPC),
       laneReader("secondary", SECONDARY_RPC),
     ];
+    /* THE FEED. Launches arrive over this bot's own RPC WebSocket (the venue's watch() on a
+       Connection built here and handed in — the adapter never opens one), corroborated by
+       the pump.fun listing poll so a dropped socket is a degraded feed rather than a
+       silent one. snipe-feed.mjs owns the ledger, dedupe and health; this only names the
+       sources. */
+    const laneSocket = new Connection(RPC, solanaRpcConnectionConfig());
+    const laneFeed = feedMod.createSnipeFeed({
+      sources: [
+        feedMod.sourceFromVenueWatch(PUMPFUN_VENUE, {
+          id: "logs:pumpfun", opts: { connection: laneSocket, commitment: "processed" },
+        }),
+        feedMod.pollSource({
+          id: "poll:pumpfun-list", venueId: PUMPFUN_VENUE.id,
+          fetchRows: feedMod.pumpfunListingFetcher({ pages: 1 }),
+        }),
+      ],
+    });
     const lane = createSnipeLane({
       venue: PUMPFUN_VENUE,
       readers: laneReaders,
       cfg: laneCfg,
+      feed: laneFeed,
+      executor: snipeExecutor,
       /* THE DESK'S STATE OBJECT, SO THE TWO BOOKS CAN SEE EACH OTHER — which is the
          opposite of mixing them, and the distinction is the whole design.
          The lane keeps its positions under S.snipes and the desk keeps its under
@@ -3321,8 +3388,26 @@ if (SNIPE_LANE_MODE !== "off") {
           `than disabling, because a disabled lane cannot exit what it opened. The desk is unaffected: ${err?.message || err}`);
       }
     }, snipeTickMs);
+    /* RECOVER, THEN LISTEN. An armed lane first asks its port about its own pending
+       intents — a buy sent before a crash is a position whether or not the book heard —
+       and says, per intent, whether the book holds it. Then the feed starts and the lane
+       consumes it; without start() the lane is deaf, which is what it was until today. */
+    if (snipeExecutor) {
+      const recovered = await snipeExecutor.recoverPending();
+      for (const r of recovered) {
+        if (r.outcome !== "finalized") { log(`[snipe] recovery ${r.mint}: ${r.side} ${r.outcome}`); continue; }
+        const onBook = (() => { try { return Boolean(lane.positionFor(r.mint)); } catch { return false; } })();
+        log(`[snipe] RECOVERED ${r.side} on ${r.mint}: ${r.fill?.signature ?? "?"} finalized — ` +
+          (r.side === "buy"
+            ? (onBook ? "the book holds this position" : "NO BOOK ENTRY for this position: sell it by hand or restore it before arming again")
+            : (onBook ? "the book still lists this position — it was sold; clear it by hand" : "the book agrees it is closed")));
+      }
+    }
+    await lane.start();
     log(`[snipe] launch lane up in ${laneCfg.lane} mode, ${snipeTickMs}ms tick, ` +
-      `${laneReaders.length} endpoints — nothing is signed on this path`);
+      `${laneReaders.length} endpoints — ${laneCfg.lane === "execute"
+        ? `EXECUTING for ${snipeExecutor.wallet} through snipe-execute.mjs`
+        : "nothing is signed on this path"}`);
   } catch (err) {
     /* Deliberately not fatal. The desk was running before the lane existed and must go on
        running if it cannot start: a missing module, a bad SNIPE_* value or an unreachable

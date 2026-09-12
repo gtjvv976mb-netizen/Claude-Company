@@ -5,7 +5,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Keypair } from "@solana/web3.js";
 import {
-  CURRENT_TX_ATTEMPT_PROTOCOL, ExecutionJournal, acquireProcessLock,
+  CURRENT_TX_ATTEMPT_PROTOCOL, SNIPE_TX_ATTEMPT_PROTOCOL, TX_ATTEMPT_PROTOCOLS, ExecutionJournal, acquireProcessLock,
   positionEntryBlock, trackedBalanceDecision, INTENT_KINDS, POSITION_SCOPED_KINDS,
 } from "./journal.mjs";
 import { freshState } from "./strategy.mjs";
@@ -348,6 +348,22 @@ ok("recordSigned marks new attempts with the exported current protocol", () => {
     CURRENT_TX_ATTEMPT_PROTOCOL);
   assert.equal(legacyProtocol.db.prepare("SELECT protocol FROM tx_attempts WHERE intent_id=?")
     .get(migratedProtocolSpec.id).protocol, CURRENT_TX_ATTEMPT_PROTOCOL);
+});
+const snipeProtocolSpec = {
+  ...spec, id: "snipe-entry:protocol", kind: "snipe_entry", eventId: null, feedId: null,
+  mint: Keypair.generate().publicKey.toBase58(),
+};
+legacyProtocol.ensureIntent(snipeProtocolSpec);
+legacyProtocol.recordSigned(snipeProtocolSpec.id, {
+  attempt: 1, requestId: "snipe-protocol", signedTx: Buffer.from("curve bytes"),
+  signature: "snipe-protocol-signature", blockhash: "snipe-protocol-blockhash",
+  lastValidBlockHeight: 999, quotedOutputRaw: "1000", minOutputRaw: "900",
+  order: { side: "buy" }, protocol: SNIPE_TX_ATTEMPT_PROTOCOL,
+});
+ok("recordSigned honours the sniper's own marker, which is in the taught set and is not the desk's", () => {
+  assert.equal(legacyProtocol.latestAttempt(snipeProtocolSpec.id).protocol, SNIPE_TX_ATTEMPT_PROTOCOL);
+  assert.notEqual(SNIPE_TX_ATTEMPT_PROTOCOL, CURRENT_TX_ATTEMPT_PROTOCOL);
+  assert.ok(TX_ATTEMPT_PROTOCOLS.includes(SNIPE_TX_ATTEMPT_PROTOCOL));
 });
 legacyProtocol.close();
 

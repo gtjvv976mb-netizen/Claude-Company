@@ -58,22 +58,61 @@ const readers = ["primary", "secondary"].map((id) => ({
    DESK'S OWN hardStop/pauseEntries, so one file stops both lanes. */
 const control = () => ({ hardStop: false, pauseEntries: false });
 
-ok("createSnipeLane REFUSES lane=execute outright", () => {
+/* RE-ANCHORED 2026-09-12, when the signing path shipped. The lane no longer refuses
+   lane=execute by name; it refuses it for want of the three things arming needs, in
+   order, and each refusal is asserted below by its clause. The poller's block builds the
+   port only under EXECUTE=1, so a flag on a paper install still constructs nothing. */
+ok("createSnipeLane REFUSES lane=execute without a signing port", () => {
   assert.throws(
     () => lane.createSnipeLane({ venue: PUMPFUN_VENUE, readers, control, cfg: { lane: "execute" } }),
-    /execute/i,
-    "the lane accepted lane=execute — arming must be an owner decision, not a flag");
+    (err) => err.clause === "executor_missing" && /execute/i.test(err.message),
+    "the lane accepted lane=execute with no port — arming must be an owner decision, not a flag");
 });
-/* STRONGER THAN EXPECTED, so the assertion follows the code rather than the other way
-   round: SNIPE_LANE=execute is refused at CONFIG PARSE, before construction is reached.
-   The environment cannot even be turned into an executing config, which means there is no
-   window in poller.mjs between reading the env and building the lane where an execute
-   config exists. Asserted at the config boundary because that is where it actually is. */
-ok("...and SNIPE_LANE=execute is refused at config parse, before construction", () => {
-  assert.throws(() => lane.snipeLaneConfig({ SNIPE_LANE: "execute" }),
-    /observe-only|execute/i,
-    "the environment produced an executing config — poller.mjs would hold it, however briefly");
-  console.log("        SNIPE_LANE=execute cannot be parsed into a config at all");
+const fakePort = { wallet: "D7ppNxdmcoVtEHsHjV47D8q2nGdoUjhdgPpKYmX9gwps",
+  prepareBuy() { throw new Error("not in this test"); }, async buy() { throw new Error("no"); }, async sell() { throw new Error("no"); } };
+ok("...and REFUSES it with a port but without the owner's typed sentence", () => {
+  assert.throws(
+    () => lane.createSnipeLane({ venue: PUMPFUN_VENUE, readers, control, cfg: { lane: "execute" }, executor: fakePort }),
+    (err) => err.clause === "arming_refused" && /SNIPE_LIVE_ACK/.test(err.message),
+    "a port alone armed the lane — the sentence is the owner's part");
+});
+ok("...and REFUSES a ticket above the canary whose stop was never typed", () => {
+  /* The 0.20x default stop was derived for a 0.005 SOL ticket. Carried unexamined onto a
+     larger one it is an 80% drawdown before it speaks, so the checklist (not the parser)
+     refuses to arm until SNIPE_STOP_FRAC is set — and it names the item. */
+  const cfg = lane.snipeLaneConfig({ SNIPE_LANE: "execute", SNIPE_MAX_SOL_PER_TRADE: "0.05", SNIPE_DAILY_SOL_CAP: "0.2" });
+  assert.throws(
+    () => lane.createSnipeLane({ venue: PUMPFUN_VENUE, readers, control, cfg, executor: fakePort }),
+    (err) => err.clause === "not_armable" && err.detail.blocking.includes("stop_is_fundable"),
+    "a 0.05 SOL ticket armed on the canary's stop");
+});
+ok("...and constructs only when the sentence names this wallet and these caps", () => {
+  const cfg = lane.snipeLaneConfig({ SNIPE_LANE: "execute", SNIPE_MAX_SOL_PER_TRADE: "0.05", SNIPE_DAILY_SOL_CAP: "0.2", SNIPE_STOP_FRAC: "0.7" });
+  const sentence = lane.snipeArmSentence(fakePort.wallet, 0.05, 0.2);
+  const armed = lane.createSnipeLane({ venue: PUMPFUN_VENUE, readers, control,
+    cfg: { ...cfg, liveAck: sentence }, executor: fakePort });
+  assert.equal(armed.mode, "execute");
+  assert.equal(armed.adapter.observeOnly, false, "an armed lane must reach the real encoders");
+  assert.equal(armed.effective.policy.stopFrac, 0.7, "the typed stop must be the stop the determiner runs under");
+  /* And the determiner is handed the EFFECTIVE config, not the stated one. Read from the
+     source: the one step() call in the lane's tick must pass `cfg: effective`. Until
+     2026-09-12 it passed `cfg: conf`, and the take dial never reached the sell. */
+  const laneSrc = fs.readFileSync(new URL("./snipe-lane.mjs", import.meta.url), "utf8");
+  const stepCalls = laneSrc.match(/determiner\.step\(\{[\s\S]*?\}\)/g) ?? [];
+  assert.equal(stepCalls.length, 1, "expected exactly one determiner.step() call in the lane");
+  assert.match(stepCalls[0], /cfg:\s*effective\b/, "the determiner is handed the stated config, so typed dials are inert");
+  assert.throws(
+    () => lane.createSnipeLane({ venue: PUMPFUN_VENUE, readers, control,
+      cfg: { ...cfg, liveAck: lane.snipeArmSentence(fakePort.wallet, 0.06, 0.2) }, executor: fakePort }),
+    (err) => err.clause === "arming_refused",
+    "a sentence for a different size armed a lane at this size");
+  console.log(`        armed with: ${sentence}`);
+});
+ok("SNIPE_LANE=execute parses, and the legacy SNIPE_EXECUTE flag is still refused", () => {
+  assert.equal(lane.snipeLaneConfig({ SNIPE_LANE: "execute" }).lane, "execute");
+  assert.throws(() => lane.snipeLaneConfig({ SNIPE_LANE: "observe", SNIPE_EXECUTE: "1" }),
+    (err) => err.clause === "execute_not_implemented",
+    "a bare boolean armed the lane — the flag cannot carry the numbers the sentence makes you type");
 });
 /* RE-ANCHORED 2026-09-11. This asserted that the ADAPTER's buildBuy refuses because the
  * layout was unverified. The layout is verified now — 30 mainnet occurrences re-encoded

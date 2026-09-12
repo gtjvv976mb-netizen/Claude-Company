@@ -15,11 +15,13 @@ const TRADING_RUNTIME_FILES = Object.freeze([
      install that never sets it — but "the trading process can load it" is exactly the test
      for whether a file belongs in the fingerprint. A module that can execute in this
      process and is not fingerprinted is a module that can be swapped without the heartbeat
-     noticing. snipe-feed.mjs is deliberately ABSENT: the lane takes a feed as an argument
-     rather than importing one, so the trading process never loads it — and this list must
-     match what is loaded EXACTLY, in both directions. */
+     noticing. Since 2026-09-12 the poller builds the lane's feed (snipe-feed.mjs) and, on
+     an armed install, its signing path (snipe-execute.mjs) — the one sniper file that
+     holds a key, which is the last file whose bytes may change unnoticed — so both are
+     here. This list must match what is loaded EXACTLY, in both directions. */
   "snipe-lane.mjs", "snipe-venue.mjs", "snipe-venue-pumpfun.mjs", "snipe-curve.mjs",
   "snipe-entry.mjs", "snipe-book.mjs", "snipe-shadow.mjs", "snipe-policy.mjs",
+  "snipe-feed.mjs", "snipe-execute.mjs",
  "balance-verification.mjs",
   "entry-quote-guard.mjs", "exit-trigger.mjs", "feed-drain.mjs", "sol-usd-oracle.mjs",
   "heartbeat-health.mjs", "sleep-assertion.mjs", "strategy.mjs", "trade-policy.mjs",

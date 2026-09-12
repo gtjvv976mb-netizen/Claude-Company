@@ -302,7 +302,7 @@ ok("the shadow declares its version", SNIPE_SHADOW_VERSION === "snipe-shadow-v1"
     JSON.stringify({ signed: lane.stats().signed, sent: lane.stats().sent, keypairs: lane.stats().keypairsLoaded }));
 }
 
-section("2. THE CONFIG IS ITS OWN OBJECT, AND EXECUTE IS REFUSED BY NAME");
+section("2. THE CONFIG IS ITS OWN OBJECT, AND THE LEGACY EXECUTE FLAG IS REFUSED BY NAME");
 
 {
   const cfg = snipeLaneConfig({});
@@ -321,7 +321,11 @@ section("2. THE CONFIG IS ITS OWN OBJECT, AND EXECUTE IS REFUSED BY NAME");
     ok(name, threw instanceof SnipeLaneError && threw.clause === clause,
       `${threw?.name ?? "no throw"} clause ${threw?.clause ?? "—"}`);
   };
-  refuses("SNIPE_LANE=execute is refused", { SNIPE_LANE: "execute" }, "execute_not_implemented");
+  /* RE-ANCHORED 2026-09-12: SNIPE_LANE=execute now parses — arming is the mode name plus a
+     signing port plus the typed sentence, all checked by createSnipeLane and the poller. The
+     legacy SNIPE_EXECUTE flag stays refused so a stale env file cannot arm anything by accident. */
+  const execute = snipeLaneConfig({ SNIPE_LANE: "execute" });
+  ok("SNIPE_LANE=execute parses as the execute lane", execute.lane === "execute", `lane ${execute.lane}`);
   refuses("SNIPE_EXECUTE=1 is refused even in observe", { SNIPE_LANE: "observe", SNIPE_EXECUTE: "1" }, "execute_not_implemented");
   refuses("a malformed number is refused, not coerced", { SNIPE_MAX_SOL_PER_TRADE: "abc" }, "mode_invalid");
   refuses("an unknown lane name is refused", { SNIPE_LANE: "armed" }, "mode_invalid");
@@ -337,8 +341,11 @@ section("2. THE CONFIG IS ITS OWN OBJECT, AND EXECUTE IS REFUSED BY NAME");
     createSnipeLane({ venue: FAKE_VENUE, control: OK_CONTROL, cfg: { lane: "execute" },
       readers: makeReaders([{ id: "a", slot: 1, accounts: [] }, { id: "b", slot: 1, accounts: [] }]) });
   } catch (error) { laneThrew = error; }
-  ok("createSnipeLane refuses lane=execute outright",
-    laneThrew instanceof SnipeLaneError && laneThrew.clause === "execute_not_implemented",
+  /* RE-ANCHORED 2026-09-12: the refusal is now for want of a signing port, not for the mode
+     by name. The port lives in snipe-execute.mjs; this file still cannot sign, which the
+     scans in section 1 keep proving. test-snipe-execute.mjs drives the armed path. */
+  ok("createSnipeLane refuses lane=execute without a signing port",
+    laneThrew instanceof SnipeLaneError && laneThrew.clause === "executor_missing",
     `${laneThrew?.name} clause ${laneThrew?.clause}`);
 }
 
@@ -580,9 +587,9 @@ section("5. HOSTILE LAUNCHES ARE REFUSED BY THE GATE THAT NAMES THE FACT");
     {
       name: "a venue that cannot name an exit route",
       gate: "exit_route_unimplemented",
-      /* THE POSTURE OF EVERY REAL VENUE IN THIS REPO TODAY. snipe-venue-pumpfun.mjs's
-         exitRoute answers `routable: false` for any live curve because its sell
-         instruction layout is unproved — WE MAY NOT ENTER WHAT WE CANNOT EXIT. */
+      /* THE POSTURE OF A VENUE WHOSE SELL IS UNPROVED — which snipe-venue-pumpfun.mjs was
+         until its layout was re-encoded from 30 mainnet occurrences, and which it must
+         become again if it ever loses that proof. WE MAY NOT ENTER WHAT WE CANNOT EXIT. */
       build: () => laneFor({
         venue: { ...FAKE_VENUE, exitRoute: () => ({ via: null, routable: false, reason: "layout unverified" }) },
       }),

@@ -744,13 +744,17 @@ ok("accountsFor returns the three roles the gates need, in the declared order", 
   assert.equal(keys[2].toBase58(), LIVE_CURVE_MINT, `mint=${keys[2].toBase58()}`);
   console.log(`         ${PUMPFUN_ACCOUNT_ROLES.join(" / ")} = ${keys.map((k) => k.toBase58().slice(0, 8) + "…").join(" / ")}`);
 });
-ok("EXIT ROUTE: a live curve is NOT routable, and the reason is the unverified layout", () => {
+ok("EXIT ROUTE: a live curve IS routable through its own proved sell", () => {
+  /* Pinned the other way until 2026-09-12: "not routable, layout unverified". The layout
+     was proved (section 14 below re-encodes 30 mainnet occurrences) and this answer was
+     never revisited, so the entry contract refused EVERY launch at gate 10 and the shadow
+     book could only ever record refusals. The route is now read off the proof. */
   const c = decodeBondingCurve(LIVE_INFO(), { feeBps: FEE, mint: LIVE_CURVE_MINT });
   const r = exitRoute(null, LIVE_CURVE_MINT, { curve: c });
-  assert.equal(r.routable, false, `routable=${r.routable}`);
-  assert.equal(r.via, null, `via=${r.via}`);
-  assert.match(r.reason, /not verified/i, `reason=${r.reason}`);
-  console.log(`         live curve -> via ${r.via}, routable ${r.routable}  (spec gate 10: exit_route_unimplemented)`);
+  assert.equal(r.routable, true, `routable=${r.routable}`);
+  assert.equal(r.via, "curve", `via=${r.via}`);
+  assert.match(r.reason, /sell_v2 is proved/i, `reason=${r.reason}`);
+  console.log(`         live curve -> via ${r.via}, routable ${r.routable}  (spec gate 10 passes on a proved layout)`);
 });
 ok("…and a COMPLETE curve routes to Jupiter — the method can say yes", () => {
   const c = decodeBondingCurve(GRAD(), { feeBps: FEE, mint: GRADUATED_CURVE_MINT, requireOwner: false });

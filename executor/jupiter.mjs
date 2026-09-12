@@ -36,7 +36,7 @@ export const EXECUTION_READINESS_AMOUNT_LAMPORTS = 5_000_000;
  * — but the bot reported itself degraded and the dashboard said not-ready, which is the
  * state an operator reads as broken. test-operator-max-parity.mjs now holds this to the
  * poller's ceiling. (jupiter.mjs cannot import poller.mjs — poller imports jupiter.) */
-export const EXECUTION_READINESS_MAX_AMOUNT_LAMPORTS = 400_000_000;
+export const EXECUTION_READINESS_MAX_AMOUNT_LAMPORTS = 1_000_000_000;
 export const EXECUTION_READINESS_RESERVE_LAMPORTS = 10_000_000;
 /* ONE DEFINITION, RE-EXPORTED. The rent ceiling and the fee gate below now live in
    network-fee-budget.mjs so the sniper lane and this envelope cannot drift apart on what
@@ -2487,8 +2487,14 @@ export class JupiterV2Executor {
     // poller's accounting quarantine path. Slice only after removing them: one
     // permanently malformed confirmed exit must not consume the single bounded slot
     // forever and starve every genuinely signed/submitted stop behind it.
+    /* THE SNIPER'S INTENTS ARE NOT THIS PATH'S TO RECOVER. snipe_entry / snipe_exit bytes
+       are curve instructions sent raw to two RPCs (snipe-execute.mjs), and every rule
+       below — the /execute response, the Jupiter order envelope, the fill verifier —
+       would read them as a malformed Jupiter attempt and either throw or mark them
+       ambiguous, which disarms every exit. The lane's own executor recovers its own
+       kinds on boot; this loop must not touch them. */
     const ordered = this.journal.pendingIntents()
-      .filter((intent) => intent.state !== "confirmed")
+      .filter((intent) => intent.state !== "confirmed" && !String(intent.kind).startsWith("snipe_"))
       .sort((left, right) =>
       Number(!this._isSafetyExit(left)) - Number(!this._isSafetyExit(right)) ||
       Number(left.createdAt) - Number(right.createdAt) || left.id.localeCompare(right.id));

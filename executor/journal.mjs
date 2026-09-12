@@ -60,6 +60,12 @@ export const LEGACY_CALL_IDENTITY_POLICY = "liquidate-on-next-valid-same-mint-de
 // change. Recovery compares this durable provenance marker; a null value is an
 // explicitly unversioned attempt built before this invariant existed.
 export const CURRENT_TX_ATTEMPT_PROTOCOL = "jupiter-dual-rpc-coherent-snapshot-v3";
+/** The launch lane's own path (snipe-execute.mjs): a raw curve buy/sell, simulated on both
+ *  RPCs and sent to both. Recovery reads this marker to know whose rules an attempt obeys. */
+export const SNIPE_TX_ATTEMPT_PROTOCOL = "pumpfun-v2-dual-rpc-raw-send-v1";
+/** The only markers recordSigned will write. A caller naming anything else gets the desk's
+ *  current marker, so a spoofed string cannot invent a provenance recovery never learned. */
+export const TX_ATTEMPT_PROTOCOLS = Object.freeze([CURRENT_TX_ATTEMPT_PROTOCOL, SNIPE_TX_ATTEMPT_PROTOCOL]);
 
 const json = (value) => JSON.stringify(value ?? null);
 const parse = (value, { fallback = null, label = "journal JSON" } = {}) => {
@@ -973,7 +979,12 @@ export class ExecutionJournal {
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
           id, n, "signed", attempt.requestId, Buffer.from(attempt.signedTx), attempt.signature,
           attempt.blockhash, Number(attempt.lastValidBlockHeight), String(attempt.quotedOutputRaw),
-          String(attempt.minOutputRaw), json(attempt.order), CURRENT_TX_ATTEMPT_PROTOCOL, now, now,
+          String(attempt.minOutputRaw), json(attempt.order),
+          /* The provenance marker names the PATH that built the bytes. The desk's path is
+             the default; the sniper's raw-send path names itself, so recovery never
+             reconciles a curve buy with rules written for a Jupiter order. */
+          TX_ATTEMPT_PROTOCOLS.includes(attempt.protocol) ? attempt.protocol : CURRENT_TX_ATTEMPT_PROTOCOL,
+          now, now,
         );
       this.db.prepare("UPDATE intents SET state='signed',signature=?,error=NULL,updated_at=? WHERE id=?")
         .run(attempt.signature, now, id);
@@ -1086,7 +1097,12 @@ export class ExecutionJournal {
     const occurredAt = Number(intent.confirmedAt || intent.updatedAt || this.now());
     if (!Number.isSafeInteger(occurredAt) || occurredAt < 0) throw new Error(`intent ${intent.id} has invalid confirmation time`);
     if (fee > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error(`intent ${intent.id} network fee is too large`);
-    if (intent.kind === "entry") {
+    /* A SNIPE ENTRY IS A DEPLOYMENT. This branch named only "entry", so the first accounted
+       snipe_entry would have fallen through to the exit rule below and thrown "invalid
+       durable exit basis" — an accounting throw on a position that had just been bought
+       with real money. The wallet is one wallet: what the sniper deploys counts against
+       the same rolling risk the desk reads. */
+    if (intent.kind === "entry" || intent.kind === "snipe_entry") {
       const deployed = input + fee;
       if (deployed > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error(`intent ${intent.id} deployment is too large`);
       return { kind: "deployment", deployedLamports: Number(deployed), realizedLamports: 0,
