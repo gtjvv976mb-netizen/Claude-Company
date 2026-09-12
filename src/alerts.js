@@ -198,6 +198,13 @@ export const ENTRY_HOLD_REASONS = Object.freeze([
   "mint_already_held",     // the bot is in this coin; the desk does not stack a second entry
 ]);
 
+/** How long a passed rehearsal keeps answering "can this bot execute?" after a later
+ *  probe is refused. The bot probes every two minutes, so this is about seven probes:
+ *  long enough that a route Jupiter happened to return cannot shut the gate on its
+ *  own, short enough that a wallet that has actually stopped clearing the rehearsal is
+ *  held within a quarter of an hour. Same ruler as MARK_MAX_AGE_MS, on purpose. */
+export const READINESS_PROOF_GRACE_MS = 15 * 60_000;
+
 /** The floor's last self-reported pulse, read as "can this bot take an entry?".
  *  `bot:false` means no LIVE pulse was ever posted — no bot to burn a window on (an
  *  absent floor or a rehearsing one), so no gate. See the two carve-outs above. */
@@ -233,8 +240,29 @@ export function executorReadiness(floorNo, { now = Date.now(), windowMs = null }
   if (health?.entriesPaused === true) return no("bot_entries_paused");
   if (health?.blockingIntent === true) return no("bot_blocking_intent");
   if (health?.feedRollback === true) return no("bot_feed_rollback");
-  if (health?.executionReadiness?.ready !== true) return no("bot_not_ready");
-  return { ...state, ready: true, reason: null };
+  /* A REHEARSAL THAT PROVED MINUTES AGO IS A BOT THAT CAN TRADE.
+   *
+   * The rehearsal is a no-sign simulation of the bot's full-size buy on whatever route
+   * Jupiter returns, refused whenever the route spends lamports the quote did not
+   * declare. That refusal is correct for SIGNING and route-dependent by nature: on
+   * 2026-09-12 the same bot, same wallet, same size, was refused at 21:05 on a 281,721
+   * CU route and proved at 21:07 on a 195,975 CU one. Reading only the LATEST result
+   * here meant that every two minutes the gate flipped, and while it was shut every
+   * call was withheld — silently, with the price walking out of its zone meanwhile —
+   * for a bot that had proved itself two probes earlier and would again two later.
+   *
+   * So a proof inside READINESS_PROOF_GRACE_MS still counts. It answers the gate's
+   * actual question — can this bot execute — with the last time it demonstrably could,
+   * and the bot re-asks it every two minutes, so a bot that has genuinely lost the
+   * ability (a drained wallet, a dead provider) still ages out of grace in a handful of
+   * probes. Nothing about signing is loosened: the bot runs the same guard on the real
+   * order and refuses it there; this decides only whether the call is HANDED OVER. */
+  const rehearsal = health?.executionReadiness ?? null;
+  const provedAt = Number(rehearsal?.lastSuccessAt) > 0 ? Number(rehearsal.lastSuccessAt) : 0;
+  const recentlyProved = provedAt > 0 && now - provedAt >= 0 && now - provedAt <= READINESS_PROOF_GRACE_MS;
+  if (rehearsal?.ready !== true && !recentlyProved) return no("bot_not_ready");
+  return { ...state, ready: true, reason: null, rehearsalProvedAt: provedAt || null,
+    rehearsalFlapping: rehearsal?.ready !== true };
 }
 
 /** The newest observation on the call, exactly as the feed COALESCEs it (office.js). */
@@ -363,11 +391,14 @@ async function witnessOnHold(call, deps = null) {
  * rejection. The DexScreener witness read therefore lives on announceEntry's hold path
  * only — the poll that runs this is already the bot's, seconds apart.
  */
-export function reconcileMissingEntryAlerts(floorNo, { withinMs = 6 * 3600e3, limit = 20, now = Date.now() } = {}) {
-  let rows;
+/* THE ROW SHAPE A HELD CALL HAS: offered to this floor, live, and with no entry alert
+ * yet. The repair sweep below and heldEntriesFor() must look at exactly the same set —
+ * a report that disagreed with the sweep about what is being withheld would be worse
+ * than no report, so they share one query rather than two that drift apart. */
+function unraisedOfferedEntries(floorNo, { withinMs, limit, now }) {
   try {
-    rows = db.prepare(`
-      SELECT d.call_id, d.size_sol, c.*
+    return db.prepare(`
+      SELECT d.call_id, d.size_sol, d.delivered_at, c.*
         FROM deliveries d
         JOIN calls c ON c.id = d.call_id
         LEFT JOIN alerts a
@@ -376,7 +407,68 @@ export function reconcileMissingEntryAlerts(floorNo, { withinMs = 6 * 3600e3, li
          AND c.status = 'live' AND d.delivered_at > ?
        ORDER BY d.delivered_at DESC LIMIT ?`)
       .all(floorNo, now - withinMs, Math.max(1, Math.min(100, limit)));
-  } catch { return 0; }
+  } catch { return null; }
+}
+
+/**
+ * WHAT THIS FLOOR IS NOT BEING TOLD, AND WHY — the read the 2026-09-12 outage needed.
+ *
+ * A live macOS install comes up entry-paused on purpose, and the operator's had been
+ * paused since its release adoption on 09-11. Four calls were published to floor 50 that
+ * afternoon. Every one was offered, every one was held by entryGate for
+ * `bot_entries_paused`, and NOTHING anywhere said so for a day and a half:
+ *
+ *   - the desk holds silently by design (see the sweep below: announcing each wait would
+ *     be a bus event every five seconds), so only the first hold emitted an event, which
+ *     scrolled off the page's event strip the minute it appeared;
+ *   - the bot logs its pause only when an entry ARRIVES, and none ever did, because the
+ *     hold is what stops it arriving. The one message that would name the cause is
+ *     unreachable precisely when the cause is present;
+ *   - the floor's board said "your bot is not in this one", which reads as the bot having
+ *     passed on the call rather than never having been handed it;
+ *   - and the feed the bot polls carried no trace at all: `latest_id` simply sat where it
+ *     was, which is indistinguishable from a desk that has published nothing.
+ *
+ * Four silences, one state. So the state gets published: read-only, derived from the same
+ * durable rows and the same gate, and served everywhere the question is asked — the feed
+ * (curl-able with the floor's own secret), the floor's board, and the owner's heartbeat.
+ * A held call must never again be reachable only by reading this file.
+ *
+ * Read-only, DELIBERATELY: no raise, no stamp, no emit. The sweep owns every transition;
+ * this only reports. A floor with no live bot returns [] rather than a list of holds,
+ * because entryGate raises for such a floor instead of holding — nothing is withheld.
+ */
+export function heldEntriesFor(floorNo, { withinMs = 6 * 3600e3, limit = 20, now = Date.now() } = {}) {
+  const rows = unraisedOfferedEntries(floorNo, { withinMs, limit, now });
+  if (!rows?.length) return [];
+  const out = [];
+  for (const r of rows) {
+    let hold = null;
+    // A report must not be able to fail a poll: office.js serves this inside the feed.
+    try { ({ hold } = entryGate(r, floorNo, { now })); } catch { hold = null; }
+    if (!hold) continue;
+    out.push({
+      call_id: r.call_id,
+      mint: r.mint ?? null,
+      symbol: r.symbol || (r.mint ? String(r.mint).slice(0, 6) : null),
+      reason: hold.reason,
+      detail: hold.message ?? null,
+      /* Terminal: the band's window has closed and no amount of fixing the bot brings
+         this one back. The operator needs that distinction to know whether to hurry. */
+      not_executable: hold.notExecutable === true,
+      window_ms: hold.windowMs ?? null,
+      bot_age_ms: hold.ageMs ?? null,
+      heartbeat_seen_at: hold.heartbeatSeenAt ?? null,
+      delivered_at: r.delivered_at ?? null,
+      held_for_ms: r.delivered_at ? Math.max(0, now - r.delivered_at) : null,
+    });
+  }
+  return out;
+}
+
+export function reconcileMissingEntryAlerts(floorNo, { withinMs = 6 * 3600e3, limit = 20, now = Date.now() } = {}) {
+  const rows = unraisedOfferedEntries(floorNo, { withinMs, limit, now });
+  if (!rows) return 0;
 
   let repaired = 0;
   for (const r of rows) {

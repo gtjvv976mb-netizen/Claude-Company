@@ -7197,6 +7197,34 @@ window.__showChatter = (() => { try { return localStorage.getItem("cc_detailed")
     t = t.replace(/\b[a-z]+(?:_[a-z]+)+\b/g, (w) => REASON[w] ?? w.replace(/_/g, " "));
     return t.replace(/\s+/g, " ").trim().slice(0, 160);
   };
+  /* WHY THE DESK IS HOLDING A CALL BACK FROM THIS FLOOR'S BOT, as an instruction rather
+     than a code. Each one names the thing the reader can go and change: on 2026-09-12 an
+     operator spent a day and a half on four calls their bot never received, because every
+     surface said "not in this one" and none said "paused, and here is the file". The first
+     six are the bot's own state and are fixable in seconds; the rest are the call's own
+     geometry, which the reader cannot fix and should not try to. */
+  const HELD = {
+    bot_entries_paused: "your bot has buying paused — delete its PAUSE_ENTRIES file to let it buy again",
+    bot_hard_stop: "your bot's hard stop is on — delete its HARD_STOP file to let it trade again",
+    bot_blocking_intent: "your bot has an unfinished order to resolve first",
+    bot_feed_rollback: "your bot froze buying after the desk's feed went backwards",
+    bot_not_ready: "your bot's trade rehearsal has not passed in the last 15 minutes — check its READINESS log lines",
+    heartbeat_stale: "your bot has not checked in recently enough to be handed this",
+    mint_already_held: "your bot already holds this coin",
+    window_expired: "the entry window closed before your bot was ready",
+    mark_stale: "the price is too old to enter on",
+    mark_outside_zone: "the price has moved outside the entry zone",
+    mark_breached_stop: "the price has already broken the stop",
+    mark_at_target: "the price is already at the target",
+    invalid_zone: "the entry zone is unusable",
+    no_stop: "the call has no stop price",
+    no_entry_ref: "the call has no entry price",
+    stop_at_or_above_entry: "the stop is at or above the entry",
+    invalid_target: "the target is unusable",
+    target_inside_cost: "costs would eat the move",
+    reference_refused: "the entry reference was refused",
+  };
+  const held = (code) => HELD[String(code ?? "").toLowerCase()] ?? fallback(code);
   const CLOSE = { target_hit: "target hit", stop_hit: "stop hit", stopped: "stop hit", time_stop: "time ran out",
     timed_out: "time ran out", expired: "time ran out", manual: "closed by the desk", desk_exit: "closed by the desk",
     invalidated: "reason broke", cannot_exit: "could not be sold", closed: "closed",
@@ -7322,7 +7350,7 @@ window.__showChatter = (() => { try { return localStorage.getItem("cc_detailed")
   };
   /* A call's life events — published, marked, target hit — as words, never snake_case. */
   const kind = (code) => { const k = String(code ?? "").toLowerCase(); return CLOSE[k] ?? REASON[k] ?? k.replace(/_/g, " "); };
-  window.PLAIN = Object.freeze({ role, reason, decision, closeReason, kind, plainDetail, event, chip, fallback, plainAge, deskState, botState, eventTypes: Object.keys(EVENT) });
+  window.PLAIN = Object.freeze({ role, reason, decision, closeReason, kind, held, plainDetail, event, chip, fallback, plainAge, deskState, botState, eventTypes: Object.keys(EVENT) });
 })();
 /* PLAIN:END */
 
@@ -9880,6 +9908,18 @@ function paintFeedInto(wrap, feed, settings) {
         ? " \u00b7 " + window.PLAIN.plainDetail(c.bot_exit_reason) : "";
       line.textContent = `Your bot sold \u00b7 ${Number.isFinite(realized) ? signedSol(realized) : "? SOL"} \u00b7 ${exitWords}${exitWhy}`;
       if (Number.isFinite(realized) && realized !== 0) line.style.color = realized > 0 ? "var(--good,#4f8f52)" : "var(--bad,#b5473b)";
+    } else if (c.held_reason) {
+      /* THE DESK IS WITHHOLDING THIS ONE, AND SAYS SO HERE. Before this branch the card
+         fell through to "your bot is not in this one" \u2014 true, and the reason four calls
+         went unbought for a day and a half on 2026-09-12 while the operator read it as
+         their bot having declined them. The gate's verdict outranks every sentence below
+         because it is the only one that names something the reader can change. */
+      const why = window.PLAIN.held(c.held_reason);
+      const waited = Number(c.held_for_ms) > 0 ? " \u00b7 waiting " + window.PLAIN.plainAge(c.held_for_ms) : "";
+      line.textContent = c.held_not_executable
+        ? `The desk could not hand this to your bot \u00b7 ${why}`
+        : `The desk is holding this call for your bot \u00b7 ${why}${waited}`;
+      line.style.color = c.held_not_executable ? "var(--bad,#b5473b)" : "var(--warn,#e0ad3d)";
     } else if (!bs?.exists) {
       line.textContent = FLOOR_N == null ? "The desk's own call." : "The desk's own call \u00b7 your bot is not set up, so it is not in this trade";
     } else if (!bs.running) {
