@@ -21,7 +21,7 @@ import { cfg } from "./config.js";
 import { CYCLE, MAX_ESCALATION_LEVEL, escalationPlan } from "./config.js";
 import * as store from "./lib/store.js";
 import db from "./lib/store.js";
-import { reconcileMissingEntryAlerts, reconcileMissingExitAlerts } from "./alerts.js";
+import { reconcileMissingEntryAlerts, reconcileMissingExitAlerts, heldEntriesFor } from "./alerts.js";
 import crypto from "node:crypto";
 function cryptoTimingEqual(a, b) {
   const ab = Buffer.from(String(a)), bb = Buffer.from(String(b));
@@ -134,6 +134,13 @@ export function executorFeedPayload(floorNo, rawAfter = 0) {
   return { cluster: "mainnet-beta", latest_id: latestId,
     next_cursor: rows.length ? rows[rows.length - 1].id : after,
     decisions,
+    /* WHAT THIS POLL IS NOT BEING GIVEN, AND WHY. `decisions` says the desk offered the
+       call; `events` is what the bot may act on. Between them sat an unlit gap: an entry
+       the readiness gate withheld appears in the first and never in the second, so a
+       bot that is paused, stale or unready polls a feed whose latest_id never moves and
+       has no way to learn that four calls are waiting on it (2026-09-12, floor 50, a day
+       and a half). This is that gap, named. Empty is the normal case. */
+    held: heldEntriesFor(floorNo),
     rules: { take_profit_x: floorSettings.take_profit_x ?? 0,
              fixed_sol: floorSettings.fixed_sol ?? 0,
              /* The bot's size comes from the bot's own FIXED_SOL / MAX_SOL_PER_TRADE,
@@ -573,6 +580,32 @@ export function withEscalation(rows) {
     return rows.map((r) => {
       const s = stamp.get(Number(r.call_id));
       return { ...r, cycle_id: s?.cycle_id ?? null, escalation_level: s?.escalation_level ?? null };
+    });
+  } catch { return rows; }
+}
+
+/**
+ * "YOUR BOT IS NOT IN THIS ONE" WAS TRUE AND USELESS.
+ *
+ * That is what the board said under each of the four calls floor 50 was offered on
+ * 2026-09-12, and it reads as a bot that saw the call and passed. The bot had seen
+ * nothing: its entries were paused, so the readiness gate withheld every alert and the
+ * one channel it can hear stayed empty. A board that cannot tell "declined it" from
+ * "was never handed it" turns a two-second fix into a day and a half.
+ *
+ * So the hold rides on the row that renders the sentence. Same shape as withEscalation
+ * above and for the same reason: keyed by call id, read-only, and wrapped, because a
+ * board must never fail because an explanation did.
+ */
+export function withHold(rows, floorNo) {
+  if (!Array.isArray(rows) || !rows.length) return rows;
+  try {
+    const held = new Map(heldEntriesFor(floorNo).map((h) => [Number(h.call_id), h]));
+    if (!held.size) return rows;
+    return rows.map((r) => {
+      const h = held.get(Number(r.call_id));
+      return h ? { ...r, held_reason: h.reason, held_detail: h.detail,
+        held_not_executable: h.not_executable, held_for_ms: h.held_for_ms } : r;
     });
   } catch { return rows; }
 }
@@ -1601,6 +1634,16 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
                 .map((r) => ({ symbol: r.symbol, verdict: r.verdict, reason: r.reason,
                   sizeSol: r.size_sol, minutesAgo: Math.round((now - r.delivered_at) / 60000) }));
             } catch (e) { return [{ error: String(e.message) }]; } })(),
+            /* WHICH OF THOSE 'offered' ROWS THE HOUSE BOT WAS NEVER ACTUALLY HANDED.
+               houseDeliveries above says what the desk decided; this says what the
+               readiness gate then withheld, which is a different question and was the
+               unanswerable one on 2026-09-12 — four rows reading 'offered' beside a bot
+               that had been entry-paused since its release adoption, and nothing on any
+               surface joining the two facts. Owner-only, like the deliveries it explains:
+               a floor's own hold is on its own feed. Empty is the healthy case. */
+            heldEntries: !hqViewer ? [] : (() => { try {
+              return heldEntriesFor(tower.HQ_FLOOR, { now });
+            } catch (e) { return [{ error: String(e.message) }]; } })(),
             /* `sizingProbe` (copy.probeSizingMismatch) WAS HERE and is deleted with the
                ceiling it reported. It listed which floors had configured a per-trade
                size larger than the desk's exit probe measured — a mismatch that only
@@ -2158,8 +2201,10 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             const st = copy.settingsFor(floorNo);
             const settings = floorFeedSettingsForViewer(st, { isOwner });
             /* withEscalation puts the cohort stamp back on each row. The card shows the
-               level it was published at, so an L3 call cannot look like an L0 one. */
-            return json(200, { feed: withEscalation(copy.feedFor(floorNo, queryLimit(url, 25, 200))), settings,
+               level it was published at, so an L3 call cannot look like an L0 one.
+               withHold puts the readiness gate's verdict back, so a call the bot was
+               never handed cannot render as a call the bot looked at and skipped. */
+            return json(200, { feed: withHold(withEscalation(copy.feedFor(floorNo, queryLimit(url, 25, 200))), floorNo), settings,
                                appetites: copy.APPETITES, rent: leasing.rentStatus(floorNo),
                                /* WHO SIZES THE TRADE, ON THE SCREEN RATHER THAN IN A FILE.
                                   The owner must be able to SEE that size is the bot's and

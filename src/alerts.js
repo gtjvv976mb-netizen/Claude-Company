@@ -363,11 +363,14 @@ async function witnessOnHold(call, deps = null) {
  * rejection. The DexScreener witness read therefore lives on announceEntry's hold path
  * only — the poll that runs this is already the bot's, seconds apart.
  */
-export function reconcileMissingEntryAlerts(floorNo, { withinMs = 6 * 3600e3, limit = 20, now = Date.now() } = {}) {
-  let rows;
+/* THE ROW SHAPE A HELD CALL HAS: offered to this floor, live, and with no entry alert
+ * yet. The repair sweep below and heldEntriesFor() must look at exactly the same set —
+ * a report that disagreed with the sweep about what is being withheld would be worse
+ * than no report, so they share one query rather than two that drift apart. */
+function unraisedOfferedEntries(floorNo, { withinMs, limit, now }) {
   try {
-    rows = db.prepare(`
-      SELECT d.call_id, d.size_sol, c.*
+    return db.prepare(`
+      SELECT d.call_id, d.size_sol, d.delivered_at, c.*
         FROM deliveries d
         JOIN calls c ON c.id = d.call_id
         LEFT JOIN alerts a
@@ -376,7 +379,68 @@ export function reconcileMissingEntryAlerts(floorNo, { withinMs = 6 * 3600e3, li
          AND c.status = 'live' AND d.delivered_at > ?
        ORDER BY d.delivered_at DESC LIMIT ?`)
       .all(floorNo, now - withinMs, Math.max(1, Math.min(100, limit)));
-  } catch { return 0; }
+  } catch { return null; }
+}
+
+/**
+ * WHAT THIS FLOOR IS NOT BEING TOLD, AND WHY — the read the 2026-09-12 outage needed.
+ *
+ * A live macOS install comes up entry-paused on purpose, and the operator's had been
+ * paused since its release adoption on 09-11. Four calls were published to floor 50 that
+ * afternoon. Every one was offered, every one was held by entryGate for
+ * `bot_entries_paused`, and NOTHING anywhere said so for a day and a half:
+ *
+ *   - the desk holds silently by design (see the sweep below: announcing each wait would
+ *     be a bus event every five seconds), so only the first hold emitted an event, which
+ *     scrolled off the page's event strip the minute it appeared;
+ *   - the bot logs its pause only when an entry ARRIVES, and none ever did, because the
+ *     hold is what stops it arriving. The one message that would name the cause is
+ *     unreachable precisely when the cause is present;
+ *   - the floor's board said "your bot is not in this one", which reads as the bot having
+ *     passed on the call rather than never having been handed it;
+ *   - and the feed the bot polls carried no trace at all: `latest_id` simply sat where it
+ *     was, which is indistinguishable from a desk that has published nothing.
+ *
+ * Four silences, one state. So the state gets published: read-only, derived from the same
+ * durable rows and the same gate, and served everywhere the question is asked — the feed
+ * (curl-able with the floor's own secret), the floor's board, and the owner's heartbeat.
+ * A held call must never again be reachable only by reading this file.
+ *
+ * Read-only, DELIBERATELY: no raise, no stamp, no emit. The sweep owns every transition;
+ * this only reports. A floor with no live bot returns [] rather than a list of holds,
+ * because entryGate raises for such a floor instead of holding — nothing is withheld.
+ */
+export function heldEntriesFor(floorNo, { withinMs = 6 * 3600e3, limit = 20, now = Date.now() } = {}) {
+  const rows = unraisedOfferedEntries(floorNo, { withinMs, limit, now });
+  if (!rows?.length) return [];
+  const out = [];
+  for (const r of rows) {
+    let hold = null;
+    // A report must not be able to fail a poll: office.js serves this inside the feed.
+    try { ({ hold } = entryGate(r, floorNo, { now })); } catch { hold = null; }
+    if (!hold) continue;
+    out.push({
+      call_id: r.call_id,
+      mint: r.mint ?? null,
+      symbol: r.symbol || (r.mint ? String(r.mint).slice(0, 6) : null),
+      reason: hold.reason,
+      detail: hold.message ?? null,
+      /* Terminal: the band's window has closed and no amount of fixing the bot brings
+         this one back. The operator needs that distinction to know whether to hurry. */
+      not_executable: hold.notExecutable === true,
+      window_ms: hold.windowMs ?? null,
+      bot_age_ms: hold.ageMs ?? null,
+      heartbeat_seen_at: hold.heartbeatSeenAt ?? null,
+      delivered_at: r.delivered_at ?? null,
+      held_for_ms: r.delivered_at ? Math.max(0, now - r.delivered_at) : null,
+    });
+  }
+  return out;
+}
+
+export function reconcileMissingEntryAlerts(floorNo, { withinMs = 6 * 3600e3, limit = 20, now = Date.now() } = {}) {
+  const rows = unraisedOfferedEntries(floorNo, { withinMs, limit, now });
+  if (!rows) return 0;
 
   let repaired = 0;
   for (const r of rows) {
