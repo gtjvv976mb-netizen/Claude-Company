@@ -34,7 +34,8 @@ process.env.CLAUDE_CO_DB = process.env.CLAUDE_CO_DB ||
 import db from "./src/lib/store.js";
 import { openCall, closeCall, noteEvent, getCall } from "./src/calls.js";
 import { settingsFor } from "./src/copy.js";
-import { heldEntriesFor, reconcileMissingEntryAlerts, ENTRY_HOLD_REASONS } from "./src/alerts.js";
+import { heldEntriesFor, reconcileMissingEntryAlerts, ENTRY_HOLD_REASONS,
+  READINESS_PROOF_GRACE_MS } from "./src/alerts.js";
 import { executorFeedPayload, withHold } from "./src/office.js";
 import { ENTRY_GATES } from "./executor/entry-contract.mjs";
 
@@ -127,6 +128,40 @@ console.log("\n1. A PAUSED BOT'S HELD CALL IS NAMED, NOT INFERRED");
   ok("...so the feed now carries it as an event",
     executorFeedPayload(FLOOR, 0).events.some((e) => e.call_id === call.id));
   closeCall(call.id, "test_reset", 1);
+}
+
+console.log("\n4b. A REHEARSAL THAT FLAPS ON THE ROUTE DOES NOT SHUT THE GATE");
+{
+  /* 2026-09-12, 21:05 and 21:07 UTC: the same bot was refused on one Jupiter route and
+     proved on the next. The desk used to read only the latest result, so every refusal
+     withheld every call for two minutes — and in those minutes the price left the zone. */
+  const now = Date.now();
+  const twoMinutesAgo = now - 2 * 60_000;
+  setHeartbeat(FLOOR, { executionReadiness: { ...healthyHealth(now).executionReadiness,
+    ready: false, lastSuccessAt: twoMinutesAgo, providers: 0, lastError: "simulation SOL spend is outside the exact input" } }, { now });
+  const call = offeredCall({ deliveredAt: now });
+  ok("a refused latest probe with a proof two minutes old holds nothing",
+    heldEntriesFor(FLOOR, { now }).every((h) => h.call_id !== call.id));
+  ok("...and the sweep hands the call over", reconcileMissingEntryAlerts(FLOOR, { now }) === 1);
+  closeCall(call.id, "test_reset", 1);
+
+  /* The grace is a grace, not a waiver: a bot that has not proved in a quarter of an
+     hour is one that has actually stopped clearing the rehearsal, and it is held. */
+  setHeartbeat(FLOOR, { executionReadiness: { ...healthyHealth(now).executionReadiness,
+    ready: false, lastSuccessAt: now - (READINESS_PROOF_GRACE_MS + 1_000), providers: 0 } }, { now });
+  const stale = offeredCall({ deliveredAt: now });
+  const h = heldEntriesFor(FLOOR, { now }).find((x) => x.call_id === stale.id);
+  ok("a proof older than the grace is held as not ready", h?.reason === "bot_not_ready", h?.reason);
+  ok("...and the sweep withholds it", reconcileMissingEntryAlerts(FLOOR, { now }) === 0);
+  closeCall(stale.id, "test_reset", 1);
+
+  /* No proof ever is not a flap; it is a bot that has never cleared the rehearsal. */
+  setHeartbeat(FLOOR, { executionReadiness: { ...healthyHealth(now).executionReadiness,
+    ready: false, lastSuccessAt: 0, providers: 0 } }, { now });
+  const never = offeredCall({ deliveredAt: now });
+  ok("a bot that never proved is held", heldEntriesFor(FLOOR, { now }).some((x) => x.call_id === never.id && x.reason === "bot_not_ready"));
+  closeCall(never.id, "test_reset", 1);
+  setHeartbeat(FLOOR, {}, { now });
 }
 
 console.log("\n5. A FLOOR WITH NO LIVE BOT IS NOT 'HELD' — NOTHING IS BEING WITHHELD");

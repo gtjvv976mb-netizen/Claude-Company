@@ -198,6 +198,13 @@ export const ENTRY_HOLD_REASONS = Object.freeze([
   "mint_already_held",     // the bot is in this coin; the desk does not stack a second entry
 ]);
 
+/** How long a passed rehearsal keeps answering "can this bot execute?" after a later
+ *  probe is refused. The bot probes every two minutes, so this is about seven probes:
+ *  long enough that a route Jupiter happened to return cannot shut the gate on its
+ *  own, short enough that a wallet that has actually stopped clearing the rehearsal is
+ *  held within a quarter of an hour. Same ruler as MARK_MAX_AGE_MS, on purpose. */
+export const READINESS_PROOF_GRACE_MS = 15 * 60_000;
+
 /** The floor's last self-reported pulse, read as "can this bot take an entry?".
  *  `bot:false` means no LIVE pulse was ever posted — no bot to burn a window on (an
  *  absent floor or a rehearsing one), so no gate. See the two carve-outs above. */
@@ -233,8 +240,29 @@ export function executorReadiness(floorNo, { now = Date.now(), windowMs = null }
   if (health?.entriesPaused === true) return no("bot_entries_paused");
   if (health?.blockingIntent === true) return no("bot_blocking_intent");
   if (health?.feedRollback === true) return no("bot_feed_rollback");
-  if (health?.executionReadiness?.ready !== true) return no("bot_not_ready");
-  return { ...state, ready: true, reason: null };
+  /* A REHEARSAL THAT PROVED MINUTES AGO IS A BOT THAT CAN TRADE.
+   *
+   * The rehearsal is a no-sign simulation of the bot's full-size buy on whatever route
+   * Jupiter returns, refused whenever the route spends lamports the quote did not
+   * declare. That refusal is correct for SIGNING and route-dependent by nature: on
+   * 2026-09-12 the same bot, same wallet, same size, was refused at 21:05 on a 281,721
+   * CU route and proved at 21:07 on a 195,975 CU one. Reading only the LATEST result
+   * here meant that every two minutes the gate flipped, and while it was shut every
+   * call was withheld — silently, with the price walking out of its zone meanwhile —
+   * for a bot that had proved itself two probes earlier and would again two later.
+   *
+   * So a proof inside READINESS_PROOF_GRACE_MS still counts. It answers the gate's
+   * actual question — can this bot execute — with the last time it demonstrably could,
+   * and the bot re-asks it every two minutes, so a bot that has genuinely lost the
+   * ability (a drained wallet, a dead provider) still ages out of grace in a handful of
+   * probes. Nothing about signing is loosened: the bot runs the same guard on the real
+   * order and refuses it there; this decides only whether the call is HANDED OVER. */
+  const rehearsal = health?.executionReadiness ?? null;
+  const provedAt = Number(rehearsal?.lastSuccessAt) > 0 ? Number(rehearsal.lastSuccessAt) : 0;
+  const recentlyProved = provedAt > 0 && now - provedAt >= 0 && now - provedAt <= READINESS_PROOF_GRACE_MS;
+  if (rehearsal?.ready !== true && !recentlyProved) return no("bot_not_ready");
+  return { ...state, ready: true, reason: null, rehearsalProvedAt: provedAt || null,
+    rehearsalFlapping: rehearsal?.ready !== true };
 }
 
 /** The newest observation on the call, exactly as the feed COALESCEs it (office.js). */

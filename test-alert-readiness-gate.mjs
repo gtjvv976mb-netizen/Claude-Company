@@ -37,7 +37,7 @@ import { openCall, closeCall, liveCalls, noteEvent, getCall,
   beginCyclePass, recordCyclePublish, cycleStatus } from "./src/calls.js";
 import { settingsFor } from "./src/copy.js";
 import { announceEntry, reconcileMissingEntryAlerts, executorReadiness,
-  ENTRY_HOLD_REASONS } from "./src/alerts.js";
+  ENTRY_HOLD_REASONS, READINESS_PROOF_GRACE_MS } from "./src/alerts.js";
 import { CAP_BANDS } from "./src/bands.js";
 import { entryWindowMs } from "./executor/entry-contract.mjs";
 
@@ -133,8 +133,12 @@ console.log(`\nA BOT THAT CANNOT ACT IS NOT HANDED THE CLOCK (micro band, window
     bot_entries_paused:   { health: { ...healthyHealth(now), entriesPaused: true } },
     bot_blocking_intent:  { health: { ...healthyHealth(now), blockingIntent: true } },
     bot_feed_rollback:    { health: { ...healthyHealth(now), feedRollback: true } },
+    /* Not ready means no proof INSIDE THE GRACE, not merely a refused latest probe: a
+       rehearsal that passed two minutes ago still answers for the bot (the flap of
+       2026-09-12, tested in test-held-call-is-visible.mjs). Age the proof out here. */
     bot_not_ready:        { health: { ...healthyHealth(now),
-      executionReadiness: { ...healthyHealth(now).executionReadiness, ready: false } } },
+      executionReadiness: { ...healthyHealth(now).executionReadiness, ready: false,
+        lastSuccessAt: now - (READINESS_PROOF_GRACE_MS + 60_000) } } },
   };
   for (const [reason, hb] of Object.entries(unhealthy)) {
     const call = fixtureCall();
