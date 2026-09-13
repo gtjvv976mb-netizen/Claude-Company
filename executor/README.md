@@ -44,6 +44,11 @@ must sign with, then walks you through two private RPCs and a Jupiter key, and t
 makes you retype the new wallet's own public key before it will arm — see
 [Explicit live installation](#explicit-live-installation).
 
+**A small Linux server you own is the 24/7 option.** The same command on a VPS installs
+a systemd unit that restarts the bot on its own and never sleeps, and the key is
+generated on that server and stays there — you hold it, not the desk. A laptop works
+too, as long as it stays awake and on power.
+
 **Arming is not funding, and funding is the switch.** The burner it generates starts
 empty, and an empty wallet cannot trade. Nothing happens until you send SOL to the
 printed address from a wallet of your own, which is a step this installer has no part
@@ -558,6 +563,11 @@ The installer records explicit paths in the protected environment file:
 
 - If the file named by `PAUSE_ENTRIES_FILE` exists, WALL-ST-E refuses new buys but
   continues monitoring, closing recorded positions, and reconciling pending attempts.
+  **Every install and upgrade creates it**, so a new release comes up not buying until
+  you lift it: `rm -f ~/claudeco-executor/PAUSE_ENTRIES`, or pass `--resume-entries`
+  to the installer and it lifts the pause itself the moment the new release is the
+  running one (never before, so a failed activation still comes up paused). The floor's
+  "New buys" chip reads OFF while the file exists.
 - If the file named by `HARD_STOP_FILE` exists, WALL-ST-E creates no new submissions,
   including automated exits. It still reconciles transactions that were already
   signed or submitted. Existing positions require operator supervision or manual
