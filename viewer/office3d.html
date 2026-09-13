@@ -4327,6 +4327,35 @@ pollBossBoard();
 setInterval(pollBossBoard, 60000);
 window.pollBossBoard = pollBossBoard;
 
+/* A TAB LEFT OPEN RUNS THE CODE IT LOADED, HOWEVER OFTEN IT POLLS. The board fetched
+   fresh numbers every minute all day and drew them with the morning's logic, and the
+   owner read a wall that "never updated" while the site had shipped three times behind
+   it (2026-09-13). So the page asks the site once a minute for build.json — the stamp
+   the build wrote beside the pages — and when it differs from this page's own cc-build
+   meta, the page reloads itself. Guarded once per stamp in sessionStorage, so a CDN
+   still serving the old page cannot make a tab reload forever; a local dev server has
+   no build.json and no stamp, and the check is quiet there. */
+(() => {
+  const mine = document.querySelector('meta[name="cc-build"]')?.content || null;
+  if (!mine) return;
+  const check = async () => {
+    try {
+      const r = await fetch("build.json", { cache: "no-store" });
+      if (!r.ok) return;
+      const theirs = String((await r.json())?.build || "");
+      if (!theirs || theirs === mine) return;
+      let done = null;
+      try { done = sessionStorage.getItem("cc_reloaded_for"); } catch {}
+      if (done === theirs) return;
+      try { sessionStorage.setItem("cc_reloaded_for", theirs); } catch {}
+      console.log("Claude Company build " + theirs + " is live; reloading from " + mine);
+      location.reload();
+    } catch {}
+  };
+  setTimeout(check, 15000);
+  setInterval(check, 60000);
+})();
+
 /* ── the worker ───────────────────────────────────────────────────────────── */
 const SPEED = 2.9;                     // world units per second
 const clock = new THREE.Clock();

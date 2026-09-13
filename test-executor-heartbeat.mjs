@@ -243,6 +243,16 @@ assert.match(route, /closed: sanitizeExecutorClosed\(body\.closed\)/, "closes pe
   assert.match(viewer, /const __anyBotPulse = \(\) => window\.__botHeartbeat \|\| window\.__houseBot \|\| null;/, "the cards' close and held lookups fall back to it");
   assert.match(viewer, /heartbeat\?\.ledger \|\| window\.__houseBot\?\.ledger \|\| null/, "the Overview's P&L tile falls back to it");
   assert.match(viewer, /renderBotBook\(el, exec\.telemetry\?\.heartbeat \|\| heartbeat \|\| window\.__houseBot, feed/, "the Overview's book falls back to it");
+  /* And a tab left open cannot keep drawing with yesterday's logic: the build writes
+     its stamp to build.json and the page reloads itself when the stamp moves. */
+  const build = fs.readFileSync(new URL("./scripts/build-viewer.mjs", import.meta.url), "utf8");
+  assert.match(build, /fs\.writeFileSync\(path\.join\(OUT, "build\.json"\), JSON\.stringify\(\{ build: BUILD_STAMP, commit: EXECUTOR_COMMIT \}\)/,
+    "the build publishes its stamp beside the pages");
+  assert.match(build, /const stamp = BUILD_STAMP;/, "every page carries the same stamp build.json does");
+  assert.match(viewer, /fetch\("build\.json", \{ cache: "no-store" \}\)/, "the page asks for the live build stamp, bypassing caches");
+  assert.match(viewer, /if \(!theirs \|\| theirs === mine\) return;/, "…and does nothing while the stamps agree");
+  assert.match(viewer, /sessionStorage\.setItem\("cc_reloaded_for", theirs\)/, "…reloads once per stamp, never in a loop");
+  assert.match(viewer, /location\.reload\(\);/, "…and reloads itself when a newer build is live");
 }
 
 console.log("\nexecutor heartbeat readback is authenticated, read-only and secret-safe\n");
