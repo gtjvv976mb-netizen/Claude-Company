@@ -1912,6 +1912,64 @@ let ticking = false;
  * secret and opens no control channel — the server learns the bot's pulse, not its
  * reins. Throttled to once a minute. */
 let lastHeartbeatAt = 0;
+/* A SILENT FAILURE IS AN OFFLINE BADGE. The pulse used to be `.catch(() => {})` with no
+   look at the status either, so a desk that answered 500, slept, or was unreachable
+   left no trace here — while the floor board, which reads only what the desk heard,
+   said OFFLINE about a bot that was buying. The send stays fire-and-forget (nothing in
+   the trade path awaits it); what changes is that a run of misses is logged, throttled,
+   naming the reason and what the board will show because of it. */
+let heartbeatMisses = 0;
+let lastHeartbeatMissLogAt = 0;
+let lastHeartbeatAckAt = 0;
+const HEARTBEAT_MISS_LOG_MS = 5 * 60_000;
+const heartbeatCloses = () => {
+  try {
+    const rows = [];
+    for (const intent of journal.accountedIntentsWithCallId({ sinceMs: Date.now() - FILL_REPORT_WINDOW_MS })) {
+      if (!EXIT_INTENT_KINDS.includes(intent.kind)) continue;
+      const body = fillReportBody(intent);
+      if (!body || body.side !== "sell") continue;
+      const before = intent.context?.position || {};
+      rows.push({
+        mint: intent.mint, symbol: String(before.symbol || "").slice(0, 24), callId: body.callId,
+        closedAt: body.at, openedAt: Number(before.openedAtMs) || null,
+        solIn: Number((Number(before.costBasisLamports || 0) / LAMPORTS).toFixed(6)),
+        solOut: Number(body.sol.toFixed(6)), realizedSol: Number(body.realizedSol.toFixed(6)),
+        fraction: body.fraction, reason: String(body.reason || "").slice(0, 120), kind: body.kind,
+        reported: journal.getMeta(fillReportedKey(intent.id)) != null,
+      });
+    }
+    return rows.sort((a, b) => b.closedAt - a.closedAt).slice(0, 20);
+  } catch (error) {
+    log(`heartbeat closes unavailable — ${error?.message ?? error}`);
+    return [];
+  }
+};
+const heartbeatLedger = () => {
+  try {
+    const all = journal.lifetimeRisk();
+    const day = journal.rollingRisk(Date.now());
+    return {
+      realizedSol: all.realizedSol, deployedSol: all.deployedSol, feesSol: all.feesSol,
+      deployments: all.deployments, exits: all.exits, firstAt: all.firstAt, lastAt: all.lastAt,
+      realized24hSol: day.realizedTodaySol, deployed24hSol: day.deployedTodaySol,
+      openSol: openList().reduce((sum, p) => sum + Number(p.entryInputLamports || 0) / LAMPORTS, 0),
+      asOf: Date.now(),
+    };
+  } catch (error) {
+    log(`heartbeat ledger unavailable — ${error?.message ?? error}`);
+    return null;
+  }
+};
+const noteHeartbeatMiss = (reason) => {
+  heartbeatMisses++;
+  const now = Date.now();
+  if (now - lastHeartbeatMissLogAt < HEARTBEAT_MISS_LOG_MS) return;
+  lastHeartbeatMissLogAt = now;
+  const since = lastHeartbeatAckAt ? `${Math.round((now - lastHeartbeatAckAt) / 60_000)}m since the desk last acknowledged one` : "no pulse has been acknowledged since boot";
+  log(`heartbeat to the desk failed (${reason}) — ${heartbeatMisses} miss(es), ${since}; ` +
+    "the floor board shows this bot OFFLINE until a pulse lands. Trading is unaffected.");
+};
 const runtimeHealth = {
   lastTickStartedAt: 0, lastTickCompletedAt: 0, lastFeedSuccessAt: 0,
   consecutiveFeedFailures: 0, consecutiveTickFailures: 0,
@@ -2259,11 +2317,45 @@ function sendHeartbeat() {
         mint: p.mint,
         sol: Number((Number(p.entryInputLamports || 0) / LAMPORTS).toFixed(4)),
         openedAt: Number(p.openedAtMs) || 0,
+        /* THE REST OF THE POSITION, so the board can show it as a position and not as a
+           mint. The owner asked (2026-09-13) for every open position, its levels and its
+           result on the floor. Levels are the bot's own, as multiples of its fill (entry
+           is 1); the desk's absolute levels ride beside them so the board can put the
+           desk's current mark against the price the bot actually paid. No live mark is
+           carried because the bot stores none — it reads one fresh each tick. */
+        symbol: String(p.symbol || "").slice(0, 24),
+        callId: Number.isSafeInteger(Number(p.callId)) && Number(p.callId) > 0 ? Number(p.callId) : null,
+        costSol: Number((Number(p.costBasisLamports || 0) / LAMPORTS).toFixed(6)),
+        stop: Number(p.stop) > 0 ? Number(p.stop) : null,
+        target: Number(p.target) > 0 ? Number(p.target) : null,
+        high: Number(p.high) > 0 ? Number(p.high) : null,
+        holdMaxMs: Number(p.holdMaxMs) > 0 ? Number(p.holdMaxMs) : null,
+        deskEntryRef: Number(p.deskEntryRef) > 0 ? Number(p.deskEntryRef) : null,
+        deskStop: Number(p.deskStop) > 0 ? Number(p.deskStop) : null,
+        deskTarget: Number(p.deskTarget) > 0 ? Number(p.deskTarget) : null,
       })),
+      /* THE LAST TWENTY CLOSES, from the journal's accounted exits — the same rows the fill
+         reports are built from, so a close the desk refused to record still shows on the
+         board as what it was. */
+      closed: heartbeatCloses(),
       health,
+      /* THE BOT'S OWN BOOKS, so the board can answer "have I lost or gained SOL" from the
+         journal rather than from the desk's paper record (which is a chain scan of the
+         floor OWNER's wallet — never the burner — and so never saw a bot trade). Totals
+         only: no per-trade prices, nothing the desk can act on. */
+      ledger: heartbeatLedger(),
+      reporting: {
+        fillsOwed: unreportedFillDetails.size,
+        lastReportedAt: fillReporting.lastReportedAt || null,
+        lastError: fillReporting.lastError,
+        lastErrorAt: fillReporting.lastErrorAt || null,
+      },
       ts: Date.now(),
     }),
-  }).catch(() => {});
+  }).then((r) => {
+    if (r.ok) { heartbeatMisses = 0; lastHeartbeatAckAt = Date.now(); return; }
+    noteHeartbeatMiss(`HTTP ${r.status}`);
+  }).catch((error) => noteHeartbeatMiss(error?.name === "TimeoutError" ? "timed out after 5s" : String(error?.message ?? error)));
 }
 
 /* TELLING THE DESK WHAT THE TRADE WAS — every fill AND every exit, with real numbers.
@@ -2284,6 +2376,11 @@ function sendHeartbeat() {
  * the last seven days and re-queues those without the key. */
 const unreportedFillDetails = new Set();
 let reportingFillDetails = false;
+/* What the board is told about this queue. A fill report that keeps failing used to be
+   a log line on the Mac and nothing anywhere else — the board simply never showed the
+   trade, and read as "not updating". The heartbeat now carries how many reports are
+   owed and the last refusal, so the board can say WHY a trade is missing from it. */
+const fillReporting = { lastReportedAt: 0, lastError: null, lastErrorAt: 0 };
 const FILL_REPORT_WINDOW_MS = 7 * 24 * 3600e3;
 const fillReportedKey = (intentId) => `fill_reported:${intentId}`;
 
@@ -2366,12 +2463,14 @@ async function flushFillReports() {
       try {
         const result = await reportFillDetail(intentId);
         unreportedFillDetails.delete(intentId);
+        fillReporting.lastReportedAt = Date.now(); fillReporting.lastError = null;
         if (result.unreportable)
           log(`fill detail ${intentId} has no attributable call id or fill totals — not reported`);
         else
           log(`reported ${result.body.side} fill of call ${result.body.callId} (${intentId}) to the desk`);
       } catch (error) {
         // Left in the queue on purpose; the next tick tries again.
+        fillReporting.lastError = String(error?.message ?? error).slice(0, 200); fillReporting.lastErrorAt = Date.now();
         log(`could not report fill detail ${intentId} (${error.message}) — will retry`);
       }
     }

@@ -86,6 +86,14 @@ j.markAccounted(spec.id, runtime);
    millisecond apart are not "different risk", and the CI runner lost exactly that race
    (…895 vs …894, 2026-09-05) and blocked a deploy. Compare the risk, bound the clock. */
 const sansClock = (r) => { const { riskWindowAsOf, ...rest } = r; return rest; };
+ok("the lifetime ledger sums every deployment, with the fee, and starts with nothing realized", () => {
+  const life = j.lifetimeRisk();
+  assert.equal(life.deployments, 1);
+  assert.equal(life.exits, 0);
+  assert.ok(Math.abs(life.deployedSol - accountedRisk.deployedTodaySol) < 1e-12, `${life.deployedSol} vs ${accountedRisk.deployedTodaySol}`);
+  assert.ok(Math.abs(life.realizedSol - accountedRisk.realizedTodaySol) < 1e-12);
+  assert.ok(life.firstAt > 0 && life.lastAt >= life.firstAt);
+});
 ok("accounting replay is idempotent and cannot duplicate risk events", () => {
   const again = j.rollingRisk();
   assert.deepEqual(sansClock(again), sansClock(accountedRisk));

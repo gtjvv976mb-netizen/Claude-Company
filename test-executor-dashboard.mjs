@@ -94,12 +94,19 @@ const dashboard = buildExecutorDashboard({
   nowMs: now,
   heartbeat: {
     mode: "live", wallet, cursor: 12, open: 1,
-    held: [{ mint, sol: 0.005 }, { mint: "not-an-address", sol: 999 }],
+    held: [{ mint, sol: 0.005, symbol: "TEST", callId: 7, costSol: 0.00505, stop: 0.6, target: 2, high: 1.1,
+      holdMaxMs: 3_600_000, deskEntryRef: 0.01, deskStop: 0.006, deskTarget: 0.02 }, { mint: "not-an-address", sol: 999 }],
+    closed: [{ mint, symbol: "TEST", callId: 6, closedAt: now - 90_000, openedAt: now - 900_000, solIn: 0.005, solOut: 0.007,
+      realizedSol: 0.002, fraction: 1, reason: "target", kind: "desk_exit", reported: false },
+      { mint: "not-an-address", closedAt: now, realizedSol: 1 }],
     health: { state: "entries-paused", entriesPaused: true, secret: "nested-must-not-cross",
       executionReadiness: { ready: true, providers: 2,
         lastSuccessAt: now - 20_000, observedAt: now - 20_000,
         route: "wsol-usdc", amountLamports: CANARY_LAMPORTS },
       caps: { ...CANARY_CAPS } },
+    ledger: { realizedSol: 0.25, deployedSol: 2, feesSol: 0.01, deployments: 5, exits: 3,
+      realized24hSol: 0.1, deployed24hSol: 0.5, openSol: 0.4, asOf: now - 35_000, secret: "ledger-must-not-cross" },
+    reporting: { fillsOwed: 2, lastError: "fill HTTP 404", lastErrorAt: now - 36_000, lastReportedAt: null },
     ts: now - 40_000, seenAt: now - 30_000,
     secret: "must-not-cross",
   },
@@ -115,7 +122,18 @@ const dashboard = buildExecutorDashboard({
 
 assert.equal(dashboard.telemetry.connected, true);
 assert.equal(dashboard.telemetry.source, "self-reported-by-tenant-machine");
+assert.deepEqual(dashboard.telemetry.heartbeat.ledger, { realizedSol: 0.25, deployedSol: 2, feesSol: 0.01,
+  deployments: 5, exits: 3, firstAt: 0, lastAt: 0, realized24hSol: 0.1, deployed24hSol: 0.5, openSol: 0.4, asOf: now - 35_000 },
+  "the bot's ledger reaches the board, bounded, with nothing else from the object");
+assert.deepEqual(dashboard.telemetry.heartbeat.reporting, { fillsOwed: 2, lastReportedAt: 0, lastError: "fill HTTP 404", lastErrorAt: now - 36_000 });
+assert.ok(!JSON.stringify(dashboard).includes("ledger-must-not-cross"));
 assert.equal(dashboard.telemetry.heartbeat.held.length, 1);
+assert.deepEqual(dashboard.telemetry.heartbeat.held[0], { mint, sol: 0.005, openedAt: 0, symbol: "TEST", callId: 7, costSol: 0.00505,
+  stop: 0.6, target: 2, high: 1.1, holdMaxMs: 3_600_000, deskEntryRef: 0.01, deskStop: 0.006, deskTarget: 0.02 },
+  "a position reaches the board with its levels, and a row without a real mint does not");
+assert.deepEqual(dashboard.telemetry.heartbeat.closed, [{ mint, symbol: "TEST", callId: 6, closedAt: now - 90_000, openedAt: now - 900_000,
+  solIn: 0.005, solOut: 0.007, realizedSol: 0.002, fraction: 1, reason: "target", kind: "desk_exit", reported: false }],
+  "a close reaches the board with its result, and one without a real mint does not");
 assert.equal(dashboard.wallet.state, "ready-balance");
 assert.equal(dashboard.wallet.source, "solana-confirmed-read");
 assert.equal(dashboard.activation.executionReadinessReady, true);

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { executorHeartbeatHealth } from "./heartbeat-health.mjs";
+import { executorHeartbeatHealth, HEARTBEAT_CAP_BOUNDS } from "./heartbeat-health.mjs";
 
 assert.equal(executorHeartbeatHealth({ lastTickCompletedAt: 1, lastFeedSuccessAt: 1 }).state, "healthy");
 assert.equal(executorHeartbeatHealth({ entriesPaused: true }).state, "entries-paused");
@@ -38,8 +38,23 @@ assert.equal(executorHeartbeatHealth({ executionReadiness: {
 assert.deepEqual(readiness.caps, {
   maxSolPerTrade: 0.05, dailySolCap: 0.5, dailyLossLimitSol: 0.15, maxOpenPositions: 4,
 });
+/* A bot armed at the operator maximum is HEALTHY, and its caps are reported. Until
+   2026-09-13 the bounds here were the 0.05/0.5/0.15 canary ceilings, so a bot armed at
+   0.4 SOL per trade reported caps: null and state "degraded" on every pulse while it
+   was trading normally. */
+const armedAtMax = executorHeartbeatHealth({ caps: {
+  maxSolPerTrade: HEARTBEAT_CAP_BOUNDS.maxSolPerTrade, dailySolCap: HEARTBEAT_CAP_BOUNDS.dailySolCap,
+  dailyLossLimitSol: HEARTBEAT_CAP_BOUNDS.dailyLossLimitSol, maxOpenPositions: 4,
+} });
+assert.equal(armedAtMax.state, "healthy", `armed at the operator maximum reads ${armedAtMax.state}`);
+assert.equal(armedAtMax.caps.maxSolPerTrade, HEARTBEAT_CAP_BOUNDS.maxSolPerTrade);
+const armedAboveCanary = executorHeartbeatHealth({ caps: {
+  maxSolPerTrade: 0.4, dailySolCap: 1, dailyLossLimitSol: 0.4, maxOpenPositions: 4,
+} });
+assert.equal(armedAboveCanary.state, "healthy", "0.4 SOL per trade is within the operator maximum and must not read as degraded");
+assert.deepEqual(armedAboveCanary.caps, { maxSolPerTrade: 0.4, dailySolCap: 1, dailyLossLimitSol: 0.4, maxOpenPositions: 4 });
 const invalidCaps = executorHeartbeatHealth({ caps: {
-  maxSolPerTrade: 0.050001, dailySolCap: 0.5, dailyLossLimitSol: 0.15, maxOpenPositions: 4,
+  maxSolPerTrade: HEARTBEAT_CAP_BOUNDS.maxSolPerTrade + 0.000001, dailySolCap: 0.5, dailyLossLimitSol: 0.15, maxOpenPositions: 4,
 } });
 assert.equal(invalidCaps.caps, null);
 assert.equal(invalidCaps.state, "degraded",

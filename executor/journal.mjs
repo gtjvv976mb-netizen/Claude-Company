@@ -638,6 +638,38 @@ export class ExecutionJournal {
     };
   }
 
+  /**
+   * THE WHOLE LEDGER, not the rolling window: every deployment and every realized result
+   * since the journal was created, fees on failed attempts included. rollingRisk() answers
+   * "how much capacity is left today"; this answers the owner's question — "have I lost
+   * or gained SOL?" — and is what the heartbeat carries to the floor board so the board
+   * can say it from the bot's own books rather than from a fill report that may not have
+   * landed. Realized is net of network fees and of the cost basis it closed against.
+   */
+  lifetimeRisk() {
+    let deployed = 0n, realized = 0n, fees = 0n, deployments = 0, exits = 0;
+    let firstAt = null, lastAt = null;
+    for (const row of this.db.prepare(`SELECT kind,deployed_lamports,realized_lamports,network_fee_lamports,occurred_at
+      FROM risk_events`).all()) {
+      deployed += BigInt(row.deployed_lamports);
+      realized += BigInt(row.realized_lamports);
+      fees += BigInt(row.network_fee_lamports);
+      if (row.kind === "deployment") deployments++; else exits++;
+      const at = Number(row.occurred_at);
+      if (Number.isFinite(at)) { firstAt = firstAt == null ? at : Math.min(firstAt, at); lastAt = lastAt == null ? at : Math.max(lastAt, at); }
+    }
+    for (const row of this.db.prepare("SELECT network_fee_lamports FROM attempt_fee_events").all()) {
+      const fee = BigInt(row.network_fee_lamports);
+      deployed += fee; realized -= fee; fees += fee;
+    }
+    return {
+      deployedSol: Number(deployed) / 1_000_000_000,
+      realizedSol: Number(realized) / 1_000_000_000,
+      feesSol: Number(fees) / 1_000_000_000,
+      deployments, exits, firstAt, lastAt,
+    };
+  }
+
   riskHistoryStatus(now = this.now()) {
     const until = Number(this.getMeta("risk_history_incomplete_until") || 0);
     return { complete: !(until > Number(now)), incompleteUntil: until || null };

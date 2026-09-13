@@ -339,6 +339,13 @@ body{
 .candidate-why{margin:7px 0 0;color:var(--ink-soft);font-size:10.5px;line-height:1.4}
 .candidate-link{font-size:10px;color:var(--teal);text-decoration:none}
 .candidate-link:hover{text-decoration:underline}
+.bot-book .datarow{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,2fr) auto auto;gap:.5rem .9rem;align-items:baseline;padding:.4rem 0;border-top:1px solid rgba(128,128,128,.18)}
+.bot-book .datarow small{opacity:.75}
+.bot-book .datarow em{font-style:normal;font-weight:600}
+.bot-book .datarow em.good,.bot-book .datarow .good{color:#2f9e6b}
+.bot-book .datarow em.bad,.bot-book .datarow .bad{color:#d05353}
+.bot-book .datarow.unreported{opacity:.85}
+@media (max-width:640px){.bot-book .datarow{grid-template-columns:1fr auto}.bot-book .datarow small{grid-column:1/-1}}
 .wallste-grid,.settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .statusline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px}
 .statusdot{width:9px;height:9px;border-radius:50%;background:var(--ink-faint)}
@@ -12352,6 +12359,14 @@ async function loadOverviewDashboard() {
     const held = Number(heartbeat?.open ?? (Array.isArray(heartbeat?.held) ? heartbeat.held.length : 0)) || 0;
     const botOn = bot.cls === "good";
     const pnl = feedPrivate ? null : Number(feedR?.body?.record?.netPnlUsd ?? 0);
+    /* THE BOT'S OWN LEDGER, when the heartbeat carries one. The desk's record above is a
+       chain scan of the floor OWNER's wallet — never the burner — so on a floor whose bot
+       trades it never saw a single bot trade and the tile read a paper number as if it
+       were money. The journal's totals come up in the heartbeat now; when they are here
+       they are the answer to "have I lost or gained SOL". */
+    const ledger = exec.telemetry?.heartbeat?.ledger || heartbeat?.ledger || null;
+    const reporting = exec.telemetry?.heartbeat?.reporting || heartbeat?.reporting || null;
+    const signedSol = (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(4) + " SOL";
     let claudeco = null;
     if (budgetR?.status === 200) {
       try {
@@ -12377,11 +12392,28 @@ async function loadOverviewDashboard() {
       held ? "good" : "", held ? "Your bot reported holding this." : "Your bot is not in a trade.");
     fact("SOL", execWallet.balanceSol == null ? "\u2014" : dashSol(execWallet.balanceSol), "",
       execWallet.address ? "Confirmed on chain for " + execWallet.address : "no wallet reported yet");
-    fact("Profit and loss", pnl == null ? "Private" : money(pnl),
-      pnl == null ? "" : pnl > 0 ? "good" : pnl < 0 ? "bad" : "", "Across every trade your bot has closed.");
+    if (ledger) {
+      fact("Profit and loss", signedSol(ledger.realizedSol),
+        ledger.realizedSol > 0 ? "good" : ledger.realizedSol < 0 ? "bad" : "",
+        "From your bot's own journal: " + ledger.exits + " sale" + (ledger.exits === 1 ? "" : "s") + " closed, net of network fees and what each cost to buy. " +
+        "Last 24h " + signedSol(ledger.realized24hSol) + ". " +
+        (ledger.openSol > 0 ? "Coins still held (" + ledger.openSol.toFixed(4) + " SOL in) are not counted until they sell. " : "") +
+        "Reported by your machine " + (ledger.asOf ? window.PLAIN.plainAge(Date.now() - ledger.asOf) + " ago" : "") + ".");
+    } else {
+      fact("Profit and loss", pnl == null ? "Private" : money(pnl),
+        pnl == null ? "" : pnl > 0 ? "good" : pnl < 0 ? "bad" : "",
+        "The desk's paper record for this floor. Your bot has not reported its own ledger yet — it does so from release 2026-09-13 on.");
+    }
+    if (reporting && reporting.fillsOwed > 0) {
+      fact("Unreported", String(reporting.fillsOwed) + (reporting.fillsOwed === 1 ? " trade" : " trades"), "bad",
+        "Your bot made these trades but the desk has refused or missed its report" +
+        (reporting.lastError ? " — last answer: " + reporting.lastError : "") +
+        ". The calls below cannot show them until a report lands; the bot retries every few seconds.");
+    }
     fact("$CLAUDECO", claudeco == null ? "\u2014" : claudeco, "");
     if (feedR?.body?.rent?.overdue) fact("Rent", "OVERDUE", "bad", "This floor's rent is overdue. Settle it from the tower.");
     el.appendChild(facts);
+    renderBotBook(el, exec.telemetry?.heartbeat || heartbeat, feed, { compact: true });
     /* THE OFF/ON BUTTON, BESIDE THE FIGURES (owner, 2026-09-09: "an off/on button";
        2026-09-08: "IF THEIR BOT IS ON (WHICH THEY CAN EASILY TURNOFF)"). One press.
        OFF asks for no confirmation — stopping is the safe direction — and ON does,
@@ -12848,6 +12880,76 @@ function loadHawkDashboard() {
 let wallsteDashboardLoading = false;
 let wallsteFiltersDirty = false;
 
+/* THE BOT'S BOOK, AS THE BOT REPORTS IT. Every open position with its size, its levels
+   and the desk's mark against the price it paid; every recent close with what went in,
+   what came out and the result. Read from the heartbeat, which the bot builds from its
+   own journal — so a trade the desk refused to record still shows here as what it was.
+   The owner's rule (2026-09-13): "ALL OPEN POSITIONS, PROFITS, LOSS and EVERYTHING
+   SHOWN". Rendered on the Overview and the WALL-ST-E tab alike; `compact` trims the
+   closes to the last five for the Overview. */
+function renderBotBook(el, heartbeat, feedRows, { compact = false } = {}) {
+  if (!heartbeat) return;
+  const held = Array.isArray(heartbeat.held) ? heartbeat.held : [];
+  const closed = Array.isArray(heartbeat.closed) ? heartbeat.closed : [];
+  const feed = Array.isArray(feedRows) ? feedRows : [];
+  const signedSol = (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(4) + " SOL";
+  const pct = (x) => (x >= 0 ? "+" : "−") + Math.abs(x * 100).toFixed(1) + "%";
+  const short = (mint) => mint ? mint.slice(0, 4) + "…" + mint.slice(-4) : "?";
+  const card = (title, sub) => {
+    const c = dashNode("section", "dashsection bot-book");
+    c.append(dashNode("h3", "", title));
+    if (sub) c.append(dashNode("p", "dp-note", sub));
+    return c;
+  };
+  const row = (cells, cls) => {
+    const r = dashNode("div", "datarow" + (cls ? " " + cls : ""));
+    for (const c of cells) r.append(c);
+    return r;
+  };
+
+  const open = card("Open positions · " + (held.length ? held.length : "none"),
+    held.length ? "What your bot holds right now, from its own journal. “Now” is the desk’s latest mark against the desk’s entry price for the same call — an estimate until the bot sells."
+      : "Your bot is not in a trade. It reported an empty book.");
+  for (const p of held) {
+    const call = feed.find((c) => (p.callId && Number(c.call_id ?? c.id) === p.callId) || c.mint === p.mint) || null;
+    const mark = call?.last_mark ?? null;
+    const est = mark != null && p.deskEntryRef > 0 ? mark / p.deskEntryRef - 1 : null;
+    const estSol = est != null ? p.sol * est : null;
+    const levels = [];
+    if (p.stop) levels.push("stop " + pct(p.stop - 1));
+    if (p.target) levels.push("target " + pct(p.target - 1));
+    if (p.high && p.high > 1) levels.push("high " + pct(p.high - 1));
+    if (p.holdMaxMs && p.openedAt) levels.push("clock ends " + dashWhen(p.openedAt + p.holdMaxMs));
+    const name = dashNode("span", "", (p.symbol ? p.symbol + " · " : "") + short(p.mint));
+    name.title = p.mint + (p.callId ? " · call " + p.callId : "");
+    open.append(row([
+      name,
+      dashNode("small", "", (p.openedAt ? "bought " + dashWhen(p.openedAt) + " · " : "") + levels.join(" · ")),
+      dashNode("strong", "", p.sol.toFixed(4) + " SOL in"),
+      est == null
+        ? dashNode("em", "", mark == null ? "no desk mark yet" : "no entry reference")
+        : dashNode("em", est > 0 ? "good" : est < 0 ? "bad" : "", "now " + pct(est) + " ≈ " + signedSol(estSol)),
+    ]));
+  }
+  el.appendChild(open);
+
+  const shown = compact ? closed.slice(0, 5) : closed;
+  const closes = card("Closed trades · " + (closed.length ? (compact && closed.length > 5 ? "last 5 of " + closed.length : closed.length) : "none"),
+    closed.length ? "Each sale your bot made in the last 7 days, net of fees and of what the coin cost. “Not on the desk” means the desk has not accepted the bot’s report of it yet; the number here is still the journal’s."
+      : "No sales in the last 7 days.");
+  for (const c of shown) {
+    const name = dashNode("span", "", (c.symbol ? c.symbol + " · " : "") + short(c.mint));
+    name.title = c.mint + (c.callId ? " · call " + c.callId : "");
+    closes.append(row([
+      name,
+      dashNode("small", "", "sold " + dashWhen(c.closedAt) + (c.reason ? " · " + c.reason : "") + (c.reported ? "" : " · not on the desk")),
+      dashNode("strong", "", c.solIn.toFixed(4) + " → " + c.solOut.toFixed(4) + " SOL"),
+      dashNode("em", c.realizedSol > 0 ? "good" : c.realizedSol < 0 ? "bad" : "", signedSol(c.realizedSol)),
+    ], c.reported ? "" : "unreported"));
+  }
+  el.appendChild(closes);
+}
+
 async function loadWallsteDashboard({ background = false } = {}) {
   const el = document.getElementById("wallstebody");
   if (!el || document.getElementById("wallstepanel")?.hidden) return;
@@ -12943,7 +13045,23 @@ async function loadWallsteDashboard({ background = false } = {}) {
       { label: "Wallet", value: wallet.balanceSol == null ? "\u2014" : dashSol(wallet.balanceSol),
         title: wallet.address ? "confirmed on-chain balance of " + wallet.address : "no address reported yet" },
       { label: "Last check-in", value: telemetry.ageMs == null ? "never" : window.PLAIN.plainAge(telemetry.ageMs) + " ago" },
+      ...(heartbeat?.ledger ? [{
+        label: "Realized",
+        value: (heartbeat.ledger.realizedSol > 0 ? "+" : heartbeat.ledger.realizedSol < 0 ? "−" : "") + Math.abs(heartbeat.ledger.realizedSol).toFixed(4) + " SOL",
+        cls: heartbeat.ledger.realizedSol > 0 ? "good" : heartbeat.ledger.realizedSol < 0 ? "bad" : "",
+        title: "From your bot's own journal: " + heartbeat.ledger.exits + " sale(s) closed, net of fees and cost; " +
+          heartbeat.ledger.deployedSol.toFixed(4) + " SOL deployed across " + heartbeat.ledger.deployments + " buy(s); " +
+          "last 24h " + (heartbeat.ledger.realized24hSol >= 0 ? "+" : "−") + Math.abs(heartbeat.ledger.realized24hSol).toFixed(4) + " SOL. Coins still held are not counted.",
+      }] : []),
+      ...(heartbeat?.reporting?.fillsOwed > 0 ? [{
+        label: "Owed to the desk", value: heartbeat.reporting.fillsOwed + " fill report(s)", cls: "bad",
+        title: "Your bot has trades the desk has not accepted a report for" +
+          (heartbeat.reporting.lastError ? " — last answer: " + heartbeat.reporting.lastError : "") +
+          ". The call cards cannot show them until one lands.",
+      }] : []),
     ]));
+    /* THE BOOK, ALWAYS: positions and closes are the point of the page, not detail. */
+    renderBotBook(el, heartbeat, feedR.status === 200 ? feedR.body?.feed : null);
     /* NO DROPDOWN BARS (owner, 2026-09-08). Both of these were collapsible sections.
        They are now plain containers, built either way and ATTACHED only when they are
        worth a reader's screen: the set-up path while the bot is not yet running, the

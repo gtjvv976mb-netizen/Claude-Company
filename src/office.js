@@ -252,8 +252,11 @@ export async function executorStatusPayload(floorNo, {
     wallet: stored.wallet,
     cursor: stored.cursor,
     open: stored.open,
-    held: stored.held,
+    held: sanitizeExecutorHeld(stored.held),
+    closed: sanitizeExecutorClosed(stored.closed),
     health: sanitizeExecutorHealth(stored.health),
+    ledger: sanitizeExecutorLedger(stored.ledger),
+    reporting: sanitizeExecutorReporting(stored.reporting),
     ts: stored.ts,
     seenAt: stored.seenAt,
   } : null;
@@ -298,6 +301,95 @@ export async function executorStatusPayload(floorNo, {
       updatedAt: raw.updated_at,
     },
   });
+}
+
+/** The bot's lifetime and 24-hour ledger, as it reports it: finite SOL figures bounded to
+ *  a sane range, counts, timestamps. Anything else in the object is dropped. */
+export function sanitizeExecutorLedger(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const sol = (input) => {
+    const n = Number(input);
+    return Number.isFinite(n) && Math.abs(n) <= 1_000_000 ? Math.round(n * 1e9) / 1e9 : null;
+  };
+  const count = (input) => Math.min(1_000_000, Math.max(0, Math.floor(Number(input) || 0)));
+  const timestamp = (input) => {
+    const n = Number(input);
+    return Number.isSafeInteger(n) && n > 0 ? n : null;
+  };
+  const realizedSol = sol(value.realizedSol), deployedSol = sol(value.deployedSol);
+  if (realizedSol == null || deployedSol == null) return null;
+  return {
+    realizedSol, deployedSol, feesSol: sol(value.feesSol) ?? 0,
+    deployments: count(value.deployments), exits: count(value.exits),
+    firstAt: timestamp(value.firstAt), lastAt: timestamp(value.lastAt),
+    realized24hSol: sol(value.realized24hSol) ?? 0, deployed24hSol: sol(value.deployed24hSol) ?? 0,
+    openSol: Math.max(0, sol(value.openSol) ?? 0),
+    asOf: timestamp(value.asOf),
+  };
+}
+
+const boundedSol = (input, { signed = false } = {}) => {
+  const n = Number(input);
+  if (!Number.isFinite(n) || Math.abs(n) > 1_000_000) return null;
+  return signed ? Math.round(n * 1e9) / 1e9 : Math.max(0, Math.round(n * 1e9) / 1e9);
+};
+const boundedLevel = (input) => {
+  const n = Number(input);
+  return Number.isFinite(n) && n > 0 && n < 1e12 ? n : null;
+};
+const boundedTs = (input) => {
+  const n = Number(input);
+  return Number.isSafeInteger(n) && n > 0 ? n : 0;
+};
+
+/** The bot's open positions as it reports them: mint, size, when, its own levels as
+ *  multiples of its fill, and the desk's absolute levels beside them. Twenty at most. */
+export function sanitizeExecutorHeld(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 20).map((h) => ({
+    mint: String(h?.mint ?? "").slice(0, 64),
+    sol: boundedSol(h?.sol) ?? 0,
+    openedAt: boundedTs(h?.openedAt),
+    symbol: h?.symbol == null ? null : String(h.symbol).slice(0, 24),
+    callId: Number.isSafeInteger(Number(h?.callId)) && Number(h.callId) > 0 ? Number(h.callId) : null,
+    costSol: boundedSol(h?.costSol),
+    stop: boundedLevel(h?.stop), target: boundedLevel(h?.target), high: boundedLevel(h?.high),
+    holdMaxMs: boundedLevel(h?.holdMaxMs),
+    deskEntryRef: boundedLevel(h?.deskEntryRef), deskStop: boundedLevel(h?.deskStop), deskTarget: boundedLevel(h?.deskTarget),
+  })).filter((h) => h.mint);
+}
+
+/** The bot's recent closes, from its journal: what went in, what came out, the result,
+ *  and why. Twenty at most; the reason is the bot's own text, capped, treated as data. */
+export function sanitizeExecutorClosed(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 20).map((c) => ({
+    mint: String(c?.mint ?? "").slice(0, 64),
+    symbol: c?.symbol == null ? null : String(c.symbol).slice(0, 24),
+    callId: Number.isSafeInteger(Number(c?.callId)) && Number(c.callId) > 0 ? Number(c.callId) : null,
+    closedAt: boundedTs(c?.closedAt), openedAt: boundedTs(c?.openedAt) || null,
+    solIn: boundedSol(c?.solIn) ?? 0, solOut: boundedSol(c?.solOut) ?? 0,
+    realizedSol: boundedSol(c?.realizedSol, { signed: true }),
+    fraction: Number(c?.fraction) > 0 && Number(c.fraction) <= 1 ? Number(c.fraction) : 1,
+    reason: String(c?.reason ?? "").slice(0, 120), kind: String(c?.kind ?? "").slice(0, 24),
+    reported: c?.reported === true,
+  })).filter((c) => c.mint && c.closedAt > 0 && c.realizedSol != null);
+}
+
+/** The bot's fill-report queue: how many reports it still owes this desk and why the
+ *  last one was refused. The error text is the bot's own, capped, and treated as data. */
+export function sanitizeExecutorReporting(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const timestamp = (input) => {
+    const n = Number(input);
+    return Number.isSafeInteger(n) && n > 0 ? n : null;
+  };
+  return {
+    fillsOwed: Math.min(1_000_000, Math.max(0, Math.floor(Number(value.fillsOwed) || 0))),
+    lastReportedAt: timestamp(value.lastReportedAt),
+    lastError: value.lastError == null ? null : String(value.lastError).slice(0, 200),
+    lastErrorAt: timestamp(value.lastErrorAt),
+  };
 }
 
 export function sanitizeExecutorHealth(value) {
@@ -867,12 +959,12 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             cursor: Number(body.cursor) || 0,
             open: Number(body.open) || 0,
             // Bounded and sanitised: a floor's own bot reporting which mints it holds.
-            held: Array.isArray(body.held) ? body.held.slice(0, 20).map((h) => ({
-              mint: String(h?.mint ?? "").slice(0, 64),
-              sol: Number(h?.sol) || 0,
-              openedAt: Number(h?.openedAt) || 0,
-            })).filter((h) => h.mint) : [],
+            held: sanitizeExecutorHeld(body.held),
+            closed: sanitizeExecutorClosed(body.closed),
             health: sanitizeExecutorHealth(body.health),
+            /* The bot's own ledger totals and its fill-report queue, bounded numbers only. */
+            ledger: sanitizeExecutorLedger(body.ledger),
+            reporting: sanitizeExecutorReporting(body.reporting),
             ts: Number(body.ts) || Date.now(),
             seenAt: Date.now(),
           };
