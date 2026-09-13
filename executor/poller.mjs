@@ -2076,9 +2076,14 @@ function maybeProbeExecutionReadiness() {
       const need = Math.floor(CFG.maxSolPerTrade * LAMPORTS) +
         Number(jupiter.cfg.maxNetworkFeeLamports ?? 500_000) +
         Number(jupiter.cfg.maxRentLamports ?? 4_200_000) + 10_000_000;
-      log(`READINESS not proved (${EXECUTION_READINESS_ROUTE} at ${CFG.maxSolPerTrade} SOL): ${reason}` +
-        ` — this no-sign rehearsal needs about ${(need / LAMPORTS).toFixed(4)} SOL in the wallet ` +
-        "(the trade size, the network-fee ceiling, two ATAs of rent and an untouched reserve)");
+      /* The balance hint only when the balance is the reason. It used to ride every
+         refusal, so a custody refusal on a 3 SOL wallet read as "needs about 1.02 SOL"
+         and sent the operator to fund a wallet that was already funded. */
+      const balanceHint = /wallet reserve/i.test(reason)
+        ? ` — this no-sign rehearsal needs about ${(need / LAMPORTS).toFixed(4)} SOL in the wallet ` +
+          "(the trade size, the network-fee ceiling, two ATAs of rent and an untouched reserve)"
+        : "";
+      log(`READINESS not proved (${EXECUTION_READINESS_ROUTE} at ${CFG.maxSolPerTrade} SOL): ${reason}${balanceHint}`);
     }
     runtimeHealth.executionReadiness = {
       ready: false,

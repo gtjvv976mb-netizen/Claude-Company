@@ -979,6 +979,21 @@ await ok("simulation must show the exact SOL spend and minimum token receipt", a
   const after = { wallet: systemAccount(12_960_720, true), input: null,
     output: tokenAccount({ tokenMint: mint, owner: wallet.publicKey, amount: 987, simulated: true }) };
   assert.deepEqual(validateSimulationEffects(before, after, expected, cfg), { actualOutputRaw: "987" });
+  /* A KNOWN FEE IS NOT A DRAIN. The build check admits a priority fee up to the 2M cap,
+     but the custody band here was 500k and had to cover that fee too — so a legal
+     1.5M fee was refused as unexplained, the readiness rehearsal flapped at 1 SOL on a
+     3 SOL wallet, and the log blamed the balance. The built fee is admitted as itself;
+     the band still bounds what nobody can explain. */
+  const cfgFee = { ...cfg, expectedNetworkFeeLamports: 500_000 };   // the live band; the cap stays 3M
+  const withFee = { ...after, wallet: systemAccount(12_960_720 - 1_505_000, true) };
+  assert.throws(() => validateSimulationEffects(before, withFee, expected, cfgFee),
+    /outside the exact input[\s\S]*unexplained[\s\S]*not the wallet balance/);
+  assert.deepEqual(validateSimulationEffects(before, withFee, { ...expected, builtFeeLamports: 1_505_000 }, cfgFee),
+    { actualOutputRaw: "987" });
+  /* …and the allowance cannot be widened past the cap by naming a bigger fee. */
+  const drained = { ...after, wallet: systemAccount(12_960_720 - 9_000_000, true) };
+  assert.throws(() => validateSimulationEffects(before, drained, { ...expected, builtFeeLamports: 9_000_000 }, cfgFee),
+    /outside the exact input/);
   const tombstone = systemAccount(0, true);
   assert.deepEqual(validateSimulationEffects({ ...before, input: tombstone },
     { ...after, input: tombstone }, expected, cfg), { actualOutputRaw: "987" });
