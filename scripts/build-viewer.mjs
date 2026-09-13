@@ -268,6 +268,16 @@ const built = [];
 const hawkStatusValue = hawkStatus();
 console.log(`hawk-ai status    armable=${hawkStatusValue.armable} blocking=[${hawkStatusValue.blocking.join(", ")}]`);
 
+/* ONE STAMP FOR THE WHOLE BUILD, and a file that says it. Every page carries the stamp
+   in its cc-build meta; build.json carries the same stamp beside the pages so a page
+   that is already open can ask "is there a newer me?" with one small fetch and reload
+   itself. Until 2026-09-13 a tab left open all day kept running the code it loaded
+   that morning — it polled fresh numbers every minute and drew them with stale logic,
+   and the owner read a board that "never updated" while the site had shipped three
+   times. The stamp is minute-resolved; the commit is the tiebreaker. */
+const BUILD_STAMP = new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC";
+fs.writeFileSync(path.join(OUT, "build.json"), JSON.stringify({ build: BUILD_STAMP, commit: EXECUTOR_COMMIT }) + "\n");
+
 for (const { src: name, out } of PAGES) {
   const src = path.join(VIEWER, name);
   if (!fs.existsSync(src)) continue;
@@ -311,9 +321,9 @@ for (const { src: name, out } of PAGES) {
   }
   // A visible build stamp, so "am I seeing the new version?" is answerable by
   // anyone in two seconds: view-source or the console, no guessing about caches.
-  const stamp = new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  const stamp = BUILD_STAMP;
   html = html.replace(/<style>/, () =>
-    `<meta name="cc-build" content="${stamp}">\n<script>console.log("Claude Company build ${stamp}")</script>\n<style>`);
+    `<meta name="cc-build" content="${stamp}">\n<meta name="cc-commit" content="${EXECUTOR_COMMIT}">\n<script>console.log("Claude Company build ${stamp}")</script>\n<style>`);
 
   if (API_BASE) {
     html = html.replace(/<style>/, () =>
