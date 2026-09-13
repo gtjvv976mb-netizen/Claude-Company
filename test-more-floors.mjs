@@ -35,6 +35,22 @@ assert.ok(!/rm -f "\$HARD_STOP_FILE"/.test(install.slice(lift, lift + 600)), "�
 assert.match(install, /Resume entries: rm -f \$PAUSE_FILE\s+\(or pass --resume-entries next time\)/, "the summary teaches the flag");
 execFileSync("bash", ["-n", new URL("./executor/install.sh", import.meta.url).pathname]);
 
+/* 1b · THE BATTERY PAUSE, the one that stopped the live bot twice on 2026-09-13. The
+   supervisor publishes it by itself on battery and re-publishes it every tick, AC alone
+   never clears it, and the dial that overrides it must survive an upgrade — otherwise an
+   owner sets it, upgrades, and is silently back to a bot that stops when the charger
+   comes out. */
+const sleepAssertion = read("./executor/sleep-assertion.mjs");
+const runner = read("./executor/launchd-runner.mjs");
+assert.match(sleepAssertion, /"host is drawing battery power"/, "battery is the reason the pause names");
+assert.match(sleepAssertion, /String\(env\.WALLSTE_ALLOW_BATTERY_ENTRIES \?\? "0"\)\.trim\(\) === "1"/, "the dial is exactly WALLSTE_ALLOW_BATTERY_ENTRIES=1");
+assert.match(sleepAssertion, /entry pause remains until explicit readiness review/, "restoring AC does not lift the pause by itself");
+assert.ok(!/(?:unlinkSync|rmSync)\(pauseEntriesFile/.test(sleepAssertion), "the watcher never removes the pause it published");
+assert.match(runner, /"WALLSTE_ALLOW_BATTERY_ENTRIES",/, "the runner allows the dial through");
+assert.match(install, /JUPITER_EXCLUDE_DEXES WALLSTE_ALLOW_BATTERY_ENTRIES; do/, "…and an upgrade carries it forward");
+assert.match(readme, /The supervisor writes that same file by itself whenever the host is on battery/, "the README says the supervisor writes it");
+assert.match(readme, /undone within 15 seconds, silently/, "…and that removing it on battery does not stick");
+
 /* 2 · the README */
 assert.match(readme, /\*\*A small Linux server you own is the 24\/7 option\.\*\*/, "the README names the server option up front");
 assert.match(readme, /\*\*Every install and upgrade creates it\*\*/, "…and says every upgrade pauses entries");
