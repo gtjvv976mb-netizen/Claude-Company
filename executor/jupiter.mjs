@@ -1308,6 +1308,8 @@ export class JupiterV2Executor {
       maxComputeUnits: 1_400_000,
       maxAttempts: 3,
       finalityTimeoutMs: 30_000,
+      // Route-plan labels the order request leaves out; see order() for the measurement.
+      excludeDexes: "HumidiFi",
       ...config,
     };
   }
@@ -1363,6 +1365,22 @@ export class JupiterV2Executor {
       slippageBps: String(this.cfg.slippageBps),
       excludeRouters: "jupiterz,dflow,okx",
     });
+    /* VENUES WHOSE SWAP MAKES THE TAKER FUND AN ACCOUNT NOBODY QUOTED.
+     *
+     * Measured 2026-09-13 on the readiness rehearsal at 0.5 SOL, wsol-usdc: every
+     * order Jupiter routed through HumidiFi created a 2,440-byte account owned by the
+     * HumidiFi program and funded it from the wallet — 13,045,440 lamports, 0.013 SOL,
+     * on top of the input, the quoted ATA rent and the built fee. Jupiter's
+     * rentFeeLamports did not declare it, so validateSimulationEffects refused the
+     * route as "a route that funds accounts nobody quoted", which is exactly right for
+     * signing and wrong as a reason for the bot never to prove readiness: three
+     * rehearsals in a row drew that venue and the desk withheld every call meanwhile.
+     * The custody rule is not loosened for it. The venue is left out of the request,
+     * which Jupiter honours (eight orders excluding seven labels returned none of
+     * them). Labels are Jupiter's own route-plan labels, comma-separated; an empty
+     * string sends nothing. */
+    const excluded = String(this.cfg.excludeDexes ?? "").trim();
+    if (excluded) params.set("excludeDexes", excluded);
     if (taker) params.set("taker", this.wallet);
     const response = await this.fetch(`${this.baseUrl}/order?${params}`, {
       headers: this.headers(), redirect: "error", signal: AbortSignal.timeout(12_000),

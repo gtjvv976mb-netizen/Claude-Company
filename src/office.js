@@ -224,6 +224,36 @@ export function executorHeartbeatPayload(floorNo) {
   return { heartbeat };
 }
 
+/** THE HOUSE BOT'S BOOK, FOR EVERY VISITOR.
+ *
+ * The bot's pulse is owner-only on a tenant floor because it is the tenant's money. The
+ * house floor's bot is the house's own record — the trades the desk's published calls
+ * actually produced — and the owner's instruction was that the site show it: every open
+ * position, every close, the profit and the loss. Until 2026-09-13 those figures reached
+ * a screen only through the owner's signed-in session, so a visitor, and the owner in a
+ * tab that had lost its session, saw a board reading dashes beside a bot that had traded
+ * all day. This is the projection that leaves the building: the sanitized book and
+ * ledger, the health state and entry mode, and how old the pulse is. Never the wallet,
+ * never the caps, never the reporting queue or its error text — those stay behind the
+ * owner's token on /executor/status. */
+export function houseBotPublic(floorNo, { now = Date.now() } = {}) {
+  const stored = executorHeartbeatPayload(floorNo).heartbeat;
+  if (!stored || typeof stored !== "object" || Array.isArray(stored)) return null;
+  const seenAt = Number(stored.seenAt) > 0 ? Number(stored.seenAt) : (Number(stored.ts) > 0 ? Number(stored.ts) : 0);
+  const health = sanitizeExecutorHealth(stored.health);
+  return {
+    mode: stored.mode === "live" ? "live" : "paper",
+    seenAt: seenAt || null,
+    ageMs: seenAt ? Math.max(0, now - seenAt) : null,
+    state: health?.state ?? null,
+    entryMode: health?.entryMode ?? null,
+    entriesEnabled: health?.entriesEnabled ?? null,
+    held: sanitizeExecutorHeld(stored.held),
+    closed: sanitizeExecutorClosed(stored.closed),
+    ledger: sanitizeExecutorLedger(stored.ledger),
+  };
+}
+
 /** A guest pass grants the call sheet only. Local executor telemetry contains the
  * burner address, held mints, and safety state, so it is masked with credentials for
  * every non-owner response. Kept as a pure projection so the privacy boundary has a
@@ -1714,6 +1744,9 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               isOwner: hqViewer,
             }),
             lastEventTs: lastEv, grokEnabled: !!process.env.XAI_API_KEY,
+            /* THE HOUSE BOT'S OWN BOOK, to every viewer: see houseBotPublic. Wrapped so a
+               malformed stored pulse can never fail the heartbeat the whole site polls. */
+            houseBot: (() => { try { return houseBotPublic(tower.HQ_FLOOR, { now }); } catch { return null; } })(),
             /* WHY THE HOUSE BOT IS SILENT. A floor's executor feed only carries
                calls the desk OFFERED it; a floor whose deliveries are all skipped
                has a bot that never logs a thing. The verdict and reason for the

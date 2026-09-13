@@ -92,7 +92,9 @@ const ALLOWED_ENV = new Set([
   /* The entry mode, its arming sentence, and the per-trade size it buys at. */
   "ENTRY_MODE", "ENTRY_MODE_ACK", "FIXED_SOL",
   "FEE_RESERVE_SOL", "FINALITY_TIMEOUT_MS", "F_DEFAULT", "F_NAME_MAX", "HARD_STOP_FILE",
-  "INIT_ONLY", "JUPITER_API_BASE", "JUPITER_API_KEY", "KEYPAIR", "LIVE_CAPS_ACK",
+  "INIT_ONLY", "JUPITER_API_BASE", "JUPITER_API_KEY",
+  // Route-plan labels left out of every Jupiter order; default HumidiFi (jupiter.mjs order()).
+  "JUPITER_EXCLUDE_DEXES", "KEYPAIR", "LIVE_CAPS_ACK",
   "LIVE_STATE_INIT_ACK", "LIVE_TRADING_ACK", "LOCK_FILE",
   /* Cadence of the valuation/custody pass (manageOpen) — the feed is read every POLL_MS
      regardless. Live 5 s to 5 min. */

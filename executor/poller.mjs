@@ -565,6 +565,17 @@ const JUPITER_CFG = {
     { min: 1, max: EXECUTE ? LIVE_LIMITS.maxQuoteShortfallPct : 100 }),
   finalityTimeoutMs: number("FINALITY_TIMEOUT_MS", process.env.FINALITY_TIMEOUT_MS || 30_000,
     { min: 1_000, max: 120_000 }),
+  /* Route-plan labels Jupiter must leave out of every order. The default names the one
+     venue measured to make the taker fund an unquoted account (jupiter.mjs order()).
+     Comma-separated labels; set it to an empty string to exclude nothing. Letters,
+     digits, spaces, dots, underscores and hyphens only — a label is a query value. */
+  excludeDexes: (() => {
+    const raw = process.env.JUPITER_EXCLUDE_DEXES === undefined ? "HumidiFi" : String(process.env.JUPITER_EXCLUDE_DEXES);
+    const labels = raw.split(",").map((s) => s.trim()).filter(Boolean);
+    if (labels.some((label) => !/^[A-Za-z0-9 ._-]{1,40}$/.test(label)) || labels.length > 20)
+      fatal("JUPITER_EXCLUDE_DEXES must be up to 20 comma-separated Jupiter route labels (letters, digits, spaces, . _ -)");
+    return labels.join(",");
+  })(),
 };
 
 // Parse this once at startup. Live operators may shorten the outage bridge, but

@@ -4181,7 +4181,8 @@ function drawBossBoard() {
   const net = bossData.net;
   /* Read at draw time, not only at poll time: the panels set window.__botHeartbeat on
      their own 30s cadence, and the wall is redrawn with every feed pass. */
-  const live = window.__botHeartbeat?.ledger ? window.__botHeartbeat : null;
+  const live = window.__botHeartbeat?.ledger ? window.__botHeartbeat
+    : window.__houseBot?.ledger ? window.__houseBot : null;   // the house book, public
   const lg = bossData.ledger || live?.ledger || null;
   if (lg && !bossData.ledger) {
     bossData.held = Array.isArray(live.held) ? live.held : [];
@@ -4280,22 +4281,30 @@ async function pollBossBoard() {
        see the ledger it was written to chalk, however fresh the bot's pulse was. */
     const token = (() => { try { return localStorage.getItem("cc_token"); } catch { return null; } })();
     const authed = token ? { headers: { authorization: "Bearer " + token } } : {};
-    const [recR, lbR, roomR] = await Promise.all([
+    const [recR, lbR, roomR, pulseR] = await Promise.all([
       fetch(`${base}${floorNo === 50 ? "/api/record" : `/api/floor/${floorNo}/record`}`),
       fetch(`${base}/api/leaderboard`).catch(() => null),
       fetch(`${base}/api/floor/${floorNo}`, authed).catch(() => null),
+      /* THE HOUSE BOOK IS PUBLIC. The desk's heartbeat carries the house bot's own
+         positions, closes and ledger to every viewer (office.js houseBotPublic), so the
+         main floor's wall chalks real trades whether or not anyone is signed in. */
+      floorNo === 50 ? fetch(`${base}/api/heartbeat`).catch(() => null) : Promise.resolve(null),
     ]);
     const rec = await recR.json();
     const lb = lbR ? await lbR.json().catch(() => null) : null;
     const roomB = roomR ? await roomR.json().catch(() => null) : null;
+    const pulse = pulseR ? await pulseR.json().catch(() => null) : null;
+    if (pulse?.houseBot) window.__houseBot = pulse.houseBot;
     /* THE BOT'S OWN BOOKS ride the room state for the owner. Parsed here so BIG C's wall
        can chalk the journal's realized SOL and the open book, not the desk's paper. */
     let hb = null;
     try { hb = roomB?.executorHeartbeat ? JSON.parse(roomB.executorHeartbeat) : null; } catch { hb = null; }
     if (hb) window.__botHeartbeat = hb;
     /* And when the room gave nothing (a visitor, or a token the desk rejected), the
-       pulse the WALL-ST-E and Overview panels fetched is just as good. */
+       pulse the WALL-ST-E and Overview panels fetched is just as good — and failing
+       that, the public house book. */
     if (!hb && window.__botHeartbeat?.ledger) hb = window.__botHeartbeat;
+    if (!hb && window.__houseBot?.ledger) hb = window.__houseBot;
     const floors = lb?.floors ?? [];
     const idx = floors.findIndex((f) => Number(f.floor_no ?? f.floorNo ?? f.n) === floorNo);
     const id = roomB?.identity ?? {};
@@ -5494,8 +5503,9 @@ window.__grokBoardUpdate = (feed = []) => {
      desk's entry reference) and its ledger. A fill report the desk refused left this
      wall blank about a real position; the heartbeat cannot be refused the same way, so
      when it names positions they are the board, enriched with the desk's call row for
-     the cap and the mark. Rows the heartbeat does not carry fall back to the reports. */
-  const hb = window.__botHeartbeat;
+     the cap and the mark. Rows the heartbeat does not carry fall back to the reports.
+     The owner's pulse first; otherwise the public house book (window.__houseBot). */
+  const hb = window.__botHeartbeat || window.__houseBot || null;
   const hbHeld = Array.isArray(hb?.held) && hb.held.length ? hb.held : null;
   const fromHeartbeat = hbHeld ? hbHeld.map((p) => {
     const c = open.find((row) => (p.callId && Number(row.call_id ?? row.id) === Number(p.callId)) || row.mint === p.mint) || null;
@@ -6261,8 +6271,15 @@ botPose(true);
  * when the trades are real and amber on paper; silence = he goes home and sleeps.
  * Set by the panels that fetch it, so the scene never issues requests of its own. */
 window.__botHeartbeat = null;                      // {mode, open, seenAt} | null
+/* THE HOUSE BOT'S PUBLIC BOOK: the desk's /api/heartbeat carries the main floor's own
+   bot (positions, closes, ledger, state, age) to every viewer. It stands in wherever the
+   owner's private pulse is absent — a visitor, or an owner whose tab lost its session —
+   so the walls and the cards say what the bot did rather than dashes. Set by the boss
+   board's poll on floor 50; null elsewhere. */
+window.__houseBot = null;
+const __anyBotPulse = () => window.__botHeartbeat || window.__houseBot || null;
 window.__botStatus = () => {
-  const hb = window.__botHeartbeat;
+  const hb = __anyBotPulse();
   const fresh = hb && hb.seenAt && (Date.now() - hb.seenAt) < 3 * 60e3;
   return { exists: !!hb, running: !!fresh, live: !!(fresh && hb.mode === "live") };
 };
@@ -6271,7 +6288,7 @@ window.__botStatus = () => {
    walls. No freshness rule: a sale that happened is history whether or not the bot is
    awake now. */
 window.__botClosed = (mint, callId) => {
-  const list = window.__botHeartbeat?.closed;
+  const list = __anyBotPulse()?.closed;
   if (!Array.isArray(list)) return null;
   const id = Number(callId);
   return list.find((c) => (id > 0 && Number(c.callId) === id) || c.mint === mint) || null;
@@ -6279,7 +6296,7 @@ window.__botClosed = (mint, callId) => {
 /** Is the operator's own bot holding this mint? Only trusted while the pulse is
  *  fresh — a stale heartbeat's position list is a memory, not a fact. */
 window.__botHeld = (mint) => {
-  const hb = window.__botHeartbeat;
+  const hb = __anyBotPulse();
   if (!hb?.seenAt || Date.now() - hb.seenAt >= 3 * 60e3) return null;
   return (hb.held || []).find((h) => h.mint === mint) || null;
 };
@@ -12492,7 +12509,7 @@ async function loadOverviewDashboard() {
        trades it never saw a single bot trade and the tile read a paper number as if it
        were money. The journal's totals come up in the heartbeat now; when they are here
        they are the answer to "have I lost or gained SOL". */
-    const ledger = exec.telemetry?.heartbeat?.ledger || heartbeat?.ledger || null;
+    const ledger = exec.telemetry?.heartbeat?.ledger || heartbeat?.ledger || window.__houseBot?.ledger || null;
     const reporting = exec.telemetry?.heartbeat?.reporting || heartbeat?.reporting || null;
     const signedSol = (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(4) + " SOL";
     let claudeco = null;
@@ -12541,7 +12558,7 @@ async function loadOverviewDashboard() {
     fact("$CLAUDECO", claudeco == null ? "\u2014" : claudeco, "");
     if (feedR?.body?.rent?.overdue) fact("Rent", "OVERDUE", "bad", "This floor's rent is overdue. Settle it from the tower.");
     el.appendChild(facts);
-    renderBotBook(el, exec.telemetry?.heartbeat || heartbeat, feed, { compact: true });
+    renderBotBook(el, exec.telemetry?.heartbeat || heartbeat || window.__houseBot, feed, { compact: true });
     /* THE OFF/ON BUTTON, BESIDE THE FIGURES (owner, 2026-09-09: "an off/on button";
        2026-09-08: "IF THEIR BOT IS ON (WHICH THEY CAN EASILY TURNOFF)"). One press.
        OFF asks for no confirmation — stopping is the safe direction — and ON does,

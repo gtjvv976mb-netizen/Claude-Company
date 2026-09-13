@@ -780,6 +780,7 @@ and the first sell in the journal and on an explorer, and only then raise the ce
 | `LIVE_TRADING_ACK` | unset | Must exactly match the loaded burner public key in live mode |
 | `LIVE_CAPS_ACK` | unset | Required when any live money cap exceeds its canary default; must be the installer’s exact wallet-and-number-bound v2 sentence |
 | `JUPITER_API_KEY` | unset | Required locally for Jupiter Swap API v2 in live mode |
+| `JUPITER_EXCLUDE_DEXES` | `HumidiFi` | Jupiter route-plan labels left out of every order, comma-separated. The default is the venue measured on 2026-09-13 to make the taker fund a 0.013 SOL program account nobody quoted, which the custody rule refuses; the rule is unchanged, the venue is not asked for. Empty excludes nothing; carried across upgrades |
 | `SOLANA_RPC` | public default in dry run | A private HTTPS provider is required in live mode |
 | `SOLANA_RPC_SECONDARY` | required in live mode | Independent private provider for expiry, custody, and Pyth SOL/USD consensus checks; an outage fails closed or uses only the bounded Pyth exit cache |
 | `SOL_USD_CACHE_MAX_AGE_MS` | `1800000` live ceiling | Maximum age of both the local observation and retained Pyth publish time before the exit-price cache fails closed |
