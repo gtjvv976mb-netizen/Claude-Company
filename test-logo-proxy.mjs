@@ -34,12 +34,20 @@ db.prepare(`INSERT INTO calls (mint, symbol, status, opened_at, image_url) VALUE
 /* Only the upstream is stubbed; requests to the office go through the real fetch. */
 const realFetch = globalThis.fetch;
 let upstreamCalls = 0, upstreamMode = "ok";
+const seenUrls = [];
+/* The CDN resizes only to a fixed set of widths and answers anything else with a 422
+   JSON body — "Invalid image size: 96x96", measured on the live CDN 2026-09-13. That
+   is exactly what the first release of this route hit, so "refuse-the-size" is a mode
+   this test drives: the desk must fall back to the URL the scanner recorded. */
 globalThis.fetch = async (input, init) => {
   const url = String(input instanceof URL ? input.href : input);
   if (!/^https:\/\/cdn\.dexscreener\.com\//.test(url)) return realFetch(input, init);
   upstreamCalls++;
+  seenUrls.push(url);
   if (upstreamMode === "down") throw new Error("upstream unreachable");
-  assert.match(url, /width=96&height=96&quality=85/, "the desk asks the CDN for the small rendition");
+  if (upstreamMode === "refuse-size" && /width=64/.test(url))
+    return new Response(JSON.stringify({ status: 422, error: "Invalid image size: 64x64" }),
+      { status: 422, headers: { "content-type": "application/json; charset=utf-8" } });
   return new Response(PNG, { status: 200, headers: { "content-type": "image/png" } });
 };
 
@@ -54,6 +62,8 @@ try {
   assert.match(first.headers.get("cache-control") || "", /max-age=3600/);
   assert.equal(Buffer.compare(Buffer.from(await first.arrayBuffer()), PNG), 0, "the bytes are the CDN's");
   assert.equal(upstreamCalls, 1);
+  assert.match(seenUrls[0], /width=64&height=64&quality=85/,
+    "the desk asks for a rendition size the CDN actually serves (64/128/256/800; 96 is a 422)");
 
   const second = await realFetch(`${BASE}/api/logo/${MINT}`);
   assert.equal(second.status, 200);
@@ -66,6 +76,19 @@ try {
   const garbage = await realFetch(`${BASE}/api/logo/not-a-mint`);
   assert.notEqual(garbage.status, 200, "the route matches only a base58 key");
   assert.equal(upstreamCalls, 1, "none of those touched upstream");
+
+  /* THE 422 THAT BLANKED THE BOARD: a refused rendition size falls back to the recorded
+     URL rather than 502-ing, so a CDN policy change costs bytes and never the wall. */
+  upstreamMode = "refuse-size";
+  const SIZED = "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R".replace("4k3", "9k3");
+  db.prepare(`INSERT INTO calls (mint, symbol, status, opened_at, image_url) VALUES (?, ?, 'closed', ?, ?)`)
+    .run(SIZED, "SIZE", Date.now(), "https://cdn.dexscreener.com/cms/images/sized?width=800&height=800&quality=95&format=auto");
+  const before = upstreamCalls;
+  const fellBack = await realFetch(`${BASE}/api/logo/${SIZED}`);
+  assert.equal(fellBack.status, 200, "a refused rendition size is not a 502");
+  assert.equal(fellBack.headers.get("content-type"), "image/png");
+  assert.equal(upstreamCalls - before, 2, "…it tried the small rendition, then the recorded URL");
+  assert.match(seenUrls[seenUrls.length - 1], /width=800/, "…and the fallback is the URL the scanner recorded");
 
   upstreamMode = "down";
   const stale = await realFetch(`${BASE}/api/logo/${MINT}`);
