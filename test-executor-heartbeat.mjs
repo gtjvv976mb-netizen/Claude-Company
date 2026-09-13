@@ -181,7 +181,7 @@ assert.match(viewer, /reporting\.fillsOwed > 0/, "the board must say when fill r
 assert.match(viewer, /From your bot's own journal/, "the tile must say where the number comes from");
 /* And the book — positions and closes — is rendered on BOTH the Overview and the tab,
    outside the detailed-view fold. */
-assert.equal((viewer.match(/^\s*renderBotBook\(el, /gm) || []).length, 2, "the book renders on the Overview and on the WALL-ST-E tab");
+assert.equal((viewer.match(/^\s*renderBotBook\(el, /gm) || []).length, 3, "the book renders on the owner's Overview, the visitor's Overview of the house floor, and the WALL-ST-E tab");
 assert.match(viewer, /Open positions · /, "the open positions card is titled");
 assert.match(viewer, /Closed trades · /, "the closed trades card is titled");
 assert.match(viewer, /not on the desk/, "a close the desk has not recorded is marked as such, not hidden");
@@ -241,8 +241,15 @@ assert.match(route, /closed: sanitizeExecutorClosed\(body\.closed\)/, "closes pe
   assert.match(viewer, /: window\.__houseBot\?\.ledger \? window\.__houseBot : null;/, "BIG C's wall falls back to the public house book");
   assert.match(viewer, /const hb = window\.__botHeartbeat \|\| window\.__houseBot \|\| null;/, "the Grok board's positions fall back to it");
   assert.match(viewer, /const __anyBotPulse = \(\) => window\.__botHeartbeat \|\| window\.__houseBot \|\| null;/, "the cards' close and held lookups fall back to it");
-  assert.match(viewer, /heartbeat\?\.ledger \|\| window\.__houseBot\?\.ledger \|\| null/, "the Overview's P&L tile falls back to it");
-  assert.match(viewer, /renderBotBook\(el, exec\.telemetry\?\.heartbeat \|\| heartbeat \|\| window\.__houseBot, feed/, "the Overview's book falls back to it");
+  assert.match(viewer, /const house = pulse\.houseBot \|\| window\.__houseBot \|\| null;/, "the owner's Overview reads the house book off the pulse it already fetched");
+  assert.match(viewer, /heartbeat\?\.ledger \|\| house\?\.ledger \|\| null/, "the Overview's P&L tile falls back to it");
+  assert.match(viewer, /renderBotBook\(el, exec\.telemetry\?\.heartbeat \|\| heartbeat \|\| house, feed\.length \? feed : marksFromPulse\(pulse\)/,
+    "the Overview's book falls back to it, priced from the pulse's marks when the feed is private");
+  /* And a visitor of the house floor gets the same book, priced the same way. */
+  assert.match(viewer, /const house = isHouse \? \(pulse\.houseBot \|\| window\.__houseBot \|\| null\) : null;/, "the house floor's visitor Overview reads the house book");
+  assert.match(viewer, /label: "Bot P&L · all-time", value: signedSol\(lg\.realizedSol\)/, "…and shows the bot's P&L");
+  assert.match(viewer, /renderBotBook\(el, house, marksFromPulse\(pulse\), \{ compact: true \}\)/, "…and the open positions with their details");
+  assert.match(viewer, /call_id: c\.id, symbol: c\.symbol, entry_ref: c\.entry, last_mark: c\.mark/, "the pulse's open-call marks are shaped like feed rows for the book");
   /* And a tab left open cannot keep drawing with yesterday's logic: the build writes
      its stamp to build.json and the page reloads itself when the stamp moves. */
   const build = fs.readFileSync(new URL("./scripts/build-viewer.mjs", import.meta.url), "utf8");

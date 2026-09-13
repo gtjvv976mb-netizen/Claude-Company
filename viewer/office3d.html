@@ -12455,6 +12455,15 @@ for (const group of ["calls", "activity", "performance"]) {
   });
 }
 
+/* THE DESK'S OWN MARKS, FOR A BOOK WITHOUT A FEED. renderBotBook prices an open position
+   against the desk's latest mark for the same call, which it reads off the floor feed —
+   owner-only at the route. The public heartbeat carries the same marks for every live
+   call (pnl.openCalls: id, symbol, entry, mark), so a visitor's book, and an owner's in
+   a tab whose session lapsed, is priced from those instead of reading "no desk mark". */
+const marksFromPulse = (pulse) => Array.isArray(pulse?.pnl?.openCalls)
+  ? pulse.pnl.openCalls.map((c) => ({ call_id: c.id, symbol: c.symbol, entry_ref: c.entry, last_mark: c.mark }))
+  : [];
+
 async function loadOverviewDashboard() {
   const el = document.getElementById("overviewbody");
   if (!el) return;
@@ -12538,7 +12547,8 @@ async function loadOverviewDashboard() {
        trades it never saw a single bot trade and the tile read a paper number as if it
        were money. The journal's totals come up in the heartbeat now; when they are here
        they are the answer to "have I lost or gained SOL". */
-    const ledger = exec.telemetry?.heartbeat?.ledger || heartbeat?.ledger || window.__houseBot?.ledger || null;
+    const house = pulse.houseBot || window.__houseBot || null;
+    const ledger = exec.telemetry?.heartbeat?.ledger || heartbeat?.ledger || house?.ledger || null;
     const reporting = exec.telemetry?.heartbeat?.reporting || heartbeat?.reporting || null;
     const signedSol = (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(4) + " SOL";
     let claudeco = null;
@@ -12587,7 +12597,7 @@ async function loadOverviewDashboard() {
     fact("$CLAUDECO", claudeco == null ? "\u2014" : claudeco, "");
     if (feedR?.body?.rent?.overdue) fact("Rent", "OVERDUE", "bad", "This floor's rent is overdue. Settle it from the tower.");
     el.appendChild(facts);
-    renderBotBook(el, exec.telemetry?.heartbeat || heartbeat || window.__houseBot, feed, { compact: true });
+    renderBotBook(el, exec.telemetry?.heartbeat || heartbeat || house, feed.length ? feed : marksFromPulse(pulse), { compact: true });
     /* THE OFF/ON BUTTON, BESIDE THE FIGURES (owner, 2026-09-09: "an off/on button";
        2026-09-08: "IF THEIR BOT IS ON (WHICH THEY CAN EASILY TURNOFF)"). One press.
        OFF asks for no confirmation — stopping is the safe direction — and ON does,
@@ -12668,6 +12678,34 @@ async function loadOverviewDashboard() {
       { label: "Open calls", value: feedPrivate ? "private" : String(live.length) },
     ]));
     if (isHouse) el.append(leadButton("See the calls", () => goTo("calls")));
+    /* THE HOUSE BOT'S BOOK, TO EVERY VISITOR OF THE HOUSE FLOOR (owner, 2026-09-13: the
+       profit, the loss, the open positions and their details, on the Overview). The
+       desk's public heartbeat carries it (office.js houseBotPublic); the positions are
+       priced from the same heartbeat's marks. An owner whose session lapsed lands here
+       too, and reads the same numbers rather than a private-looking blank. */
+    const house = isHouse ? (pulse.houseBot || window.__houseBot || null) : null;
+    if (house?.ledger) {
+      const lg = house.ledger;
+      const signedSol = (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(4) + " SOL";
+      const tone = (v) => v > 0 ? "good" : v < 0 ? "bad" : "";
+      el.append(chipRow([
+        { label: "Bot P&L · all-time", value: signedSol(lg.realizedSol), cls: tone(lg.realizedSol),
+          title: "From the house bot's own journal: " + lg.exits + " sale" + (lg.exits === 1 ? "" : "s") + " closed, net of network fees and what each cost to buy." },
+        { label: "Last 24h", value: signedSol(lg.realized24hSol) + " · " + lg.deployments + " bought, " + lg.exits + " sold", cls: tone(lg.realized24hSol) },
+        { label: "Open positions", value: String((house.held || []).length) + (lg.openSol > 0 ? " · " + lg.openSol.toFixed(4) + " SOL in" : ""),
+          title: "Coins the bot still holds are not counted in P&L until they sell." },
+      ]));
+      // chipRow draws three chips; the bot's own state takes its own row.
+      el.append(chipRow([
+        { label: "Bot", value: house.entryMode === "take-every-call" ? "TAKES EVERY CALL" : "RISK MODE",
+          cls: house.entriesEnabled === false ? "warn" : "good", title: house.seenAt ? "Reported by the bot " + window.PLAIN.plainAge(Date.now() - house.seenAt) + " ago." : "" },
+        { label: "New buys", value: house.entriesEnabled === false ? "OFF" : house.entriesEnabled === true ? "ON" : "—",
+          cls: house.entriesEnabled === false ? "warn" : house.entriesEnabled === true ? "good" : "" },
+        { label: "Reported", value: house.seenAt ? window.PLAIN.plainAge(Date.now() - house.seenAt) + " ago" : "—",
+          cls: house.ageMs != null && house.ageMs > 3 * 60e3 ? "warn" : "" },
+      ]));
+      renderBotBook(el, house, marksFromPulse(pulse), { compact: true });
+    }
   }
 
   /* THE CURRENT ROUND SITS ABOVE THE DETAILS, on purpose. Whether the quota is healthy
