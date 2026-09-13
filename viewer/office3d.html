@@ -4187,12 +4187,40 @@ function drawBossBoard() {
        last 24 hours, what is held now, and how many trades it took to get here. */
     const sol = (v) => (v > 0 ? "+" : v < 0 ? "\u2212" : "") + Math.abs(v).toFixed(3) + " sol";
     const tone = (v) => v > 0 ? "#b9e3b6" : v < 0 ? "#f0b2a2" : chalk;
-    row("bot p&l \u00b7 all-time", sol(lg.realizedSol), 140, tone(lg.realizedSol));
-    row("last 24h", sol(lg.realized24hSol), 200, tone(lg.realized24hSol));
+    const rowAt = (label, value, y, color, size = 46) => {
+      chalkText(x, label, 32, y, 30, dim, "left", 500);
+      chalkText(x, value, W - 32, y, size, color || chalk, "right");
+    };
+    rowAt("bot p&l \u00b7 all-time", sol(lg.realizedSol), 126, tone(lg.realizedSol));
+    rowAt("last 24h \u00b7 " + `${lg.deployments} bought, ${lg.exits} sold` + (bossData.owed ? ` \u00b7 ${bossData.owed} unreported` : ""),
+      sol(lg.realized24hSol), 176, tone(lg.realized24hSol), 40);
+    /* THE LIVE TRADES, on the boss's wall (owner, 2026-09-13). Each open position from
+       the bot's journal: what it is, what went in, and where it stands against the
+       desk's latest mark — the same estimate Grok's wall carries, because grokBook is
+       built from this heartbeat too. The stop and target ride as multiples of the fill. */
     const heldSol = bossData.held.reduce((a, p) => a + (Number(p.sol) || 0), 0);
-    row("holding", bossData.held.length ? `${bossData.held.length} coin${bossData.held.length === 1 ? "" : "s"} \u00b7 ${heldSol.toFixed(3)} sol in` : "nothing", 260);
-    row("trades", `${lg.deployments} bought \u00b7 ${lg.exits} sold` + (bossData.owed ? ` \u00b7 ${bossData.owed} unreported` : ""), 320,
-      bossData.owed ? "#f0b2a2" : chalk);
+    chalkText(x, bossData.held.length
+      ? `live trades \u00b7 ${bossData.held.length} \u00b7 ${heldSol.toFixed(3)} sol in`
+      : "live trades \u00b7 none open", 32, 226, 30, dim, "left", 500);
+    x.strokeStyle = dim; x.globalAlpha = .35; x.lineWidth = 1.5;
+    x.beginPath(); x.moveTo(28, 244); x.lineTo(W - 28, 246); x.stroke(); x.globalAlpha = 1;
+    let marks = [];
+    try { marks = Array.isArray(grokBook?.positions) ? grokBook.positions : []; } catch { marks = []; }
+    let py = 274;
+    for (const p of bossData.held.slice(0, 4)) {
+      const g = marks.find((m) => m.symbol === p.symbol) || null;
+      const pnl = g?.pnlPct;
+      const name = String(p.symbol || String(p.mint || "").slice(0, 6)).slice(0, 10);
+      const levels = (p.stop ? `stop ${((p.stop - 1) * 100).toFixed(0)}%` : "") +
+        (p.target ? `${p.stop ? " \u00b7 " : ""}target +${((p.target - 1) * 100).toFixed(0)}%` : "");
+      chalkText(x, name, 32, py, 34, chalk, "left");
+      chalkText(x, `${Number(p.sol).toFixed(3)} sol in${levels ? " \u00b7 " + levels : ""}`, 200, py, 26, dim, "left", 500);
+      chalkText(x, pnl == null ? "no mark yet" : (pnl >= 0 ? "+" : "\u2212") + Math.abs(pnl).toFixed(1) + "%",
+        W - 32, py, 34, pnl == null ? dim : pnl >= 0 ? "#b9e3b6" : "#f0b2a2", "right");
+      py += 34;
+    }
+    if (bossData.held.length > 4)
+      chalkText(x, `+${bossData.held.length - 4} more on the WALL-ST-E tab`, 32, py, 24, dim, "left", 500);
   } else {
     row("net p&l", net == null ? "\u2014" : (net >= 0 ? "+$" : "\u2212$") + Math.abs(net).toLocaleString(undefined, { maximumFractionDigits: 0 }),
       152, net == null ? dim : net >= 0 ? "#b9e3b6" : "#f0b2a2");
@@ -4205,7 +4233,7 @@ function drawBossBoard() {
   // boss's wall used to carry only settled history, which said nothing about
   // what was open at this minute.
   const st = window.__liveBook;
-  if (st) {
+  if (st && !lg) {
     chalkText(x, "live", 32, 372, 30, dim, "left", 500);
     const bits = [
       `${st.liveCalls} on the sheet`,
