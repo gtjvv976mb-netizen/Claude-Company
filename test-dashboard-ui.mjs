@@ -16,6 +16,7 @@ const destinations = [...html.matchAll(
 )].map((match) => [match[1], match[2].trim()]);
 assert.deepEqual(destinations, [
   ["overview", "Overview"],
+  ["guide", "Guide"],            // added 2026-09-13: the real site, recorded and narrated
   ["calls", "Calls"],
   ["wallste", "WALL-ST-E"],
   ["hawkai", "HAWK-AI"],         // added 2026-09-11: the sniper lane is a second bot, not a WALL-ST-E view
@@ -24,13 +25,13 @@ assert.deepEqual(destinations, [
   ["activity", "Activity"],
   ["performance", "Performance"],
   ["settings", "Settings"],
-], "the redesigned HUD exposes nine purposeful destinations in order");
+], "the redesigned HUD exposes ten purposeful destinations in order");
 assert.match(html, /id="primary-nav" role="tablist"/);
 /* The COUNT is deliberately re-anchored rather than removed. Nav is the one surface a
    half-finished feature leaks onto first, and the list above already pins order and
    labels; this second assertion is what catches a tab added somewhere OTHER than the
    list -- a stray data-destination in a workspace, a duplicate in a mobile rail. */
-assert.equal((html.match(/data-destination=/g) || []).length, 9);
+assert.equal((html.match(/data-destination=/g) || []).length, 10);
 assert.doesNotMatch(html.slice(html.indexOf('id="primary-nav"'), html.indexOf("</div>", html.indexOf('id="primary-nav"'))), />Whales</,
   "Whales is no longer a visible destination");
 
