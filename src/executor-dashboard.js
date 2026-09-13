@@ -104,6 +104,7 @@ const publicHealth = (value) => {
     state,
     entriesPaused: value.entriesPaused === true,
     hardStop: value.hardStop === true,
+    entryMode: value.entryMode === "take-every-call" ? "take-every-call" : value.entryMode === "risk" ? "risk" : null,
     // The off switch, as the BOT reports it: its effective entry state, and the flag it
     // last read from the feed. See botRunControl below for how the two are reconciled.
     entriesEnabled: triState(value.entriesEnabled),

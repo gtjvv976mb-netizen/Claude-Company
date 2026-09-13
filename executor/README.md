@@ -650,6 +650,40 @@ rolling 24-hour realized-loss
 limit, available balance, and maximum-open-position rule. These are loss controls,
 not evidence of an edge.
 
+## Taking every published call
+
+By default the bot decides for itself whether a published call is worth buying: Kelly's
+verdicts, the net reward-to-risk of the bracket, the per-name risk cap and book heat may
+refuse a call or shrink it, and the route ladder refuses a coin whose trading costs
+already sit at or below the authored stop. `ENTRY_MODE="take-every-call"` is the owner's
+instruction to buy every call the desk publishes, at one fixed size, and to treat those
+edge rails as advisory: each one still runs and is written to the log as a `WARN` line,
+but none of them refuses.
+
+What still refuses in that mode, because no instruction can spend money that is not
+there or hold a position with no floor: a call with no stop, the rolling 24-hour
+realized-loss entry brake, the open-position count, the daily deploy cap, the spendable
+balance, the minimum viable size, the call-age and mark checks, and every custody, fee,
+rent and price-impact rule on the transaction itself. The route's own caps (round-trip
+loss and price impact) are never advisory.
+
+Arming it is a sentence, like every other raise of risk here. Stop the service, add
+three lines to the protected env file, and load:
+
+```bash
+# in $ENV_FILE
+ENTRY_MODE="take-every-call"
+FIXED_SOL="0.5"
+ENTRY_MODE_ACK="I take every published call on <burner public key> at 0.5 SOL"
+```
+
+`FIXED_SOL` may not exceed `MAX_SOL_PER_TRADE`. The sentence must name the wallet that
+signs and the exact `FIXED_SOL` figure; the bot refuses to start otherwise and prints
+the sentence it expected. The boot log then says `ENTRY MODE take-every-call`, the
+heartbeat reports the mode, and the WALL-ST-E tab's health grid reads `TAKES EVERY
+CALL`. An upgrade carries the three lines forward. Remove `ENTRY_MODE` (or set it to
+`risk`) and load again to return to risk-sized entries.
+
 ## Arming HAWK-AI, the launch sniper, with real money
 
 HAWK-AI is the executor's second lane. It listens to pump.fun's own program logs over the

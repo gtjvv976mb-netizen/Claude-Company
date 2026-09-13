@@ -77,6 +77,10 @@ export function executorHeartbeatHealth({
      echoed rather than obeyed silently: the page shows what the BOT says, never what the
      server asked for, because a bot that is asleep has agreed to nothing. */
   deskEntriesEnabled = null,
+  /* How the bot decides whether to buy: "risk" (the rails decide) or "take-every-call"
+     (the owner's instruction; the edge rails are advisory). Reported so the board says
+     which bot it is looking at. */
+  entryMode = "risk",
   lastTickCompletedAt = 0, lastFeedSuccessAt = 0, consecutiveFeedFailures = 0,
   consecutiveTickFailures = 0, feedRollback = false, executionReadiness = null,
   caps = null, runtimeCommit = null, runtimeFingerprint = null,
@@ -143,6 +147,7 @@ export function executorHeartbeatHealth({
     // bot, no reins: the server learns it is being mirrored, it cannot switch it on or off.
     deskUnreachableSince: unreachableSince,
     mirrorActive: mirrorActive === true,
+    entryMode: entryMode === "take-every-call" ? "take-every-call" : "risk",
     markUnavailable,
     executionReadiness: executionReadiness && typeof executionReadiness === "object" ? {
       ready: executionReadiness.ready === true,

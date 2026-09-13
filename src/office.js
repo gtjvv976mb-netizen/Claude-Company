@@ -480,6 +480,7 @@ export function sanitizeExecutorHealth(value) {
     state,
     entriesPaused: value.entriesPaused === true,
     hardStop: value.hardStop === true,
+    entryMode: value.entryMode === "take-every-call" ? "take-every-call" : value.entryMode === "risk" ? "risk" : null,
     /* THE BOT'S ECHO OF THE OFF SWITCH, AND IT IS TRI-STATE ON PURPOSE.
      * `entriesEnabled` is the bot's EFFECTIVE state — no switch is currently refusing a
      * new entry — and `deskEntriesEnabled` is the value it last read out of the feed's

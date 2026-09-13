@@ -13392,6 +13392,10 @@ async function loadWallsteDashboard({ background = false } = {}) {
         lastTickAt ? dashWhen(lastTickAt) : "from outbound heartbeat"),
       dashMetric("Last read of the desk", lastFeedAt ? dashAge(Date.now() - lastFeedAt) : "Not reported",
         lastFeedAt ? dashWhen(lastFeedAt) : "from outbound heartbeat"),
+      dashMetric("Entry mode", health?.entryMode === "take-every-call" ? "TAKES EVERY CALL" : health?.entryMode === "risk" ? "Risk-sized" : "Not reported",
+        health?.entryMode === "take-every-call"
+          ? "every published call is bought at the fixed size; the edge rails are advisory, the loss brake and money rails still bind"
+          : "the rails decide whether and how much"),
       dashMetric("Buying paused?", health?.entriesPaused === true ? "Yes" : health ? "No" : "Unknown",
         "self-reported control state"),
       dashMetric("Hard stop", health?.hardStop === true ? "ACTIVE" : health ? "Clear" : "Unknown",

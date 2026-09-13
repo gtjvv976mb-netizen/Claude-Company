@@ -89,6 +89,8 @@ const ALLOWED_ENV = new Set([
      exit. Still accepted so an existing env file validates; the poller ignores it. */
   "EXIT_MARK_OUTAGE_LATCH_MS",
   "EXPECTED_NETWORK_FEE_LAMPORTS", "DAILY_SOL_CAP", "EXECUTE", "EXECUTOR_SOURCE_COMMIT",
+  /* The entry mode, its arming sentence, and the per-trade size it buys at. */
+  "ENTRY_MODE", "ENTRY_MODE_ACK", "FIXED_SOL",
   "FEE_RESERVE_SOL", "FINALITY_TIMEOUT_MS", "F_DEFAULT", "F_NAME_MAX", "HARD_STOP_FILE",
   "INIT_ONLY", "JUPITER_API_BASE", "JUPITER_API_KEY", "KEYPAIR", "LIVE_CAPS_ACK",
   "LIVE_STATE_INIT_ACK", "LIVE_TRADING_ACK", "LOCK_FILE",

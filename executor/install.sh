@@ -1834,6 +1834,21 @@ fi
     write_env_line SOLANA_RPC "$RPC"
     if [ -n "$SECONDARY_RPC" ]; then write_env_line SOLANA_RPC_SECONDARY "$SECONDARY_RPC"; fi
   fi
+  # OPERATOR DIALS CARRIED FORWARD. Everything above is what this installer asked for or
+  # derived; the lines below are what the operator set by hand afterwards — the entry
+  # mode and its sentence, the per-trade size, the risk dials, and the launch lane's
+  # arming lines. Until 2026-09-13 an upgrade dropped all of them silently: a bot armed
+  # for the sniper came back from an upgrade with the lane off. Carried verbatim; the
+  # runner validates each against its own allow-list and bounds before anything runs.
+  if [ "$UPGRADE" -eq 1 ]; then
+    for dial in ENTRY_MODE ENTRY_MODE_ACK FIXED_SOL F_DEFAULT F_NAME_MAX BOOK_HEAT_MAX MIN_CONVICTION \
+      MAX_OPEN_POSITIONS TRAIL_PCT MAX_AGE_HOURS \
+      SNIPE_LANE SNIPE_TICK_MS SNIPE_MAX_SOL_PER_TRADE SNIPE_DAILY_SOL_CAP SNIPE_LIVE_ACK \
+      SNIPE_TAKE_AT_ENTRY_X SNIPE_STOP_FRAC SNIPE_HOLD_MAX_MS SNIPE_PRIORITY_FEE_LAMPORTS \
+      SNIPE_MAX_PRICE_IMPACT_PCT SNIPE_MAX_ROUND_TRIP_LOSS_PCT; do
+      if upgrade_env_read "$dial" && [ -n "$UPGRADE_VALUE" ]; then write_env_line "$dial" "$UPGRADE_VALUE"; fi
+    done
+  fi
 } > "$ENV_NEXT"
 chmod 600 "$ENV_NEXT"
 
