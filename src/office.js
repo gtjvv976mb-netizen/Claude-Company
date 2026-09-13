@@ -39,6 +39,17 @@ import * as shadowBook from "./shadow.js";   // creates dev_reputation; the over
 import * as copy from "./copy.js";
 import * as perf from "./perf.js";
 import * as alerts from "./alerts.js";
+
+/* THE TOKEN LOGOS THE WALLS DRAW, kept for an hour. The walls are WebGL canvases, and a
+   cross-origin image with no CORS header taints a canvas that WebGL then refuses to
+   upload — and the DexScreener CDN the desk's calls point at sends none. So the desk
+   fetches the logo the call recorded and serves it under its own origin with the
+   header. Keyed by mint; bounded; a stale entry is served rather than nothing when
+   upstream fails. Only URLs the desk itself wrote into `calls.image_url` are fetched,
+   and only from the hosts the scanner uses: this is not an open image proxy. */
+const logoCache = new Map();
+const LOGO_TTL_MS = 60 * 60_000;
+const LOGO_HOSTS = /^https:\/\/(?:cdn|dd)\.dexscreener\.com\//;
 import * as identity from "./identity.js";
 import { latestCandidateBoard } from "./candidate-board.js";
 import { walletSolBalance } from "./data/solana.js";
@@ -1245,6 +1256,38 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           return json(200, latestCandidateBoard({ coinType: "memecoin", perBand: 5 }));
 
         // The house record, computed from chain data rather than self-reported.
+        /* A CALL'S TOKEN LOGO, under this origin — see logoCache above. Public, like the
+           call it belongs to; 404 for a mint the desk never published or never got art for. */
+        const logoMatch = url.pathname.match(/^\/api\/logo\/([1-9A-HJ-NP-Za-km-z]{32,44})$/);
+        if (logoMatch) {
+          const mint = logoMatch[1];
+          const row = db.prepare("SELECT image_url FROM calls WHERE mint=? AND image_url IS NOT NULL ORDER BY id DESC LIMIT 1").get(mint);
+          const src = String(row?.image_url || "");
+          if (!LOGO_HOSTS.test(src)) return json(404, { error: "no logo on record for that mint" });
+          const cached = logoCache.get(mint) || null;
+          let entry = cached && Date.now() - cached.at < LOGO_TTL_MS ? cached : null;
+          if (!entry) {
+            try {
+              const upstream = new URL(src);
+              if (upstream.searchParams.has("width")) { upstream.searchParams.set("width", "96"); upstream.searchParams.set("height", "96"); upstream.searchParams.set("quality", "85"); }
+              const r = await fetch(upstream, { signal: AbortSignal.timeout(6000), headers: { accept: "image/*" }, redirect: "follow" });
+              const type = String(r.headers.get("content-type") || "").split(";")[0].trim();
+              if (!r.ok || !/^image\/(?:png|jpeg|webp|gif|avif)$/.test(type)) throw new Error(`upstream ${r.status} ${type || "no type"}`);
+              const buf = Buffer.from(await r.arrayBuffer());
+              if (buf.length > 512 * 1024) throw new Error("logo too large");
+              entry = { buf, type, at: Date.now() };
+              logoCache.set(mint, entry);
+              if (logoCache.size > 500) logoCache.delete(logoCache.keys().next().value);
+            } catch (e) {
+              if (!cached) return json(502, { error: "logo unavailable upstream: " + String(e?.message || e).slice(0, 120) });
+              entry = cached;   // stale beats blank on a wall
+            }
+          }
+          res.writeHead(200, { "content-type": entry.type, "cache-control": "public, max-age=3600",
+            "access-control-allow-origin": "*", "x-content-type-options": "nosniff" });
+          res.end(entry.buf);
+          return;
+        }
         if (url.pathname === "/api/record") return json(200, perf.houseRecord());
         /* THE SCOREBOARD, public and aggregate: per seat, how often its direction was right
            and what the coins it killed did next. Counts and averages only — no prompt, no
