@@ -61,11 +61,17 @@ const rollback = sanitizeExecutorHealth({ state: "healthy", feedRollback: true,
 assert.equal(rollback.feedRollback, true);
 assert.equal(rollback.state, "degraded", "a feed rollback cannot persist as healthy");
 
+/* A probe that missed a second after a proof is weather: the state reads through the
+   15-minute grace the entry gate uses, while the latest verdict is kept as it is. */
+const flapped = sanitizeExecutorHealth({ state: "healthy", feedRollback: false,
+  executionReadiness: { ...ready.executionReadiness, ready: false } }, { nowMs: now });
+assert.equal(flapped.executionReadiness.ready, false, "the latest verdict is still reported");
+assert.equal(flapped.state, "healthy", "one miss inside the grace does not make a proved bot degraded");
 const failedReadiness = sanitizeExecutorHealth({ state: "healthy", feedRollback: false,
-  executionReadiness: { ...ready.executionReadiness, ready: false } });
+  executionReadiness: { ...ready.executionReadiness, ready: false, lastSuccessAt: now - 16 * 60_000 } }, { nowMs: now });
 assert.equal(failedReadiness.executionReadiness.ready, false);
 assert.equal(failedReadiness.state, "degraded",
-  "a failed execution probe cannot persist as healthy");
+  "a failed execution probe with no proof inside the grace cannot persist as healthy");
 
 const malformed = sanitizeExecutorHealth({ state: "healthy", feedRollback: "false",
   executionReadiness: { ready: true, lastSuccessAt: String(now), observedAt: now,

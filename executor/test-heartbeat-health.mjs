@@ -66,6 +66,21 @@ const subminimumCaps = executorHeartbeatHealth({ caps: {
 assert.equal(subminimumCaps.caps, null);
 assert.equal(subminimumCaps.state, "degraded");
 assert.equal(executorHeartbeatHealth({ executionReadiness: { ready: false } }).state, "degraded");
+/* A REHEARSAL THAT PROVED MINUTES AGO STILL COUNTS: one missed probe (an incoherent RPC
+   snapshot, a venue refusing the simulation) does not make a buying bot degraded. */
+{
+  const t = 1_800_000_000_000;
+  assert.equal(executorHeartbeatHealth({ nowMs: t, executionReadiness: { ready: false, lastSuccessAt: t - 5 * 60_000, observedAt: t } }).state,
+    "healthy", "a miss five minutes after a proof is weather");
+  assert.equal(executorHeartbeatHealth({ nowMs: t, executionReadiness: { ready: false, lastSuccessAt: t - 15 * 60_000, observedAt: t } }).state,
+    "healthy", "…up to the whole grace");
+  assert.equal(executorHeartbeatHealth({ nowMs: t, executionReadiness: { ready: false, lastSuccessAt: t - 15 * 60_000 - 1, observedAt: t } }).state,
+    "degraded", "…and one millisecond past it, the bot has really stopped proving");
+  assert.equal(executorHeartbeatHealth({ nowMs: t, executionReadiness: { ready: false, lastSuccessAt: t + 60_000, observedAt: t } }).state,
+    "degraded", "a proof from the future is not a proof");
+  const latest = executorHeartbeatHealth({ nowMs: t, executionReadiness: { ready: false, lastSuccessAt: t - 5 * 60_000, observedAt: t } });
+  assert.equal(latest.executionReadiness.ready, false, "the latest verdict is still reported as it is");
+}
 assert.equal(executorHeartbeatHealth({ positions: [{ exitExecutionRequired: true }] }).state, "exits-blocked");
 assert.equal(executorHeartbeatHealth({ positions: [{ manualExitRequired: true }] }).state, "manual-action");
 assert.equal(executorHeartbeatHealth({ positions: [{ callIdentityIncomplete: true }] }).state, "degraded");

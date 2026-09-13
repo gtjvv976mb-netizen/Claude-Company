@@ -422,7 +422,7 @@ export function sanitizeExecutorReporting(value) {
   };
 }
 
-export function sanitizeExecutorHealth(value) {
+export function sanitizeExecutorHealth(value, { nowMs = Date.now() } = {}) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const allowed = new Set(["healthy", "entries-paused", "degraded", "exits-blocked", "manual-action"]);
   let state = allowed.has(String(value.state)) ? String(value.state) : "degraded";
@@ -465,13 +465,22 @@ export function sanitizeExecutorHealth(value) {
       ? readinessObject.amountLamports : 0;
     const ready = readinessObject.ready === true && lastSuccessAt > 0 && observedAt > 0 &&
       route === "wsol-usdc" && providers === 2 && amountLamports > 0;
+    /* A PROOF INSIDE THE GRACE STILL COUNTS — the same rule the entry gate applies
+       (alerts.js executorReadiness). The probe runs every two minutes on whatever route
+       Jupiter returns; one miss (an incoherent RPC snapshot, a venue refusing the
+       simulation) used to persist the floor DEGRADED for the two minutes until the next
+       proof, on a bot that was buying in between (2026-09-13). The latest verdict is
+       kept as it is in `executionReadiness.ready`; only the state reads through the
+       grace. A bot whose proofs have really stopped ages out of it in eight probes. */
+    const provedRecently = lastSuccessAt > 0 && nowMs - lastSuccessAt >= 0 &&
+      nowMs - lastSuccessAt <= alerts.READINESS_PROOF_GRACE_MS;
     /* The bot's own reason, carried through so the dashboard can say more than 0/2.
        Bounded and sanitised like everything else on this self-reported surface: it is an
        error string about a route and a balance, never a secret or a key path. */
     const lastError = typeof readinessObject.lastError === "string"
       ? readinessObject.lastError.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 300) : null;
     executionReadiness = { ready, lastSuccessAt, observedAt, route, providers, amountLamports, lastError };
-    readinessFailed = !ready;
+    readinessFailed = !(ready || provedRecently);
   }
   const rawCaps = value.caps;
   const capsObject = rawCaps && typeof rawCaps === "object" && !Array.isArray(rawCaps)
