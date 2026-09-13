@@ -180,6 +180,13 @@ Options:
                         still win over anything carried.
   --dry-run             Install without arming: EXECUTE=0, nothing is signed
                         and nothing is sent. The opt-out, not the default.
+  --resume-entries      Lift the entry pause as soon as the new release is
+                        running. Every install and upgrade comes up PAUSED
+                        (the PAUSE_ENTRIES file) so that starting to buy is a
+                        separate, visible act; this flag is that act, given
+                        up front. Nothing else changes: caps, hard stop and
+                        readiness still bind, and an empty wallet still
+                        trades nothing.
   --expected-commit SHA The exact 40-character published commit to sign with.
                         Live never runs code downloaded from the site. If you
                         do not pass it, you are asked for it; the site prints
@@ -243,10 +250,16 @@ HELP
 }
 # END HELP
 
+# Lift the entry pause the moment the new release is running (see --resume-entries).
+# Off by default: an upgrade that comes up paused is the reviewed behaviour, and the
+# operator lifts it as a separate act unless they said otherwise on this command line.
+RESUME_ENTRIES=0
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --help|-h) usage; exit 0;;
     --live) MODE="live"; shift;;
+    --resume-entries) RESUME_ENTRIES=1; shift;;
     # Kept, and now the default it names. Scripts and documents that pass it keep
     # working byte for byte; --dry-run is the flag that changes anything.
     --dry-run) MODE="paper"; shift;;
@@ -2001,6 +2014,22 @@ fi
 prune_releases "$RELEASES_DIR" "$(readlink "$CURRENT_LINK" 2>/dev/null || true)" \
   "$RELEASE_DIR" "${KEEP_RELEASES:-3}"
 
+# THE ACT OF STARTING TO BUY, GIVEN UP FRONT. Every install and upgrade comes up with
+# the entry pause in place (created above, and required by the versioned macOS path),
+# and until 2026-09-13 the operator lifted it by hand after every upgrade — or forgot,
+# and read "New buys · OFF" on the floor for an hour while the desk withheld every
+# call. --resume-entries lifts it here, and only here: after the new release is the
+# running one, never before, so a failed activation still comes up paused. The hard
+# stop is not touched; nothing about the caps, the readiness rehearsal or the wallet
+# changes. On a dry run there is nothing to lift into: EXECUTE=0 buys nothing anyway.
+if [ "$RESUME_ENTRIES" -eq 1 ] && [ "${ACTIVATION_COMMITTED:-0}" -eq 1 ]; then
+  if rm -f "$PAUSE_FILE" 2>/dev/null; then
+    echo "▶ entry pause lifted (--resume-entries): the bot may open new positions once it proves readiness"
+  else
+    echo "▶ --resume-entries: could not remove $PAUSE_FILE; lift it by hand: rm -f $PAUSE_FILE" >&2
+  fi
+fi
+
 case "$MODE" in live) MODE_BANNER="LIVE";; *) MODE_BANNER="PAPER";; esac
 SECRET=""; JUPITER_KEY=""; LIVE_ACK=""; LIVE_CAPS_ACK=""; CAPS_ACK_EXPECTED=""; REPLY=""; CRED_VALUE=""
 # UPGRADE_VALUE is the variable every carried credential passed through on its way out
@@ -2020,7 +2049,7 @@ cat <<DONE
   Max $MAX_SOL SOL/trade · $DAILY_CAP SOL/rolling 24h deploy
   Realized-loss entry brake $DAILY_LOSS_CAP SOL/rolling 24h
   Pause entries:  install -m 600 /dev/null $PAUSE_FILE
-  Resume entries: rm -f $PAUSE_FILE
+  Resume entries: rm -f $PAUSE_FILE   (or pass --resume-entries next time)
   Hard stop:      install -m 600 /dev/null $HARD_STOP_FILE
   Protected env:  $ENV_FILE
   Durable state:  $STATE_DB
