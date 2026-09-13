@@ -45,6 +45,11 @@ const ASSETS = [
   "banner-1500x500.png", "banner-1200x630.png",
   "codex-turntable-cover.png", "codex-turntable.gif", "codex-turntable.mp4",
   "grox-mulder-front.png",
+  /* The GUIDE tab's recording of the real site, narrated, and its chapter marks. Made
+     by scripts/record-guide.mjs (Playwright over the live pages, Piper for the voice);
+     committed under token/ like the other finished media, because the build must not
+     depend on a browser, a voice model and the live site all being available. */
+  "guide-walkthrough.mp4", "guide-walkthrough.webm", "guide-chapters.json",
 ];
 const PUBLIC_FONTS = ["Archivo-Bold.ttf", "InstrumentSerif-Regular.ttf"];
 // Publish only the finished article artifacts. README files, render templates,
