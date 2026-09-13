@@ -4179,7 +4179,14 @@ function drawBossBoard() {
     chalkText(x, value, W - 32, y, 58, color || chalk, "right");
   };
   const net = bossData.net;
-  const lg = bossData.ledger;
+  /* Read at draw time, not only at poll time: the panels set window.__botHeartbeat on
+     their own 30s cadence, and the wall is redrawn with every feed pass. */
+  const live = window.__botHeartbeat?.ledger ? window.__botHeartbeat : null;
+  const lg = bossData.ledger || live?.ledger || null;
+  if (lg && !bossData.ledger) {
+    bossData.held = Array.isArray(live.held) ? live.held : [];
+    bossData.owed = Number(live.reporting?.fillsOwed) > 0 ? Number(live.reporting.fillsOwed) : 0;
+  }
   if (lg) {
     /* THE BOT'S LEDGER, NOT THE DESK'S PAPER. The wall chalked the desk record's USD,
        which is a chain scan of the floor owner's wallet and never saw a bot trade. When
@@ -4268,10 +4275,15 @@ async function pollBossBoard() {
   const floorNo = Number(fp[1]);
   const base = window.__API_BASE__ || "";
   try {
+    /* WITH THE OWNER'S SESSION. The room hands the bot's heartbeat only to the wallet
+       that holds the floor, and this poll sent no token — so the boss's wall could never
+       see the ledger it was written to chalk, however fresh the bot's pulse was. */
+    const token = (() => { try { return localStorage.getItem("cc_token"); } catch { return null; } })();
+    const authed = token ? { headers: { authorization: "Bearer " + token } } : {};
     const [recR, lbR, roomR] = await Promise.all([
       fetch(`${base}${floorNo === 50 ? "/api/record" : `/api/floor/${floorNo}/record`}`),
       fetch(`${base}/api/leaderboard`).catch(() => null),
-      fetch(`${base}/api/floor/${floorNo}`).catch(() => null),
+      fetch(`${base}/api/floor/${floorNo}`, authed).catch(() => null),
     ]);
     const rec = await recR.json();
     const lb = lbR ? await lbR.json().catch(() => null) : null;
@@ -4281,6 +4293,9 @@ async function pollBossBoard() {
     let hb = null;
     try { hb = roomB?.executorHeartbeat ? JSON.parse(roomB.executorHeartbeat) : null; } catch { hb = null; }
     if (hb) window.__botHeartbeat = hb;
+    /* And when the room gave nothing (a visitor, or a token the desk rejected), the
+       pulse the WALL-ST-E and Overview panels fetched is just as good. */
+    if (!hb && window.__botHeartbeat?.ledger) hb = window.__botHeartbeat;
     const floors = lb?.floors ?? [];
     const idx = floors.findIndex((f) => Number(f.floor_no ?? f.floorNo ?? f.n) === floorNo);
     const id = roomB?.identity ?? {};
