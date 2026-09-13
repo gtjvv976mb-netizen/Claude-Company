@@ -42,7 +42,7 @@ import { POLICY_DEFAULTS, POLICY_VERSION, pricePolicy } from "./trade-policy.mjs
 export { POLICY_VERSION };
 
 export const DEFAULTS = {
-  maxSolPerTrade: 0.4,       // hard ceiling; Kelly may size well under it
+  maxSolPerTrade: 1,         // hard ceiling (0.4 -> 1, 2026-09-12); Kelly may size well under it
   dailySolCap: 1000,         // owner removed the daily cap; the wallet balance binds
   dailyLossLimitSol: 0.4,    // realized losses that stop new entries for the day
   maxOpenPositions: 24,      // a sentinel; risk decides, not a count (see poller LIVE_LIMITS)

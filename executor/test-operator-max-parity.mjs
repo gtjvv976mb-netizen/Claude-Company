@@ -38,6 +38,10 @@ const poller = read("poller.mjs");
 const runner = read("launchd-runner.mjs");
 const install = read("install.sh");
 const dashboard = fs.readFileSync(path.join(here, "..", "src", "executor-dashboard.js"), "utf8");
+/* The heartbeat vouches for caps up to a bound of its own. It held the 0.05/0.5/0.15
+   canary ceilings long after every other copy moved, so a bot armed at 0.4 SOL told the
+   desk it was "degraded" with no caps. It is a copy of the same number and is held here. */
+const heartbeat = read("heartbeat-health.mjs");
 
 const CAPS = [
   {
@@ -46,6 +50,7 @@ const CAPS = [
     runner: /OPERATOR_MONEY_MAX = Object\.freeze\(\{[\s\S]*?MAX_SOL_PER_TRADE:\s*([\d.]+)/,
     install: /^LIVE_OPERATOR_MAX_SOL="([\d.]+)"/m,
     dashboard: /EXECUTOR_OPERATOR_MAXIMA = Object\.freeze\(\{\s*maxSolPerTrade:\s*([\d.]+)/,
+    heartbeat: /HEARTBEAT_CAP_BOUNDS = Object\.freeze\(\{\s*maxSolPerTrade:\s*([\d.]+)/,
   },
   {
     label: "daily deploy",
@@ -53,6 +58,7 @@ const CAPS = [
     runner: /OPERATOR_MONEY_MAX = Object\.freeze\(\{[\s\S]*?DAILY_SOL_CAP:\s*([\d.]+)/,
     install: /^LIVE_OPERATOR_MAX_DAILY_CAP="([\d.]+)"/m,
     dashboard: /EXECUTOR_OPERATOR_MAXIMA = Object\.freeze\(\{[\s\S]*?rolling24hDeploySol:\s*([\d.]+)/,
+    heartbeat: /HEARTBEAT_CAP_BOUNDS = Object\.freeze\(\{[^}]*dailySolCap:\s*([\d.]+)/,
   },
   {
     label: "realized-loss brake",
@@ -60,23 +66,25 @@ const CAPS = [
     runner: /OPERATOR_MONEY_MAX = Object\.freeze\(\{[\s\S]*?DAILY_LOSS_LIMIT_SOL:\s*([\d.]+)/,
     install: /^LIVE_OPERATOR_MAX_DAILY_LOSS_CAP="([\d.]+)"/m,
     dashboard: /EXECUTOR_OPERATOR_MAXIMA = Object\.freeze\(\{[\s\S]*?rolling24hRealizedLossBrakeSol:\s*([\d.]+)/,
+    heartbeat: /HEARTBEAT_CAP_BOUNDS = Object\.freeze\(\{[^}]*dailyLossLimitSol:\s*([\d.]+)/,
   },
 ];
 
 for (const c of CAPS) {
-  ok(`the ${c.label} operator maximum is the same number in all four places`, () => {
+  ok(`the ${c.label} operator maximum is the same number in all five places`, () => {
     const values = {
       "poller.mjs OPERATOR_MAX": num(poller, c.poller, `poller ${c.label}`),
       "launchd-runner.mjs OPERATOR_MONEY_MAX": num(runner, c.runner, `runner ${c.label}`),
       "install.sh LIVE_OPERATOR_MAX_*": num(install, c.install, `install ${c.label}`),
       "executor-dashboard.js EXECUTOR_OPERATOR_MAXIMA": num(dashboard, c.dashboard, `dashboard ${c.label}`),
+      "heartbeat-health.mjs HEARTBEAT_CAP_BOUNDS": num(heartbeat, c.heartbeat, `heartbeat ${c.label}`),
     };
     const distinct = [...new Set(Object.values(values))];
     assert.equal(distinct.length, 1,
       `the ${c.label} ceiling disagrees across copies — a raise armed in one place is ` +
       `refused by another:\n    ` +
       Object.entries(values).map(([k, v]) => `${k} = ${v}`).join("\n    "));
-    console.log(`       ${c.label}: ${distinct[0]} SOL in all four`);
+    console.log(`       ${c.label}: ${distinct[0]} SOL in all five`);
   });
 }
 

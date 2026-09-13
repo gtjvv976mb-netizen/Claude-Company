@@ -11,13 +11,13 @@
  *
  * AND THE AMOUNT WAS STRANDED TOO. probe-size.js reads the largest per-trade cap a live
  * bot declares, and office.js's readiness sanitiser still zeroed any rehearsal above
- * 50,000,000 lamports (0.05 SOL) while the executor's declared ceiling is 0.4 —  so a
+ * 50,000,000 lamports (0.05 SOL) while the executor's declared ceiling was 0.4 (now 1) — so a
  * correctly-armed bot was persisted `degraded` for ever and the probe fell back to the
  * stated $15 constant instead of quoting the bot's real cap.
  *
  * WHAT THIS FILE PROVES, on the wire rather than on a fixture: the URL Jupiter is
- * actually asked for names MINTS.SOL and 400,000,000 lamports when a heartbeat declares
- * 0.4 SOL; the USDC fallback survives when no bot is reporting; both legs' hops and amms
+ * actually asked for names MINTS.SOL and the ceiling's own lamports when a heartbeat declares
+ * it; the USDC fallback survives when no bot is reporting; both legs' hops and amms
  * reach ev.exitProbe; `multi_hop_route` is a JUDGMENT note that never enters `fails`;
  * and `unverified_exit` still refuses a probe whose buy OR sell leg failed.
  *
@@ -59,7 +59,7 @@ console.log("\n1. THE LEG: WSOL at the bot's own lamports, USDC only when no bot
      configure past OPERATOR_MAX.maxSolPerTrade, and the desk's own band mirrors it. */
   const ARMED_SOL = EXECUTOR_OPERATOR_MAXIMA.maxSolPerTrade;
   ok(`the executor's declared per-trade ceiling is ${ARMED_SOL} SOL, and the desk's band matches it`,
-    ARMED_SOL === 0.4 && BOT_CAP_SOL_MAX === ARMED_SOL,
+    ARMED_SOL === 1 && BOT_CAP_SOL_MAX === ARMED_SOL,
     `EXECUTOR_OPERATOR_MAXIMA.maxSolPerTrade=${ARMED_SOL}, BOT_CAP_SOL_MAX=${BOT_CAP_SOL_MAX}`);
 
   heartbeat(ARMED_SOL);
@@ -185,6 +185,9 @@ globalThis.fetch = async (url) => {
 
 try {
   heartbeat(EXECUTOR_OPERATOR_MAXIMA.maxSolPerTrade);
+  /* Raised 0.4 -> 1 SOL on 2026-09-12 with every other copy of the ceiling; the lamports
+     are derived from the declared ceiling so this file cannot pin a stale number again. */
+  const ARMED_LAMPORTS = String(Math.round(EXECUTOR_OPERATOR_MAXIMA.maxSolPerTrade * 1e9));
   quotes.length = 0;
   const armedEv = await gather(MINT);
   const [buyQ, sellQ] = quotes;
@@ -197,18 +200,18 @@ try {
     `sellAmms=${JSON.stringify(armedEv.exitProbe.sellAmms)}`);
   ok("gather() asked Jupiter for WSOL -> mint",
     buyQ?.inputMint === MINTS.SOL && buyQ?.outputMint === MINT, `${buyQ?.inputMint} -> ${buyQ?.outputMint}`);
-  ok("...at 400,000,000 lamports, the bot's declared cap",
-    buyQ?.amount === "400000000", `amount=${buyQ?.amount}`);
+  ok(`...at ${ARMED_LAMPORTS} lamports, the bot's declared cap`,
+    buyQ?.amount === ARMED_LAMPORTS, `amount=${buyQ?.amount}`);
   ok("...and sold back into WSOL, not USDC",
     sellQ?.inputMint === MINT && sellQ?.outputMint === MINTS.SOL, `${sellQ?.inputMint} -> ${sellQ?.outputMint}`);
   ok("neither leg touched USDC", !quotes.some((q) => q.inputMint === MINTS.USDC || q.outputMint === MINTS.USDC),
     `${quotes.length} quote(s), mints: ${[...new Set(quotes.flatMap((q) => [q.inputMint, q.outputMint]))].length} distinct`);
   ok("the probe records what it was quoted in",
     armedEv.exitProbe.quoteAsset === "WSOL" && armedEv.exitProbe.quoteMint === MINTS.SOL &&
-    armedEv.exitProbe.quoteAmountRaw === "400000000",
+    armedEv.exitProbe.quoteAmountRaw === ARMED_LAMPORTS,
     `${armedEv.exitProbe.quoteAsset} ${armedEv.exitProbe.quoteAmountRaw}`);
   ok("...and still states the amount in dollars for the report",
-    armedEv.exitProbe.targetSizeUsd === Number((0.4 * cfg.solUsdFallback).toFixed(2)) &&
+    armedEv.exitProbe.targetSizeUsd === Number((EXECUTOR_OPERATOR_MAXIMA.maxSolPerTrade * cfg.solUsdFallback).toFixed(2)) &&
     armedEv.exitProbe.sizeFromBot === true,
     `$${armedEv.exitProbe.targetSizeUsd} at SOL $${cfg.solUsdFallback}`);
   ok("hops are recorded per leg", armedEv.exitProbe.buyHops === 1 && armedEv.exitProbe.sellHops === 2,

@@ -38,6 +38,12 @@ export function hawkStatus() {
       armable: report.armable,
       blocking: [...report.blocking],
       items: report.items.map((i) => ({ name: i.name, ok: i.ok, detail: i.detail })),
+      /* WHERE ARMING HAPPENS, stated so the panel cannot imply the site can do it. The
+         signing path exists (snipe-execute.mjs) and is reached only on the owner's own
+         machine: SNIPE_LANE=execute on a live install, with SNIPE_LIVE_ACK typed for the
+         signing wallet. This host holds no key and can arm nothing. */
+      signingPath: "executor/snipe-execute.mjs",
+      armedBy: "SNIPE_LANE=execute and SNIPE_LIVE_ACK in the bot's own environment, on a live EXECUTE=1 install",
       dials: {
         takeAtEntryX: take,
         sizeSol: cfg.maxSolPerTrade,

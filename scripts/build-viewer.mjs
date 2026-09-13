@@ -189,6 +189,9 @@ const EXECUTOR_FILES = [
   "snipe-book.mjs",
   "snipe-shadow.mjs",
   "snipe-policy.mjs",
+  /* The lane's signing path (2026-09-12): imported dynamically by poller.mjs only under
+     SNIPE_LANE=execute, and a 404 there is a bot that armed and cannot buy. Published. */
+  "snipe-execute.mjs",
   /* Desk-led exits (2026-09-05). The bot no longer carries an exit policy of its own —
      Shrek, call 55: it sold 03:01:42Z on its own normalised stop at -13.5% while the
      desk's determined stop_hit landed 03:10:24Z. When the desk is unreachable the bot

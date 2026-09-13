@@ -232,7 +232,8 @@ ok("a config built around the parser still fails the size item", () => {
     cfg: { ...snipeLaneConfig({ SNIPE_LANE: "observe" }), maxSolPerTrade: overSize },
     venue: PROVED });
   assert.equal(itemOf(r, "size_within_operator_max").ok, false);
-  assert.match(itemOf(r, "size_within_operator_max").detail, /operator maximum of 0\.4 SOL/);
+  assert.match(itemOf(r, "size_within_operator_max").detail,
+    new RegExp(`operator maximum of ${SNIPE_OPERATOR_MAX.maxSolPerTrade} SOL`));
 });
 
 console.log(`\n══ ${pass} passed, 0 failed ══`);

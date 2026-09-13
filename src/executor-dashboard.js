@@ -16,8 +16,13 @@ export const EXECUTOR_CANARY_DEFAULTS = Object.freeze({
   rolling24hRealizedLossBrakeSol: 0.01,
   maxOpenPositions: 4,
 });
+/* Per-trade ceiling raised 0.4 -> 1 on 2026-09-12 at the owner's request. Every copy moves
+   together or test-operator-max-parity.mjs fails (it reads this literal by regex, which is
+   why the note sits above the object rather than inside it); the bot honours the new number
+   only on a release that carries it, re-armed through the caps ceremony with the new
+   figures typed. */
 export const EXECUTOR_OPERATOR_MAXIMA = Object.freeze({
-  maxSolPerTrade: 0.4,
+  maxSolPerTrade: 1,
   rolling24hDeploySol: 1000,
   rolling24hRealizedLossBrakeSol: 0.4,
   /* The executor's open-position count is a SENTINEL (strategy.mjs DEFAULTS 24 — "book
@@ -135,10 +140,58 @@ const publicHeartbeat = (value) => {
       mint: isAddress(holding?.mint) ? holding.mint : null,
       sol: Math.max(0, finite(holding?.sol, 0)),
       openedAt: timestamp(holding?.openedAt),
+      symbol: holding?.symbol == null ? null : String(holding.symbol).slice(0, 24),
+      callId: count(holding?.callId) || null,
+      costSol: holding?.costSol == null ? null : Math.max(0, finite(holding.costSol, 0)),
+      stop: level(holding?.stop), target: level(holding?.target), high: level(holding?.high),
+      holdMaxMs: level(holding?.holdMaxMs),
+      deskEntryRef: level(holding?.deskEntryRef), deskStop: level(holding?.deskStop), deskTarget: level(holding?.deskTarget),
     })).filter((holding) => holding.mint) : [],
+    closed: Array.isArray(value.closed) ? value.closed.slice(0, 20).map((c) => ({
+      mint: isAddress(c?.mint) ? c.mint : null,
+      symbol: c?.symbol == null ? null : String(c.symbol).slice(0, 24),
+      callId: count(c?.callId) || null,
+      closedAt: timestamp(c?.closedAt), openedAt: timestamp(c?.openedAt) || null,
+      solIn: Math.max(0, finite(c?.solIn, 0)), solOut: Math.max(0, finite(c?.solOut, 0)),
+      realizedSol: finite(c?.realizedSol, null),
+      fraction: finite(c?.fraction, 1),
+      reason: String(c?.reason ?? "").slice(0, 120), kind: String(c?.kind ?? "").slice(0, 24),
+      reported: c?.reported === true,
+    })).filter((c) => c.mint && c.closedAt && c.realizedSol != null) : [],
     health,
+    /* Stored sanitized by the ingest route; re-bounded here because this projection is
+       what the browser sees and the ingest is not the only writer of that column. */
+    ledger: publicLedger(value.ledger),
+    reporting: publicReporting(value.reporting),
     ts: timestamp(value.ts),
     seenAt: timestamp(value.seenAt),
+  };
+};
+
+const level = (value) => { const n = finite(value, null); return n != null && n > 0 && n < 1e12 ? n : null; };
+
+const publicLedger = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const sol = (v) => { const n = finite(v, null); return n == null || Math.abs(n) > 1_000_000 ? null : n; };
+  const realizedSol = sol(value.realizedSol), deployedSol = sol(value.deployedSol);
+  if (realizedSol == null || deployedSol == null) return null;
+  return {
+    realizedSol, deployedSol, feesSol: sol(value.feesSol) ?? 0,
+    deployments: count(value.deployments), exits: count(value.exits),
+    firstAt: timestamp(value.firstAt), lastAt: timestamp(value.lastAt),
+    realized24hSol: sol(value.realized24hSol) ?? 0, deployed24hSol: sol(value.deployed24hSol) ?? 0,
+    openSol: Math.max(0, sol(value.openSol) ?? 0),
+    asOf: timestamp(value.asOf),
+  };
+};
+
+const publicReporting = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return {
+    fillsOwed: count(value.fillsOwed),
+    lastReportedAt: timestamp(value.lastReportedAt),
+    lastError: value.lastError == null ? null : String(value.lastError).slice(0, 200),
+    lastErrorAt: timestamp(value.lastErrorAt),
   };
 };
 

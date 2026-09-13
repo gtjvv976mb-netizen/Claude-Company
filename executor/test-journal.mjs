@@ -5,7 +5,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Keypair } from "@solana/web3.js";
 import {
-  CURRENT_TX_ATTEMPT_PROTOCOL, ExecutionJournal, acquireProcessLock,
+  CURRENT_TX_ATTEMPT_PROTOCOL, SNIPE_TX_ATTEMPT_PROTOCOL, TX_ATTEMPT_PROTOCOLS, ExecutionJournal, acquireProcessLock,
   positionEntryBlock, trackedBalanceDecision, INTENT_KINDS, POSITION_SCOPED_KINDS,
 } from "./journal.mjs";
 import { freshState } from "./strategy.mjs";
@@ -86,6 +86,14 @@ j.markAccounted(spec.id, runtime);
    millisecond apart are not "different risk", and the CI runner lost exactly that race
    (…895 vs …894, 2026-09-05) and blocked a deploy. Compare the risk, bound the clock. */
 const sansClock = (r) => { const { riskWindowAsOf, ...rest } = r; return rest; };
+ok("the lifetime ledger sums every deployment, with the fee, and starts with nothing realized", () => {
+  const life = j.lifetimeRisk();
+  assert.equal(life.deployments, 1);
+  assert.equal(life.exits, 0);
+  assert.ok(Math.abs(life.deployedSol - accountedRisk.deployedTodaySol) < 1e-12, `${life.deployedSol} vs ${accountedRisk.deployedTodaySol}`);
+  assert.ok(Math.abs(life.realizedSol - accountedRisk.realizedTodaySol) < 1e-12);
+  assert.ok(life.firstAt > 0 && life.lastAt >= life.firstAt);
+});
 ok("accounting replay is idempotent and cannot duplicate risk events", () => {
   const again = j.rollingRisk();
   assert.deepEqual(sansClock(again), sansClock(accountedRisk));
@@ -348,6 +356,22 @@ ok("recordSigned marks new attempts with the exported current protocol", () => {
     CURRENT_TX_ATTEMPT_PROTOCOL);
   assert.equal(legacyProtocol.db.prepare("SELECT protocol FROM tx_attempts WHERE intent_id=?")
     .get(migratedProtocolSpec.id).protocol, CURRENT_TX_ATTEMPT_PROTOCOL);
+});
+const snipeProtocolSpec = {
+  ...spec, id: "snipe-entry:protocol", kind: "snipe_entry", eventId: null, feedId: null,
+  mint: Keypair.generate().publicKey.toBase58(),
+};
+legacyProtocol.ensureIntent(snipeProtocolSpec);
+legacyProtocol.recordSigned(snipeProtocolSpec.id, {
+  attempt: 1, requestId: "snipe-protocol", signedTx: Buffer.from("curve bytes"),
+  signature: "snipe-protocol-signature", blockhash: "snipe-protocol-blockhash",
+  lastValidBlockHeight: 999, quotedOutputRaw: "1000", minOutputRaw: "900",
+  order: { side: "buy" }, protocol: SNIPE_TX_ATTEMPT_PROTOCOL,
+});
+ok("recordSigned honours the sniper's own marker, which is in the taught set and is not the desk's", () => {
+  assert.equal(legacyProtocol.latestAttempt(snipeProtocolSpec.id).protocol, SNIPE_TX_ATTEMPT_PROTOCOL);
+  assert.notEqual(SNIPE_TX_ATTEMPT_PROTOCOL, CURRENT_TX_ATTEMPT_PROTOCOL);
+  assert.ok(TX_ATTEMPT_PROTOCOLS.includes(SNIPE_TX_ATTEMPT_PROTOCOL));
 });
 legacyProtocol.close();
 
