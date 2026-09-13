@@ -67,6 +67,15 @@ const flapped = sanitizeExecutorHealth({ state: "healthy", feedRollback: false,
   executionReadiness: { ...ready.executionReadiness, ready: false } }, { nowMs: now });
 assert.equal(flapped.executionReadiness.ready, false, "the latest verdict is still reported");
 assert.equal(flapped.state, "healthy", "one miss inside the grace does not make a proved bot degraded");
+/* And the grace launders nothing: a reading the sanitiser had to zero (an amount past
+   the operator ceiling, an unknown route) stays degraded however recent its proof. */
+const overCeiling = sanitizeExecutorHealth({ state: "healthy", feedRollback: false,
+  executionReadiness: { ...ready.executionReadiness, ready: true, amountLamports: 1_000_000_001 } }, { nowMs: now });
+assert.equal(overCeiling.executionReadiness.amountLamports, 0);
+assert.equal(overCeiling.state, "degraded", "an amount past the ceiling is not a missed probe, and no proof rescues it");
+const unknownRoute = sanitizeExecutorHealth({ state: "healthy", feedRollback: false,
+  executionReadiness: { ...ready.executionReadiness, ready: false, route: "elsewhere" } }, { nowMs: now });
+assert.equal(unknownRoute.state, "degraded", "an unknown route is not a missed probe either");
 const failedReadiness = sanitizeExecutorHealth({ state: "healthy", feedRollback: false,
   executionReadiness: { ...ready.executionReadiness, ready: false, lastSuccessAt: now - 16 * 60_000 } }, { nowMs: now });
 assert.equal(failedReadiness.executionReadiness.ready, false);
