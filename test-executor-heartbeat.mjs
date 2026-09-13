@@ -181,7 +181,16 @@ assert.match(viewer, /reporting\.fillsOwed > 0/, "the board must say when fill r
 assert.match(viewer, /From your bot's own journal/, "the tile must say where the number comes from");
 /* And the book — positions and closes — is rendered on BOTH the Overview and the tab,
    outside the detailed-view fold. */
-assert.equal((viewer.match(/^\s*renderBotBook\(el, /gm) || []).length, 3, "the book renders on the owner's Overview, the visitor's Overview of the house floor, and the WALL-ST-E tab");
+assert.equal((viewer.match(/^\s*renderBotBook\(el, /gm) || []).length, 2, "the book renders on the owner's Overview and the visitor's Overview of the house floor, and nowhere else (removed from the WALL-ST-E tab, owner 2026-09-13)");
+/* COMPACT: the token and one bar per trade, every number in the tooltip only. */
+assert.match(viewer, /const bar = \(lo, hi, now, title, \{ flat = false \} = \{\}\) => \{/, "each trade is one bar from stop to target");
+assert.match(viewer, /dashNode\("i", "end stop"\)/, "…with the stop at the left end");
+assert.match(viewer, /dashNode\("i", "end target"\)/, "…the target at the right end");
+assert.match(viewer, /const tick = dashNode\("i", "in"\); tick\.style\.left = entryX \+ "%";/, "…a tick where the bot went in");
+assert.match(viewer, /dashNode\("i", "now" \+ \(now == null \|\| flat \? " flat" : now < 1 \? " bad" : ""\)\)/, "…and a dot where the coin stands now");
+assert.match(viewer, /r\.append\(name, barNode\);/, "a row is the token and the bar, nothing else");
+assert.ok(!/dashNode\("strong", "", p\.sol\.toFixed\(4\) \+ " SOL in"\)/.test(viewer), "the size is no longer printed on the row");
+assert.match(viewer, /bar\(0\.5, 1\.5, exit, title\)/, "a closed trade draws its exit on a ±50% scale around its entry");
 assert.match(viewer, /Open positions · /, "the open positions card is titled");
 assert.match(viewer, /Closed trades · /, "the closed trades card is titled");
 assert.match(viewer, /not on the desk/, "a close the desk has not recorded is marked as such, not hidden");
