@@ -55,7 +55,13 @@ console.log("\n2. THE DIAL, END TO END");
   ok("the poller defaults JUPITER_EXCLUDE_DEXES to HumidiFi", /process\.env\.JUPITER_EXCLUDE_DEXES === undefined \? "HumidiFi"/.test(poller));
   ok("…and refuses a label that is not a plain route label", /JUPITER_EXCLUDE_DEXES must be up to 20 comma-separated Jupiter route labels/.test(poller));
   ok("the runner allows the dial through", /"JUPITER_EXCLUDE_DEXES"/.test(runner));
-  ok("an installer upgrade carries it forward", /SNIPE_MAX_PRICE_IMPACT_PCT SNIPE_MAX_ROUND_TRIP_LOSS_PCT \\\n\s+JUPITER_EXCLUDE_DEXES; do/.test(install));
+  /* THE BLOCK, NOT THE LINE. This pinned the carry list's exact line break and broke the
+     moment another dial joined the list (2026-09-13, twice) — a green test turning red
+     for a change it does not care about, which blocked every deploy for six hours,
+     because the desk's Render build runs this suite as its build step. Assert that the
+     dial is IN the block. */
+  const carryList = install.slice(install.indexOf("for dial in"), install.indexOf('upgrade_env_read "$dial"'));
+  ok("an installer upgrade carries it forward", /\bJUPITER_EXCLUDE_DEXES\b/.test(carryList));
   ok("the README documents it with the measurement", /`JUPITER_EXCLUDE_DEXES` \| `HumidiFi`/.test(readme));
 }
 
