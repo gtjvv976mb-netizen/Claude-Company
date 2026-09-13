@@ -46,7 +46,7 @@ import {
   independentSolUsdPrice, PYTH_SOL_USD_CACHE_SOURCE, solanaRpcConnectionConfig,
   usableSolUsdCache,
 } from "./sol-usd-oracle.mjs";
-import { DEFAULTS, POLICY_VERSION, planEntry, minViableSolPerTrade, openPosition, stepPosition,
+import { DEFAULTS, ENTRY_MODES, POLICY_VERSION, planEntry, minViableSolPerTrade, openPosition, stepPosition,
   freshState } from "./strategy.mjs";
 import { sizeEntryToRoute } from "./entry-sizing.mjs";
 import { policyConfigForPosition, resolveTakeProfitRule, validateEntryReference } from "./trade-policy.mjs";
@@ -484,10 +484,34 @@ const CFG = {
    * 0 (the default) means conviction changes nothing in this process at all. */
   minConviction: number("MIN_CONVICTION", process.env.MIN_CONVICTION || DEFAULTS.minConviction,
     { min: 0, max: 100 }),
+  /* The operator's per-trade size. strategy.mjs carried it as a default only; there was
+     no way to set it from the environment. Bounded to the per-trade ceiling below. */
+  fixedSol: number("FIXED_SOL", process.env.FIXED_SOL || DEFAULTS.fixedSol, { min: 0, max: 100 }),
+  entryMode: (() => {
+    const raw = String(process.env.ENTRY_MODE || DEFAULTS.entryMode).trim();
+    if (!ENTRY_MODES.includes(raw)) fatal(`ENTRY_MODE must be one of ${ENTRY_MODES.join(", ")}`);
+    return raw;
+  })(),
   scaleOutPct: 0,
 };
 if (EXECUTE && configuredDailyCap.units < configuredTradeCap.units)
   fatal(`DAILY_SOL_CAP (${CFG.dailySolCap}) is below MAX_SOL_PER_TRADE (${CFG.maxSolPerTrade}) — the day would refuse the first trade`);
+/* The default 0.4 is a ceiling the per-trade cap clamps (planEntry takes the min); only a
+   FIXED_SOL the operator typed above the cap is a contradiction worth refusing to start on. */
+if (process.env.FIXED_SOL !== undefined && CFG.fixedSol > CFG.maxSolPerTrade)
+  fatal(`FIXED_SOL (${CFG.fixedSol}) is above MAX_SOL_PER_TRADE (${CFG.maxSolPerTrade})`);
+/* TAKE-EVERY-CALL IS ARMED BY A SENTENCE, LIKE EVERY OTHER RAISE OF RISK HERE. The mode
+   makes the edge rails advisory, so the person arming it types the wallet and the size it
+   will buy every call at. A stale or copied env line cannot switch it on. */
+export const takeEveryCallSentence = (wallet, fixedSol) =>
+  `I take every published call on ${wallet} at ${fixedSol} SOL`;
+if (CFG.entryMode === "take-every-call") {
+  if (!(Number(process.env.FIXED_SOL) > 0))
+    fatal("ENTRY_MODE=take-every-call needs FIXED_SOL set explicitly: the size every call is bought at");
+  const expected = takeEveryCallSentence(WALLET, CFG.fixedSol);
+  if (String(process.env.ENTRY_MODE_ACK || "") !== expected)
+    fatal(`ENTRY_MODE=take-every-call needs ENTRY_MODE_ACK set to exactly:\n\n    ${expected}\n`);
+}
 
 // Parse every transaction rail before INIT_ONLY can exit. This makes the
 // installer validate the exact persistent environment that systemd will use.
@@ -1427,6 +1451,7 @@ async function onEntry(ev) {
     target: entryReference.targetRatio };
   let plan = planEntry({ call: normalizedCall, cfg: perCall, state: S.state });
   if (plan.action !== "buy") return log(`SKIP ${ev.symbol}: ${plan.reason}`);
+  for (const note of plan.advisories ?? []) log(`WARN ${ev.symbol}: ${note}`);
 
   if (!EXECUTE) {
     log(`ENTRY ${ev.symbol} — ${plan.sol} SOL | stop ${ev.stop} target ${ev.target}`);
@@ -1460,6 +1485,7 @@ async function onEntry(ev) {
   const routeStopFrac = Math.max(1e-9, 1 - entryReference.stopRatio);
   const [sizing, tokenDecimals, solUsdOracle] = await Promise.all([
     sizeEntryToRoute({
+      stopFloor: CFG.entryMode === "take-every-call" ? "advisory" : "enforce",
       probe: (amountRaw) => jupiter.preflightEntryProbe(WSOL, ev.mint, amountRaw),
       sol: plan.sol, lamportsPerSol: LAMPORTS, stopRatio: entryReference.stopRatio,
       expectedNetworkFeeLamports: jupiter.cfg.expectedNetworkFeeLamports,
@@ -1472,6 +1498,8 @@ async function onEntry(ev) {
   ]);
   entryEventSubmissionGate({ kind: "entry", context: { event: ev } });
   if (!sizing.ok) throw new Error(sizing.refusal);
+  if (sizing.advisory)
+    log(`WARN ${ev.symbol}: ${sizing.advisory} — buying anyway (ENTRY_MODE=take-every-call)`);
   const preflight = sizing.preflight;
   const preliminaryAmountRaw = sizing.amountRaw;
   const conservativeLossPct = sizing.conservativeLossPct;
@@ -2276,6 +2304,7 @@ function sendHeartbeat() {
       feedRollback: feedRollbackActive(),
       deskUnreachableSince, mirrorActive: mirrorActive(),
       executionReadiness: runtimeHealth.executionReadiness,
+      entryMode: CFG.entryMode,
       caps: {
         maxSolPerTrade: CFG.maxSolPerTrade,
         dailySolCap: CFG.dailySolCap,
@@ -2296,6 +2325,7 @@ function sendHeartbeat() {
       feedRollback: feedRollbackActive(),
       deskUnreachableSince, mirrorActive: mirrorActive(),
       executionReadiness: runtimeHealth.executionReadiness,
+      entryMode: CFG.entryMode,
       caps: {
         maxSolPerTrade: CFG.maxSolPerTrade,
         dailySolCap: CFG.dailySolCap,
@@ -3292,6 +3322,10 @@ async function tick() {
 }
 
 log(`up — floor ${FLOOR} — wallet ${WALLET} — ${EXECUTE ? "LIVE MAINNET" : "PAPER"}`);
+if (CFG.entryMode === "take-every-call")
+  log(`ENTRY MODE take-every-call: every published call is bought at ${CFG.fixedSol} SOL; the R_net, per-name risk and book-heat rails ` +
+    "and the route's stop-floor cost check are ADVISORY (logged as WARN); the loss brake, the deploy cap, the wallet, the open-position count, " +
+    "and every custody, fee, rent and impact rule still refuse");
 log(`caps: ${CFG.maxSolPerTrade} SOL/trade, ${CFG.dailySolCap} SOL/rolling 24h deploy, ` +
   `realized-loss entry brake = the TIGHTER of ${CFG.dailyLossLimitSol} SOL and ` +
   `${(DEFAULTS.dailyLossPctOfEquity * 100).toFixed(0)}% of the bankroll, ` +
