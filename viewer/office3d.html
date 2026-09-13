@@ -4179,10 +4179,26 @@ function drawBossBoard() {
     chalkText(x, value, W - 32, y, 58, color || chalk, "right");
   };
   const net = bossData.net;
-  row("net p&l", net == null ? "\u2014" : (net >= 0 ? "+$" : "\u2212$") + Math.abs(net).toLocaleString(undefined, { maximumFractionDigits: 0 }),
-    152, net == null ? dim : net >= 0 ? "#b9e3b6" : "#f0b2a2");
-  row("record", bossData.settled ? `${bossData.wins}W \u2013 ${bossData.losses}L` : "no settles yet", 232);
-  row("building rank", bossData.rank ? `#${bossData.rank} of ${bossData.of}` : "unranked", 312);
+  const lg = bossData.ledger;
+  if (lg) {
+    /* THE BOT'S LEDGER, NOT THE DESK'S PAPER. The wall chalked the desk record's USD,
+       which is a chain scan of the floor owner's wallet and never saw a bot trade. When
+       the bot's pulse carries its journal, the boss reads that: realized all-time, the
+       last 24 hours, what is held now, and how many trades it took to get here. */
+    const sol = (v) => (v > 0 ? "+" : v < 0 ? "\u2212" : "") + Math.abs(v).toFixed(3) + " sol";
+    const tone = (v) => v > 0 ? "#b9e3b6" : v < 0 ? "#f0b2a2" : chalk;
+    row("bot p&l \u00b7 all-time", sol(lg.realizedSol), 140, tone(lg.realizedSol));
+    row("last 24h", sol(lg.realized24hSol), 200, tone(lg.realized24hSol));
+    const heldSol = bossData.held.reduce((a, p) => a + (Number(p.sol) || 0), 0);
+    row("holding", bossData.held.length ? `${bossData.held.length} coin${bossData.held.length === 1 ? "" : "s"} \u00b7 ${heldSol.toFixed(3)} sol in` : "nothing", 260);
+    row("trades", `${lg.deployments} bought \u00b7 ${lg.exits} sold` + (bossData.owed ? ` \u00b7 ${bossData.owed} unreported` : ""), 320,
+      bossData.owed ? "#f0b2a2" : chalk);
+  } else {
+    row("net p&l", net == null ? "\u2014" : (net >= 0 ? "+$" : "\u2212$") + Math.abs(net).toLocaleString(undefined, { maximumFractionDigits: 0 }),
+      152, net == null ? dim : net >= 0 ? "#b9e3b6" : "#f0b2a2");
+    row("record", bossData.settled ? `${bossData.wins}W \u2013 ${bossData.losses}L` : "no settles yet", 232);
+    row("building rank", bossData.rank ? `#${bossData.rank} of ${bossData.of}` : "unranked", 312);
+  }
 
   // The live book, chalked under the record: what is on the sheet right now,
   // what this floor is actually holding, and how much of that is memecoin. The
@@ -4201,7 +4217,7 @@ function drawBossBoard() {
     ].filter(Boolean).join("  \u00b7  ");
     chalkText(x, bits, W - 32, 372, 30, chalk, "right", 500);
   }
-  chalkText(x, "every number from the public books \u00b7 live", 32, 418, 24, dim, "left", 500);
+  chalkText(x, lg ? "every number from the bot's own journal \u00b7 live" : "every number from the public books \u00b7 live", 32, 418, 24, dim, "left", 500);
   bossBoard.tex.needsUpdate = true;
 }
 // chalk needs its font: redraw once Caveat actually arrives
@@ -4232,6 +4248,11 @@ async function pollBossBoard() {
     const rec = await recR.json();
     const lb = lbR ? await lbR.json().catch(() => null) : null;
     const roomB = roomR ? await roomR.json().catch(() => null) : null;
+    /* THE BOT'S OWN BOOKS ride the room state for the owner. Parsed here so BIG C's wall
+       can chalk the journal's realized SOL and the open book, not the desk's paper. */
+    let hb = null;
+    try { hb = roomB?.executorHeartbeat ? JSON.parse(roomB.executorHeartbeat) : null; } catch { hb = null; }
+    if (hb) window.__botHeartbeat = hb;
     const floors = lb?.floors ?? [];
     const idx = floors.findIndex((f) => Number(f.floor_no ?? f.floorNo ?? f.n) === floorNo);
     const id = roomB?.identity ?? {};
@@ -4241,6 +4262,10 @@ async function pollBossBoard() {
       net: rec?.netPnlUsd ?? null,
       wins: rec?.wins ?? 0, losses: rec?.losses ?? 0, settled: rec?.settled ?? 0,
       rank: idx >= 0 ? idx + 1 : null, of: floors.length || null,
+      ledger: hb?.ledger || null,
+      held: Array.isArray(hb?.held) ? hb.held : [],
+      closed: Array.isArray(hb?.closed) ? hb.closed : [],
+      owed: Number(hb?.reporting?.fillsOwed) > 0 ? Number(hb.reporting.fillsOwed) : 0,
     };
     applyBrainRoom(bossData.brain);
     drawBossBoard();
@@ -5248,6 +5273,10 @@ function drawGrokBoard() {
          morning and a flat book that never traded used to print the same wall; the
          bot's 03:01:42Z Shrek exit (call 55, 2026-09-05) was invisible here. */
       ["REALIZED TODAY", st.realizedTodaySol != null ? fmtSignedSol(st.realizedTodaySol) : "\u2014"],
+      ...(st.journalAllSol != null ? [
+        ["JOURNAL 24H", fmtSignedSol(st.journal24hSol)],
+        ["JOURNAL ALL-TIME", fmtSignedSol(st.journalAllSol) + " \u00b7 " + st.journalSells + " sold"],
+      ] : []),
       ["BOT WALLET", (() => {
         const bb = window.__botBalance;
         if (!bb) return "\u2014";
@@ -5256,12 +5285,12 @@ function drawGrokBoard() {
       })()],
     ];
     x.font = '500 18px "JetBrains Mono", ui-monospace, monospace';
-    let ry = 172;                       // seven rows now: 30px pitch keeps the quote clear
+    let ry = st.journalAllSol != null ? 150 : 172;   // nine rows with the journal, seven without
     for (const [k, v] of rows) {
       x.textAlign = "left";  x.fillStyle = "#8a9095"; x.fillText(k, 52, ry);
       x.textAlign = "right";
-      x.fillStyle = k === "REALIZED TODAY" && st.realizedTodaySol
-        ? (st.realizedTodaySol >= 0 ? "#4ec9a5" : "#e0685c") : "#e8eaec";
+      const signedRow = k === "REALIZED TODAY" ? st.realizedTodaySol : k === "JOURNAL 24H" ? st.journal24hSol : k === "JOURNAL ALL-TIME" ? st.journalAllSol : null;
+      x.fillStyle = signedRow ? (signedRow >= 0 ? "#4ec9a5" : "#e0685c") : "#e8eaec";
       x.fillText(v, W - 52, ry);
       x.strokeStyle = "#1c1e21"; x.lineWidth = 1;
       x.beginPath(); x.moveTo(52, ry + 13); x.lineTo(W - 52, ry + 13); x.stroke();
@@ -5335,7 +5364,8 @@ function drawGrokBoard() {
       x.textAlign = "left";
       x.font = '500 15px "JetBrains Mono", ui-monospace, monospace';
       x.fillStyle = !st.realizedTodaySol ? "#5f6469" : st.realizedTodaySol >= 0 ? "#4ec9a5" : "#e0685c";
-      x.fillText("REALIZED TODAY " + fmtSignedSol(st.realizedTodaySol), 26, H - 18);
+      x.fillText("REALIZED TODAY " + fmtSignedSol(st.realizedTodaySol) +
+        (st.journalAllSol != null ? "   \u00b7   JOURNAL ALL-TIME " + fmtSignedSol(st.journalAllSol) : ""), 26, H - 18);
     }
   }
   // his signature under the book, so the board reads as a person's work
@@ -5416,6 +5446,25 @@ window.__grokBoardUpdate = (feed = []) => {
    * where it is labelled as what it is. */
   const held = open.filter(botOpen);
   grokBook.record = window.__floorRecord || grokBook.record;
+  /* THE HEARTBEAT'S BOOK OUTRANKS THE FILL REPORTS. Since 2026-09-13 the bot's pulse
+     carries every open position from its journal (`held`, with size, levels and the
+     desk's entry reference) and its ledger. A fill report the desk refused left this
+     wall blank about a real position; the heartbeat cannot be refused the same way, so
+     when it names positions they are the board, enriched with the desk's call row for
+     the cap and the mark. Rows the heartbeat does not carry fall back to the reports. */
+  const hb = window.__botHeartbeat;
+  const hbHeld = Array.isArray(hb?.held) && hb.held.length ? hb.held : null;
+  const fromHeartbeat = hbHeld ? hbHeld.map((p) => {
+    const c = open.find((row) => (p.callId && Number(row.call_id ?? row.id) === Number(p.callId)) || row.mint === p.mint) || null;
+    const entry = p.deskEntryRef ?? c?.entry_ref ?? null, target = c?.target ?? null;
+    const capAtCall = Number(c?.mcap_at_call) > 0 ? Number(c.mcap_at_call) : null;
+    const capOf = (px) => (capAtCall && entry > 0 && px > 0) ? capAtCall * (px / entry) : null;
+    const mark = c?.last_mark ?? null;
+    return { symbol: p.symbol || c?.symbol || p.mint.slice(0, 6), size: Number(p.sol), real: true,
+             entryCap: capAtCall, targetCap: capOf(target),
+             category: c?.category || null, taken: true,
+             pnlPct: (entry && mark) ? ((mark - entry) / entry) * 100 : null };
+  }) : null;
   grokBook.positions = held.map((c) => {
     const entry = c.entry_ref ?? null, target = c.target ?? null;
     /* IN MARKET CAP, NOT IN DECIMALS. A memecoin price is a string of zeros that tells
@@ -5442,6 +5491,7 @@ window.__grokBoardUpdate = (feed = []) => {
              category: c.category || null, taken: true,
              pnlPct: (basis && mark) ? ((mark - basis) / basis) * 100 : null };
   });
+  if (fromHeartbeat) grokBook.positions = fromHeartbeat;
   /* WHAT THE BOT BOOKED TODAY. Realised SOL from every sell report whose close landed
      since UTC midnight — the number the desk's paper book could never carry, because
      the desk never knew the bot sold. */
@@ -5454,6 +5504,7 @@ window.__grokBoardUpdate = (feed = []) => {
   }, 0);
   // The counts he keeps on the wall: what is live, what is actually held, and
   // how much of it is memecoin — the number that decides how hard to breathe.
+  const ledger = hb?.ledger || null;
   window.__liveBook = {
     liveCalls: live.length,
     open: liveOpen.length,
@@ -5462,7 +5513,15 @@ window.__grokBoardUpdate = (feed = []) => {
     exposureSol: grokBook.positions.reduce((a, p) => a + (p.size || 0), 0),
     realizedTodaySol,
     closedToday: feed.filter((c) => c.status === "closed").length,
+    /* The journal's own totals, when the pulse carries them: the last 24 hours and
+       all-time, net of fees and cost. These are what the owner means by profit. */
+    journal24hSol: ledger ? Number(ledger.realized24hSol) : null,
+    journalAllSol: ledger ? Number(ledger.realizedSol) : null,
+    journalSells: ledger ? Number(ledger.exits) : null,
+    journalBuys: ledger ? Number(ledger.deployments) : null,
+    journalOwed: Number(hb?.reporting?.fillsOwed) > 0 ? Number(hb.reporting.fillsOwed) : 0,
   };
+  if (fromHeartbeat) window.__liveBook.taken = fromHeartbeat.length;
   drawGrokBoard();
   drawGrokTickets();
   drawBossBoard();          // the boss's wall carries the same live book
@@ -6163,6 +6222,16 @@ window.__botStatus = () => {
   const hb = window.__botHeartbeat;
   const fresh = hb && hb.seenAt && (Date.now() - hb.seenAt) < 3 * 60e3;
   return { exists: !!hb, running: !!fresh, live: !!(fresh && hb.mode === "live") };
+};
+/* THE BOT'S OWN CLOSE for a call, from the heartbeat's `closed` list (its journal), so a
+   sale the desk has not accepted a report for still reads as a sale on the card and the
+   walls. No freshness rule: a sale that happened is history whether or not the bot is
+   awake now. */
+window.__botClosed = (mint, callId) => {
+  const list = window.__botHeartbeat?.closed;
+  if (!Array.isArray(list)) return null;
+  const id = Number(callId);
+  return list.find((c) => (id > 0 && Number(c.callId) === id) || c.mint === mint) || null;
 };
 /** Is the operator's own bot holding this mint? Only trusted while the pulse is
  *  fresh — a stale heartbeat's position list is a memory, not a fact. */
@@ -8971,7 +9040,7 @@ function renderRoom() {
   /* NO DROPDOWN BARS (owner, 2026-09-08). Naming a floor already lives in Settings,
      and the journal is a log — neither earns a bar on the tab a reader opens to see
      their team. Both still build; they attach only for a reader who asked for detail. */
-  const nameFold = { wrap: dashNode("div"), body: dashNode("div") };
+  const nameFold = { wrap: mk("div"), body: mk("div") };
   if (typeof detailedView === "function" && detailedView()) panel.appendChild(nameFold.wrap);
   const panelReal = panel;
   panel = nameFold.body;                  // everything below lands in that container
@@ -9043,7 +9112,7 @@ function renderRoom() {
 
   // ── the journal: history, not a control. Its own drawer. ──
   panel = panelReal;
-  const jrnFold = { wrap: dashNode("div"), body: dashNode("div") };
+  const jrnFold = { wrap: mk("div"), body: mk("div") };
   if (typeof detailedView === "function" && detailedView()) panelReal.appendChild(jrnFold.wrap);
   panel = jrnFold.body;
   if (!ROOM.runs.length) panel.appendChild(mk("p", "dp-note", "No research yet. Put the team on a token above."));
@@ -9915,6 +9984,16 @@ function paintFeedInto(wrap, feed, settings) {
         ? " \u00b7 " + window.PLAIN.plainDetail(c.bot_exit_reason) : "";
       line.textContent = `Your bot sold \u00b7 ${Number.isFinite(realized) ? signedSol(realized) : "? SOL"} \u00b7 ${exitWords}${exitWhy}`;
       if (Number.isFinite(realized) && realized !== 0) line.style.color = realized > 0 ? "var(--good,#4f8f52)" : "var(--bad,#b5473b)";
+    } else if (window.__botClosed?.(c.mint, c.call_id ?? c.id)) {
+      /* THE JOURNAL'S CLOSE, when the desk has no fill report for it. The bot sold; the
+         desk's fill route refused or never received the report; the card used to fall
+         through to the generic "not in this trade" sentence, true of the present and a
+         lie about the past. The number is the bot's own, and the card says the desk lacks it. */
+      const sold = window.__botClosed(c.mint, c.call_id ?? c.id);
+      line.textContent = `Your bot sold \u00b7 ${signedSol(Number(sold.realizedSol))}` +
+        (sold.reason ? " \u00b7 " + window.PLAIN.plainDetail(String(sold.reason).slice(0, 80)) : "") +
+        (sold.reported ? "" : " \u00b7 from its journal, not yet recorded by the desk");
+      if (Number(sold.realizedSol) !== 0) line.style.color = Number(sold.realizedSol) > 0 ? "var(--good,#4f8f52)" : "var(--bad,#b5473b)";
     } else if (c.held_reason) {
       /* THE DESK IS WITHHOLDING THIS ONE, AND SAYS SO HERE. Before this branch the card
          fell through to "your bot is not in this one" \u2014 true, and the reason four calls
@@ -11461,6 +11540,12 @@ function ordC(n) {
    This layer composes the existing loaders into one navigable work surface.
    It never changes the 3D scene and deliberately keeps candidates, published
    calls, local execution telemetry, and settled performance in separate views. */
+/* HTML escaping for this module. `esc` is defined in the scene module (line ~3872) and
+   each <script type="module"> is its own scope, so the burner-key card below reached for
+   a name that did not exist here: "esc is not defined", and the whole WALL-ST-E tab
+   fell to "status unavailable" the moment the desk began sending burnerKey. */
+const esc = (t) => String(t == null ? "" : t)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const dashNode = (tag, cls, text) => {
   const el = document.createElement(tag);
   if (cls) el.className = cls;

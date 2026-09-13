@@ -398,6 +398,20 @@ try {
   assert.match(view, /\["REALIZED TODAY", st\.realizedTodaySol != null \? fmtSignedSol\(st\.realizedTodaySol\) : "\\u2014"\]/,
     "the flat-book rows carry REALIZED TODAY ±x SOL from the bot's sell reports");
   assert.match(view, /taken: held\.length,/, "the held count is the bot-open set");
+  /* EVERY HELPER A MODULE CALLS IS DEFINED IN THAT MODULE. `esc` lived in the scene
+     module and was called from the dashboard module's burner-key card; the tab threw
+     "esc is not defined" and rendered "WALL-ST-E status unavailable" (owner, 2026-09-13). */
+  {
+    const modules = [...view.matchAll(/<script type="module">([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+    assert.ok(modules.length >= 3, "expected the scene, dashboard and calls modules");
+    for (const [i, code] of modules.entries()) {
+      for (const name of ["esc", "dashNode", "dashWhen", "dashSol", "fmtSignedSol", "chalkText"]) {
+        const used = new RegExp("(^|[^\\w.$])" + name + "\\(").test(code);
+        const defined = new RegExp("(const|let|function)\\s+" + name + "\\b").test(code);
+        assert.ok(!used || defined, `module ${i + 1} calls ${name}() but does not define it — a ReferenceError at runtime`);
+      }
+    }
+  }
   assert.match(view, /exposureSol: grokBook\.positions\.reduce\(\(a, p\) => a \+ \(p\.size \|\| 0\), 0\)/,
     "exposure sums the sizes actually on the board");
   assert.match(view, /if \(hudOnly\) \{[\s\S]{0,700}?window\.__grokBoardUpdate\?\.\(body\.feed \|\| \[\]\);[\s\S]{0,200}?return;/,
