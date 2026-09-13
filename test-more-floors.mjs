@@ -47,9 +47,23 @@ assert.match(sleepAssertion, /String\(env\.WALLSTE_ALLOW_BATTERY_ENTRIES \?\? "0
 assert.match(sleepAssertion, /entry pause remains until explicit readiness review/, "restoring AC does not lift the pause by itself");
 assert.ok(!/(?:unlinkSync|rmSync)\(pauseEntriesFile/.test(sleepAssertion), "the watcher never removes the pause it published");
 assert.match(runner, /"WALLSTE_ALLOW_BATTERY_ENTRIES",/, "the runner allows the dial through");
-assert.match(install, /JUPITER_EXCLUDE_DEXES WALLSTE_ALLOW_BATTERY_ENTRIES; do/, "…and an upgrade carries it forward");
+const carryList = install.slice(install.indexOf("for dial in"), install.indexOf('upgrade_env_read "$dial"'));
+assert.match(carryList, /\bWALLSTE_ALLOW_BATTERY_ENTRIES\b/, "…and an upgrade carries it forward");
 assert.match(readme, /The supervisor writes that same file by itself whenever the host is on battery/, "the README says the supervisor writes it");
 assert.match(readme, /undone within 15 seconds, silently/, "…and that removing it on battery does not stick");
+
+/* 1c · THE CADENCE DIALS THAT DECIDE THE RPC BILL. The chain-simulated exit mark runs
+   every MARK_MS and costs 20 RPC calls per position per pass across the two providers —
+   85% of a measured 270,660 calls a day, spent producing a valuationMark that is written
+   at poller.mjs:1832 and read nowhere. Raising MARK_MS is how an operator on a metered
+   plan survives 24 hours, so every cadence dial the RUNNER accepts must also survive an
+   upgrade. On 2026-09-13 none of them did, and the secondary provider hit its daily cap
+   after nine hours. */
+for (const dial of ["MARK_MS", "POLL_MS", "RECONCILE_MS", "SOL_USD_CACHE_MAX_AGE_MS", "MAX_ENTRY_MARK_AGE_MIN"]) {
+  assert.match(runner, new RegExp(`"${dial}",`), `the runner accepts ${dial} from an operator`);
+  assert.ok(new RegExp(`\\b${dial}\\b`).test(install.slice(install.indexOf("for dial in"), install.indexOf("upgrade_env_read \"$dial\""))),
+    `…so an upgrade must carry ${dial} forward, or the operator's tuning is silently reverted`);
+}
 
 /* 2 · the README */
 assert.match(readme, /\*\*A small Linux server you own is the 24\/7 option\.\*\*/, "the README names the server option up front");
