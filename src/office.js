@@ -474,13 +474,19 @@ export function sanitizeExecutorHealth(value, { nowMs = Date.now() } = {}) {
        grace. A bot whose proofs have really stopped ages out of it in eight probes. */
     const provedRecently = lastSuccessAt > 0 && nowMs - lastSuccessAt >= 0 &&
       nowMs - lastSuccessAt <= alerts.READINESS_PROOF_GRACE_MS;
+    /* Only a WELL-FORMED reading whose latest probe missed is read through the grace: the
+       route the bot rehearses, an amount inside the operator ceiling, a real timestamp.
+       A reading the sanitiser had to zero — an amount past the ceiling, an unknown route
+       — is not a missed probe, it is evidence that cannot be trusted, and a recent proof
+       does not launder it (test-wsol-probe pins the ceiling case). */
+    const wellFormed = route === "wsol-usdc" && amountLamports > 0 && observedAt > 0;
     /* The bot's own reason, carried through so the dashboard can say more than 0/2.
        Bounded and sanitised like everything else on this self-reported surface: it is an
        error string about a route and a balance, never a secret or a key path. */
     const lastError = typeof readinessObject.lastError === "string"
       ? readinessObject.lastError.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 300) : null;
     executionReadiness = { ready, lastSuccessAt, observedAt, route, providers, amountLamports, lastError };
-    readinessFailed = !(ready || provedRecently);
+    readinessFailed = !(ready || (wellFormed && provedRecently));
   }
   const rawCaps = value.caps;
   const capsObject = rawCaps && typeof rawCaps === "object" && !Array.isArray(rawCaps)
