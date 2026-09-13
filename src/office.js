@@ -1267,14 +1267,37 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           const cached = logoCache.get(mint) || null;
           let entry = cached && Date.now() - cached.at < LOGO_TTL_MS ? cached : null;
           if (!entry) {
+            /* ASK FOR THE SMALL RENDITION, BUT NEVER STAKE THE WALL ON IT. The CDN
+               resizes only to a fixed set of widths and answers anything else with
+               422 "Invalid image size" — measured 2026-09-13: 64, 128, 256 and 800 are
+               served, 16/32/48/96/100/200/300/512 are refused. The first release of
+               this route asked for 96 and every logo on the board came back 502. So the
+               shrunk URL is an OPTIMISATION and the URL the scanner recorded is the
+               fallback: a CDN that changes its size policy again costs bytes, never a
+               blank wall. 64px is drawn into a 24px disc. */
+            const attempts = [];
             try {
-              const upstream = new URL(src);
-              if (upstream.searchParams.has("width")) { upstream.searchParams.set("width", "96"); upstream.searchParams.set("height", "96"); upstream.searchParams.set("quality", "85"); }
-              const r = await fetch(upstream, { signal: AbortSignal.timeout(6000), headers: { accept: "image/*" }, redirect: "follow" });
-              const type = String(r.headers.get("content-type") || "").split(";")[0].trim();
-              if (!r.ok || !/^image\/(?:png|jpeg|webp|gif|avif)$/.test(type)) throw new Error(`upstream ${r.status} ${type || "no type"}`);
-              const buf = Buffer.from(await r.arrayBuffer());
-              if (buf.length > 512 * 1024) throw new Error("logo too large");
+              const shrunk = new URL(src);
+              if (shrunk.searchParams.has("width")) {
+                shrunk.searchParams.set("width", "64"); shrunk.searchParams.set("height", "64");
+                shrunk.searchParams.set("quality", "85");
+                attempts.push(shrunk);
+              }
+            } catch { /* a malformed URL falls through to the recorded one */ }
+            attempts.push(src);
+            try {
+              let buf = null, type = null, lastError = null;
+              for (const upstream of attempts) {
+                try {
+                  const r = await fetch(upstream, { signal: AbortSignal.timeout(6000), headers: { accept: "image/*" }, redirect: "follow" });
+                  const got = String(r.headers.get("content-type") || "").split(";")[0].trim();
+                  if (!r.ok || !/^image\/(?:png|jpeg|webp|gif|avif)$/.test(got)) { lastError = `upstream ${r.status} ${got || "no type"}`; continue; }
+                  const body = Buffer.from(await r.arrayBuffer());
+                  if (body.length > 512 * 1024) { lastError = "logo too large"; continue; }
+                  buf = body; type = got; break;
+                } catch (e) { lastError = String(e?.message || e); }
+              }
+              if (!buf) throw new Error(lastError || "no rendition served an image");
               entry = { buf, type, at: Date.now() };
               logoCache.set(mint, entry);
               if (logoCache.size > 500) logoCache.delete(logoCache.keys().next().value);
