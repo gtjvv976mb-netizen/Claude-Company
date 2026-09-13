@@ -188,4 +188,61 @@ assert.match(viewer, /not on the desk/, "a close the desk has not recorded is ma
 assert.match(route, /held: sanitizeExecutorHeld\(body\.held\)/, "held positions persist only through their sanitizer");
 assert.match(route, /closed: sanitizeExecutorClosed\(body\.closed\)/, "closes persist only through their sanitizer");
 
+/* THE HOUSE BOOK LEAVES THE BUILDING; THE WALLET AND THE QUEUE DO NOT. The desk's public
+   heartbeat carries the house bot's sanitized positions, closes and ledger to every
+   viewer, so the main floor's walls chalk real trades with nobody signed in. */
+{
+  const { houseBotPublic } = await import("./src/office.js");
+  const stamp = Date.now() - 45_000;
+  db.prepare("UPDATE copy_settings SET executor_heartbeat=? WHERE floor_no=?").run(JSON.stringify({
+    mode: "live", wallet: "BurnerWalletMustNotCross", cursor: 7, open: 1, ts: stamp, seenAt: stamp,
+    held: [{ mint: "MintHeld", symbol: "HELD", sol: 0.5, openedAt: stamp - 60_000, callId: 79, stop: 0.8, target: 1.3, junk: "x" }],
+    closed: [{ mint: "MintSold", symbol: "SOLD", callId: 68, closedAt: stamp - 3_600_000, solIn: 0.5, solOut: 0.62,
+      realizedSol: 0.1194, reason: "target", kind: "exit" }],
+    ledger: { realizedSol: 0.0571, deployedSol: 2.5, feesSol: 0.001, deployments: 5, exits: 5, realized24hSol: 0.0571,
+      openSol: 0.5, asOf: stamp, firstAt: stamp - 86_400_000, lastAt: stamp },
+    reporting: { fillsOwed: 3, lastError: "ReportErrorMustNotCross" },
+    health: { state: "healthy", entryMode: "take-every-call", entriesEnabled: true, deskEntriesEnabled: true,
+      caps: { maxSolPerTrade: 0.5, dailySolCap: 5, dailyLossLimitSol: 0.4 }, secret: "HealthSecretMustNotCross" },
+  }), HQ_FLOOR);
+  const pub = houseBotPublic(HQ_FLOOR, { now: stamp + 45_000 });
+  const text = JSON.stringify(pub);
+  assert.equal(pub.mode, "live");
+  assert.equal(pub.seenAt, stamp);
+  assert.equal(pub.ageMs, 45_000);
+  /* The state is the sanitizer's verdict, not the bot's word: a pulse with no readiness
+     evidence reads degraded however it describes itself. */
+  assert.equal(pub.state, sanitizeExecutorHealth({ state: "healthy", entryMode: "take-every-call",
+    caps: { maxSolPerTrade: 0.5, dailySolCap: 5, dailyLossLimitSol: 0.4 } }).state);
+  assert.equal(pub.entryMode, "take-every-call");
+  assert.equal(pub.entriesEnabled, true);
+  assert.equal(pub.ledger.realizedSol, 0.0571, "the ledger is public");
+  assert.equal(pub.held.length, 1);
+  assert.equal(pub.held[0].symbol, "HELD");
+  assert.equal(pub.held[0].junk, undefined, "held rows pass through their sanitizer");
+  assert.equal(pub.closed.length, 1);
+  assert.equal(pub.closed[0].realizedSol, 0.1194);
+  for (const secretText of ["BurnerWalletMustNotCross", "ReportErrorMustNotCross", "HealthSecretMustNotCross", "fillsOwed", "maxSolPerTrade"])
+    assert.ok(!text.includes(secretText), `the public house book must not carry ${secretText}`);
+  assert.equal(pub.wallet, undefined, "no wallet address leaves the building");
+  assert.equal(houseBotPublic(49), null, "a floor with no pulse has no public book");
+  db.prepare("UPDATE copy_settings SET executor_heartbeat='not json' WHERE floor_no=?").run(HQ_FLOOR);
+  assert.equal(houseBotPublic(HQ_FLOOR), null, "an unreadable pulse is no book, not a throw");
+  db.prepare("UPDATE copy_settings SET executor_heartbeat=? WHERE floor_no=?").run(JSON.stringify(pulse), HQ_FLOOR);
+
+  const office = fs.readFileSync(new URL("./src/office.js", import.meta.url), "utf8");
+  assert.match(office, /houseBot: \(\(\) => \{ try \{ return houseBotPublic\(tower\.HQ_FLOOR, \{ now \}\); \} catch \{ return null; \} \}\)\(\)/,
+    "the public heartbeat carries the house book, and a bad pulse cannot fail it");
+  assert.ok(!/houseBot: hqViewer/.test(office), "the house book must not be gated on the owner's session");
+  /* And the page reads it wherever the owner's private pulse is missing. */
+  assert.match(viewer, /window\.__houseBot = null;/, "the page declares the public house book");
+  assert.match(viewer, /floorNo === 50 \? fetch\(`\$\{base\}\/api\/heartbeat`\)/, "the boss board's poll fetches the public heartbeat on the main floor");
+  assert.match(viewer, /if \(pulse\?\.houseBot\) window\.__houseBot = pulse\.houseBot;/, "…and keeps its house book");
+  assert.match(viewer, /: window\.__houseBot\?\.ledger \? window\.__houseBot : null;/, "BIG C's wall falls back to the public house book");
+  assert.match(viewer, /const hb = window\.__botHeartbeat \|\| window\.__houseBot \|\| null;/, "the Grok board's positions fall back to it");
+  assert.match(viewer, /const __anyBotPulse = \(\) => window\.__botHeartbeat \|\| window\.__houseBot \|\| null;/, "the cards' close and held lookups fall back to it");
+  assert.match(viewer, /heartbeat\?\.ledger \|\| window\.__houseBot\?\.ledger \|\| null/, "the Overview's P&L tile falls back to it");
+  assert.match(viewer, /renderBotBook\(el, exec\.telemetry\?\.heartbeat \|\| heartbeat \|\| window\.__houseBot, feed/, "the Overview's book falls back to it");
+}
+
 console.log("\nexecutor heartbeat readback is authenticated, read-only and secret-safe\n");
