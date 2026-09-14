@@ -17,7 +17,13 @@
  */
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { CHAPTERS } from "./scripts/record-guide.mjs";
+/* From guide-script.mjs, NOT record-guide.mjs. The recorder imports `playwright`, which
+   this project does not depend on — it is installed by hand to re-record — so importing
+   it here threw ERR_MODULE_NOT_FOUND under `npm ci` and took the whole suite down with
+   it. The suite is the site's build step and Render's buildCommand, so that froze the
+   deploy (pages.yml run 503). The narration is data and now lives in a module with no
+   imports at all. */
+import { CHAPTERS } from "./scripts/guide-script.mjs";
 
 const read = (p) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
 const viewer = read("./viewer/office3d.html");
@@ -98,6 +104,24 @@ ok("importing the recorder does not record",
   /const isMain = process\.argv\[1\] && path\.resolve\(process\.argv\[1\]\) === fileURLToPath\(import\.meta\.url\)/.test(recorder) &&
   /if \(isMain\) await record\(\);/.test(recorder));
 ok("…and the raw take is not committed", /^\.guide-work\/$/m.test(read("./.gitignore")));
+
+/* THE ONE THAT FROZE THE DEPLOY (pages.yml run 503, 2026-09-14), and the reason the
+   narration lives in a module of its own. `playwright` is not in package.json — it is
+   installed by hand to re-record — so nothing the SUITE imports may reach it. This suite
+   is the site's build step AND Render's buildCommand, so a single unresolvable import
+   here stops the site shipping, which is a far larger blast radius than one red test.
+   Assert the narration module imports nothing at all, rather than trusting that nobody
+   adds an import to it later. */
+const scriptModule = read("./scripts/guide-script.mjs");
+const self = read("./test-guide.mjs");
+ok("the narration module imports nothing", !/^\s*import\s/m.test(scriptModule));
+/* The word itself is in this module's header, explaining why — so match an IMPORT of it,
+   not a mention of it. */
+ok("…so the suite never reaches playwright through it",
+  !/(?:from|require\()\s*["']playwright["']/.test(scriptModule));
+ok("…and this test reads the narration module, not the recorder",
+  /from "\.\/scripts\/guide-script\.mjs"/.test(self) &&
+  !/^import \{[^}]*\} from "\.\/scripts\/record-guide\.mjs"/m.test(self));
 
 console.log("\n5. THE PLAYER READS ALL OF IT");
 ok("the transcript follows BEATS, not whole chapters", /const beats = chapters\.flatMap\(/.test(viewer));
