@@ -37,6 +37,14 @@ const WORK = process.env.GUIDE_WORK || path.join(ROOT, ".guide-work");
 const CHROME = process.env.PLAYWRIGHT_CHROMIUM || undefined;
 const VOICE = process.env.PIPER_VOICE;
 const FFMPEG = process.env.FFMPEG || "ffmpeg";
+/* Capture big, deliver smaller: the downscale supersamples and the text comes out
+   sharper than capturing at the delivery size ever could. */
+const CAP_W = 1920, CAP_H = 1080;
+const OUT_W = 1280, OUT_H = 720;
+/* Measured in this sandbox, 2026-09-14, with the 3D loop frozen: 66 ms a frame on the
+   floor, 74 ms over a panel. 12 fps leaves headroom on both; 15 would sit exactly on the
+   limit and fall behind whenever a panel does real work. */
+const FPS = Number(process.env.GUIDE_FPS || 12);
 
 /* THE SCRIPT. Each beat is one spoken sentence, the camera move it describes, and the thing
    on the page it is about. `spot` rings that element so the eye lands where the words do. */
@@ -85,8 +93,13 @@ console.log(`voice: ${BEATS.length} beats, ${BEATS.reduce((s, b) => s + b.spoken
 /* 2 · THE RECORDING: real pages, real clicks, a caption bar and a spotlight for the eye. */
 const browser = await chromium.launch({ headless: true, executablePath: CHROME,
   args: ["--use-gl=swiftshader", "--enable-webgl", "--ignore-gpu-blocklist", "--font-render-hinting=none"] });
-const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1,
-  recordVideo: { dir: WORK, size: { width: 1280, height: 720 } } });
+/* 1920x1080 AND NO recordVideo. Playwright's built-in recorder encodes VP8 at about
+   926 kb/s, which throws the detail away at capture time — no output encoder can put it
+   back, and the first cut shipped soft text because of it. Frames are taken here instead,
+   as JPEG at quality 92, roughly 370 KB each: two orders of magnitude more data per
+   frame. Captured at 1080p and delivered at 720p, so the downscale supersamples and the
+   text comes out sharper than capturing at 720p ever could. */
+const ctx = await browser.newContext({ viewport: { width: CAP_W, height: CAP_H }, deviceScaleFactor: 1 });
 await ctx.addInitScript(() => {
   const install = () => {
     if (document.getElementById("cc-guide-cap")) return;
@@ -105,17 +118,10 @@ await ctx.addInitScript(() => {
     ring.style.cssText = "position:fixed;border:2px solid #d97757;border-radius:10px;z-index:2147483646;pointer-events:none;" +
       "opacity:0;transition:opacity .25s,left .35s,top .35s,width .35s,height .35s;box-shadow:0 0 0 4000px rgba(6,8,12,.42),0 0 18px rgba(217,119,87,.75)";
     document.body.appendChild(ring);
-    /* A colour marker in the top-right corner, one per BEAT, cycling through a small
-       palette: the recording's own clock. Wall-clock marks drift against a headless
-       renderer that drops frames, so beat times are read back from the video itself. */
-    const mark = document.createElement("div"); mark.id = "cc-guide-mark";
-    mark.style.cssText = "position:fixed;right:0;top:0;width:14px;height:14px;z-index:2147483647;pointer-events:none;background:transparent";
-    document.body.appendChild(mark);
   };
   if (document.body) install(); else document.addEventListener("DOMContentLoaded", install);
-  window.__cap = (text, label, color) => {
+  window.__cap = (text, label) => {
     install();
-    document.getElementById("cc-guide-mark").style.background = color || "transparent";
     const bar = document.getElementById("cc-guide-cap"); bar.textContent = text; bar.style.opacity = text ? "1" : "0";
     const step = document.getElementById("cc-guide-step"); step.textContent = label || ""; step.style.opacity = label ? "1" : "0";
   };
@@ -163,11 +169,6 @@ const VACANT = await (async () => {
   } catch { return 14; }
 })();
 
-/* Eight colours far apart in RGB, cycled across the beats. Only ADJACENT beats ever need
-   telling apart, because each search starts where the previous beat was found, so eight is
-   plenty however long the script grows — and a 14-pixel patch sampled at its centre
-   survives VP9 at crf 34, which a 6-pixel one did not. */
-const PALETTE = [[255,0,0],[0,255,0],[0,0,255],[255,255,0],[255,0,255],[0,255,255],[255,128,0],[128,0,255]];
 const helpers = {
   tab: (dest) => page.evaluate((d) => document.querySelector(`.dtab[data-destination="${d}"]`)?.click(), dest).catch(() => {}),
   sub: (group, view) => page.evaluate(([g, v]) => document.querySelector(`[data-${g}-view="${v}"]`)?.click(), [group, view]).catch(() => {}),
@@ -180,71 +181,132 @@ const PAGES = {
   floor: `${SITE}/floor.html?floor=50`,
 };
 
-const t0 = Date.now();
+/* FREEZE THE 3D LOOP, and this is what makes a sharp recording possible at all.
+ *
+ * There is no GPU here, so WebGL runs through swiftshader. Measured: a screenshot of the
+ * live floor costs 3206 ms — 0.3 frames a second — because each one forces the scene to
+ * re-render in software. Stop the render loop and the same screenshot costs 66 ms, which
+ * is 15 a second, a forty-eight-fold difference. The canvas keeps whatever it last drew,
+ * so the floor stays a crisp still rather than a stuttering slideshow.
+ *
+ * Nothing worth watching is lost: a guide's motion is the interface — tabs opening,
+ * panels filling, the spotlight moving, the caption changing, a list scrolling — and all
+ * of that is DOM and CSS, which never needed the animation frame. Re-freezing after every
+ * navigation is required because a new document brings its own window. */
+const freeze3d = () => page.evaluate(() => {
+  if (!window.__rafFrozen) { window.__rafFrozen = window.requestAnimationFrame; window.requestAnimationFrame = () => 0; }
+}).catch(() => {});
+
+/* The frames, taken as fast as the page allows and stamped with the moment each was
+   taken. Assembling from real timestamps is why the beat seconds below are exact rather
+   than recovered: the first cut had to paint a colour marker into the corner of every
+   shot and read it back out of the encoded file, because Playwright's recorder dropped
+   and padded frames unpredictably. Here the clock is ours. */
+const FRAMES = path.join(WORK, "frames");
+fs.mkdirSync(FRAMES, { recursive: true });
+const stamps = [];
+let capturing = false, dropped = 0;
+const captureLoop = async () => {
+  const budget = 1000 / FPS;
+  while (capturing) {
+    const started = Date.now();
+    try {
+      await page.screenshot({ path: path.join(FRAMES, `f${String(stamps.length).padStart(6, "0")}.jpg`),
+        type: "jpeg", quality: 92 });
+      stamps.push(started);
+    } catch { dropped++; }
+    const spent = Date.now() - started;
+    if (spent < budget) await new Promise((r) => setTimeout(r, budget - spent));
+  }
+};
+
 const marks = [];
 await page.goto(PAGES.floor, { waitUntil: "load", timeout: 120000 });
 await page.waitForTimeout(9000);
+await freeze3d();
+await page.waitForTimeout(400);
+capturing = true;
+const capturer = captureLoop();
+const t0 = Date.now();
 
 for (const b of BEATS) {
   if (b.page) {
     await page.evaluate(() => window.__spot?.(null)).catch(() => {});
     await page.goto(PAGES[b.page], { waitUntil: "load", timeout: 120000 });
     await page.waitForTimeout(b.page === "floor" ? 8000 : 3500);
+    await freeze3d();                 // a new document brings its own window
   }
   if (b.act) { try { await b.act(page, helpers); } catch {} await page.waitForTimeout(900); }
   /* The spotlight is set BEFORE the caption, so the ring and the words appear together
      rather than the eye being sent somewhere a third of a second late. */
   await page.evaluate((s) => window.__spot?.(s || null), b.spot || null).catch(() => {});
+  await page.evaluate(([text, lbl]) => window.__cap?.(text, lbl), [b.say, b.title]).catch(() => {});
+  /* The beat's second, taken from the capture clock rather than guessed: the frame index
+     at this instant IS the frame the line starts on. */
   marks.push({ key: b.key, chapter: b.chapter, title: b.title, say: b.say, first: b.first,
-    at: Math.round((Date.now() - t0) / 100) / 10 });
-  const colour = PALETTE[(marks.length - 1) % PALETTE.length];
-  await page.evaluate(([text, lbl, color]) => window.__cap?.(text, lbl, color),
-    [b.say, b.title, `rgb(${colour.join(",")})`]).catch(() => {});
+    frame: stamps.length, at: 0 });
   await page.waitForTimeout(Math.ceil(b.spoken * 1000) + 750);
 }
-await page.evaluate(() => { window.__cap?.("", "", "transparent"); window.__spot?.(null); }).catch(() => {});
+await page.evaluate(() => { window.__cap?.("", ""); window.__spot?.(null); }).catch(() => {});
 await page.waitForTimeout(900);
-const video = page.video();
+capturing = false;
+await capturer;
 await ctx.close();
-const webm = await video.path();
 await browser.close();
-let duration = Math.round((Date.now() - t0) / 100) / 10;
+if (!stamps.length) throw new Error("no frames were captured");
+console.log(`captured ${stamps.length} frames in ${((stamps.at(-1) - stamps[0]) / 1000).toFixed(1)}s ` +
+  `= ${(stamps.length / ((stamps.at(-1) - stamps[0]) / 1000)).toFixed(1)} fps${dropped ? `, ${dropped} dropped` : ""}`);
 
-/* 3 · THE CLOCK IS THE VIDEO'S OWN. A headless renderer drops frames, so the wall-clock
-   second a beat began drifts against where it appears in the file — two seconds by the end
-   of a ninety-second take, which is the difference between a line landing on its subject
-   and landing on the next one. Each beat painted its colour into the top-right marker;
-   read it back at ten samples a second, take the first three-sample hold, and search
-   forward from the previous beat so a cycled palette is never ambiguous. */
-const raw = execFileSync(FFMPEG, ["-loglevel", "error", "-i", webm, "-vf", "crop=8:8:1269:3,scale=1:1", "-r", "10",
-  "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], { maxBuffer: 1 << 28 });
-const nearest = (r, g, b) => {
-  let best = -1, d = Infinity;
-  PALETTE.forEach((c, i) => { const dd = (c[0] - r) ** 2 + (c[1] - g) ** 2 + (c[2] - b) ** 2; if (dd < d) { d = dd; best = i; } });
-  return d < 110 * 110 ? best : -1;
-};
-const seq = []; for (let i = 0; i + 2 < raw.length; i += 3) seq.push(nearest(raw[i], raw[i + 1], raw[i + 2]));
-let cursor = 0, missed = 0;
-marks.forEach((m, k) => {
-  const want = k % PALETTE.length;
-  for (let i = cursor; i + 2 < seq.length; i++) {
-    if (seq[i] === want && seq[i + 1] === want && seq[i + 2] === want) { m.at = i / 10; cursor = i + 1; return; }
-  }
-  missed++;
-  console.warn(`beat ${m.key}: marker not found after ${(cursor / 10).toFixed(1)}s; keeping the wall-clock second ${m.at}`);
-});
-if (missed) console.warn(`${missed} of ${marks.length} beats fell back to wall clock`);
+/* 3 · TRIM THE LEAD-IN, then place every beat on its own frame.
+ *
+ * The first beat cannot speak until the floor has rendered, and none of that wait is
+ * content — it is a silent, motionless page at exactly the point a viewer decides whether
+ * to keep watching. Frames before the trim point are simply not written into the reel.
+ *
+ * Note what is NOT here any more: the colour marker painted into the corner of every shot
+ * and read back out of the encoded file. That existed because Playwright's recorder
+ * dropped and padded frames, so the only honest clock was the picture itself. Assembling
+ * the reel ourselves means a beat's second is its frame index over the frame rate —
+ * exact, and nothing to miss. */
+/* EACH FRAME HOLDS FOR AS LONG AS IT ACTUALLY DID.
+ *
+ * FPS is a budget the capture loop aims at, not a rate it achieves: a screenshot that
+ * overruns simply arrives late. The first cut of this stage assembled at the nominal 12
+ * while capture had really run at 10.7, so the reel played eleven percent fast — and
+ * because every beat's hold is sized to its own spoken line, an eleven percent shorter
+ * hold means the next line starts before the last one has finished. Sync looked fine
+ * (both sides indexed off the same nominal number) while the voice talked over itself.
+ *
+ * The timestamps are already here, so use them: a frame's duration is the gap to the next
+ * one, and a beat's second is the real elapsed time to the frame it began on. Video time
+ * and wall time are then the same thing, which is the only version that cannot drift. */
+const FIRST = (() => {
+  const want = stamps[marks[0].frame] - 1200;      // 1.2s of picture before the first line
+  let i = marks[0].frame;
+  while (i > 0 && stamps[i - 1] >= want) i--;
+  return i;
+})();
+const base = stamps[FIRST];
+marks.forEach((m) => { m.at = Math.round(((stamps[m.frame] - base) / 1000) * 10) / 10; });
+let duration = Math.round(((stamps.at(-1) - base) / 1000) * 10) / 10;
+const realFps = (stamps.length - FIRST) / Math.max(0.001, duration);
+console.log(`trimmed ${(( base - stamps[0]) / 1000).toFixed(1)}s of lead-in; first line at ${marks[0].at}s; ` +
+  `reel ${duration}s at a real ${realFps.toFixed(1)} fps`);
 
-/* 4 · TRIM THE LEAD-IN. The first beat cannot speak until the floor has rendered, which
-   is nine seconds of WebGL on a headless renderer — nine seconds of a silent, motionless
-   page at the top of the video, which is where a viewer decides whether to keep watching.
-   None of it is content, so it is cut, and every beat moves earlier by what was cut. */
-const LEAD = Math.max(0, Math.round((marks[0].at - 1.2) * 10) / 10);
-if (LEAD > 0) {
-  marks.forEach((m) => { m.at = Math.round((m.at - LEAD) * 10) / 10; });
-  duration = Math.round((duration - LEAD) * 10) / 10;
-  console.log(`trimmed ${LEAD}s of lead-in; the first line now lands at ${marks[0].at}s`);
+/* 4 · THE REEL. A concat list of the kept frames, each held for the gap that actually
+   followed it. The last frame has no successor, so it takes the median gap. */
+const reel = path.join(WORK, "reel.txt");
+const files = fs.readdirSync(FRAMES).filter((f) => f.endsWith(".jpg")).sort();
+const gaps = stamps.slice(1).map((t, i) => (t - stamps[i]) / 1000);
+const median = [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length / 2)] || 1 / FPS;
+const q = (f) => path.join(FRAMES, f).replace(/'/g, "'\\''");
+const lines = [];
+for (let i = FIRST; i < files.length; i++) {
+  const hold = i + 1 < stamps.length ? (stamps[i + 1] - stamps[i]) / 1000 : median;
+  lines.push(`file '${q(files[i])}'`, `duration ${Math.max(0.005, hold).toFixed(5)}`);
 }
+lines.push(`file '${q(files.at(-1))}'`);           // concat needs the last file repeated
+fs.writeFileSync(reel, lines.join("\n") + "\n");
 
 /* 5 · THE MIX: each line laid at its own beat's second, then muxed with the picture. */
 const inputs = [];
@@ -256,18 +318,22 @@ marks.forEach((m, i) => {
 /* amix scales every input by 1/N and the lines never overlap, so volume=N restores them —
    on every ffmpeg, including ones without amix's normalize option. */
 const mixed = marks.map((_, i) => `[a${i}]`).join("") + `amix=inputs=${marks.length}:dropout_transition=0,volume=${marks.length}[voice]`;
-/* -ss BEFORE -i seeks the input, so the picture starts at the trim point and the beat
-   seconds above, already shifted by the same amount, still line up with it. */
+/* The reel is 1080p stills; the delivery is 720p. Downscaling with lanczos supersamples
+   the text, so it reads sharper than a 720p capture ever could — which is the whole point
+   of capturing above the delivery size. crf 20 rather than 23 because screen text is
+   exactly what a quantiser blurs first, and the content is mostly static so it costs
+   little: the bytes go where the picture changes, and here it usually does not. */
 const encode = (out, vcodec) => execFileSync(FFMPEG, ["-y",
-  ...(LEAD > 0 ? ["-ss", String(LEAD)] : []), "-i", webm, ...inputs,
-  "-filter_complex", filters.join(";") + ";" + mixed,
-  "-map", "0:v:0", "-map", "[voice]", ...vcodec, "-shortest", out], { stdio: "inherit" });
+  "-f", "concat", "-safe", "0", "-i", reel, ...inputs,
+  "-filter_complex", filters.join(";") + ";" + mixed +
+    `;[0:v]scale=${OUT_W}:${OUT_H}:flags=lanczos,fps=${FPS},format=yuv420p[vid]`,
+  "-map", "[vid]", "-map", "[voice]", ...vcodec, "-shortest", out], { stdio: "inherit" });
 const mp4 = path.join(ROOT, "token", "guide-walkthrough.mp4");
-encode(mp4, ["-c:v", "libx264", "-preset", "medium", "-crf", "23", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+encode(mp4, ["-c:v", "libx264", "-preset", "slow", "-crf", "20", "-movflags", "+faststart",
   "-c:a", "aac", "-b:a", "112k"]);
 /* And the same recording as VP9/Opus, for Chromium builds that ship without H.264. */
 const webmOut = path.join(ROOT, "token", "guide-walkthrough.webm");
-encode(webmOut, ["-c:v", "libvpx-vp9", "-crf", "34", "-b:v", "0", "-row-mt", "1", "-deadline", "good", "-cpu-used", "2",
+encode(webmOut, ["-c:v", "libvpx-vp9", "-crf", "32", "-b:v", "0", "-row-mt", "1", "-deadline", "good", "-cpu-used", "2",
   "-c:a", "libopus", "-b:a", "72k"]);
 
 /* The GUIDE tab reads chapters for its rail and beats for the transcript that follows the

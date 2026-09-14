@@ -86,12 +86,38 @@ console.log("\n4. THE RECORDER KEEPS PICTURE AND SENTENCE TOGETHER");
 const recorder = read("./scripts/record-guide.mjs");
 ok("the hold for a beat is the length of ITS OWN line",
   /await page\.waitForTimeout\(Math\.ceil\(b\.spoken \* 1000\) \+ \d+\)/.test(recorder));
+const capAt = recorder.indexOf("window.__cap?.(text, lbl)");
 ok("…and the line is only spoken after its camera move has run",
-  recorder.indexOf("if (b.act)") < recorder.indexOf("window.__cap?.(text, lbl, color)"));
+  capAt > 0 && recorder.indexOf("if (b.act)") < capAt);
 ok("the spotlight is set before the caption, so ring and words arrive together",
-  recorder.indexOf("window.__spot?.(s || null), b.spot") < recorder.indexOf("window.__cap?.(text, lbl, color)"));
-ok("beat times are read back from the video, not trusted from the wall clock",
-  /marker not found after/.test(recorder) && /crop=8:8/.test(recorder));
+  capAt > 0 && recorder.indexOf("window.__spot?.(s || null), b.spot") < capAt);
+/* CAPTURE, NOT RECORD. Playwright's own recorder encoded VP8 at ~926 kb/s and padded a
+   0.3 fps software-GL render up to a nominal 25 fps, which is both halves of "laggy and
+   not HD" (owner, 2026-09-14). Frames are taken at 1080p and the reel is assembled here,
+   so the beat seconds are frame indices — exact, with no marker to paint and miss. */
+/* The option, not the word — the comment above it in the recorder explains why it is gone
+   and would match a bare /recordVideo/ forever. */
+ok("the recorder captures frames rather than using Playwright's video recorder",
+  !/recordVideo\s*:/.test(recorder) && /page\.screenshot\(\{ path: path\.join\(FRAMES/.test(recorder));
+ok("…at a capture size above the delivery size, so the downscale supersamples",
+  /const CAP_W = 1920, CAP_H = 1080;/.test(recorder) && /const OUT_W = 1280, OUT_H = 720;/.test(recorder) &&
+  /flags=lanczos/.test(recorder));
+ok("…and the 3D loop is frozen, which is what makes that rate possible at all",
+  /window\.requestAnimationFrame = \(\) => 0;/.test(recorder) && /await freeze3d\(\);/.test(recorder));
+ok("…re-frozen after every navigation, because a new document brings its own window",
+  (recorder.match(/await freeze3d\(\);/g) || []).length >= 2);
+/* A BEAT'S SECOND IS REAL ELAPSED TIME, and each frame holds for the gap that actually
+   followed it. FPS is a budget the capture loop aims at, not one it hits: assembling at
+   the nominal 12 while capture ran at 10.7 played the reel eleven percent fast, which
+   shortened every hold by eleven percent and had the voice talking over itself — with
+   video and audio still in perfect apparent sync, because both indexed the same wrong
+   number. Only the timestamps make video time and wall time the same thing. */
+ok("beat seconds come from the capture timestamps, not a nominal frame rate",
+  /m\.at = Math\.round\(\(\(stamps\[m\.frame\] - base\) \/ 1000\) \* 10\) \/ 10;/.test(recorder));
+ok("…and each frame holds for the gap that actually followed it",
+  /const hold = i \+ 1 < stamps\.length \? \(stamps\[i \+ 1\] - stamps\[i\]\) \/ 1000 : median;/.test(recorder));
+ok("…so the colour-marker readback is gone entirely",
+  !/marker not found/.test(recorder) && !/PALETTE/.test(recorder));
 ok("the voice is the high-quality model's own pace, with prosody noise left on",
   /"--length-scale", "1\.0"/.test(recorder) && /"--noise-scale", "0\.667"/.test(recorder) &&
   /"--noise-w-scale", "0\.8"/.test(recorder) && /"--sentence-silence", "0\.32"/.test(recorder));
