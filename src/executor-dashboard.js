@@ -16,15 +16,18 @@ export const EXECUTOR_CANARY_DEFAULTS = Object.freeze({
   rolling24hRealizedLossBrakeSol: 0.01,
   maxOpenPositions: 4,
 });
-/* Per-trade ceiling raised 0.4 -> 1 on 2026-09-12 at the owner's request. Every copy moves
-   together or test-operator-max-parity.mjs fails (it reads this literal by regex, which is
-   why the note sits above the object rather than inside it); the bot honours the new number
-   only on a release that carries it, re-armed through the caps ceremony with the new
-   figures typed. */
+/* Per-trade ceiling raised 0.4 -> 1 on 2026-09-12, and the realized-loss brake ceiling
+   0.4 -> 1000 on 2026-09-14, both at the owner's request. Every copy moves together or
+   test-operator-max-parity.mjs fails (it reads these literals by regex, which is why the
+   note sits above the object rather than inside it); the bot honours a new number only on
+   a release that carries it, re-armed through the caps ceremony with the new figures
+   typed. The desk's side of the brake raise is only this bound — it decides which armed
+   caps the desk will VOUCH for in a heartbeat, and a bot armed above the bound has its
+   caps nulled and its state forced to degraded. */
 export const EXECUTOR_OPERATOR_MAXIMA = Object.freeze({
   maxSolPerTrade: 1,
   rolling24hDeploySol: 1000,
-  rolling24hRealizedLossBrakeSol: 0.4,
+  rolling24hRealizedLossBrakeSol: 1000,
   /* The executor's open-position count is a SENTINEL (strategy.mjs DEFAULTS 24 — "book
      heat and the wallet bind first") and it reports that number in every heartbeat. A
      bound of 4 here rejected every one of those heartbeats before the SOL caps were even
