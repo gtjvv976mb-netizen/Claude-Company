@@ -723,16 +723,28 @@ until the wallet recovers. Nothing about the brake resets at midnight.
 **Raising `DAILY_LOSS_LIMIT_SOL` on its own usually changes nothing**, because on a small
 wallet the percentage is the half that is binding. Both have to be lifted:
 
+**Two commands, and the second one is unavoidable.** The percentage is a setting, so it
+rides the install line; the absolute figure is a money cap, so it does not.
+
 ```bash
-# in $ENV_FILE — stop the service first, then load again
-DAILY_LOSS_LIMIT_SOL="1000"
-DAILY_LOSS_PCT_OF_EQUITY="0"
+# 1 — upgrade, turn the equity brake off, keep entries armed on battery, unpause
+curl -fsSL https://claudedotcompany.com/install.sh | bash -s -- \
+  --floor <N> --expected-commit <SHA> \
+  --no-equity-brake --allow-battery-entries --resume-entries
+
+# 2 — raise the absolute cap; COPY the sentence it prints, do not retype it
+bash "$RELEASE_DIR/executor/macos-launchagent.sh" arm-caps \
+  --executor-dir "$RELEASE_DIR/executor" --env-file "$ENV_FILE" \
+  --max-sol <your per-trade size> --daily-sol-cap 1000 --daily-loss-cap 1000
 ```
 
-`DAILY_LOSS_LIMIT_SOL` is one of the three money caps, so it goes through the caps
-ceremony (`arm-caps`, with the new figure typed into the acknowledgement sentence) like
-any other. `DAILY_LOSS_PCT_OF_EQUITY` is an ordinary dial: it never authorises a spend, it
-only decides when entries stop. An upgrade carries both forward.
+`--no-equity-brake` writes `DAILY_LOSS_PCT_OF_EQUITY=0` and wins over whatever an upgrade
+would otherwise carry forward. `DAILY_LOSS_LIMIT_SOL` is one of the three money caps and
+is deliberately **not** settable from the install line: **an upgrade refuses to raise any
+cap**, because re-pinning code and widening a money limit are different acts. `arm-caps`
+is the only way, it works only at a real local terminal against a stopped and paused
+executor, and it makes you retype a sentence naming the wallet and the exact figures. An
+upgrade carries both settings forward once they are set.
 
 The boot log tells you which half is binding, and says so plainly when neither is:
 
