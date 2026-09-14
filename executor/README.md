@@ -707,6 +707,62 @@ heartbeat reports the mode, and the WALL-ST-E tab's health grid reads `TAKES EVE
 CALL`. An upgrade carries the three lines forward. Remove `ENTRY_MODE` (or set it to
 `risk`) and load again to return to risk-sized entries.
 
+## Running with no loss brake, until the wallet is the stop
+
+The realized-loss entry brake is the **tighter of two numbers**, and that is the whole
+reason this section exists. `DAILY_LOSS_LIMIT_SOL` is an absolute figure in SOL.
+`DAILY_LOSS_PCT_OF_EQUITY` is a share of the wallet balance, `0.20` by default. Whichever
+is smaller wins, so it can only ever brake sooner.
+
+That pairing is **self-tightening on a losing wallet**, which is what surprises operators:
+the percentage falls as the balance does. At a 0.55 SOL bankroll the 20% default brakes at
+0.11 SOL, which a single stop-out on a 0.5 SOL position clears — and because the brake is
+a *rolling 24-hour* window, it then stays shut until those losses age out on the clock, not
+until the wallet recovers. Nothing about the brake resets at midnight.
+
+**Raising `DAILY_LOSS_LIMIT_SOL` on its own usually changes nothing**, because on a small
+wallet the percentage is the half that is binding. Both have to be lifted:
+
+```bash
+# in $ENV_FILE — stop the service first, then load again
+DAILY_LOSS_LIMIT_SOL="1000"
+DAILY_LOSS_PCT_OF_EQUITY="0"
+```
+
+`DAILY_LOSS_LIMIT_SOL` is one of the three money caps, so it goes through the caps
+ceremony (`arm-caps`, with the new figure typed into the acknowledgement sentence) like
+any other. `DAILY_LOSS_PCT_OF_EQUITY` is an ordinary dial: it never authorises a spend, it
+only decides when entries stop. An upgrade carries both forward.
+
+The boot log tells you which half is binding, and says so plainly when neither is:
+
+```
+caps: 0.5 SOL/trade, 1000 SOL/rolling 24h deploy, realized-loss entry brake = 1000 SOL
+  flat (DAILY_LOSS_PCT_OF_EQUITY=0 — no equity brake), 24 open (a sentinel — book heat
+  and the wallet bind first)
+realized-loss brake: LIFTED on both halves — the wallet's spendable balance is the only
+  stop on losses.
+```
+
+**What this does and does not remove.** It removes the discretionary stop — the one that
+says "you have lost enough for now". It removes no rail that protects the transaction or
+the balance. Still refusing, on every entry, with the brake fully lifted: the spendable
+balance after the fee reserve, the per-trade cap (a clamp, so an oversized `FIXED_SOL` is
+cut to the cap rather than honoured), the per-name risk cap, book heat, the open-position
+count, the minimum viable size, a call with no stop, and every custody, fee, rent and
+price-impact rule on the transaction itself. The pause file and the hard-stop file both
+still work. `executor/test-unbraked.mjs` drives each of those against a bot with the brake
+lifted, so the list above is asserted rather than promised.
+
+Understand what you are choosing: with no loss brake the bot will keep taking calls
+through a losing streak until the balance can no longer fund an entry. That is the
+intended behaviour of this setting, and the reason it is off by default. Fund the wallet
+with what you are prepared to lose entirely, and use the pause file to stop it early:
+
+```bash
+touch "$INSTALL_DIR/PAUSE_ENTRIES"     # stops new entries, lets open positions exit
+```
+
 ## Arming HAWK-AI, the launch sniper, with real money
 
 HAWK-AI is the executor's second lane. It listens to pump.fun's own program logs over the
@@ -812,7 +868,8 @@ and the first sell in the journal and on an explorer, and only then raise the ce
 | `HARD_STOP_FILE` | installer-managed | Presence blocks new submissions while reconciliation continues |
 | `MAX_SOL_PER_TRADE` | live `0.005` | Absolute input ceiling for one entry; acknowledged operator hard maximum `1` SOL |
 | `DAILY_SOL_CAP` | live `0.01` | Rolling 24-hour deployment cap; acknowledged operator hard maximum `1000` SOL and never below the per-trade cap |
-| `DAILY_LOSS_LIMIT_SOL` | live `0.01` | Rolling 24-hour realized-loss entry brake, including failed-attempt fees; acknowledged operator hard maximum `0.4` SOL, not a guaranteed loss ceiling |
+| `DAILY_LOSS_LIMIT_SOL` | live `0.01` | Rolling 24-hour realized-loss entry brake, including failed-attempt fees; acknowledged operator hard maximum `1000` SOL, not a guaranteed loss ceiling. Applied as the **tighter** of this and `DAILY_LOSS_PCT_OF_EQUITY` — raising this alone often changes nothing |
+| `DAILY_LOSS_PCT_OF_EQUITY` | `0.20` | The same brake as a share of the wallet balance. `0` turns it off. Applied as the tighter of this and `DAILY_LOSS_LIMIT_SOL`, so it can only ever brake sooner |
 | `MAX_OPEN_POSITIONS` | policy default | Concurrent recorded-position ceiling |
 | `SLIPPAGE_BPS` | policy default | Maximum requested swap slippage |
 | `MAX_PRICE_IMPACT_PCT` | `5` | Strict maximum impact for a new entry |

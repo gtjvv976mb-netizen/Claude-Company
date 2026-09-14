@@ -1216,7 +1216,11 @@ LIVE_CANARY_DAILY_LOSS_CAP="0.01"
 LIVE_MIN_MONEY_CAP="0.000001"
 LIVE_OPERATOR_MAX_SOL="1"
 LIVE_OPERATOR_MAX_DAILY_CAP="1000"
-LIVE_OPERATOR_MAX_DAILY_LOSS_CAP="0.4"
+# 0.4 -> 1000 (owner, 2026-09-14: "i want it to trade until it losses the funds"). Held
+# equal to poller.mjs OPERATOR_MAX.dailyLossLimitSol by test-operator-max-parity.mjs. A
+# realized loss cannot exceed what was deployed to realize it, so the deploy ceiling is
+# the arithmetic ceiling on this rail; the wallet balance is what stops the day.
+LIVE_OPERATOR_MAX_DAILY_LOSS_CAP="1000"
 
 # One SOL has exactly 1e9 lamports. Limiting cap literals to that precision keeps
 # the comparison exact enough for the declared unit and prevents awk's binary
@@ -1855,6 +1859,7 @@ fi
   # runner validates each against its own allow-list and bounds before anything runs.
   if [ "$UPGRADE" -eq 1 ]; then
     for dial in ENTRY_MODE ENTRY_MODE_ACK FIXED_SOL F_DEFAULT F_NAME_MAX BOOK_HEAT_MAX MIN_CONVICTION \
+      DAILY_LOSS_PCT_OF_EQUITY \
       MAX_OPEN_POSITIONS TRAIL_PCT MAX_AGE_HOURS \
       SNIPE_LANE SNIPE_TICK_MS SNIPE_MAX_SOL_PER_TRADE SNIPE_DAILY_SOL_CAP SNIPE_LIVE_ACK \
       SNIPE_TAKE_AT_ENTRY_X SNIPE_STOP_FRAC SNIPE_HOLD_MAX_MS SNIPE_PRIORITY_FEE_LAMPORTS \
