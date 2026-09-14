@@ -134,6 +134,42 @@ console.log("\n3. THE DIAL, END TO END");
   ok("an installer upgrade carries it forward", /\bDAILY_LOSS_PCT_OF_EQUITY\b/.test(carryList));
   ok("the README documents it", /DAILY_LOSS_PCT_OF_EQUITY/.test(readme));
 
+  /* ONE COMMAND, NOT THREE (owner, 2026-09-14: "theres too many info, just make the bot
+     trade until its funding is gone"). Hand-editing the protected env file between an
+     upgrade and a load is where a three-step list loses a step, so the two settings that
+     are NOT money caps ride the install line. The absolute cap still does not: an upgrade
+     refuses to raise a cap, by design, and that refusal is asserted below. */
+  ok("--no-equity-brake is parsed", /--no-equity-brake\) NO_EQUITY_BRAKE=1; shift;;/.test(install));
+  ok("…and is off by default", /^NO_EQUITY_BRAKE=0$/m.test(install));
+  ok("…and writes the dial as exactly 0", /write_env_line DAILY_LOSS_PCT_OF_EQUITY "0"/.test(install));
+  ok("--allow-battery-entries is parsed", /--allow-battery-entries\) ALLOW_BATTERY_ENTRIES=1; shift;;/.test(install));
+  ok("…and is off by default", /^ALLOW_BATTERY_ENTRIES=0$/m.test(install));
+  ok("…and writes the dial as exactly 1", /write_env_line WALLSTE_ALLOW_BATTERY_ENTRIES "1"/.test(install));
+  ok("both flags are documented in --help",
+    /--no-equity-brake\s+Set DAILY_LOSS_PCT_OF_EQUITY=0/.test(install) &&
+    /--allow-battery-entries\n\s+Set WALLSTE_ALLOW_BATTERY_ENTRIES=1/.test(install));
+
+  /* THE DOUBLE-WRITE THIS GUARDS. Both flag dials are also in the upgrade carry list, so
+     without the skip an upgrade emits the flag's line AND the prior value's line for the
+     same key, and which one the runtime honours falls to the env parser rather than to
+     what the operator just typed. The flag must win. */
+  ok("a flag's value is written before the carry loop, and the loop skips it",
+    /SET_BY_FLAG="\$SET_BY_FLAG DAILY_LOSS_PCT_OF_EQUITY"/.test(install) &&
+    /SET_BY_FLAG="\$SET_BY_FLAG WALLSTE_ALLOW_BATTERY_ENTRIES"/.test(install) &&
+    /case " \$SET_BY_FLAG " in \*" \$dial "\*\) continue;; esac/.test(install));
+  ok("…and the skip sits INSIDE the carry loop, before the read",
+    install.indexOf('case " $SET_BY_FLAG " in') > install.indexOf("for dial in") &&
+    install.indexOf('case " $SET_BY_FLAG " in') < install.indexOf('upgrade_env_read "$dial"'));
+
+  /* The absolute cap is a money cap: an upgrade REFUSES to raise one, and that is the
+     gate that keeps a remote hand off an operator's money limits. Not softened here. */
+  ok("an upgrade still refuses to RAISE the absolute loss cap",
+    /upgrade_cap_refuse_raise DAILY_LOSS_LIMIT_SOL --daily-loss-cap/.test(install) &&
+    /would RAISE \$key above the \$have this machine already runs/.test(install));
+  ok("…and the closing summary says the absolute cap is then the only brake left",
+    /Equity brake OFF \(DAILY_LOSS_PCT_OF_EQUITY=0\)/.test(install) &&
+    /Raise it with arm-caps/.test(install));
+
   /* The startup line is the only place an operator learns which half is binding, so it
      must read the CONFIGURED percentage. It read DEFAULTS until this change — harmless
      only while no dial existed, and actively misleading the moment one did. */
