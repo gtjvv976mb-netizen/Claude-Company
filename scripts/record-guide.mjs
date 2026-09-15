@@ -37,10 +37,15 @@ const WORK = process.env.GUIDE_WORK || path.join(ROOT, ".guide-work");
 const CHROME = process.env.PLAYWRIGHT_CHROMIUM || undefined;
 const VOICE = process.env.PIPER_VOICE;
 const FFMPEG = process.env.FFMPEG || "ffmpeg";
-/* Capture big, deliver smaller: the downscale supersamples and the text comes out
-   sharper than capturing at the delivery size ever could. */
+/* TRUE 1080p, captured AND delivered (owner, 2026-09-15: "video in HD"). The first cut
+   captured at 1080p and delivered at 720p to keep the file small; that was the wrong
+   trade. And the obvious way to make the panels larger in frame — a 1280x720 viewport at
+   2x device scale — was measured and rejected: 2560x1440 costs 189 ms a frame (5.3 fps)
+   and 3200x1800 costs 239 ms (4.2 fps), against 66 ms (12 fps) at 1920x1080 at 1x. So the
+   capture stays 1x, the delivery matches it, and a subject that needs to be bigger in
+   frame is brought there by the spotlight and the camera move, not by scaling. */
 const CAP_W = 1920, CAP_H = 1080;
-const OUT_W = 1280, OUT_H = 720;
+const OUT_W = 1920, OUT_H = 1080;
 /* Measured in this sandbox, 2026-09-14, with the 3D loop frozen: 66 ms a frame on the
    floor, 74 ms over a panel. 12 fps leaves headroom on both; 15 would sit exactly on the
    limit and fall behind whenever a panel does real work. */
@@ -206,18 +211,34 @@ const FRAMES = path.join(WORK, "frames");
 fs.mkdirSync(FRAMES, { recursive: true });
 const stamps = [];
 let capturing = false, dropped = 0;
+/* A CUT, NOT A HOLD, ACROSS EVERY PAGE CHANGE. Measured on the first 1080p take (2026-09-15):
+   between the tower's last line and "Step inside" the reel showed twelve seconds of a black
+   floor and the word CONNECTING, in silence, because the recorder kept shooting while the
+   new document loaded and its 3D scene built. Nobody teaches anything with a loading
+   screen, so the shutter closes for the navigation and the clock stops with it: frames are
+   stamped on a clock that excludes the paused time, so the reel — and every beat second on
+   it — simply steps from the last frame of the old page to the first ready frame of the
+   new one. */
+let paused = false, skew = 0;
 const captureLoop = async () => {
   const budget = 1000 / FPS;
   while (capturing) {
+    if (paused) { await new Promise((r) => setTimeout(r, 40)); continue; }
     const started = Date.now();
     try {
       await page.screenshot({ path: path.join(FRAMES, `f${String(stamps.length).padStart(6, "0")}.jpg`),
         type: "jpeg", quality: 92 });
-      stamps.push(started);
+      stamps.push(started - skew);
     } catch { dropped++; }
     const spent = Date.now() - started;
     if (spent < budget) await new Promise((r) => setTimeout(r, budget - spent));
   }
+};
+const shutter = async (fn) => {
+  paused = true;
+  await new Promise((r) => setTimeout(r, 2 * Math.ceil(1000 / FPS)));  // let a shot in flight land
+  const closedAt = Date.now();
+  try { await fn(); } finally { skew += Date.now() - closedAt; paused = false; }
 };
 
 const marks = [];
@@ -232,9 +253,11 @@ const t0 = Date.now();
 for (const b of BEATS) {
   if (b.page) {
     await page.evaluate(() => window.__spot?.(null)).catch(() => {});
-    await page.goto(PAGES[b.page], { waitUntil: "load", timeout: 120000 });
-    await page.waitForTimeout(b.page === "floor" ? 8000 : 3500);
-    await freeze3d();                 // a new document brings its own window
+    await shutter(async () => {
+      await page.goto(PAGES[b.page], { waitUntil: "load", timeout: 120000 });
+      await page.waitForTimeout(b.page === "floor" ? 8000 : 3500);
+      await freeze3d();               // a new document brings its own window
+    });
   }
   if (b.act) { try { await b.act(page, helpers); } catch {} await page.waitForTimeout(900); }
   /* The spotlight is set BEFORE the caption, so the ring and the words appear together
