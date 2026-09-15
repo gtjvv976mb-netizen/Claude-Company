@@ -12,7 +12,7 @@ process.env.CLAUDE_CO_DB = process.env.CLAUDE_CO_DB ||
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import db from "./src/lib/store.js";
-import { executorHeartbeatPayload, sanitizeExecutorHealth, sanitizeExecutorLedger, sanitizeExecutorReporting,
+import { executorHeartbeatPayload, sanitizeExecutorHealth, sanitizeExecutorLedger, sanitizeExecutorReporting, sanitizeExecutorSnipe,
   sanitizeExecutorHeld, sanitizeExecutorClosed } from "./src/office.js";
 import { settingsFor } from "./src/copy.js";
 import { HQ_FLOOR } from "./src/tower.js";
@@ -151,6 +151,47 @@ assert.equal(reporting.lastError.length, 200, "the bot's error text is capped");
 assert.equal(reporting.lastReportedAt, null);
 assert.deepEqual(sanitizeExecutorReporting({}), { fillsOwed: 0, lastReportedAt: null, lastError: null, lastErrorAt: null });
 
+/* THE SNIPER (owner, 2026-09-15: "fully working and fail proof, I will ship this to all
+   floors"). The desk had no word for the launch lane; a floor that armed HAWK-AI against a
+   bad SNIPE_* value had a sniper that was silently absent. These pin that the block is
+   accepted, bounded, and — the part that matters for support — that both silent stops
+   arrive by name. */
+const snipeOff = sanitizeExecutorSnipe({ mode: "off" });
+assert.deepEqual(snipeOff, { mode: "off", state: "off" }, "an unarmed lane is two fields, never a book");
+assert.equal(sanitizeExecutorSnipe(null), null);
+assert.equal(sanitizeExecutorSnipe("execute"), null, "a bare string is not a report");
+const MINT = "So11111111111111111111111111111111111111112";
+const snipe = sanitizeExecutorSnipe({
+  mode: "execute", state: "failed-to-start", since: 1_700_000_000_000,
+  lastError: "SNIPE_LANE=execute needs SOLANA_RPC_SECONDARY distinct from SOLANA_RPC" + "x".repeat(400),
+  lastErrorAt: 1_700_000_000_500, faults: 3, retryAt: 1_700_000_001_000, lastFillAt: null,
+  open: [
+    { mint: MINT, sizeSol: 0.05, entry: 1.25e-7, openedAt: 1_700_000_000_000, high: 2.5e-7, secret: "no" },
+    { mint: "not-a-mint", sizeSol: 1 },                       // dropped: no valid mint
+    { mint: MINT, sizeSol: 9_999_999, entry: -1, openedAt: "soon" },  // clamped and nulled
+  ],
+  counts: { entered: 2, exited: 1, entryFailures: 1, exitFailures: 0, refused: 40, readErrors: "7", ticks: 1e12, signed: 2, sent: 2, notices: 55 },
+  feed: { state: "degraded", ok: true, live: ["logs:pumpfun"], dead: ["poll:pumpfun-list"], message: "1/2 live; DEAD: poll:pumpfun-list" },
+  wallet: "never-carried", endpoint: "never-carried",
+});
+assert.equal(snipe.mode, "execute");
+assert.equal(snipe.state, "failed-to-start", "the silent startup failure arrives by name");
+assert.equal(snipe.lastError.length, 200, "the bot's error text is capped");
+assert.equal(snipe.faults, 3);
+assert.equal(snipe.open.length, 2, "a row without a base58 mint is dropped");
+assert.deepEqual(snipe.open[0], { mint: MINT, sizeSol: 0.05, entry: 1.25e-7, openedAt: 1_700_000_000_000, high: 2.5e-7 });
+assert.equal(snipe.open[1].sizeSol, 1_000, "an absurd size is clamped, not displayed");
+assert.equal(snipe.open[1].entry, null, "a non-positive level is null");
+assert.equal(snipe.open[1].openedAt, null, "a non-numeric time is null");
+assert.equal(snipe.counts.readErrors, 7, "counts are numbers even when the bot sent strings");
+assert.equal(snipe.counts.ticks, 1_000_000, "counts are clamped");
+assert.equal(snipe.feed.state, "degraded");
+assert.deepEqual(snipe.feed.dead, ["poll:pumpfun-list"], "a dead source is named");
+assert.ok(!JSON.stringify(snipe).includes("never-carried"), "nothing the bot did not choose to publish leaks through");
+assert.equal(sanitizeExecutorSnipe({ mode: "execute", state: "bogus" }).state, "faulted", "an unknown state reads as faulted, never as up");
+assert.equal(sanitizeExecutorSnipe({ mode: "execute", state: "disabled", lastError: "tick fault" }).state, "disabled",
+  "the other silent stop — disabled after a fault with nothing open — arrives by name");
+
 /* THE BOOK ITSELF: every open position with its levels, every recent close with its
    result. Bounded, and a row without a mint or a close without a result is dropped. */
 const held = sanitizeExecutorHeld([{ mint: "MintPublic", sol: 0.248, openedAt: 1_789_251_886_063, symbol: "EMBER", callId: 60,
@@ -188,11 +229,32 @@ assert.match(route, /ledger: sanitizeExecutorLedger\(body\.ledger\)/,
   "the heartbeat route must persist the bot's ledger only through its sanitizer");
 assert.match(route, /reporting: sanitizeExecutorReporting\(body\.reporting\)/,
   "the heartbeat route must persist the fill-report queue only through its sanitizer");
+/* A block this whitelist did not name was dropped on the floor — which is exactly how the
+   sniper stayed invisible. The pin is that it is named, and named through its sanitizer. */
+assert.match(route, /snipe: sanitizeExecutorSnipe\(body\.snipe\)/,
+  "the heartbeat route must persist the launch lane only through its sanitizer");
 /* And the board reads them from the status payload, by these names. */
 const viewer = fs.readFileSync(new URL("./viewer/office3d.html", import.meta.url), "utf8");
 assert.match(viewer, /exec\.telemetry\?\.heartbeat\?\.ledger/, "the Overview's P&L tile must read the bot's ledger from the status payload");
 assert.match(viewer, /ledger\.realizedSol/, "the P&L tile must show realized SOL from the ledger");
 assert.match(viewer, /reporting\.fillsOwed > 0/, "the board must say when fill reports are owed");
+/* THE HAWK-AI TAB READS THE LANE. Everything else on that tab is build-time — the
+   executor's armability checklist, which can say whether he MAY run and never whether he
+   IS. The live block reads the sniper from the owner's status when signed in and from the
+   public house book otherwise, and the sentence support gets asked about — armed but not
+   running — names the bot's own reason rather than leaving a floor to guess. */
+assert.match(viewer, /hb\?\.snipe\) \{ snipe = hb\.snipe;/, "the HAWK-AI tab reads the sniper from the owner's status");
+assert.match(viewer, /window\.__houseBot\?\.snipe/, "…and falls back to the public house book for a signed-out viewer");
+assert.match(viewer, /did not start when the bot booted, so this floor has no sniper running/,
+  "armed-but-not-running is a plain sentence, not a blank");
+assert.match(viewer, /The bot's own reason: /, "…that carries the bot's own reason");
+assert.match(viewer, /stopped itself after a fault with no position open/, "the disabled latch is a plain sentence too");
+/* And the owner payload must not lose the block on the way: executor-dashboard.js hands
+   the tab `telemetry.heartbeat` as a SPREAD of the pulse, not a field-by-field copy — a
+   copy would have dropped `snipe` silently, exactly as the route whitelist once did. */
+const dashboard = fs.readFileSync(new URL("./src/executor-dashboard.js", import.meta.url), "utf8");
+assert.match(dashboard, /\? \{ \.\.\.pulse, health: \{ \.\.\.pulse\.health, state: "degraded" \} \} : pulse;/,
+  "the owner's heartbeat is the pulse spread through, so a new block such as `snipe` survives");
 assert.match(viewer, /From your bot's own journal/, "the tile must say where the number comes from");
 /* And the book — positions and closes — is rendered on BOTH the Overview and the tab,
    outside the detailed-view fold. */
@@ -252,6 +314,24 @@ assert.match(route, /closed: sanitizeExecutorClosed\(body\.closed\)/, "closes pe
   assert.equal(houseBotPublic(49), null, "a floor with no pulse has no public book");
   db.prepare("UPDATE copy_settings SET executor_heartbeat='not json' WHERE floor_no=?").run(HQ_FLOOR);
   assert.equal(houseBotPublic(HQ_FLOOR), null, "an unreadable pulse is no book, not a throw");
+
+  /* THE SNIPER RIDES THE PUBLIC BOOK. A floor's HAWK-AI tab must answer "is it running"
+     for a signed-out viewer, so the lane's state reaches houseBotPublic — sanitized, and
+     carrying nothing a stranger could use. The case is the one that matters for support:
+     a lane that failed to start, with the bot's own reason. */
+  db.prepare("UPDATE copy_settings SET executor_heartbeat=? WHERE floor_no=?").run(JSON.stringify({
+    ...pulse,
+    snipe: { mode: "execute", state: "failed-to-start",
+      lastError: "SNIPE_LANE=execute needs SOLANA_RPC_SECONDARY distinct from SOLANA_RPC",
+      lastErrorAt: stamp, wallet: "SniperWalletMustNotCross", endpoint: "https://rpc.example/MustNotCross" },
+  }), HQ_FLOOR);
+  const withSnipe = houseBotPublic(HQ_FLOOR, { now: stamp + 45_000 });
+  assert.equal(withSnipe.snipe.mode, "execute");
+  assert.equal(withSnipe.snipe.state, "failed-to-start", "the silent startup failure is public, by name");
+  assert.match(withSnipe.snipe.lastError, /SOLANA_RPC_SECONDARY/, "…with the bot's own reason");
+  for (const secretText of ["SniperWalletMustNotCross", "MustNotCross"])
+    assert.ok(!JSON.stringify(withSnipe).includes(secretText), `the public book must not carry ${secretText} from the sniper block`);
+  assert.deepEqual(houseBotPublic(HQ_FLOOR, { now: stamp }).snipe, withSnipe.snipe, "the projection is stable across reads");
   db.prepare("UPDATE copy_settings SET executor_heartbeat=? WHERE floor_no=?").run(JSON.stringify(pulse), HQ_FLOOR);
 
   const office = fs.readFileSync(new URL("./src/office.js", import.meta.url), "utf8");
