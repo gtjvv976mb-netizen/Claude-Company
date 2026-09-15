@@ -262,6 +262,9 @@ export function houseBotPublic(floorNo, { now = Date.now() } = {}) {
     held: sanitizeExecutorHeld(stored.held),
     closed: sanitizeExecutorClosed(stored.closed),
     ledger: sanitizeExecutorLedger(stored.ledger),
+    /* The sniper rides the public book too: a floor's HAWK-AI tab must answer "is it
+       running" for a signed-out viewer, and the block carries no wallet to hide. */
+    snipe: sanitizeExecutorSnipe(stored.snipe),
   };
 }
 
@@ -298,6 +301,7 @@ export async function executorStatusPayload(floorNo, {
     health: sanitizeExecutorHealth(stored.health),
     ledger: sanitizeExecutorLedger(stored.ledger),
     reporting: sanitizeExecutorReporting(stored.reporting),
+    snipe: sanitizeExecutorSnipe(stored.snipe),
     ts: stored.ts,
     seenAt: stored.seenAt,
   } : null;
@@ -430,6 +434,64 @@ export function sanitizeExecutorReporting(value) {
     lastReportedAt: timestamp(value.lastReportedAt),
     lastError: value.lastError == null ? null : String(value.lastError).slice(0, 200),
     lastErrorAt: timestamp(value.lastErrorAt),
+  };
+}
+
+/** THE SNIPER, AS THE BOT REPORTS IT (owner, 2026-09-15: "fully working and fail proof,
+ *  I will ship this to all floors"). Until this existed the desk had no word for the
+ *  launch lane: it lived in the bot's own S.snipes and its two ways of stopping — a throw
+ *  at startup, and the latch that disables it after a fault with nothing open — reached a
+ *  local log and nothing else. A floor that armed HAWK-AI against a bad SNIPE_* value had
+ *  a sniper that was silently absent while the desk reported the floor healthy.
+ *
+ *  Bounded like the rest: an allowed-values set for the two states, counts clamped, the
+ *  bot's error text capped and treated as data, at most twenty open rows of a mint, a
+ *  size and two levels. Nothing here is a key, an endpoint or a wallet. */
+export function sanitizeExecutorSnipe(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const modes = new Set(["off", "observe", "execute"]);
+  const states = new Set(["off", "starting", "up", "faulted", "disabled", "failed-to-start"]);
+  const count = (input) => Math.min(1_000_000, Math.max(0, Math.floor(Number(input) || 0)));
+  const timestamp = (input) => {
+    const n = Number(input);
+    return Number.isSafeInteger(n) && n > 0 ? n : null;
+  };
+  const level = (input) => (Number(input) > 0 && Number.isFinite(Number(input)) ? Number(input) : null);
+  const mode = modes.has(String(value.mode)) ? String(value.mode) : "off";
+  if (mode === "off") return { mode: "off", state: "off" };
+  const open = Array.isArray(value.open) ? value.open.slice(0, 20).filter((p) => p && typeof p === "object").map((p) => ({
+    mint: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(String(p.mint || "")) ? String(p.mint) : null,
+    sizeSol: Math.min(1_000, Math.max(0, Number(p.sizeSol) || 0)),
+    entry: level(p.entry),
+    openedAt: timestamp(p.openedAt),
+    high: level(p.high),
+  })).filter((p) => p.mint) : [];
+  const c = value.counts && typeof value.counts === "object" && !Array.isArray(value.counts) ? value.counts : null;
+  const f = value.feed && typeof value.feed === "object" && !Array.isArray(value.feed) ? value.feed : null;
+  const ids = (xs) => (Array.isArray(xs) ? xs.slice(0, 8).map((x) => String(x).slice(0, 40)) : []);
+  return {
+    mode,
+    state: states.has(String(value.state)) ? String(value.state) : "faulted",
+    since: timestamp(value.since),
+    lastError: value.lastError == null ? null : String(value.lastError).slice(0, 200),
+    lastErrorAt: timestamp(value.lastErrorAt),
+    faults: count(value.faults),
+    retryAt: timestamp(value.retryAt),
+    lastFillAt: timestamp(value.lastFillAt),
+    open,
+    counts: c ? {
+      notices: count(c.notices), refused: count(c.refused),
+      entered: count(c.entered), exited: count(c.exited),
+      entryFailures: count(c.entryFailures), exitFailures: count(c.exitFailures),
+      readErrors: count(c.readErrors), ticks: count(c.ticks),
+      signed: count(c.signed), sent: count(c.sent),
+    } : null,
+    feed: f ? {
+      state: ["live", "degraded", "dead", "stopped", "starting"].includes(String(f.state)) ? String(f.state) : "dead",
+      ok: f.ok === true,
+      live: ids(f.live), dead: ids(f.dead),
+      message: String(f.message || "").slice(0, 200),
+    } : null,
   };
 }
 
@@ -1022,6 +1084,9 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             /* The bot's own ledger totals and its fill-report queue, bounded numbers only. */
             ledger: sanitizeExecutorLedger(body.ledger),
             reporting: sanitizeExecutorReporting(body.reporting),
+            /* The launch lane, through its own sanitizer — a block this whitelist did not
+               name was dropped on the floor, which is how the sniper stayed invisible. */
+            snipe: sanitizeExecutorSnipe(body.snipe),
             ts: Number(body.ts) || Date.now(),
             seenAt: Date.now(),
           };
