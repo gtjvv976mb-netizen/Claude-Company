@@ -99,9 +99,14 @@ ok("the spotlight is set before the caption, so ring and words arrive together",
    and would match a bare /recordVideo/ forever. */
 ok("the recorder captures frames rather than using Playwright's video recorder",
   !/recordVideo\s*:/.test(recorder) && /page\.screenshot\(\{ path: path\.join\(FRAMES/.test(recorder));
-ok("…at a capture size above the delivery size, so the downscale supersamples",
-  /const CAP_W = 1920, CAP_H = 1080;/.test(recorder) && /const OUT_W = 1280, OUT_H = 720;/.test(recorder) &&
-  /flags=lanczos/.test(recorder));
+/* TRUE 1080p, captured and delivered at 1x. A 720p delivery was the wrong trade, and the
+   tempting fix for small-in-frame panels — 2x device scale — was measured and rejected:
+   5.3 fps at 2560x1440 and 4.2 fps at 3200x1800, against 12 fps at 1920x1080. The pin
+   holds the capture and the delivery equal, so neither a downscale nor a scale factor can
+   creep back in as a "small" quality tweak. */
+ok("…at true 1080p, captured and delivered at the same size",
+  /const CAP_W = 1920, CAP_H = 1080;/.test(recorder) && /const OUT_W = 1920, OUT_H = 1080;/.test(recorder) &&
+  /deviceScaleFactor: 1/.test(recorder));
 ok("…and the 3D loop is frozen, which is what makes that rate possible at all",
   /window\.requestAnimationFrame = \(\) => 0;/.test(recorder) && /await freeze3d\(\);/.test(recorder));
 ok("…re-frozen after every navigation, because a new document brings its own window",
@@ -118,6 +123,15 @@ ok("…and each frame holds for the gap that actually followed it",
   /const hold = i \+ 1 < stamps\.length \? \(stamps\[i \+ 1\] - stamps\[i\]\) \/ 1000 : median;/.test(recorder));
 ok("…so the colour-marker readback is gone entirely",
   !/marker not found/.test(recorder) && !/PALETTE/.test(recorder));
+/* A PAGE CHANGE IS A CUT. The first 1080p take held twelve seconds of a black floor and the
+   word CONNECTING between the tower's last line and "Step inside", in silence, because the
+   shutter stayed open while the next document loaded. The recorder now closes it around
+   every navigation and stamps frames on a clock that excludes the closed time, so the reel
+   steps straight from one page to the next and no beat second drifts. */
+ok("a navigation closes the shutter, and the capture clock stops with it",
+  /await shutter\(async \(\) => \{\s*await page\.goto\(PAGES\[b\.page\]/.test(recorder) &&
+  /stamps\.push\(started - skew\);/.test(recorder) &&
+  /skew \+= Date\.now\(\) - closedAt; paused = false;/.test(recorder));
 ok("the voice is the high-quality model's own pace, with prosody noise left on",
   /"--length-scale", "1\.0"/.test(recorder) && /"--noise-scale", "0\.667"/.test(recorder) &&
   /"--noise-w-scale", "0\.8"/.test(recorder) && /"--sentence-silence", "0\.32"/.test(recorder));
