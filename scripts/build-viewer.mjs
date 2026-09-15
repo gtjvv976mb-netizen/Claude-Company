@@ -41,6 +41,7 @@ const PAGES = [
 ];
 const ASSETS = [
   "claudeco-512.png", "claudeco-256.png", "claudeco-64.png",
+  "claudeco-192.png", "apple-touch-icon.png",   // the phone's home-screen marks (see manifest below)
   "claudeco-rh-256.png",          // the Robinhood edition's own mark, for the lease floor
   "banner-1500x500.png", "banner-1200x630.png",
   "codex-turntable-cover.png", "codex-turntable.gif", "codex-turntable.mp4",
@@ -283,6 +284,37 @@ console.log(`hawk-ai status    armable=${hawkStatusValue.armable} blocking=[${ha
 const BUILD_STAMP = new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC";
 fs.writeFileSync(path.join(OUT, "build.json"), JSON.stringify({ build: BUILD_STAMP, commit: EXECUTOR_COMMIT }) + "\n");
 
+/* THE DESK ON A PHONE (owner, 2026-09-15: "I also want this to be an iOS app"). Two layers,
+   and this is the first: the site declares itself installable, so Safari's Share → Add to
+   Home Screen puts the tower on an iPhone as a full-screen app with its own icon, no App
+   Store, no Apple account, today. The second layer, ios/, is a native shell around these
+   same pages for TestFlight and the store. Both open on the tower, because a tenant's
+   first tap is "which floor is mine", and both carry the tower's own night ground so the
+   launch never flashes white. The manifest is written by the build, not committed, so its
+   paths agree with whatever host is being built. */
+export const WEB_APP = {
+  name: "Claude Company",
+  shortName: "Claude Co",
+  startUrl: "tower.html",
+  ground: "#08050f",           // tower.html --bar (its masthead) and solana.html --bg; the launch colour
+};
+fs.writeFileSync(path.join(OUT, "manifest.webmanifest"), JSON.stringify({
+  id: "claude-company",
+  name: WEB_APP.name,
+  short_name: WEB_APP.shortName,
+  description: "Sixteen AI analysts, one trading desk on Solana, fifty floors. Lease a floor and run the desk's calls on your own wallet.",
+  start_url: WEB_APP.startUrl,
+  scope: "./",
+  display: "standalone",
+  orientation: "any",
+  background_color: WEB_APP.ground,
+  theme_color: WEB_APP.ground,
+  icons: [
+    { src: "assets/claudeco-192.png", sizes: "192x192", type: "image/png" },
+    { src: "assets/claudeco-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+  ],
+}, null, 2) + "\n");
+
 for (const { src: name, out } of PAGES) {
   const src = path.join(VIEWER, name);
   if (!fs.existsSync(src)) continue;
@@ -344,7 +376,20 @@ for (const { src: name, out } of PAGES) {
   }
 
   // the dev server's routes become relative links
-  html = html.replace(/<link rel="icon"[^>]*>/, '<link rel="icon" href="assets/favicon.png" type="image/png">');
+  html = html.replace(/<link rel="icon"[^>]*>/, () => [
+    '<link rel="icon" href="assets/favicon.png" type="image/png">',
+    /* The installable-app head (see WEB_APP above). apple-mobile-web-app-status-bar-style
+       is "black", the opaque one, on purpose: the pages lay their own bars along the top
+       edge and do not reserve the notch, so a translucent status bar would sit on the
+       tower's title. Opaque black over the night ground reads as one surface. */
+    '<link rel="manifest" href="manifest.webmanifest">',
+    '<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">',
+    '<meta name="apple-mobile-web-app-capable" content="yes">',
+    '<meta name="mobile-web-app-capable" content="yes">',
+    '<meta name="apple-mobile-web-app-status-bar-style" content="black">',
+    `<meta name="apple-mobile-web-app-title" content="${WEB_APP.name}">`,
+    `<meta name="theme-color" content="${WEB_APP.ground}">`,
+  ].join("\n"));
   html = html.replace(/href="\/tower"/g, 'href="tower.html"');
   html = html.replace(/href="\/solana(#[\w-]*)?"/g, (_, hash) => `href="solana.html${hash || ""}"`);
   html = html.replace(/href="\/floor\/(\d+)"/g, (_, n) => `href="floor.html?floor=${n}"`);

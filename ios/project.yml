@@ -1,0 +1,60 @@
+# XcodeGen spec for the Claude Company iPhone shell. `./make.sh` turns this into
+# ClaudeCompany.xcodeproj (which is not committed — it is generated output).
+name: ClaudeCompany
+options:
+  bundleIdPrefix: com.claudedotcompany
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    # Your Apple Developer team id, or leave blank and pick it in Xcode → Signing & Capabilities.
+    DEVELOPMENT_TEAM: ""
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+targets:
+  ClaudeCompany:
+    type: application
+    platform: iOS
+    sources:
+      - path: ClaudeCompany
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.claudedotcompany.app
+        PRODUCT_NAME: Claude Company
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+    info:
+      path: ClaudeCompany/Info.plist
+      properties:
+        CFBundleDisplayName: Claude Company
+        CFBundleName: Claude Company
+        UILaunchScreen: {}
+        UIUserInterfaceStyle: Dark
+        UIViewControllerBasedStatusBarAppearance: true
+        UIRequiresFullScreen: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # Wallets the shell may ask iOS about before handing a link over.
+        LSApplicationQueriesSchemes:
+          - phantom
+          - solflare
+          - backpack
+        # claudeco://floor/12 and claudeco://tower open straight in the app.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.claudedotcompany.app
+            CFBundleURLSchemes:
+              - claudeco
+        # Only standard HTTPS; no proprietary encryption, so no export paperwork on upload.
+        ITSAppUsesNonExemptEncryption: false
