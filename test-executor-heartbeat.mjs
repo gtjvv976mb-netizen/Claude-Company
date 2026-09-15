@@ -244,7 +244,15 @@ assert.match(viewer, /reporting\.fillsOwed > 0/, "the board must say when fill r
    public house book otherwise, and the sentence support gets asked about — armed but not
    running — names the bot's own reason rather than leaving a floor to guess. */
 assert.match(viewer, /hb\?\.snipe\) \{ snipe = hb\.snipe;/, "the HAWK-AI tab reads the sniper from the owner's status");
-assert.match(viewer, /window\.__houseBot\?\.snipe/, "…and falls back to the public house book for a signed-out viewer");
+assert.match(viewer, /if \(window\.__houseBot\.snipe\) \{ snipe = window\.__houseBot\.snipe;/,
+  "…and falls back to the public house book for a signed-out viewer");
+/* TWO ABSENCES, TWO SENTENCES. A pulse with no sniper block is a bot on a release older
+   than the report — every floor between this page shipping and its operator upgrading —
+   and "no bot has reported" to that floor is false on its face. */
+assert.match(viewer, /if \(hb\) pulsed = true;/, "the tab remembers whether any pulse arrived at all");
+assert.match(viewer, /"NOT REPORTED", "warn"/, "a pulsing bot without the sniper block reads NOT REPORTED…");
+assert.match(viewer, /release predates the sniper report/, "…and says why");
+assert.match(viewer, /"NO PULSE", "warn"/, "…while a floor with no bot at all keeps NO PULSE");
 assert.match(viewer, /did not start when the bot booted, so this floor has no sniper running/,
   "armed-but-not-running is a plain sentence, not a blank");
 assert.match(viewer, /The bot's own reason: /, "…that carries the bot's own reason");
