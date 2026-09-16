@@ -139,7 +139,7 @@ const eligibleRecord = (size) => ({
   risk: { position_size_usd: size },
   ceo: { ruling: size > 0 ? "APPROVE" : "HOLD", order_size_usd: size },
   order: { size },
-  ticket: { stop_price: 0.6 },
+  ticket: { stop_price: 0.8 },   // 20% under the entry: inside the 6%-35% band mandate.js publishes
   ev: { pair: { priceUsd: 1, priceChange: { m5: 0 } } },
 });
 /* THE ONE PLACE A ZERO SIZE STILL STOPS SOMETHING, and it is a publication gate rather

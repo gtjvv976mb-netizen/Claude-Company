@@ -75,6 +75,21 @@ for (const [name, over] of unsafe) {
   if (e.eligible === false) ok(name + " → flagged as safety", e.safety === true, `safety=${e.safety}`);
 }
 
+console.log("\nTHE STOP BAND — a level outside 6%-35% under the entry is refused as judgement, never as safety");
+{
+  const tight = eligibility(good({ ticket: { stop_price: 0.97, take_profit: [{ price: 1.9 }] }, risk: { ...good().risk, stop_price: 0.97 } }));
+  ok("a stop 3% under the entry is refused — inside the coin's own noise", tight.eligible === false, tight.reason);
+  ok("...as judgement, with the stop_out_of_band gate named", tight.safety === false && tight.gate === "stop_out_of_band",
+    `safety=${tight.safety} gate=${tight.gate}`);
+  const wide = eligibility(good({ ticket: { stop_price: 0.5, take_profit: [{ price: 1.9 }] }, risk: { ...good().risk, stop_price: 0.5 } }));
+  ok("a stop 50% under the entry is refused — a drawdown no target on the record pays for", wide.eligible === false, wide.reason);
+  ok("...as judgement too", wide.safety === false && wide.gate === "stop_out_of_band", `safety=${wide.safety} gate=${wide.gate}`);
+  const edgeIn = eligibility(good({ ticket: { stop_price: 0.65, take_profit: [{ price: 1.9 }] } }));
+  ok("35% under the entry is the widest stop still published", edgeIn.eligible === true, edgeIn.reason);
+  const edgeTight = eligibility(good({ ticket: { stop_price: 0.94, take_profit: [{ price: 1.9 }] } }));
+  ok("6% under the entry is the tightest", edgeTight.eligible === true, edgeTight.reason);
+}
+
 console.log("\nTHE TEAM'S EXPLICIT NO — refused, but as judgement rather than safety");
 {
   const p = eligibility(good({ pm: { ...good().pm, decision: "PASS" }, finalDecision: "PASS" }));

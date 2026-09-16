@@ -39,7 +39,7 @@
  * failing that to publish nothing and say so. A forced call into a coin that provably
  * cannot be exited is not a trade, it is a donation.
  */
-import { liveCalls } from "./calls.js";
+import { liveCalls, STOP_BAND, stopDistance } from "./calls.js";
 
 /**
  * How many house calls may be live at once. One means strictly sequential.
@@ -87,7 +87,7 @@ export function bookState() {
   };
 }
 
-const decline = (reason, safety) => ({ eligible: false, reason, safety });
+const decline = (reason, safety, gate = null) => ({ eligible: false, reason, safety, ...(gate ? { gate } : {}) });
 
 /**
  * May this workup become the cycle's call?
@@ -151,6 +151,21 @@ export function eligibility(rec) {
     return decline("no readable entry price", true);
   if (stop >= price)
     return decline(`the stop (${stop}) sits at or above the entry (${price}) — it would fire on arrival`, true);
+  /* THE STOP BAND (2026-09-16). Not a safety fact — the coin can be bought and sold either
+     way — but a judgment about the LEVEL that the desk's own record settles: of the calls
+     the PM scored 30+, stops 8-25% under the entry won about six in ten and averaged +8%;
+     stops wider than 25% won four in ten and lost on average; stops under 8% were reached
+     by ordinary movement. A stop inside the coin's noise is a coin flip, and one wider
+     than a third of the position is a drawdown no target on this desk pays for. JUDGMENT,
+     never waived by the ladder (calls.js GATE_CLASS names no rung for it), and the Risk
+     seat's brief now says where the band is, so a refusal here is the seat not listening. */
+  const dist = stopDistance(stop, price);
+  if (dist != null && dist < STOP_BAND.min)
+    return decline(`the stop sits ${(dist * 100).toFixed(1)}% under the entry — inside this coin's own noise ` +
+      `(the desk publishes stops ${STOP_BAND.min * 100}%-${STOP_BAND.max * 100}% under the entry)`, false, "stop_out_of_band");
+  if (dist != null && dist > STOP_BAND.max)
+    return decline(`the stop sits ${(dist * 100).toFixed(1)}% under the entry — a drawdown no target on this desk's record ` +
+      `pays for (the desk publishes stops ${STOP_BAND.min * 100}%-${STOP_BAND.max * 100}% under the entry)`, false, "stop_out_of_band");
   const authorizedSize = Number(rec.order?.size ?? rec.ceo?.order_size_usd ?? rec.risk?.position_size_usd);
   if (!(authorizedSize > 0))
     return decline("the team authorized zero size — there is no trade to publish", true);

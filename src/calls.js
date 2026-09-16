@@ -533,6 +533,13 @@ export const GATE_CLASS = Object.freeze({
   // ── the quota bar itself ──────────────────────────────────────────────────────────
   tier_below_bar: "JUDGMENT",
   conviction_below_bar: "JUDGMENT",
+  /* THE STOP BAND (2026-09-16). A stop tighter than 6% of the entry is inside a memecoin's
+     own noise; one wider than 35% is a drawdown that no target on this desk's record
+     pays for (the 25%+ stops: 44% won, -3.4% average; the 8-25% stops: ~60%, +8%). It is
+     a judgment about the LEVEL, not a fact about the coin, so it is JUDGMENT — and no rung
+     of escalationPlan names it, so no quota reaches it either. The band itself is
+     STOP_BAND below; mandate.js applies it and gateFailures() reports it. */
+  stop_out_of_band: "JUDGMENT",
 
   /* ── THE ENTRY CONTRACT'S OWN CODES (2026-09-08) ─────────────────────────────────
    *
@@ -607,6 +614,17 @@ export const complianceGateClass = () => "SAFETY";
  *
  * The order matters only for reporting; the veto is "any SAFETY entry at all".
  */
+/** How far under the entry a published stop may sit, as a fraction of the entry price.
+ *  One definition, read by mandate.eligibility() and by gateFailures() below. */
+export const STOP_BAND = Object.freeze({ min: 0.06, max: 0.35 });
+
+/** The stop's distance under the entry as a fraction, or null when either is unreadable. */
+export function stopDistance(stop, price) {
+  const s = Number(stop), p = Number(price);
+  if (!(s > 0) || !(p > 0) || s >= p) return null;
+  return (p - s) / p;
+}
+
 export function gateFailures(rec) {
   const out = [];
   const add = (code, detail) => out.push({ code, cls: gateClass(code), detail: detail ?? null });
@@ -640,6 +658,10 @@ export function gateFailures(rec) {
     if (!(stop > 0)) add("no_stop", `stop=${rec.ticket?.stop_price ?? "none"}`);
     if (!(price > 0)) add("no_entry_price", `price=${rec.ev?.pair?.priceUsd ?? "none"}`);
     if (stop > 0 && price > 0 && stop >= price) add("stop_at_or_above_entry", `stop ${stop} >= entry ${price}`);
+    const dist = stopDistance(stop, price);
+    if (dist != null && (dist < STOP_BAND.min || dist > STOP_BAND.max))
+      add("stop_out_of_band", `stop ${(dist * 100).toFixed(1)}% under the entry — outside the ` +
+        `${STOP_BAND.min * 100}%-${STOP_BAND.max * 100}% band`);
     const size = Number(rec.order?.size ?? rec.ceo?.order_size_usd ?? rec.risk?.position_size_usd);
     if (!(size > 0)) add("zero_authorized_size", `size=${size}`);
     const m5 = Number(rec.ev?.pair?.priceChange?.m5 ?? 0);

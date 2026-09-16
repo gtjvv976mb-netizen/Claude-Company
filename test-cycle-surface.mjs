@@ -92,10 +92,10 @@ const cleanRecord = (over = {}) => {
     pm: { decision: "PROPOSE", conviction: 68, thesis: "real ignition", invalidation: "deployer sells" },
     redteam: { verdict: "wounded", headline: "thin on holders" },
     compliance: { pass: true, violations: [] },
-    risk: { position_size_usd: 50, stop_price: 0.00062, max_loss_usd: 20 },
+    risk: { position_size_usd: 50, stop_price: 0.0008, max_loss_usd: 20 },
     ceo: { ruling: "APPROVE", order_size_usd: 50 },
     order: { size: 50 },
-    ticket: { stop_price: 0.00062, take_profit: [{ price: 0.0019 }] },
+    ticket: { stop_price: 0.0008, take_profit: [{ price: 0.0019 }] },
     ev: { symbol: "CYC" + seq, band: "low",
       pair: { priceUsd: 0.001, marketCap: 300_000, priceChange: { m5: 2 }, liquidityUsd: 90_000 },
       pairs: { totalLiquidityUsd: 90_000 }, exitProbe: { roundTripLossPct: 3.1 },
@@ -618,7 +618,7 @@ console.log("\nPUBLISHED PER PM-POSITIVE — what the PM's yeses became at the g
     pair: { priceUsd: 0.001, marketCap: 300_000, priceChange: { m5: 2 }, liquidityUsd: 90_000 },
     pairs: { totalLiquidityUsd: 90_000 }, exitProbe: { error: "no route at any size" },
     mintAccount: { flags: [] } };
-  const modelRisk = { risk_tier: "half", confidence: 0.7, stop_price: 0.00062, position_size_usd: 40 };
+  const modelRisk = { risk_tier: "half", confidence: 0.7, stop_price: 0.0008, position_size_usd: 40 };
   const railed = railRisk({ risk: modelRisk, ev: zeroEv, redteam: { verdict: "wounded" },
     mint: zeroMint, symbol: "ZERO" });
   ok("the rails size an unproven exit to $0 and say so in a rail note",

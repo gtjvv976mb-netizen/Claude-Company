@@ -263,11 +263,34 @@ export const cfg = {
    * to 1.00 and the order of the seats is untouched. composite() normalises by the
    * weights present, so this is bookkeeping for the reader, not a change in how a
    * score is formed. */
+  /* THE WEIGHTS NOW FOLLOW THE DESK'S OWN SCORECARD, NOT THE ESSAY ABOVE IT (2026-09-16).
+   *
+   * The owner: "the trading team has been losing again and again — diagnose, fix, change
+   * the agents if you have to." Diagnosed on the live desk's first 132 closed calls (43%
+   * won, +0.4% average on paper, -3.2% a trade in real friction underneath) and on its
+   * own /api/decisions/seat-scores — each seat's score against what the coin did over the
+   * next 24h, cycle-bootstrapped, false-discovery corrected:
+   *
+   *   technical  rho +0.234  PREDICTS   (n=195, p=0.003, survives FDR)   — retired 09-08, weight 0
+   *   flow       rho +0.124  PREDICTS   (n=311, p=0.009, survives FDR)   — weight 0.25
+   *   liquidity  rho +0.062  no signal  (n=311)                          — weight 0.09
+   *   narrative  rho +0.025  no signal  (n=258, p=0.68)                  — weight 0.39
+   *   forensics  rho -0.032  no signal  (n=279)                          — weight 0.27
+   *
+   * The heaviest seat on the table predicted nothing, and the seat with the strongest
+   * signal the desk has ever measured had been cut a week earlier for costing $0.67 a day.
+   * The paragraphs above argued the chart is "the least informative thing about a
+   * memecoin"; the record says the opposite, and the record wins. Technical is back
+   * (analysts.js TECHNICAL_SYSTEM, on Haiku, in the cheap batch) and the two seats that
+   * predict carry the composite. Forensics and narrative keep real weight because their
+   * KILL arms — the bundled float, the serial rugger — are safety facts a correlation on
+   * survivors cannot see. Sums to 1.00; composite() normalises by the seats present. */
   weights: {
-    narrative: 0.39,   // lore, trend, endorsement — on a memecoin this IS the asset
-    forensics: 0.27,   // who owns the float, and have they rugged before
-    flow: 0.25,        // a crowd, or a machine wearing one
-    liquidity: 0.09,   // is there a market, and can a way out be quoted; the screen already measured it
+    technical: 0.30,   // where price sits in its own move — the strongest measured signal on the desk
+    flow: 0.30,        // a crowd, or a machine wearing one — the other seat that predicts
+    forensics: 0.20,   // who owns the float, and have they rugged before — its kill arm is the value
+    narrative: 0.15,   // lore, trend, endorsement — no measured signal in the score; the rugger kill stays
+    liquidity: 0.05,   // is there a market, and can a way out be quoted; the screen already measured it
   },
 
   // Defaults are the economical tier; env vars UPGRADE a seat, they no longer rescue
@@ -293,6 +316,9 @@ export const cfg = {
     scout:      process.env.DESK_MODEL_SCOUT      || "claude-haiku-4-5",
     forensics:  process.env.DESK_MODEL_FORENSICS  || "claude-sonnet-5",
     liquidity:  process.env.DESK_MODEL_LIQUIDITY  || "claude-haiku-4-5",
+    /* Reinstated 2026-09-16 (see `weights`). Haiku: it reads eight numbers and names a
+       shape, and its $0.67 a day was the whole reason it was retired. */
+    technical:  process.env.DESK_MODEL_TECHNICAL  || "claude-haiku-4-5",
     flow:       process.env.DESK_MODEL_FLOW       || "claude-sonnet-5",
     narrative:  process.env.DESK_MODEL_NARRATIVE  || "claude-sonnet-5",
     redteam:    process.env.DESK_MODEL_REDTEAM    || "claude-opus-5",
@@ -305,6 +331,7 @@ export const cfg = {
     scout: "low",
     forensics: "high",
     liquidity: "medium",
+    technical: "medium",
     flow: "high",
     narrative: "medium",
     redteam: effortEnv("DESK_EFFORT_REDTEAM", "high"),
@@ -507,7 +534,26 @@ export const CYCLE = {
    *
    * The owner set these numbers on 2026-09-07 against that distribution, with the
    * quota mandate ("three published calls per cycle") explicitly in force. */
-  minConviction: num("CYCLE_MIN_CONVICTION", 20),
+  /* RE-CALIBRATED AGAIN, THIS TIME TO OUTCOMES RATHER THAN TO THE SCORE DISTRIBUTION
+   * (2026-09-16, the owner: "the trading team has been losing again and again").
+   *
+   * The 20 above was set so that the desk could publish at all. It could, and here is what
+   * it published, measured on the first 132 closed calls by the PM's own conviction:
+   *
+   *     under 25     n=35   31% won   -3.8% average
+   *     25 to 29     n=16   25% won   -6.5%
+   *     30 to 34     n=66   52% won   +2.5%
+   *     35 to 39     n=10   50% won   +8.8%
+   *     40 and up    n= 5   60% won   +8.1%
+   *
+   * Everything under 30 lost; everything at 30 and above won more than half the time.
+   * Every nano call the desk ever published scored under 30 and one in seven of them won.
+   * The 51 calls under the line were 39% of the record and the whole of its loss. So the
+   * L0/L1 bar asks for 35 — the bucket that actually paid — and the L2+ floor below is 30,
+   * the measured line, and nothing lowers it further. The quota is pursued by EFFORT (L1
+   * buys twice the workups before the bar moves), by narrative (L3) and by band (L4); it
+   * is no longer pursued by publishing calls the record says lose. */
+  minConviction: num("CYCLE_MIN_CONVICTION", 35),
   /* THE FLOOR AT L2 AND BELOW-NOTHING. "Above the line where I would not trade this
      myself" is the owner's phrasing. The floor was 35, above the median of 31: cycle 19
      refused four coins at 25, 28, 31 and 34 with the quota unmet, and HeeHaw — the only
@@ -517,7 +563,11 @@ export const CYCLE = {
      Conviction is a JUDGMENT gate (calls.js GATE_CLASS); every SAFETY gate is untouched
      by this and by every rung of the ladder. */
   floorTier: num("CYCLE_FLOOR_TIER", 1),
-  floorConviction: num("CYCLE_FLOOR_CONVICTION", 15),
+  /* 30, not 15, since 2026-09-16 — see minConviction above. HeeHaw at 28 was the argument
+     for 15 when it was the only profitable trade the desk had made; the desk has now made
+     43 target hits, and the 51 calls under 30 were the whole of its loss. The floor is the
+     measured line, and the L2 rung lowers the bar TO it, never under it. */
+  floorConviction: num("CYCLE_FLOOR_CONVICTION", 30),
 };
 
 /* ═══ HOW HARD ONE PASS IS ALLOWED TO WORK — the defaults, in ONE place ══════════════

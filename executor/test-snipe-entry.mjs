@@ -238,7 +238,7 @@ ok("the cheapest check runs first: cost tiers are non-decreasing down the list",
   assert.equal(shape[shape.length - 1], 4, `the last gate is cost ${shape[shape.length - 1]}, not 4`);
 });
 
-ok("the snipe codes are DISJOINT from the desk's frozen GATE_CLASS table (33 SAFETY / 21 JUDGMENT)", () => {
+ok("the snipe codes are DISJOINT from the desk's frozen GATE_CLASS table (33 SAFETY / 22 JUDGMENT)", () => {
   /* Read as text, not imported: importing src/calls.js drags the desk's config and db
      into an executor test. The technique is test-entry-contract-parity.mjs's. */
   const source = readRepo("src/calls.js");
@@ -247,7 +247,8 @@ ok("the snipe codes are DISJOINT from the desk's frozen GATE_CLASS table (33 SAF
   const safety = rows.filter(([, k]) => k === "SAFETY").map(([c]) => c);
   const judgment = rows.filter(([, k]) => k === "JUDGMENT").map(([c]) => c);
   assert.equal(safety.length, 33, `GATE_CLASS holds ${safety.length} SAFETY gates, not the measured 33 — the frozen set moved`);
-  assert.equal(judgment.length, 21, `GATE_CLASS holds ${judgment.length} JUDGMENT gates, not the measured 21`);
+  /* 22 since 2026-09-16: stop_out_of_band, the desk's stop band, is JUDGMENT. */
+  assert.equal(judgment.length, 22, `GATE_CLASS holds ${judgment.length} JUDGMENT gates, not the measured 22`);
   const known = new Set(rows.map(([c]) => c));
   const collisions = SNIPE_GATES.filter((g) => known.has(g));
   assert.deepEqual(collisions, [],

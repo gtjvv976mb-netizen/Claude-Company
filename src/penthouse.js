@@ -1497,7 +1497,7 @@ export function cohortEligibility(rec, level = 0) {
   if (!e.eligible) {
     const judgment = gates.find((g) => g.cls === "JUDGMENT");
     return { publishable: false, safety: !!e.safety, level: plan.level,
-      gate: judgment?.code ?? (e.safety ? "unclassified_refusal" : "team_no"), reason: e.reason };
+      gate: e.gate ?? judgment?.code ?? (e.safety ? "unclassified_refusal" : "team_no"), reason: e.reason };
   }
 
   const conviction = Number(rec?.pm?.conviction ?? 0);

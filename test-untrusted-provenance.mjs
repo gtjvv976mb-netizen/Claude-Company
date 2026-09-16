@@ -201,10 +201,12 @@ ok("the bar removes findings and never a seat, so it cannot cause insufficient_c
 /* ── 4. THE SAFETY GATES ARE NOT TOUCHED ────────────────────────────────────────────── */
 console.log("\nTHE FROZEN GATES ARE NOT TOUCHED");
 const { GATE_CLASS } = await import("./src/calls.js");
-ok("GATE_CLASS still has 54 entries, 33 of them SAFETY", () => {
+/* 55 since 2026-09-16: stop_out_of_band joined as JUDGMENT. The SAFETY count is the one
+   this file guards, and it did not move. */
+ok("GATE_CLASS still has 55 entries, 33 of them SAFETY", () => {
   const e = Object.entries(GATE_CLASS);
   const safety = e.filter(([, v]) => v === "SAFETY").length;
-  assert.equal(e.length, 54, `entries=${e.length}`);
+  assert.equal(e.length, 55, `entries=${e.length}`);
   assert.equal(safety, 33, `SAFETY=${safety}`);
 });
 ok("src/untrusted.js never imports the gate table or calls gateClass", () => {
