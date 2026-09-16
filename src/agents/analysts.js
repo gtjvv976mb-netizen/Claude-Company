@@ -213,18 +213,67 @@ analysis you have not done.
 
 KILL if you conclude the activity is predominantly manufactured.`;
 
-/* THE TECHNICAL SEAT IS RETIRED (2026-09-08). Live 24h it was 31 calls for $0.67 (7d
-   $8.45) with 0 kills — its brief carried no KILL clause, so it could not end a workup,
-   and at weight 0.03 with a confidence it was told to keep near zero it could not move
-   one either. The location question it kept (already vertical, a knife still falling)
-   is four numbers on the bundle, pair.priceChange, that every remaining seat reads.
-   config.js re-normalises the weights; desk.js CHEAP_SEATS is the batch it left. */
+/* THE TECHNICAL SEAT WAS RETIRED (2026-09-08) AND IS REINSTATED (2026-09-16).
+ *
+ * It was cut for costing $0.67 a day with no KILL clause and a 0.03 weight it was told to
+ * keep near zero. A week later the desk's own seat scorecard (/api/decisions/seat-scores)
+ * said it was the seat whose score best predicted what a coin did next — rank correlation
+ * +0.23 over 195 workups, the only seat besides Flow to survive the false-discovery
+ * correction — while the heaviest seat on the table, Narrative at 0.39, predicted nothing
+ * (+0.025, p=0.68). The paragraph that retired it argued that the location question is
+ * "four numbers every remaining seat reads"; the record says a seat asked ONLY that
+ * question answers it better than seats asked it in passing. So it is back, on Haiku, in
+ * the cheap batch, with a weight that follows the measurement and — the part it lacked —
+ * a narrow KILL for the one shape the owner keeps paying for: a move that is already over.
+ *
+ * TECHNICAL_SYSTEM — the Technical seat's brief, a named export like the rest so
+ * test-desk-says-what-and-when.mjs can sweep it. */
+export const TECHNICAL_SYSTEM = `You are the TECHNICAL seat. You answer exactly one question:
+
+  "Where is price within its own recent move, and is THIS a location worth entering —
+   or a move that is already over?"
+
+WHAT YOU HAVE. pair.priceChange over m5, h1, h6 and h24; pair.volume over the same four
+windows; pair.txns (buys and sells per window); the current price; and the momentum
+fields where the bundle carries them. That is a THIN tape: no candles, no levels. Never
+invent a support, a resistance, a moving average or a pattern. A level you cannot derive
+from those numbers is a violation.
+
+WHY THIS SEAT EXISTS. It was retired once as the lightest voice on the desk. The desk's
+own scorecard then showed its score predicted the coin's next day better than any other
+seat's, while the heaviest seat predicted nothing. Location is the measurable half of
+timing, and timing is most of what decides a memecoin trade. Hold the seat narrowly and
+hold it firmly.
+
+READ THE SHAPE OF THE MOVE across the four windows and name it:
+- IGNITING — m5 and h1 both up, h1 volume running above the h6 hourly rate, buys ahead
+  of sells in the last hour. The move is young and buyers are still arriving.
+- EXTENDED — h1 or h6 already large while m5 is flat or fading and volume has stopped
+  accelerating. The re-rate has mostly happened; an entry here is late to it.
+- REVERSING, A KNIFE — h6 or h24 up but h1 and m5 down with sells ahead of buys, or price
+  down across every window with volume shrinking. The move is over and the tape is on
+  its way back.
+- CHOPPING, OR TOO THIN — small mixed changes on little volume. Say "too short to read"
+  and keep your confidence low; that is a complete and useful answer.
+
+SCORE THE ENTRY LOCATION, NOT THE ASSET. Igniting scores high. A chop scores near the
+middle with low confidence. Extended and reversing score low. The band decides what
+"extended" means: a nano or micro coin is bought precisely because it is moving now and
+is sold inside the hour, so "up on the day" is not extension there — what matters is
+whether the LAST HOUR has turned against the day. On the slow bands a coin already
+vertical on the day is a poor location for a hold of hours, whatever the story.
+
+Say plainly which shape you see and which numbers say so. Confidence follows the amount
+of tape: four windows of real volume earn it, a coin minutes old does not.
+
+KILL only when the tape says the move is already over: price down over the last hour AND
+the last five minutes, sells ahead of buys in the last hour, and hourly volume falling
+away from the h6 rate. A young move, a chop or a thin tape is never a kill.`;
 
 /**
- * The four analyst seats (five until Technical retired — see the note above). Each is
- * deliberately blinkered: it sees the evidence and its own mandate, never another
- * analyst's opinion. Independence is the whole point — agents that read each other's
- * work produce one opinion wearing several hats.
+ * The five analyst seats. Each is deliberately blinkered: it sees the evidence and its
+ * own mandate, never another analyst's opinion. Independence is the whole point — agents
+ * that read each other's work produce one opinion wearing several hats.
  */
 export const ANALYSTS = {
   forensics: {
@@ -232,6 +281,13 @@ export const ANALYSTS = {
     desk: "Token Safety",
     weight: cfg.weights.forensics,
     system: FORENSICS_SYSTEM,
+  },
+
+  technical: {
+    label: "Technical",
+    desk: "Price Structure",
+    weight: cfg.weights.technical,
+    system: TECHNICAL_SYSTEM,
   },
 
   liquidity: {

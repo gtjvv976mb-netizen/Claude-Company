@@ -59,10 +59,11 @@ export function firstKiller(analysts) {
 }
 
 /* THE CHEAP BATCH, named so a test derives the seats it expects from the source instead
-   of pinning them. Technical was the third seat here until 2026-09-08 — 31 calls, $0.67
-   in a live day, 0 kills and no KILL clause to make one; agents/analysts.js has the
-   retirement note. Liquidity now sits on Haiku 4.5, so the whole batch is ~$0.045. */
-export const CHEAP_SEATS = Object.freeze(["liquidity", "flow"]);
+   of pinning them. Technical left it on 2026-09-08 ($0.67 a day, no KILL clause) and is
+   back on 2026-09-16, because the desk's own scorecard showed its score predicts a coin's
+   next day better than any other seat's — agents/analysts.js has both notes. It sits on
+   Haiku beside Liquidity, and it now carries a narrow KILL for a move that is over. */
+export const CHEAP_SEATS = Object.freeze(["liquidity", "flow", "technical"]);
 
 /**
  * Whether the desk should buy the reputation read for this coin.
@@ -434,9 +435,9 @@ export async function workup(cycle, mint, hook = "", opts = {}) {
   if (creditFailure) throw creditFailure;
 
   // A desk missing half its analysts is not a desk. Refuse to decide on a thin book.
-  // Four seats since Technical retired, so 3 tolerates ONE failure among Liquidity, Flow,
-  // Forensics and Narrative where it tolerated two — kept at 3 on purpose: two of four
-  // is half, and the floor was never a seat count in disguise.
+  // Five seats again since Technical returned (2026-09-16), so 3 tolerates two failures
+  // among Liquidity, Flow, Technical, Forensics and Narrative — kept at 3 on purpose: it
+  // is the floor a decision needs, and it was never a seat count in disguise.
   if (Object.keys(analysts).length < 3) {
     emit("token:end", { mint, symbol: ev.symbol, outcome: "insufficient_coverage" });
     const rec = { mint, symbol: ev.symbol, outcome: "insufficient_coverage", seatFailures, ev, analysts,

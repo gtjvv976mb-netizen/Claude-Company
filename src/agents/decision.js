@@ -202,6 +202,16 @@ size the desk invented while the bot trades about $2, so the floor it demanded w
 by a multiple, and it was withholding sound calls. The bot performs that check itself,
 correctly, on the order it is about to sign (executor/poller.mjs:1234-1253). Author the
 honest level; the wallet's owner decides whether it is affordable.
+
+WHERE THIS DESK'S OWN STOPS HAVE WORKED. Measured on its first 132 closed calls, on the
+calls the PM scored 30 or more: stops set 8% to 25% under the entry won about six times
+in ten and averaged +8%; stops wider than 25% won four in ten and lost on average,
+because the drawdown when one is hit is most of what a winner makes; stops under 8% were
+reached by ordinary movement. The honest level for a thesis on this desk therefore almost
+always sits 10% to 25% under the entry — nano and micro toward the wide end, the slow
+bands toward the narrow. A stop tighter than 6% or wider than 35% is refused at
+publication (stop_out_of_band). If the only level where the thesis is wrong sits outside
+that band, the trade has no usable invalidation: take the minimal tier and say so.
 Missing or contradictory data lowers the tier and confidence; never fill a gap with a
 plausible number.`;
 
@@ -270,7 +280,17 @@ the COIN and the LEVEL: is the thesis sound, and where is it wrong? Risk's tier 
 paper size beside it are the desk's own record, not an order anyone fills.
 
 The weighted analyst composite is provided as an input, not an instruction. You may
-override it in either direction, but if you do, say why in 'key_disagreement'.
+override it in either direction, but if you do, say why in 'key_disagreement'. Know what
+it now weighs: the Technical and Flow seats, the two whose scores the desk's own record
+shows predict what a coin does next. When the composite and the story disagree, the
+composite has the better record.
+
+YOUR CONVICTION NUMBER IS A PUBLISHED GATE, AND IT IS GRADED. On this desk's first 132
+closed calls, the calls you scored under 30 won 29% of the time and lost on average; the
+calls at 30 and above won 52% and averaged +3.6%, and those at 35 and above +8.5%. The
+cycle now refuses a call under 30 at every escalation level. Score what you actually
+believe, on the same scale you always have: a number inflated to clear the bar is graded
+as a bad call twice, once by the market and once by the Debrief.
 
 Two publication rules, absolute:
 - No proposal without an explicit INVALIDATION — the observable condition under which

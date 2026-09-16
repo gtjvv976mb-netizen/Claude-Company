@@ -1,16 +1,22 @@
 /**
- * TWO SEATS ON HAIKU, ONE SEAT RETIRED — AND THE CONTRACT THEY STILL HAVE TO MEET.
+ * THREE SEATS ON HAIKU — AND THE CONTRACT THEY STILL HAVE TO MEET.
  *
- * Live 24h before this change: Technical 31 calls, $0.67 (7d $8.45), 0 kills — and no KILL
- * clause anywhere in its brief, so it could never have ended a workup; Liquidity 31 calls,
- * $0.95 (7d $13.08), 0 kills — its two authorised kills are the free screen's own
- * thin_liquidity / unverified_exit, applied before it is paid; Execution 11 calls, $0.48
- * (7d $6.26) to author an entry zone and targets around a stop that compliance.js
- * `stop_mismatch` forces equal to Risk's. Haiku 4.5 lists at $1/$5 per MTok against
- * Sonnet 5's $2/$10. So: Technical leaves the cheap batch and the weight table (the
- * 0.03 re-normalised across the four that remain), Liquidity and Execution move to
- * claude-haiku-4-5, and Red Team stays Opus/high — its verdict feeds a SAFETY gate and
- * the seat scorecard is empty, so DESK_EFFORT_REDTEAM is an A/B handle, not a default.
+ * Live 24h before the 2026-09-08 retier: Technical 31 calls, $0.67 (7d $8.45), 0 kills —
+ * and no KILL clause anywhere in its brief, so it could never have ended a workup;
+ * Liquidity 31 calls, $0.95 (7d $13.08), 0 kills — its two authorised kills are the free
+ * screen's own thin_liquidity / unverified_exit, applied before it is paid; Execution 11
+ * calls, $0.48 (7d $6.26) to author an entry zone and targets around a stop that
+ * compliance.js `stop_mismatch` forces equal to Risk's. Haiku 4.5 lists at $1/$5 per
+ * MTok against Sonnet 5's $2/$10. So Liquidity and Execution moved to claude-haiku-4-5,
+ * Technical was retired outright, and Red Team stayed Opus/high — its verdict feeds a
+ * SAFETY gate and the seat scorecard was empty, so DESK_EFFORT_REDTEAM is an A/B handle.
+ *
+ * TECHNICAL IS BACK (2026-09-16), ON HAIKU. The scorecard filled in: its score was the
+ * desk's strongest measured predictor of a coin's next day (rho +0.23, the only seat
+ * besides Flow to survive the false-discovery correction) while Narrative at 0.39
+ * predicted nothing. So the seat that was cut for $0.67 a day returns at Haiku's price,
+ * in the cheap batch, with the KILL clause it lacked, and the weights follow the record:
+ * technical 0.30, flow 0.30, forensics 0.20, narrative 0.15, liquidity 0.05.
  *
  * WHAT IS REAL: config, the ANALYSTS table, ask() and its Haiku branch (output_config
  * WITHOUT effort — Haiku 4.5 400s on it), askWithWeb, the Zod contracts, the cost meter
@@ -250,39 +256,44 @@ console.log("\n0. THE FIXTURE, HELD UP TO THE REAL SCREEN FIRST");
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════════════ */
-console.log("\n1. THE CONFIG — who sits where, and what Technical's retirement did to the table");
+console.log("\n1. THE CONFIG — who sits where, and what the scorecard did to the table");
 {
   ok("Liquidity is on claude-haiku-4-5", cfg.models.liquidity === "claude-haiku-4-5", cfg.models.liquidity);
   ok("Execution is on claude-haiku-4-5", cfg.models.execution === "claude-haiku-4-5", cfg.models.execution);
+  ok("Technical is back, on claude-haiku-4-5", cfg.models.technical === "claude-haiku-4-5", cfg.models.technical);
   ok("Red Team stays on claude-opus-5", cfg.models.redteam === "claude-opus-5", cfg.models.redteam);
-  ok("the seat table no longer holds Technical", !("technical" in ANALYSTS),
+  ok("the seat table holds Technical again", "technical" in ANALYSTS && ANALYSTS.technical.label === "Technical",
     `ANALYSTS: ${Object.keys(ANALYSTS).join(", ")}`);
-  ok("nor do the model, effort or weight tables",
-    !("technical" in cfg.models) && !("technical" in cfg.effort) && !("technical" in cfg.weights),
+  ok("...and so do the model, effort and weight tables",
+    "technical" in cfg.models && "technical" in cfg.effort && "technical" in cfg.weights,
     `models: ${Object.keys(cfg.models).join(", ")}`);
-  ok("the cheap batch no longer contains technical, and still holds liquidity and flow",
-    !CHEAP_SEATS.includes("technical") && CHEAP_SEATS.includes("liquidity") && CHEAP_SEATS.includes("flow"),
+  ok("the cheap batch is liquidity, flow and technical",
+    CHEAP_SEATS.includes("technical") && CHEAP_SEATS.includes("liquidity") && CHEAP_SEATS.includes("flow") && CHEAP_SEATS.length === 3,
     `CHEAP_SEATS = [${CHEAP_SEATS.join(", ")}]`);
+  ok("Technical's brief carries the KILL clause it used to lack, and only for a move that is over",
+    /KILL only when the tape says the move is already over/.test(ANALYSTS.technical.system) &&
+      /never a kill/.test(ANALYSTS.technical.system));
 
   const sum = Object.values(cfg.weights).reduce((a, b) => a + b, 0);
   console.log(`     weights: ${Object.entries(cfg.weights).map(([k, v]) => `${k} ${v}`).join(" · ")} → sum ${sum.toFixed(4)}`);
-  ok("the composite weights are re-normalised to 1.00 across the four seats",
-    Math.abs(sum - 1) < 1e-9 && Object.keys(cfg.weights).length === 4, `sum ${sum}`);
-  ok("the order of the seats is unchanged: narrative > forensics > flow > liquidity",
-    cfg.weights.narrative > cfg.weights.forensics && cfg.weights.forensics > cfg.weights.flow &&
-      cfg.weights.flow > cfg.weights.liquidity,
+  ok("the composite weights sum to 1.00 across the five seats",
+    Math.abs(sum - 1) < 1e-9 && Object.keys(cfg.weights).length === 5, `sum ${sum}`);
+  /* THE ORDER FOLLOWS THE SCORECARD, NOT THE ESSAY: the two seats whose scores predict
+     (technical rho +0.23, flow +0.12, both FDR-surviving) outweigh the three that do not. */
+  ok("the seats that predict outweigh the seats that do not: technical, flow >= forensics > narrative > liquidity",
+    cfg.weights.technical >= cfg.weights.flow && cfg.weights.flow > cfg.weights.forensics &&
+      cfg.weights.forensics > cfg.weights.narrative && cfg.weights.narrative > cfg.weights.liquidity,
     Object.entries(cfg.weights).map(([k, v]) => `${k}=${v}`).join(" > "));
-  /* The 0.03 is gone from the composite, not merely from the table: a technical verdict
-     left on an old record (the ledger holds thousands) now carries zero weight. */
-  const four = { narrative: { score: 80, confidence: 1 }, forensics: { score: 40, confidence: 1 },
-    flow: { score: 60, confidence: 1 }, liquidity: { score: 20, confidence: 1 } };
-  const expected = 80 * cfg.weights.narrative + 40 * cfg.weights.forensics + 60 * cfg.weights.flow + 20 * cfg.weights.liquidity;
-  const withStale = composite({ ...four, technical: { score: 0, confidence: 1 } });
-  console.log(`     composite(four seats) = ${composite(four).toFixed(4)} · with a stale technical=0 verdict = ${withStale.toFixed(4)} · weighted mean ${expected.toFixed(4)}`);
-  ok("composite() of the four seats is their weighted mean at full confidence",
-    Math.abs(composite(four) - expected) < 1e-9, composite(four).toFixed(4));
-  ok("a stale technical verdict moves the composite by nothing — its weight is 0",
-    Math.abs(withStale - composite(four)) < 1e-9, `${withStale.toFixed(4)} = ${composite(four).toFixed(4)}`);
+  const five = { narrative: { score: 80, confidence: 1 }, forensics: { score: 40, confidence: 1 },
+    flow: { score: 60, confidence: 1 }, liquidity: { score: 20, confidence: 1 }, technical: { score: 70, confidence: 1 } };
+  const expected = 80 * cfg.weights.narrative + 40 * cfg.weights.forensics + 60 * cfg.weights.flow +
+    20 * cfg.weights.liquidity + 70 * cfg.weights.technical;
+  const { technical: _t, ...fourOnly } = five;
+  console.log(`     composite(five seats) = ${composite(five).toFixed(4)} · without technical = ${composite(fourOnly).toFixed(4)} · weighted mean ${expected.toFixed(4)}`);
+  ok("composite() of the five seats is their weighted mean at full confidence",
+    Math.abs(composite(five) - expected) < 1e-9, composite(five).toFixed(4));
+  ok("a technical verdict moves the composite again — its weight is no longer 0",
+    Math.abs(composite(five) - composite(fourOnly)) > 1, `${composite(five).toFixed(4)} vs ${composite(fourOnly).toFixed(4)}`);
 }
 
 console.log("\n   DESK_EFFORT_REDTEAM — an A/B handle, in a child process with a controlled env");
@@ -402,17 +413,19 @@ console.log("\n3. THE WORKUP — the seats that run, and the $ the meter charges
     a.rec?.compliance?.violations?.map((v) => v.code).join(", ") || "clear");
   ok("nothing but the two providers left the process", a.wire.every((w) => w.provider !== "other"),
     a.wire.filter((w) => w.provider === "other").map((w) => w.url).join(", ") || "anthropic + xai only");
-  ok("Technical was never bought", !a.order.includes("TECHNICAL"), a.order.join(" -> "));
+  ok("Technical was bought, in the cheap batch before Forensics and Narrative",
+    a.order.includes("TECHNICAL") && a.order.indexOf("TECHNICAL") < a.order.indexOf("FORENSICS"), a.order.join(" -> "));
   const analystsOnWire = a.wire.filter((w) => w.kind === "analyst" || w.kind === "shape").map((w) => w.seat).sort();
-  ok("the four analyst seats ran: the cheap pair, Forensics and Narrative",
-    same(analystsOnWire, ["FLOW", "FORENSICS", "LIQUIDITY", "NARRATIVE"]) && a.analysts.length === 4,
+  ok("the five analyst seats ran: the cheap trio, Forensics and Narrative",
+    same(analystsOnWire, ["FLOW", "FORENSICS", "LIQUIDITY", "NARRATIVE", "TECHNICAL"]) && a.analysts.length === 5,
     `${analystsOnWire.join(", ")} · rec.analysts = ${a.analysts.join(", ")}`);
   ok("the read still goes second, straight after the free screen — the healthy order is untouched",
     a.order[0] === "XRead" && a.order.filter((s) => s === "XRead").length === 1, `order[0] = ${a.order[0]}`);
   const onModel = (seat) => a.wire.filter((w) => w.seat === seat).map((w) => w.model);
-  ok("Liquidity and Execution went to claude-haiku-4-5 on the wire",
-    same(onModel("LIQUIDITY"), ["claude-haiku-4-5"]) && same(onModel("EXECUTION"), ["claude-haiku-4-5"]),
-    `Liquidity ${onModel("LIQUIDITY")} · Execution ${onModel("EXECUTION")}`);
+  ok("Liquidity, Technical and Execution went to claude-haiku-4-5 on the wire",
+    same(onModel("LIQUIDITY"), ["claude-haiku-4-5"]) && same(onModel("TECHNICAL"), ["claude-haiku-4-5"]) &&
+      same(onModel("EXECUTION"), ["claude-haiku-4-5"]),
+    `Liquidity ${onModel("LIQUIDITY")} · Technical ${onModel("TECHNICAL")} · Execution ${onModel("EXECUTION")}`);
   ok("Red Team and the PM stayed on claude-opus-5; Flow, Forensics, Narrative and Risk on claude-sonnet-5",
     same(onModel("RED TEAM"), ["claude-opus-5"]) && same(onModel("PM"), ["claude-opus-5"]) &&
       ["FLOW", "FORENSICS", "NARRATIVE", "NARRATIVE(research)", "RISK"].every((s) => same(onModel(s), ["claude-sonnet-5"])),
@@ -422,30 +435,30 @@ console.log("\n3. THE WORKUP — the seats that run, and the $ the meter charges
     flowReq.body.output_config?.effort === cfg.effort.flow && !("effort" in liqReq.body.output_config),
     `Flow effort ${flowReq.body.output_config?.effort} · Liquidity keys [${Object.keys(liqReq.body.output_config).join(", ")}]`);
 
-  /* BEFORE AND AFTER, on the same usage, through the real meter. "Before" is the retier
-     this file records: Liquidity and Execution on Sonnet, plus one Technical call at
-     the analyst shape. Every request on the wire is priced at the model it went to. */
-  const BEFORE = { LIQUIDITY: "claude-sonnet-5", EXECUTION: "claude-sonnet-5" };
+  /* BEFORE AND AFTER, on the same usage, through the real meter. "Before" is the desk as
+     it stood before the 2026-09-08 retier: Liquidity, Execution AND Technical on Sonnet.
+     "After" is today: all three on Haiku, Technical bought again. Every request on the
+     wire is priced at the model it went to. */
+  const BEFORE = { LIQUIDITY: "claude-sonnet-5", EXECUTION: "claude-sonnet-5", TECHNICAL: "claude-sonnet-5" };
   const reqs = a.wire.filter((w) => w.provider === "anthropic" && !w.failed);
   const after = reqs.reduce((s, w) => s + priced(w.model, w.usage), 0);
-  const technicalBefore = priced("claude-sonnet-5", USAGE.analyst);
-  const before = reqs.reduce((s, w) => s + priced(BEFORE[w.seat] ?? w.model, w.usage), 0) + technicalBefore;
+  const before = reqs.reduce((s, w) => s + priced(BEFORE[w.seat] ?? w.model, w.usage), 0);
   console.log("     seat            model (after)        before      after");
   for (const w of reqs) {
     const b = priced(BEFORE[w.seat] ?? w.model, w.usage), c = priced(w.model, w.usage);
     console.log(`     ${w.seat.padEnd(20)}${w.model.padEnd(20)}${usd(b).padStart(8)}   ${usd(c).padStart(8)}${b !== c ? "   ↓" : ""}`);
   }
-  console.log(`     ${"TECHNICAL".padEnd(20)}${"(retired)".padEnd(20)}${usd(technicalBefore).padStart(8)}   ${usd(0).padStart(8)}   ↓`);
   console.log(`     ${"per workup".padEnd(40)}${usd(before).padStart(8)}   ${usd(after).padStart(8)}   Δ ${usd(before - after)} (${((1 - after / before) * 100).toFixed(1)}%)` +
     ` · plus the read ${usd(a.metered.xai)} either way`);
   console.log(`     seats before: XRead -> LIQUIDITY, FLOW, TECHNICAL -> FORENSICS, NARRATIVE -> RED TEAM -> RISK -> PM -> EXECUTION`);
   console.log(`     seats after : ${a.order.join(" -> ")}`);
   const liqSave = priced("claude-sonnet-5", USAGE.analyst) - priced("claude-haiku-4-5", USAGE.analyst);
+  const techSave = priced("claude-sonnet-5", USAGE.analyst) - priced("claude-haiku-4-5", USAGE.analyst);
   const exSave = priced("claude-sonnet-5", USAGE.execution) - priced("claude-haiku-4-5", USAGE.execution);
-  ok("the workup is cheaper after than before on identical usage", after < before, `${usd(after)} < ${usd(before)}`);
-  ok("...by exactly the Technical call plus half of Liquidity plus half of Execution",
-    Math.abs((before - after) - (technicalBefore + liqSave + exSave)) < 1e-9,
-    `Δ ${usd(before - after)} = ${usd(technicalBefore)} + ${usd(liqSave)} + ${usd(exSave)}`);
+  ok("the workup is cheaper after than before on identical usage, with Technical bought both times", after < before, `${usd(after)} < ${usd(before)}`);
+  ok("...by exactly half of Technical plus half of Liquidity plus half of Execution",
+    Math.abs((before - after) - (techSave + liqSave + exSave)) < 1e-9,
+    `Δ ${usd(before - after)} = ${usd(techSave)} + ${usd(liqSave)} + ${usd(exSave)}`);
   ok("the ledger agrees with the wire — every Anthropic row was metered at the model it went to",
     Math.abs(a.metered.anthropic - after) < 1e-9 && a.rows.filter((r) => r.seat !== "XRead").length === reqs.length,
     `ledger ${usd(a.metered.anthropic)} = wire ${usd(after)} over ${reqs.length} rows`);
@@ -453,32 +466,39 @@ console.log("\n3. THE WORKUP — the seats that run, and the $ the meter charges
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════════════ */
-console.log("\n4. THE COVERAGE FLOOR — <3 analysts is unchanged, so one failure among the four passes and two trip it");
+console.log("\n4. THE COVERAGE FLOOR — <3 analysts is unchanged, so with five seats two failures pass and three trip it");
 {
-  const one = await drive("one seat fails (Forensics 404s) — three of four report", { failing: ["FORENSICS"] });
+  const one = await drive("one seat fails (Forensics 404s) — four of five report", { failing: ["FORENSICS"] });
   ok("Forensics failed and was recorded as a seat failure", same(one.failed, ["forensics"]), one.failed.join(", "));
-  ok("three analysts stand, so the floor does not trip and the desk goes on to the Red Team",
-    one.analysts.length === 3 && one.stages.includes("redteam") && !one.ends.includes("insufficient_coverage"),
+  ok("four analysts stand, so the floor does not trip and the desk goes on to the Red Team",
+    one.analysts.length === 4 && one.stages.includes("redteam") && !one.ends.includes("insufficient_coverage"),
     `analysts ${one.analysts.join(", ")} · stages ${one.stages.join(", ")}`);
   ok("...and the workup still reaches a decision", one.rec?.outcome === "decided" && !one.err,
     `${one.rec?.outcome} / ${one.rec?.finalDecision}`);
 
-  const two = await drive("two seats fail (Forensics and Narrative 404) — two of four report", { failing: ["FORENSICS", "NARRATIVE"] });
+  const two = await drive("two seats fail (Forensics and Narrative 404) — three of five report", { failing: ["FORENSICS", "NARRATIVE"] });
   ok("both failures are recorded", same([...two.failed].sort(), ["forensics", "narrative"]), two.failed.join(", "));
+  ok("three analysts is still a desk: the floor holds at 3 and the decision seats are bought",
+    two.rec?.outcome === "decided" && two.analysts.length === 3 && two.order.includes("RED TEAM"),
+    `${two.rec?.outcome} · analysts ${two.analysts.join(", ")}`);
+
+  const three = await drive("three seats fail (Forensics, Narrative and Technical 404) — two of five report",
+    { failing: ["FORENSICS", "NARRATIVE", "TECHNICAL"] });
+  ok("all three failures are recorded", same([...three.failed].sort(), ["forensics", "narrative", "technical"]), three.failed.join(", "));
   ok("two analysts is a thin book: insufficient_coverage, and nothing past the floor is bought",
-    two.rec?.outcome === "insufficient_coverage" && two.analysts.length === 2 &&
-      !two.order.includes("RED TEAM") && !two.order.includes("RISK") && !two.order.includes("PM") && !two.order.includes("EXECUTION"),
-    `${two.rec?.outcome} · analysts ${two.analysts.join(", ")} · order ${two.order.join(" -> ")}`);
+    three.rec?.outcome === "insufficient_coverage" && three.analysts.length === 2 &&
+      !three.order.includes("RED TEAM") && !three.order.includes("RISK") && !three.order.includes("PM") && !three.order.includes("EXECUTION"),
+    `${three.rec?.outcome} · analysts ${three.analysts.join(", ")} · order ${three.order.join(" -> ")}`);
 
   const pair = await drive("two seats fail in the cheap batch (Liquidity and Flow 404)", { failing: ["LIQUIDITY", "FLOW"] });
-  ok("the floor trips on two failures wherever they fall",
-    pair.rec?.outcome === "insufficient_coverage" && pair.analysts.length === 2 && !pair.order.includes("RED TEAM"),
+  ok("two cheap failures leave Technical, Forensics and Narrative standing — the floor holds",
+    pair.rec?.outcome === "decided" && pair.analysts.length === 3 && pair.order.includes("RED TEAM"),
     `${pair.rec?.outcome} · analysts ${pair.analysts.join(", ")}`);
   ok("a failed seat costs nothing — only the seats that answered are on the ledger",
-    two.rows.filter((r) => r.seat !== "XRead").length === 2 + 0 && pair.rows.filter((r) => r.seat !== "XRead").length === 3,
-    `two-deep-failures: ${two.rows.filter((r) => r.seat !== "XRead").map((r) => r.seat).join(", ")} · ` +
-      `two-cheap-failures: ${pair.rows.filter((r) => r.seat !== "XRead").map((r) => r.seat).join(", ")}`);
-  ok("Technical was bought in none of the four workups", ![one, two, pair].some((d) => d.order.includes("TECHNICAL")));
+    three.rows.filter((r) => r.seat !== "XRead").length === 2 + 0,
+    `three-deep-failures: ${three.rows.filter((r) => r.seat !== "XRead").map((r) => r.seat).join(", ")}`);
+  ok("Technical was bought in every workup where it was not scripted to fail",
+    [one, two, pair].every((d) => d.order.includes("TECHNICAL")) && !three.analysts.includes("technical"));
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════════════ */
@@ -488,11 +508,13 @@ console.log("\n5. THE SOURCE — the batch is named, the floor line is the one t
   ok("cheapKeys derives from CHEAP_SEATS minus the probed seat",
     desk.includes("const cheapKeys = CHEAP_SEATS.filter((k) => k !== probedSeat);"));
   ok("the <3 coverage floor is unchanged", desk.includes("if (Object.keys(analysts).length < 3) {"));
-  ok("no literal seat list is left in the batch", !/\["liquidity", "flow", "technical"\]/.test(desk));
+  ok("the seat list is written once, as CHEAP_SEATS, and nowhere else in the batch",
+    (desk.match(/\["liquidity", "flow", "technical"\]/g) || []).length === 1 &&
+      /export const CHEAP_SEATS = Object\.freeze\(\["liquidity", "flow", "technical"\]\);/.test(desk));
   const llmSrc = fs.readFileSync(new URL("./src/lib/llm.js", import.meta.url), "utf8");
   ok("ask() still gates output_config.effort on the model — Haiku gets the schema alone",
     /const haiku = \/haiku\/\.test\(model\);/.test(llmSrc) && /output_config: haiku\s*\?\s*\{ format: betaZodOutputFormat\(schema\) \}/.test(llmSrc));
 }
 
-console.log(`\n${pass} passed, ${fail} failed — Liquidity and Execution on Haiku, Technical retired, the floor where it was\n`);
+console.log(`\n${pass} passed, ${fail} failed — Liquidity, Technical and Execution on Haiku, the floor where it was\n`);
 process.exit(fail ? 1 : 0);
