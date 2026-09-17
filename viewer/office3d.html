@@ -4392,6 +4392,11 @@ async function pollBossBoard() {
     let hb = null;
     try { hb = roomB?.executorHeartbeat ? JSON.parse(roomB.executorHeartbeat) : null; } catch { hb = null; }
     if (hb) window.__botHeartbeat = hb;
+    /* HAWK-AI's range scoreboard reads the same pulse. Chalked here rather than in
+       the tab so the board on the floor is current whether or not anybody has
+       opened a panel — a board you have to click something else to refresh is a
+       board that lies to whoever walks past it. */
+    window.__hawkBoardUpdate?.();
     /* And when the room gave nothing (a visitor, or a token the desk rejected), the
        pulse the WALL-ST-E and Overview panels fetched is just as good — and failing
        that, the public house book. */
@@ -6927,6 +6932,168 @@ const hawkFig = (() => {
   return { g, range, head, eye, finder, lamp, bow, drawHand };
 })();
 window.__hawkGroup = hawkFig.g;
+
+/* ═══ HAWK-AI's SCOREBOARD — his book, on his own range ══════════════════════════
+ *
+ * The owner, 2026-09-17: a physical board, like GROX MULDER's.
+ *
+ * GROX's hangs on the wall of an office, because he has one. HAWK-AI does not: he
+ * has a shooting line, a butt at 4.8m and a bow rack. So his book takes the form
+ * the place already has — a RANGE SCOREBOARD on two posts beside the line, of the
+ * kind you walk up to between ends to read what you actually scored.
+ *
+ * It is the same construction as GROX's board and deliberately so: a canvas on a
+ * plane, a frame box behind it, redrawn from a texture flag rather than per frame.
+ * Two differences, both because of where it stands:
+ *
+ *   · IT IS FREESTANDING, so it carries its own posts and a foot rail. A board
+ *     with no visible means of support reads as a floating UI panel, which is the
+ *     one thing this scene never does.
+ *   · IT SITS BESIDE THE LINE, NOT DOWNRANGE. Downrange is where the target is,
+ *     and a board in front of an archer at full draw is a joke the floor should
+ *     not have to explain.
+ *
+ * The numbers are the SAME ones the HAWK-AI tab shows, from the same heartbeat —
+ * the lane's own journal, not the desk's paper. It PULLS rather than being pushed:
+ * the panels that already poll set window.__botHeartbeat, and this reads it. That
+ * way a board can never disagree with the tab beside it, and nothing in the scene
+ * fetches. Blank until a pulse carries a book, which is the honest state. */
+const hawkBoard = (() => {
+  const R = hawkFig.range;                        // his own group, so the board moves with HAWK_RANGE
+  const GUN = 0x3a4248, STEEL = 0x5f7d96;
+  const mat = (c, r = 0.65, e = null, ei = 0) => new THREE.MeshStandardMaterial({
+    color: c, roughness: r, metalness: 0.25,
+    ...(e === null ? {} : { emissive: new THREE.Color(e), emissiveIntensity: ei }),
+  });
+  const post = (dz) => {
+    const p = new THREE.Mesh(BOX, mat(GUN, 0.7));
+    p.scale.set(0.07, 1.30, 0.07);
+    p.position.set(-0.02, 0.65, dz);
+    R.add(p);
+  };
+  /* The board stands SOUTH of the platform (local +z), clear of its 2.06m deck and
+     of the ground quiver at -1.32, facing +z into the room so the floor can read it
+     rather than the archer's back. */
+  const BZ = 1.52, BY = 1.42;
+  post(BZ - 0.62); post(BZ + 0.62);
+  const foot = new THREE.Mesh(BOX, mat(GUN, 0.7));
+  foot.scale.set(0.10, 0.06, 1.34); foot.position.set(-0.02, 0.03, BZ); R.add(foot);
+
+  const c = document.createElement("canvas"); c.width = 768; c.height = 448;
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  /* 1.46 x 0.85 — under GROX's 3.0 x 1.75, because a range board is read from two
+     metres and an office board from across a room. */
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.46, 0.85),
+    new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+  /* Rotated to face +x — down the firing line's near side — so it is square to
+     anyone standing at the toe line and legible from the floor beyond it. */
+  mesh.rotation.y = Math.PI / 2;
+  /* 0.075, not 0.055. The frame box is 0.06 deep centred on 0.02, so its front face
+     sits at 0.05 and the canvas cleared it by five millimetres — enough to render
+     today and enough to z-fight or vanish on another driver. GROX's board carries
+     the same note for the same reason; it was once drawn perfectly into a plane
+     buried inside its own frame. 25mm proud. */
+  mesh.position.set(0.075, BY, BZ);
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.99, 1.60),
+    mat(0x232a30, 0.7));
+  frame.position.set(0.02, BY, BZ);
+  const sill = new THREE.Mesh(BOX, mat(STEEL, 0.55));
+  sill.scale.set(0.09, 0.035, 1.60); sill.position.set(0.02, BY - 0.52, BZ);
+  R.add(mesh, frame, sill);
+  return { c, tex };
+})();
+
+/**
+ * Redraw the scoreboard from whatever pulse the panels have published.
+ *
+ * Reads, never fetches. Called by the pulse handler and by the HAWK-AI tab, and
+ * safe to call when there is nothing: no heartbeat draws the standby face, which
+ * is a real state and not an error.
+ */
+window.__hawkBoardUpdate = () => {
+  const x = hawkBoard.c.getContext("2d");
+  const W = 768, H = 448;
+  const INK = "#eef2f4", DIM = "#8d99a2", GOOD = "#4ec9a5", BAD = "#e0685c";
+  const snipe = window.__botHeartbeat?.snipe ?? window.__houseBot?.snipe ?? null;
+  const bk = snipe?.book ?? null;
+
+  x.fillStyle = "#0c1115"; x.fillRect(0, 0, W, H);
+  x.fillStyle = "#151f26"; x.fillRect(0, 0, W, 72);
+  x.strokeStyle = "#2a343b"; x.lineWidth = 2;
+  x.beginPath(); x.moveTo(0, 72); x.lineTo(W, 72); x.stroke();
+  x.fillStyle = INK;
+  x.font = '700 32px "JetBrains Mono", ui-monospace, monospace';
+  x.textBaseline = "middle"; x.textAlign = "left";
+  x.fillText("HAWK-AI", 26, 37);
+  x.fillStyle = "#5f7d96";
+  x.font = '500 18px "JetBrains Mono", ui-monospace, monospace';
+  x.fillText("LAUNCH LANE · THE BOOK", 214, 39);
+
+  if (!bk || (!bk.trades && !(bk.closed || []).length)) {
+    x.fillStyle = DIM;
+    x.font = '500 22px "JetBrains Mono", ui-monospace, monospace';
+    x.textAlign = "center";
+    x.fillText(snipe ? "NO CLOSED TRADE YET" : "NO PULSE FROM THE LANE", W / 2, 210);
+    x.font = '400 17px "JetBrains Mono", ui-monospace, monospace';
+    x.fillText(snipe ? "the first round trip is chalked here" : "the bot publishes this on its own heartbeat",
+      W / 2, 246);
+    x.textAlign = "left";
+    hawkBoard.tex.needsUpdate = true;
+    return;
+  }
+
+  /* THE TOTAL, big, and coloured by sign — a board is read by its sign first. */
+  const net = Number(bk.realizedSol) || 0;
+  x.textAlign = "left";
+  x.fillStyle = DIM;
+  x.font = '500 17px "JetBrains Mono", ui-monospace, monospace';
+  x.fillText("REALISED", 26, 112);
+  x.fillStyle = net > 0 ? GOOD : net < 0 ? BAD : INK;
+  x.font = '700 54px "JetBrains Mono", ui-monospace, monospace';
+  x.fillText(`${net > 0 ? "+" : ""}${net.toFixed(4)} SOL`, 26, 152);
+
+  x.textAlign = "right";
+  x.fillStyle = DIM;
+  x.font = '500 17px "JetBrains Mono", ui-monospace, monospace';
+  x.fillText("RECORD", W - 26, 112);
+  x.font = '700 30px "JetBrains Mono", ui-monospace, monospace';
+  x.fillStyle = INK;
+  x.fillText(`${bk.wins}–${bk.losses}`, W - 26, 150);
+  x.fillStyle = DIM;
+  x.font = '500 15px "JetBrains Mono", ui-monospace, monospace';
+  x.fillText(`${bk.trades} closed${bk.unknown ? ` · ${bk.unknown} unpriced` : ""}`, W - 26, 176);
+  x.textAlign = "left";
+
+  x.strokeStyle = "#222c33"; x.lineWidth = 2;
+  x.beginPath(); x.moveTo(26, 196); x.lineTo(W - 26, 196); x.stroke();
+
+  /* The last ends, newest first — mint, what it made, how long it was held. Six
+     rows is what fits at a legible size; the tab carries the rest. */
+  const rows = (bk.closed || []).filter((r) => r && r.mint).slice(0, 6);
+  let y = 226;
+  x.font = '500 19px "JetBrains Mono", ui-monospace, monospace';
+  for (const r of rows) {
+    const pctv = r.realizedSol !== null && r.sizeSol > 0 ? (r.realizedSol / r.sizeSol) * 100 : null;
+    x.fillStyle = DIM;
+    x.fillText(`${r.mint.slice(0, 4)}…${r.mint.slice(-4)}`, 26, y);
+    x.fillStyle = r.realizedSol === null ? DIM : r.realizedSol > 0 ? GOOD : BAD;
+    x.textAlign = "right";
+    x.fillText(r.realizedSol === null ? "not read"
+      : `${r.realizedSol > 0 ? "+" : ""}${r.realizedSol.toFixed(4)}`, W - 168, y);
+    x.fillStyle = DIM;
+    x.fillText(pctv === null ? "—" : `${pctv > 0 ? "+" : ""}${pctv.toFixed(0)}%`, W - 26, y);
+    x.textAlign = "left";
+    y += 34;
+  }
+  if (bk.trades > rows.length) {
+    x.fillStyle = "#6b757c";
+    x.font = '400 15px "JetBrains Mono", ui-monospace, monospace';
+    x.fillText(`the ${rows.length} most recent of ${bk.trades}`, 26, y + 2);
+  }
+  hawkBoard.tex.needsUpdate = true;
+};
+window.__hawkBoardUpdate();
 window.__hawk = () => ({ x: +hawkFig.g.position.x.toFixed(2), z: +hawkFig.g.position.z.toFixed(2),
                          yaw: +hawkFig.head.rotation.y.toFixed(3), ...window.__hawkStatus() });
 
