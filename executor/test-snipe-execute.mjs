@@ -72,13 +72,21 @@ const tokenAccountBytes = ({ mint, owner, amount }) => {
   return b;
 };
 
-/** A Global account with one fee recipient at 41 and one buyback recipient at 741 —
- *  the IDL's own offsets, which decodeGlobalFeeRecipients reads. */
+/** A Global account with one STANDARD fee recipient at 41, one MAYHEM fee recipient at
+ *  483 and one buyback recipient at 741 — the IDL's own offsets, which
+ *  decodeGlobalFeeRecipients reads.
+ *
+ *  The mayhem key is here because the two are NOT interchangeable: pump.fun keeps two
+ *  disjoint pools and a coin refuses the one it does not belong to, with NotAuthorized. A
+ *  fixture carrying only the standard key cannot tell a correct pick from a lucky one —
+ *  which is exactly how the lane shipped refusing every mayhem launch it saw. */
 const FEE_RECIPIENT = Keypair.generate().publicKey.toBase58();
+const MAYHEM_FEE_RECIPIENT = Keypair.generate().publicKey.toBase58();
 const BUYBACK_RECIPIENT = Keypair.generate().publicKey.toBase58();
 const globalBytes = () => {
   const b = Buffer.alloc(1000);
   new PublicKey(FEE_RECIPIENT).toBuffer().copy(b, 41);
+  new PublicKey(MAYHEM_FEE_RECIPIENT).toBuffer().copy(b, 483);
   new PublicKey(BUYBACK_RECIPIENT).toBuffer().copy(b, 741);
   return b;
 };
@@ -328,6 +336,25 @@ section("3. PREPARE BUILDS THE EXACT BYTES GATE 20 DECODES");
     `${decoded.instruction} ${decoded.amountRaw} base ≤ ${decoded.maxQuoteInRaw} lamports`);
   ok("the fee recipients are the ones the Global account names",
     prepared.feeRecipient === FEE_RECIPIENT && prepared.buybackFeeRecipient === BUYBACK_RECIPIENT);
+  /* THE POOL, PICKED FROM THE COIN AND NOT FROM HABIT.
+     The lane used to take the first entry of a merged sixteen, which is always a standard
+     recipient, so a mayhem coin produced bytes the program answers with NotAuthorized —
+     nothing signed, nothing sent, on roughly half of every launch the feed produced.
+     Asserted in BOTH directions, because a pick that ignores the curve passes either one
+     of these on its own. */
+  const mayhemPrepared = h.executor.prepareBuy({ mint: MINT,
+    curve: curveState({ mint: MINT, isMayhemMode: true }), read: laneRead(),
+    baseOutRaw: BASE_OUT, maxQuoteInRaw: CEILING });
+  ok("a MAYHEM coin is bought with the mayhem pool's recipient",
+    mayhemPrepared.feeRecipient === MAYHEM_FEE_RECIPIENT, mayhemPrepared.feeRecipient);
+  ok("…and a standard coin is not — the two are different keys",
+    prepared.feeRecipient === FEE_RECIPIENT && FEE_RECIPIENT !== MAYHEM_FEE_RECIPIENT,
+    `${prepared.feeRecipient} vs ${mayhemPrepared.feeRecipient}`);
+  ok("…while the buyback recipient is shared, so only the one that splits is split",
+    mayhemPrepared.buybackFeeRecipient === BUYBACK_RECIPIENT);
+  ok("the mayhem buy still carries the plan's own quantity and ceiling",
+    decodeBuyIx(mayhemPrepared.instruction).amountRaw === BASE_OUT
+    && decodeBuyIx(mayhemPrepared.instruction).maxQuoteInRaw === CEILING);
   ok("the tokens are routed to the signer's own ATA", prepared.associatedBaseUser === h.chain.ata, prepared.associatedBaseUser);
   ok("the mint's owner picks the token program", prepared.baseTokenProgram === TOKEN_PROGRAM);
   ok("the instruction converts to web3 with the signer flagged",
@@ -529,6 +556,29 @@ section("8. A SELL: THE WHOLE POSITION, FLOORED FROM THE CURVE'S OWN QUOTE, ACCO
   const risk = h.journal.rollingRisk(h.clock());
   const expectedRealized = Number(quoted - 1_305_000n - BigInt(bought.spentLamports)) / 1e9;
   ok("realized = proceeds − fee − cost basis, in the shared ledger", Math.abs(risk.realizedTodaySol - expectedRealized) < 1e-12, `${risk.realizedTodaySol} SOL`);
+
+  /* A MAYHEM COIN MUST BE SELLABLE, and this is the half of the fix that matters most.
+     The exit picks its fee recipient on its own, from its own fresh read of Global — so
+     an entry taught the pools and an exit left on the merged list would buy a mayhem coin
+     happily and then refuse to sell it, which is the worst state this lane has: a real
+     position with no way out. The venue guard refuses a recipient from the wrong pool
+     before any bytes exist, so a sell that COMPLETES is the proof the pick was right. */
+  {
+    const m = harness();
+    m.chain.plan = { ...PLAN_BUY };
+    const mayhemCurve = curveState({ mint: MINT, isMayhemMode: true });
+    const mPrep = m.executor.prepareBuy({ mint: MINT, curve: mayhemCurve, read: laneRead(), baseOutRaw: BASE_OUT, maxQuoteInRaw: CEILING });
+    const mBought = await m.executor.buy({ mint: MINT, curve: mayhemCurve, prepared: mPrep, baseOutRaw: BASE_OUT, maxQuoteInRaw: CEILING });
+    m.chain.finalizeAll(); await until(() => m.journal.getIntent(mBought.intentId).state === "accounted");
+    m.chain.plan = { spend: sellExactIn(mayhemCurve, BASE_OUT).quoteOutRaw, fee: 1_305_000n, rent: 0n, deliver: BASE_OUT, outcome: "confirm" };
+    const mSold = await m.executor.sell({ mint: MINT, curve: mayhemCurve, qtyRaw: mBought.qtyRaw,
+      position: { qtyRaw: mBought.qtyRaw, costBasisLamports: mBought.spentLamports }, reason: "take" });
+    ok("a mayhem coin can be bought AND sold — the exit picks the pool too",
+      mSold.qtyRaw === mBought.qtyRaw, `in ${mBought.qtyRaw}, out ${mSold.qtyRaw}`);
+    ok("…and the entry it closed really did use the mayhem recipient",
+      m.journal.getIntent(mBought.intentId).context.feeRecipient === MAYHEM_FEE_RECIPIENT,
+      m.journal.getIntent(mBought.intentId).context.feeRecipient);
+  }
 
   const graduated = await rejects(() => h.executor.sell({ mint: MINT, curve: curveState({ mint: MINT, complete: true }), qtyRaw: "1" }));
   ok("a graduated curve refuses the sell — the pool route is not this path's", graduated?.clause === "refused" && /graduated/.test(graduated?.message), graduated?.message);

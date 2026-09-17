@@ -949,7 +949,10 @@ await watchChecks().catch((error) => { console.log("  FAIL  watch()\n         ",
   const build = (c, over = {}) => {
     const args = {
       mint: c.mint, user: c.user,
-      curve: { creator: c.creator, quoteMint: c.quoteMint, complete: false },
+      /* isMayhemMode decides WHICH fee-recipient pool the coin accepts, so a case cannot
+         re-encode without it: the encoder narrows the set by the curve before it checks
+         membership, which is what makes that check a gate instead of a tautology. */
+      curve: { creator: c.creator, quoteMint: c.quoteMint, complete: false, isMayhemMode: c.isMayhemMode === true },
       curveReadSlot: c.slot, buildingForSlot: c.slot,
       feeRecipient: c.feeRecipient, buybackFeeRecipient: c.buybackFeeRecipient,
       baseTokenProgram: c.baseTokenProgram, quoteTokenProgram: c.quoteTokenProgram,
@@ -1103,7 +1106,10 @@ await watchChecks().catch((error) => { console.log("  FAIL  watch()\n         ",
   ok("a fee recipient outside the Global account's sets is refused, naming the set", () => {
     const c = cases.cases.find((x) => x.side === "buy");
     const stranger = "So11111111111111111111111111111111111111112";
-    assert.throws(() => build(c, { feeRecipient: stranger }), /is not one of the 16/);
+    /* Eight, not sixteen: the set a coin is measured against is its OWN pool. A stranger
+       fails both readings, so this assertion also pins that the message says which. */
+    assert.throws(() => build(c, { feeRecipient: stranger }), /is not one of the 8 this standard coin accepts/);
+    assert.throws(() => build(c, { feeRecipient: stranger }), /does not name it at all/);
     assert.throws(() => build(c, { buybackFeeRecipient: stranger }), /is not one of the 8/);
     assert.throws(() => build(c, { buybackFeeRecipient: stranger }), /error 6057/);
   });
@@ -1119,17 +1125,78 @@ await watchChecks().catch((error) => { console.log("  FAIL  watch()\n         ",
       /loses the position silently/);
   });
 
-  ok("the Global fee-recipient sets decode to 16 and 8 at the IDL's own offsets", () => {
-    assert.equal(cases.globalFeeRecipients.feeRecipients.length, 16);
-    assert.equal(cases.globalFeeRecipients.buybackFeeRecipients.length, 8);
+  ok("the Global fee-recipient sets decode to 8 + 8 and 8 at the IDL's own offsets", () => {
+    const g = cases.globalFeeRecipients;
+    assert.equal(g.standardFeeRecipients.length, 8);
+    assert.equal(g.mayhemFeeRecipients.length, 8);
+    assert.equal(g.feeRecipients.length, 16, "the union is still sixteen — it is just never chosen from");
+    assert.equal(g.buybackFeeRecipients.length, 8);
+    /* THE TWO POOLS SHARE NO MEMBER. If they overlapped, "which pool is this" would have
+       an ambiguous answer for the shared key and the narrowing below would be unsound. */
+    const overlap = g.standardFeeRecipients.filter((k) => g.mayhemFeeRecipients.includes(k));
+    assert.deepEqual(overlap, [], `the pools overlap at ${overlap.join(", ")}`);
     /* And every observed recipient across all 30 cases is a member — which is what makes
        the membership check a real gate rather than a formality. */
     for (const c of cases.cases) {
-      assert.ok(cases.globalFeeRecipients.feeRecipients.includes(c.feeRecipient),
+      assert.ok(g.feeRecipients.includes(c.feeRecipient),
         `${c.signature.slice(0, 12)}… used a fee recipient outside the set`);
-      assert.ok(cases.globalFeeRecipients.buybackFeeRecipients.includes(c.buybackFeeRecipient),
+      assert.ok(g.buybackFeeRecipients.includes(c.buybackFeeRecipient),
         `${c.signature.slice(0, 12)}… used a buyback recipient outside the set`);
     }
+  });
+
+  /**
+   * THE EVIDENCE THAT "reserved_" DOES NOT MEAN "SPARE", taken from transactions that
+   * LANDED — captured 2026-09-11, six days before the bug they describe was found.
+   *
+   * The adapter merged both pools into one list and always picked the standard set's
+   * first member, so every mayhem coin was refused by the program with NotAuthorized and
+   * the sniper signed nothing on roughly half the launches it saw. These assertions are
+   * the historical record saying that was always wrong.
+   */
+  ok("both pools are in live use, and no coin ever uses both", () => {
+    const g = cases.globalFeeRecipients;
+    const poolOf = (k) => (g.standardFeeRecipients.includes(k) ? "standard" : "mayhem");
+    const byMint = new Map();
+    let standard = 0, mayhem = 0;
+    for (const c of cases.cases) {
+      const pool = poolOf(c.feeRecipient);
+      pool === "standard" ? standard++ : mayhem++;
+      if (!byMint.has(c.mint)) byMint.set(c.mint, new Set());
+      byMint.get(c.mint).add(pool);
+    }
+    /* BOTH directions: a "reserved" set nobody pays would show mayhem === 0, and the old
+       merged list would have been harmless. It is not zero. */
+    assert.ok(standard > 0 && mayhem > 0,
+      `landed transactions must exercise both pools; got ${standard} standard, ${mayhem} mayhem`);
+    /* THE PREDICTION THE FIX RESTS ON. Each coin belongs to exactly one pool. If the
+       choice were arbitrary or rotated per transaction, a mint appearing several times
+       would eventually show up in both — across these mints, none does. */
+    const mixed = [...byMint].filter(([, pools]) => pools.size > 1).map(([mint]) => mint);
+    assert.deepEqual(mixed, [], `these mints paid into both pools: ${mixed.join(", ")}`);
+    console.log(`         ${standard} standard · ${mayhem} mayhem · ${byMint.size} distinct mints, none mixed`);
+  });
+
+  ok("a recipient from the OTHER pool is refused before anything is built", () => {
+    const g = cases.globalFeeRecipients;
+    const standardCase = cases.cases.find((c) => c.side === "buy" && c.isMayhemMode !== true);
+    const mayhemCase = cases.cases.find((c) => c.side === "buy" && c.isMayhemMode === true);
+    assert.ok(standardCase && mayhemCase, "the fixture must carry a buy of each kind");
+    /* Each case re-encodes with its OWN pool… */
+    assert.ok(build(standardCase), "a standard coin must still build with a standard recipient");
+    assert.ok(build(mayhemCase), "a mayhem coin must build with a mayhem recipient");
+    /* …and refuses the other one, naming why rather than producing bytes the chain will
+       reject with an opaque 6000 after the fact. */
+    assert.throws(() => build(standardCase, { feeRecipient: g.mayhemFeeRecipients[0] }),
+      /is not one of the 8 this standard coin accepts/);
+    assert.throws(() => build(mayhemCase, { feeRecipient: g.standardFeeRecipients[0] }),
+      /is not one of the 8 this MAYHEM coin accepts/);
+    /* The refusal distinguishes "not this coin's" from "not a recipient at all", because
+       those are different bugs and the message is what a reader debugs from. */
+    assert.throws(() => build(mayhemCase, { feeRecipient: g.standardFeeRecipients[0] }),
+      /it is a real recipient, but from the standard set/);
+    assert.throws(() => build(mayhemCase, { feeRecipient: cases.cases[0].user }),
+      /does not name it at all/);
   });
 
   ok("LEGACY buy is still not emitted — 18 accounts, index 16 unnamed across 120 samples", () => {
