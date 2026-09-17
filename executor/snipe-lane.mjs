@@ -234,6 +234,12 @@ export const SNIPE_LANE_DEFAULTS = Object.freeze({
      because strategy.mjs owns that key and separation clause 6 pins that the two config
      namespaces share no name. */
   takeAtEntryX: null,
+  /* THE STALL EXIT'S DIALS. Null means snipe-policy's own defaults (90s at 1.0x entry,
+     and a 3-minute backstop) — see SNIPE_POLICY_DEFAULTS.stallMs for the 58-trade record
+     that set them. SNIPE_STALL_MS=0 turns the stall off and leaves only the time stop. */
+  stallMs: null,
+  stallAtX: null,
+  timeStopMs: null,
   /* THE OWNER'S STOP DIAL, as the policy reads it: the whole position leaves when the mark
      falls to this fraction of entry. Null means snipe-policy's own 0.20, which was derived
      for the 0.005 SOL canary and which the arming checklist refuses to carry, unexamined,
@@ -331,6 +337,9 @@ export const SNIPE_ENV = Object.freeze({
   SNIPE_DISAGREE_STREAK_MAX: Object.freeze({ key: "disagreeStreakMax", parse: "number" }),
   SNIPE_CREATOR_EXIT_FRAC: Object.freeze({ key: "creatorExitFrac", parse: "number" }),
   SNIPE_TAKE_AT_ENTRY_X: Object.freeze({ key: "takeAtEntryX", parse: "number" }),
+  SNIPE_STALL_MS: Object.freeze({ key: "stallMs", parse: "number" }),
+  SNIPE_STALL_AT_X: Object.freeze({ key: "stallAtX", parse: "number" }),
+  SNIPE_TIME_STOP_MS: Object.freeze({ key: "timeStopMs", parse: "number" }),
   SNIPE_STOP_FRAC: Object.freeze({ key: "stopFrac", parse: "number" }),
   SNIPE_LIVE_ACK: Object.freeze({ key: "liveAck", parse: "string" }),
 });
@@ -445,9 +454,18 @@ export function effectiveLaneConfig(cfg = {}) {
      overrides already live, so every consumer of the effective config sees the same take. */
   const take = Number(cfg.takeAtEntryX);
   const stop = Number(cfg.stopFrac);
+  /* The stall dials fold in the same way and for the same reason — parked at the top
+     level they would be read by nobody. `stallMs` accepts 0, which is how an operator
+     turns the stall exit off, so it is bounded at >= 0 rather than > 0. */
+  const stall = Number(cfg.stallMs);
+  const stallAt = Number(cfg.stallAtX);
+  const timeStop = Number(cfg.timeStopMs);
   const folded = {
     ...(Number.isFinite(take) && take > 0 ? { takeAtEntryX: take } : {}),
     ...(Number.isFinite(stop) && stop > 0 ? { stopFrac: stop } : {}),
+    ...(Number.isFinite(stall) && stall >= 0 ? { stallMs: stall } : {}),
+    ...(Number.isFinite(stallAt) && stallAt > 0 ? { stallAtX: stallAt } : {}),
+    ...(Number.isFinite(timeStop) && timeStop > 0 ? { timeStopMs: timeStop } : {}),
   };
   const policy = Object.keys(folded).length
     ? Object.freeze({ ...(cfg.policy ?? {}), ...folded })

@@ -1005,6 +1005,54 @@ If your log fills with `no_socials`, that is the filter working. If it fills wit
 `fetch_timeout` or `fetch_failed`, that is your metadata gateway, and the bot is refusing
 launches it could not check rather than guessing at them.
 
+### What 58 real trades changed
+
+HAWK-AI's first 58 closed round trips were read back off mainnet on 2026-09-17 — the whole
+record, 290 of 290 transactions, nothing sampled. It went **10 up, 48 down, −1.58 SOL**,
+with an average winner of **+75%** and an average loser of **−22%**. Two facts in that
+record were strong enough to change the code.
+
+| hold time | n | won | net SOL | average |
+|---|---|---|---|---|
+| 0–30s | 32 | 25% | −0.88 | −2.3% |
+| 30–60s | 3 | 0% | −0.13 | −12.4% |
+| 60–120s | 2 | 100% | +0.34 | +42.9% |
+| 120–300s | 3 | 0% | −0.28 | −23.6% |
+| 600s+ | 18 | **0%** | −0.63 | −10.2% |
+
+**Eighteen positions ran to the old ten-minute clock and not one of them won.** Meanwhile
+every large winner resolved fast: +191% at 4s, +148% at 7s, +140% at 18s, +84% at 86s.
+
+So there is now a **stall exit**: a position that has not got above `SNIPE_STALL_AT_X` ×
+entry within `SNIPE_STALL_MS` leaves, and the time-stop backstop drops from ten minutes to
+three. A launch entry's thesis is that it moves *now*, and a flat position at ninety
+seconds has falsified that while it is still cheap to say so.
+
+| dial | default | what it does |
+|---|---|---|
+| `SNIPE_STALL_MS` | `90000` | how long a launch gets to move; `0` turns the stall off |
+| `SNIPE_STALL_AT_X` | `1.0` | the multiple of entry it has to clear |
+| `SNIPE_TIME_STOP_MS` | `180000` | the backstop for a position that is alive but drifting |
+
+The second fact is **size**, and it is deliberately not code:
+
+| entry size | n | won | net SOL |
+|---|---|---|---|
+| 0.05–0.15 SOL | 1 | 100% | +0.22 |
+| 0.15–0.25 SOL | 8 | 25% | +0.12 |
+| 0.25–0.35 SOL | 19 | 21% | −0.33 |
+| 0.35 SOL+ | 30 | 10% | **−1.58** |
+
+Every SOL of the net loss sits in the largest bucket, and the two smallest buckets are net
+positive. The plausible mechanism is impact: a big clip on a thin new curve moves the
+price against itself, so the position starts deeper underwater and needs a bigger move
+just to break even. That is a reason to lower `SNIPE_MAX_SOL_PER_TRADE` — an operator's
+money decision, and not one this repository makes for you.
+
+**None of this claims to have found the optimum.** It is 58 trades from one bot over one
+day: enough to say "18 for 18 is not noise", not enough to tune a constant to the minute.
+The dials exist so the next 58 can move them.
+
 ### What has and has not been proved
 
 The instruction encoders are re-encoded byte for byte against 30 mainnet transactions on
