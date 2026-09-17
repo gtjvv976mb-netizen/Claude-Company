@@ -123,6 +123,23 @@ ok("the pulse handler redraws the board",
 ok("it is drawn once at build, so the board is never a blank rectangle",
   src.includes("window.__hawkBoardUpdate();"));
 
+console.log("\nevery number on it is dated, because an undated number reads as now");
+/* THE DEFECT THIS PINS. On 2026-09-17 the owner read this wall while his bot had been
+   trading for eight hours without a pulse reaching the desk. The board showed the
+   morning's book with nothing whatever to say it was the morning's — which is exactly
+   the failure the board's own comment warns about, committed by the board. */
+ok("it reads the pulse's own timestamp, not just the book inside it",
+  /Number\(root\?\.seenAt\)/.test(fn) && /const ageMs =/.test(fn));
+ok("the root is the one that actually carried the book",
+  /window\.__botHeartbeat\?\.snipe \? window\.__botHeartbeat/.test(fn));
+ok("a pulse older than the lamp's own stale rule is called STALE, in words",
+  /STALE \\u00b7 \$\{ago\(ageMs\)\} OLD/.test(fn) && /const STALE_MS = 3 \* 60e3;/.test(fn));
+ok("...and in the colour this floor reads as bad, header included",
+  /x\.fillStyle = BAD; x\.font = F\(700, 26\);/.test(fn) && /stale \? "#2a1a1c"/.test(fn));
+ok("a fresh pulse still says how fresh", /as of \$\{ago\(ageMs\)\} ago/.test(fn));
+ok("a pulse with no timestamp says THAT, rather than implying now",
+  fn.includes("PULSE UNDATED"));
+
 console.log("\nboth empty states are real states, and both are drawn");
 ok("no pulse at all says so", fn.includes("NO PULSE FROM THE LANE"));
 ok("...and a live lane with nothing closed says something different",

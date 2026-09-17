@@ -899,6 +899,94 @@ export const batteryEntriesAllowed = (env = process.env) =>
       !fs.existsSync(path.join(buysDir, "HARD_STOP")));
   }
 
+  /* THE ENVIRONMENT FILE IS NOT BESIDE THE SCRIPT, and this is the exact trap the owner
+   * fell into on 2026-09-17. An install puts his .cc-executor.env in ~/claudeco-executor
+   * and the CODE in a release beneath it, reached through `current` — so the documented
+   * command, `bash ~/claudeco-executor/current/macos-launchagent.sh load`, resolved its
+   * default env path to a file inside the release that has never existed there, and
+   * refused with a sentence about HIS environment being broken. It cost him four rounds.
+   *
+   * DRIVEN, NOT READ. The whole point is a path resolved at run time through a symlink,
+   * which a source assertion cannot see. The real layout is built on disk — install dir,
+   * releases/<x>, the `current` link — the real script is copied into the release and run
+   * through that link, and the only thing faked is a `uname` that says Darwin, because the
+   * controller refuses a non-Darwin host and that refusal has nothing to do with this.
+   *
+   * The PAIR is what proves it: with no env file the run fails AT the environment and
+   * names every path it tried; with the env file where an install actually puts it the
+   * SAME run gets past the environment entirely and fails at the next thing (no plist
+   * installed). A test that asserted only the second would pass on a script that never
+   * looked at all. */
+  {
+    const relHome = fs.mkdtempSync(path.join(sandbox, "release-home-"));
+    const installDir = path.join(relHome, "claudeco-executor");
+    const releaseDir = path.join(installDir, "releases", "r-1");
+    fs.mkdirSync(releaseDir, { recursive: true, mode: 0o700 });
+    fs.copyFileSync(controller, path.join(releaseDir, "macos-launchagent.sh"));
+    // Existence checks only: the controller requires these to be regular non-symlinks
+    // before it reaches any command, and this case never gets as far as running one.
+    for (const name of ["launchd-runner.mjs", "poller.mjs"])
+      fs.writeFileSync(path.join(releaseDir, name), "// stand-in for a runtime check\n", { mode: 0o600 });
+    fs.symlinkSync(releaseDir, path.join(installDir, "current"));
+    const relBin = fs.mkdtempSync(path.join(sandbox, "release-bin-"));
+    fs.writeFileSync(path.join(relBin, "uname"), "#!/bin/sh\necho Darwin\n", { mode: 0o755 });
+    const viaCurrent = (...args) => spawnSync("bash",
+      [path.join(installDir, "current", "macos-launchagent.sh"), ...args],
+      { encoding: "utf8", env: { ...process.env, HOME: relHome, PATH: `${relBin}:${process.env.PATH}` } });
+
+    const missing = viaCurrent("load");
+    check("with no environment anywhere, the refusal NAMES the paths it looked in",
+      missing.status !== 0 && /no \.cc-executor\.env found/.test(missing.stderr) &&
+      missing.stderr.includes(path.join(installDir, ".cc-executor.env")) &&
+      /--env-file/.test(missing.stderr),
+      missing.stderr);
+
+    fs.writeFileSync(path.join(installDir, ".cc-executor.env"),
+      'CC_SECRET="a-secret-this-command-must-never-print"\n', { mode: 0o600 });
+    const found = viaCurrent("load");
+    check("run through `current`, it finds the environment the installer actually wrote",
+      found.status !== 0 && /LaunchAgent is not installed/.test(found.stderr) &&
+      !/\.cc-executor\.env/.test(found.stderr),
+      found.stderr);
+    check("...and finding it never prints a line of it",
+      !`${found.stdout}${found.stderr}`.includes("a-secret-this-command-must-never-print"));
+
+    const explicit = viaCurrent("load", "--env-file", path.join(relHome, "not-here.env"));
+    check("an explicit --env-file is obeyed, never second-guessed by the search",
+      explicit.status !== 0 && explicit.stderr.includes("not-here.env") &&
+      !/no \.cc-executor\.env found/.test(explicit.stderr), explicit.stderr);
+
+    /* THE SEARCH IS CONFINED TO $HOME, and that confinement has to bite or it is
+       decoration: the same release layout OUTSIDE the home directory must not be walked
+       up, because walking up out of an odd checkout is how one user ends up loading
+       another's keys. Run under an EMPTY home — with the home above still in place the
+       documented install directory answers, correctly, and the case proves nothing. */
+    const emptyHome = fs.mkdtempSync(path.join(sandbox, "empty-home-"));
+    const outsideRoot = fs.mkdtempSync(path.join(sandbox, "outside-home-"));
+    const outsideRelease = path.join(outsideRoot, "releases", "r-1");
+    fs.mkdirSync(outsideRelease, { recursive: true, mode: 0o700 });
+    for (const name of ["launchd-runner.mjs", "poller.mjs"])
+      fs.writeFileSync(path.join(outsideRelease, name), "// stand-in\n", { mode: 0o600 });
+    fs.writeFileSync(path.join(outsideRoot, ".cc-executor.env"), 'CC_SECRET="not-his"\n', { mode: 0o600 });
+    const underEmptyHome = (...args) => spawnSync("bash",
+      [path.join(installDir, "current", "macos-launchagent.sh"), ...args],
+      { encoding: "utf8", env: { ...process.env, HOME: emptyHome, PATH: `${relBin}:${process.env.PATH}` } });
+    const outside = underEmptyHome("load", "--executor-dir", outsideRelease);
+    check("it refuses to walk up out of $HOME to find one",
+      outside.status !== 0 && /no \.cc-executor\.env found/.test(outside.stderr) &&
+      !outside.stderr.includes(path.join(outsideRoot, ".cc-executor.env")), outside.stderr);
+
+    /* ...while the ORIGINAL default still works anywhere on the disk. An install that
+       keeps its environment beside its code, outside the home directory, worked before
+       this change and has to go on working: that candidate is deliberately unconfined.
+       Same empty home, same executor dir — the ONLY difference is where the file sits. */
+    fs.writeFileSync(path.join(outsideRelease, ".cc-executor.env"), 'CC_SECRET="beside-it"\n', { mode: 0o600 });
+    const beside = underEmptyHome("load", "--executor-dir", outsideRelease);
+    check("an environment beside the executor is still found, wherever that is",
+      beside.status !== 0 && /LaunchAgent is not installed/.test(beside.stderr) &&
+      !/\.cc-executor\.env/.test(beside.stderr), beside.stderr);
+  }
+
   const shell = fs.readFileSync(controller, "utf8");
   const releaseShell = fs.readFileSync(releaseController, "utf8");
   const runnerSource = fs.readFileSync(runner, "utf8");
