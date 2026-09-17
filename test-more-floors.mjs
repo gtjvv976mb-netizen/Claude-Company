@@ -33,6 +33,16 @@ assert.ok(lift < install.indexOf("Resume entries: rm -f $PAUSE_FILE"), "…befor
 assert.match(install.slice(lift, lift + 600), /rm -f "\$PAUSE_FILE"/, "…and it removes exactly the pause file");
 assert.ok(!/rm -f "\$HARD_STOP_FILE"/.test(install.slice(lift, lift + 600)), "…never the hard stop");
 assert.match(install, /Resume entries: rm -f \$PAUSE_FILE\s+\(or pass --resume-entries next time\)/, "the summary teaches the flag");
+/* 1a · THE BUY SWITCH, which is part of the offer: a floor that cannot stop its own bot
+   without typing an absolute path will reach for `touch`, and 0644 is not a control. The
+   summary names the command, and it names what OFF does not do — the whole point is that
+   what is already held still gets out. */
+assert.match(install, /buys off/, "the closing summary names the buy switch");
+assert.match(install, /buys on\b/, "…and how to turn it back on");
+assert.match(install, /off opens nothing new; what is held still exits/,
+  "…and says plainly that OFF does not strand an open position");
+assert.match(readme, /bash ~\/claudeco-executor\/current\/macos-launchagent\.sh buys off/,
+  "the README carries the same command a floor will actually type");
 execFileSync("bash", ["-n", new URL("./executor/install.sh", import.meta.url).pathname]);
 
 /* 1b · THE BATTERY PAUSE, the one that stopped the live bot twice on 2026-09-13. The

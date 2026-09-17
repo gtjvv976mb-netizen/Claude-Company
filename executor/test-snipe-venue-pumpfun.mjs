@@ -39,6 +39,9 @@ import {
   venueContract, createVenueRegistry, registerVenue, venueFor, VenueContractError,
   REQUIRED_VENUE_METHODS,
 } from "./snipe-venue.mjs";
+/* The entry's own round-trip check, imported so the seam test below drives THIS adapter
+   through it rather than through a fixture that agrees with it by construction. */
+import { assertSnipeInstruction } from "./snipe-entry.mjs";
 import {
   PUMPFUN_VENUE, PUMPFUN_VENUE_ID, PUMPFUN_PROGRAM_ID, PUMPFUN_FEE_PROGRAM_ID,
   PUMPFUN_VENUE_VERSION, BONDING_CURVE_DISCRIMINATOR, GLOBAL_DISCRIMINATOR,
@@ -1009,6 +1012,47 @@ await watchChecks().catch((error) => { console.log("  FAIL  watch()\n         ",
     assert.equal(sback.instruction, "sell_v2");
     assert.equal(sback.minQuoteOutRaw, 7n);
     assert.equal(sback.maxQuoteInRaw, null);
+  });
+
+  /* THE SEAM, DRIVEN END TO END — the one test that would have caught 2026-09-17.
+   *
+   * Everything above proves this adapter against mainnet. test-snipe-entry.mjs proves
+   * assertSnipeInstruction against a FIXTURE adapter. Both files were green while the
+   * pair was broken: the checker read `decoded.baseOutRaw` and this decoder returned only
+   * `amountRaw`, so on the owner's live floor HAWK-AI armed, saw 92 launches and refused
+   * every one at `instruction_mismatch — decoded.baseOutRaw ... got undefined`. Zero
+   * signed. The bytes were right the whole time; the two modules had never met.
+   *
+   * So this drives the REAL adapter through the REAL checker, which is the only
+   * arrangement that can see a disagreement between them. */
+  ok("the real adapter satisfies the real round-trip check — the seam, not two halves of it", () => {
+    const c = cases.cases.find((x) => x.side === "buy");
+    const baseOutRaw = 123_456_789n, maxQuoteInRaw = 987_654_321n;
+    const ix = build(c, { amountRaw: baseOutRaw, maxQuoteInRaw });
+    /* Exactly what snipe-execute.mjs hands it: the envelope's own two names. */
+    const verdict = assertSnipeInstruction(ix, { baseOutRaw, maxQuoteInRaw }, PUMPFUN_VENUE);
+    assert.equal(verdict.ok, true);
+    assert.equal(verdict.baseOutRaw, baseOutRaw, "the checker read the quantity back off the bytes");
+    assert.equal(verdict.maxQuoteInRaw, maxQuoteInRaw, "and the ceiling with it");
+    assert.equal(verdict.venueId, PUMPFUN_VENUE_ID);
+    /* And it still REFUSES a real disagreement, so the fix widened a name and not the fence. */
+    assert.throws(() => assertSnipeInstruction(ix, { baseOutRaw: baseOutRaw + 1n, maxQuoteInRaw }, PUMPFUN_VENUE),
+      /encoded quantity/, "a quantity that does not match the plan must still be refused");
+    assert.throws(() => assertSnipeInstruction(ix, { baseOutRaw, maxQuoteInRaw: maxQuoteInRaw + 1n }, PUMPFUN_VENUE),
+      /encoded ceiling/, "and so must a ceiling that does not match");
+    console.log(`         real decoder → real checker: ${verdict.baseOutRaw} base units for at most ${verdict.maxQuoteInRaw} lamports`);
+  });
+
+  ok("arg0 carries a directional name on each side, and null on the leg it does not describe", () => {
+    const buy = decodeBuyIx(build(cases.cases.find((x) => x.side === "buy"), { amountRaw: 11n, maxQuoteInRaw: 22n }));
+    assert.equal(buy.baseOutRaw, 11n, "a buy's arg0 is base tokens OUT");
+    assert.equal(buy.baseInRaw, null, "a buy takes no base tokens in");
+    const sell = decodeBuyIx(build(cases.cases.find((x) => x.side === "sell"), { amountRaw: 33n, minQuoteOutRaw: 44n }));
+    assert.equal(sell.baseInRaw, 33n, "a sell's arg0 is base tokens IN");
+    assert.equal(sell.baseOutRaw, null,
+      "a sell delivers no base tokens — naming it an out would authorise the opposite trade");
+    assert.equal(buy.amountRaw, 11n, "and the neutral name survives on both sides");
+    assert.equal(sell.amountRaw, 33n);
   });
 
   ok("the decoder reads the BYTES, not the arguments it was handed", () => {
