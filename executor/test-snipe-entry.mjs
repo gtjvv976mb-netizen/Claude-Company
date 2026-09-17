@@ -214,10 +214,10 @@ function classicMintBytes({ mintAuthority = null, freezeAuthority = null, decima
 
 /* ════ 1. THE SHAPE OF THE LIST ═══════════════════════════════════════════════════════ */
 
-ok("SNIPE_GATES is a frozen, ordered, duplicate-free list of 22 codes", () => {
+ok("SNIPE_GATES is a frozen, ordered, duplicate-free list of 23 codes", () => {
   assert.equal(Object.isFrozen(SNIPE_GATES), true, "SNIPE_GATES is not frozen");
-  assert.equal(SNIPE_GATES.length, 22, `SNIPE_GATES has ${SNIPE_GATES.length} entries`);
-  assert.equal(new Set(SNIPE_GATES).size, 22, "SNIPE_GATES repeats a code");
+  assert.equal(SNIPE_GATES.length, 23, `SNIPE_GATES has ${SNIPE_GATES.length} entries`);
+  assert.equal(new Set(SNIPE_GATES).size, 23, "SNIPE_GATES repeats a code");
   console.log(`       ${SNIPE_GATES.join(" > ")}`);
 });
 
@@ -297,7 +297,7 @@ ok("a clean launch clears all 22 gates, and the trace names every one", () => {
   const v = snipeContract(baseArgs());
   assert.equal(v.ok, true, `the clean launch was refused at ${v.gate}: ${v.detail.message}`);
   assert.equal(v.gate, null, `gate came back ${v.gate}`);
-  assert.equal(v.trace.length, 22, `the trace holds ${v.trace.length} steps`);
+  assert.equal(v.trace.length, 23, `the trace holds ${v.trace.length} steps`);
   assert.deepEqual(v.trace.map((s) => s.gate), [...SNIPE_GATES], "the trace ran the gates out of order");
   assert.equal(v.trace.every((s) => s.ok), true, "a step in a passing trace is not ok");
   console.log(`       ${v.detail.mint.slice(0, 8)}… buys ${v.detail.baseOutRaw} base units for at most ` +
@@ -341,6 +341,12 @@ const HOSTILE = [
   ["curve_unreadable", "the curve account did not decode", { curve: { vBaseRaw: "not-an-integer", vQuoteRaw: 1n } }],
   ["curve_type_unsupported", "the REAL quote reserve is unknown, so the mark is an upper bound",
     { curve: { ...STANDARD_CURVE, realQuoteRaw: null } }],
+  /* Measured on mainnet 2026-09-17: live pump.fun launches quoted in USDC and in ORE were
+     in the feed minutes apart. This lane sizes, caps and books in lamports, so there is
+     nothing on such a coin it could spend — and before this gate the refusal arrived from
+     the chain as MintDoesNotMatchBondingCurve, on a coin that was never buyable. */
+  ["quote_not_sol", "the curve is quoted in USDC, not SOL",
+    { curve: { ...STANDARD_CURVE, quoteMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", quoteIsSol: false } }],
   ["curve_already_complete", "the curve has already graduated", { curve: { ...STANDARD_CURVE, complete: true } }],
   ["exit_route_unimplemented", "the venue names no executable route out",
     { adapter: makeAdapter({ exitRoute: () => ({ via: "none", reason: "no verified sell layout" }) }) }],
