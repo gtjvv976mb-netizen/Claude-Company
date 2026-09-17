@@ -469,6 +469,27 @@ export function sanitizeExecutorSnipe(value) {
   const c = value.counts && typeof value.counts === "object" && !Array.isArray(value.counts) ? value.counts : null;
   const f = value.feed && typeof value.feed === "object" && !Array.isArray(value.feed) ? value.feed : null;
   const ids = (xs) => (Array.isArray(xs) ? xs.slice(0, 8).map((x) => String(x).slice(0, 40)) : []);
+  /* THE BOOK — closed trades and what each one made (owner, 2026-09-17: "make his own
+   * HAWK-AI board", after asking where anyone would verify its profit). Same posture as
+   * every field beside it: bounded, typed, and read as data from a machine the desk does
+   * not control.
+   *
+   * SIGNED, AND DELIBERATELY SO. Every other money field on this block is clamped at zero
+   * because it is a size or a count, where a negative value is a sign error. A realised
+   * result is the one number here that is MEANT to go below zero. Clamping it would render
+   * every losing trade as break-even and make the board flatter than the truth, which is
+   * the worst thing a page claiming to show profit could do. Bounded on both sides instead,
+   * at the same 1000 SOL the sizes use.
+   *
+   * `null` SURVIVES AS `null`. The bot sends null for a close whose proceeds or basis it
+   * could not read, and "unknown" must never arrive on a floor as "zero". */
+  const b = value.book && typeof value.book === "object" && !Array.isArray(value.book) ? value.book : null;
+  const signedSol = (input) => {
+    if (input === null || input === undefined) return null;
+    const n = Number(input);
+    if (!Number.isFinite(n)) return null;
+    return Number(Math.min(1_000, Math.max(-1_000, n)).toFixed(9));
+  };
   return {
     mode,
     state: states.has(String(value.state)) ? String(value.state) : "faulted",
@@ -491,6 +512,24 @@ export function sanitizeExecutorSnipe(value) {
       ok: f.ok === true,
       live: ids(f.live), dead: ids(f.dead),
       message: String(f.message || "").slice(0, 200),
+    } : null,
+    book: b ? {
+      closed: Array.isArray(b.closed) ? b.closed.slice(0, 20)
+        .filter((r) => r && typeof r === "object")
+        .map((r) => ({
+          mint: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(String(r.mint || "")) ? String(r.mint) : null,
+          closedAt: timestamp(r.closedAt),
+          reason: r.reason == null ? null : String(r.reason).slice(0, 80),
+          realizedSol: signedSol(r.realizedSol),
+          sizeSol: r.sizeSol == null ? null : Math.min(1_000, Math.max(0, Number(r.sizeSol) || 0)),
+        }))
+        .filter((r) => r.mint) : [],
+      trades: count(b.trades),
+      counted: count(b.counted),
+      wins: count(b.wins),
+      losses: count(b.losses),
+      unknown: count(b.unknown),
+      realizedSol: signedSol(b.realizedSol) ?? 0,
     } : null,
   };
 }
