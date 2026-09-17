@@ -5161,7 +5161,7 @@ scene.add(codexOffice);
 const GROK_OFFICE = { x0: 5.9, x1: 9.65, z0: -12.5, z1: -8.6, cx: 7.78 };  // ends clear of the 11.2 window's mullion
 const GROX_DAIS = 0.22;                           // a step up — but under the boss's 0.35
 const grokOffice = new THREE.Group();
-grokOffice.visible = false;                       // shown only on a Grok desk
+grokOffice.visible = false;                       // until __setGrokPresent runs, below the workers
 scene.add(grokOffice);
 
 const grokBoard = (() => {
@@ -6245,8 +6245,18 @@ STAFF.forEach((spec, i) => {
 });
 window.__workers = workers;   // debug hook, same idiom as __bossBoard / __figure
 if (CAPTURE) window.__rig = { renderer, scene, camera };   // scripted turntables only
-// The Assistant Director is off-stage until this floor's brain is Grok.
-if (workers.GrokAD && workers.GrokAD.g) workers.GrokAD.g.visible = false;
+/* THE ASSISTANT DIRECTOR IS ALWAYS IN THE BUILDING, and now he actually is.
+   __setGrokPresent says so in its own comment — "hiding him made the room look
+   unbuilt on Claude floors" — and it opens his office and shows him whichever way
+   it is called. But it was called from ONE place: applyBrainRoom, inside
+   pollBossBoard, which returns before it on any page with no /floor/N in the URL
+   (the house desk is one) and swallows a failed fetch in a bare catch. So on the
+   house floor nothing ever called it, he and his whole suite stayed hidden from
+   the build, and the owner read a corner of the room that looked unfinished.
+   Calling it once here, with `false`, is the default the comment always described:
+   present, asleep at his desk, his board on standby. A brain change still wakes
+   him — applyBrainRoom passes `true` — and nothing hides him again. */
+window.__setGrokPresent(false);
 
 /** Tear one worker out of the scene and build them again from their (edited) spec.
  * Used exactly once so far: the boss. On the house floor the corner office is BIG C;
