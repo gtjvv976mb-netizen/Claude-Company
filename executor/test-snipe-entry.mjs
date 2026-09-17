@@ -214,10 +214,10 @@ function classicMintBytes({ mintAuthority = null, freezeAuthority = null, decima
 
 /* ════ 1. THE SHAPE OF THE LIST ═══════════════════════════════════════════════════════ */
 
-ok("SNIPE_GATES is a frozen, ordered, duplicate-free list of 23 codes", () => {
+ok("SNIPE_GATES is a frozen, ordered, duplicate-free list of 24 codes", () => {
   assert.equal(Object.isFrozen(SNIPE_GATES), true, "SNIPE_GATES is not frozen");
-  assert.equal(SNIPE_GATES.length, 23, `SNIPE_GATES has ${SNIPE_GATES.length} entries`);
-  assert.equal(new Set(SNIPE_GATES).size, 23, "SNIPE_GATES repeats a code");
+  assert.equal(SNIPE_GATES.length, 24, `SNIPE_GATES has ${SNIPE_GATES.length} entries`);
+  assert.equal(new Set(SNIPE_GATES).size, 24, "SNIPE_GATES repeats a code");
   console.log(`       ${SNIPE_GATES.join(" > ")}`);
 });
 
@@ -297,7 +297,7 @@ ok("a clean launch clears all 22 gates, and the trace names every one", () => {
   const v = snipeContract(baseArgs());
   assert.equal(v.ok, true, `the clean launch was refused at ${v.gate}: ${v.detail.message}`);
   assert.equal(v.gate, null, `gate came back ${v.gate}`);
-  assert.equal(v.trace.length, 23, `the trace holds ${v.trace.length} steps`);
+  assert.equal(v.trace.length, 24, `the trace holds ${v.trace.length} steps`);
   assert.deepEqual(v.trace.map((s) => s.gate), [...SNIPE_GATES], "the trace ran the gates out of order");
   assert.equal(v.trace.every((s) => s.ok), true, "a step in a passing trace is not ok");
   console.log(`       ${v.detail.mint.slice(0, 8)}… buys ${v.detail.baseOutRaw} base units for at most ` +
@@ -352,6 +352,14 @@ const HOSTILE = [
     { adapter: makeAdapter({ exitRoute: () => ({ via: "none", reason: "no verified sell layout" }) }) }],
   ["mint_refused", "a live freeze authority could brick the exit",
     { mint: mintWith({ freezeAuthority: CREATOR }) }],
+  /* Owner, 2026-09-17: only trade launches with a social attached. The gate reads a fact
+     the LANE gathered — see snipe-lane handleNotice, where the metadata request rides
+     alongside the account read — so the hostile case here is that settled result, not a
+     web server. It is only armed when the operator asked for it, which is why cfg carries
+     requireSocials as well. */
+  ["no_socials", "the deployer attached no twitter, telegram or website",
+    { cfg: { ...LIVE_CFG, requireSocials: true },
+      socials: { ok: false, clause: "no_socials", message: "the metadata names no twitter, telegram or website" } }],
   ["impact_over_cap", "a 0.005 SOL ticket moves a 0.001 SOL curve at every rung",
     { curve: { ...STANDARD_CURVE, vQuoteRaw: SOL / 1_000n, vBaseRaw: 1_000_000n * TOK,
       realBaseRaw: 700_000n * TOK, realQuoteRaw: 0n, feeBps: 0 } }],

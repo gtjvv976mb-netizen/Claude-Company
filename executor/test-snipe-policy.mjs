@@ -219,6 +219,47 @@ ok("a collapsed sell side is read as unsellable, above the ordinary stop", () =>
   assert.equal(d.action, "sell");
   assert.match(d.reason, /pulled or unsellable/, d.reason);
 });
+/* ── THE STALL EXIT ────────────────────────────────────────────────────────────────────
+   Put here by the bot's own record: of its first 58 closed round trips, the 18 that ran
+   to the old ten-minute clock went 0 for 18, while every large winner resolved inside 90
+   seconds. The assertions below drive the rule in BOTH directions — a flat position
+   leaves, a position that is UP rides on — because a stall exit that fires on a winner is
+   just an expensive way to cap the only trades that pay for the rest. */
+ok("a position still under entry at the stall deadline leaves", () => {
+  const d = snipePolicy({ position: open(), mark: 0.97, nowMs: T0 + SNIPE_DEFAULTS.stallMs });
+  assert.equal(d.action, "sell", `${d.action}: ${d.reason}`);
+  assert.match(d.reason, /stall/, d.reason);
+  console.log(`        ${d.reason.slice(0, 118)}`);
+});
+ok("...but a position that IS up rides on — the winners are what pay for the losers", () => {
+  const d = snipePolicy({ position: open(), mark: 1.4, nowMs: T0 + SNIPE_DEFAULTS.stallMs });
+  assert.equal(d.action, "hold", `${d.action}: ${d.reason}`);
+});
+ok("...and the stall does not fire one tick early", () => {
+  const d = snipePolicy({ position: open(), mark: 0.97, nowMs: T0 + SNIPE_DEFAULTS.stallMs - 1 });
+  assert.equal(d.action, "hold", `${d.action}: ${d.reason}`);
+});
+ok("the stall reads a USABLE mark — never declared dead on a price nobody could read", () => {
+  const d = snipePolicy({ position: open(), mark: null, nowMs: T0 + SNIPE_DEFAULTS.stallMs });
+  assert.equal(d.action, "hold", `${d.action}: ${d.reason}`);
+});
+ok("stallMs = 0 turns it off, leaving the time stop as the only clock", () => {
+  const d = snipePolicy({ position: open(), mark: 0.97, nowMs: T0 + 100_000, config: { stallMs: 0 } });
+  assert.equal(d.action, "hold", `${d.action}: ${d.reason}`);
+});
+ok("the stall comes BEFORE the time stop, so a dead position leaves on the earlier clock", () => {
+  assert.ok(SNIPE_DEFAULTS.stallMs < SNIPE_DEFAULTS.timeStopMs,
+    `stall ${SNIPE_DEFAULTS.stallMs}ms must be under the time stop ${SNIPE_DEFAULTS.timeStopMs}ms`);
+  const d = snipePolicy({ position: open(), mark: 0.97, nowMs: T0 + SNIPE_DEFAULTS.stallMs });
+  assert.match(d.reason, /stall/, `at the stall deadline the reason must be the stall, got: ${d.reason}`);
+});
+/* Ten minutes was long enough for 18 positions to go 0 for 18. Both numbers are pinned so
+   a change to either is a deliberate edit rather than a drift. */
+ok("the old ten-minute clock is gone", () => {
+  assert.equal(SNIPE_DEFAULTS.timeStopMs, 3 * 60_000, `${SNIPE_DEFAULTS.timeStopMs}ms`);
+  assert.equal(SNIPE_DEFAULTS.stallMs, 90_000, `${SNIPE_DEFAULTS.stallMs}ms`);
+});
+
 ok("the time stop leaves a position that never did anything", () => {
   const d = snipePolicy({ position: open(), mark: 1.0, nowMs: T0 + SNIPE_DEFAULTS.timeStopMs });
   assert.equal(d.action, "sell", `${d.action}: ${d.reason}`);
