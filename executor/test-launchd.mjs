@@ -842,6 +842,63 @@ export const batteryEntriesAllowed = (env = process.env) =>
     fs.readFileSync(hardStopFile, "utf8") === "keep-hard-stop\n" &&
     terminalWrites.join("").includes("started no service, and entries remain paused"));
 
+  /* THE BUY SWITCH, RUN RATHER THAN READ (owner, 2026-09-17: "a buy off/on button — when
+   * it is off the bot cannot buy but can sell what he last bought").
+   *
+   * Driven for real, not asserted against the source, because the two things that can go
+   * wrong here are both behavioural: the sentinel landing at 0644 (which the watchdog reads
+   * as an unsafe control and answers with a SIGTERM ten seconds after every load), and the
+   * path being resolved from the wrong place. The controller refuses a non-Darwin host, so
+   * the run gets a `uname` that says Darwin on its PATH — the only thing faked, and it
+   * changes nothing the command does. */
+  {
+    const buysHome = fs.mkdtempSync(path.join(sandbox, "buys-home-"));
+    const buysDir = path.join(buysHome, "claudeco-executor");
+    const buysSentinel = path.join(buysHome, "sentinel-elsewhere", "PAUSE_ENTRIES");
+    fs.mkdirSync(path.join(buysHome, "sentinel-elsewhere"), { recursive: true });
+    fs.mkdirSync(buysDir, { recursive: true, mode: 0o700 });
+    const buysEnv = path.join(buysDir, ".cc-executor.env");
+    fs.writeFileSync(buysEnv,
+      `CC_SECRET="a-secret-this-command-must-never-print"\nPAUSE_ENTRIES_FILE="${buysSentinel}"\n`,
+      { mode: 0o600 });
+    const fakeBin = fs.mkdtempSync(path.join(sandbox, "darwin-bin-"));
+    fs.writeFileSync(path.join(fakeBin, "uname"), "#!/bin/sh\necho Darwin\n", { mode: 0o755 });
+    const buys = (...args) => spawnSync("bash", [controller, "buys", ...args], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: buysHome, PATH: `${fakeBin}:${process.env.PATH}` },
+    });
+
+    const fresh = buys("status");
+    check("buys status reads ON when no entry-pause sentinel exists",
+      fresh.status === 0 && /BUYS ARE ON/.test(fresh.stdout), fresh.stdout || fresh.stderr);
+    const off = buys("off");
+    check("buys off creates the sentinel the env file names, not a guessed path",
+      off.status === 0 && fs.existsSync(buysSentinel) && /BUYS ARE OFF/.test(off.stdout),
+      off.stdout || off.stderr);
+    check("...owner-only, because 0644 is not a control and the watchdog refuses beside one",
+      (fs.statSync(buysSentinel).mode & 0o777) === 0o600,
+      (fs.statSync(buysSentinel).mode & 0o777).toString(8));
+    check("...and it says open positions still leave on their own triggers",
+      /still exits on its stop/.test(off.stdout) && /never touches the hard stop/.test(off.stdout));
+    check("buys off is idempotent", buys("off").status === 0 && fs.existsSync(buysSentinel));
+    const on = buys("on");
+    check("buys on removes it and says so",
+      on.status === 0 && !fs.existsSync(buysSentinel) && /BUYS ARE ON/.test(on.stdout),
+      on.stdout || on.stderr);
+    check("buys on is idempotent", buys("on").status === 0 && !fs.existsSync(buysSentinel));
+    /* A control this easy to throw must be just as hard to throw BY ACCIDENT. */
+    check("a missing verb is refused rather than guessed",
+      buys().status !== 0 && /needs one of: on, off, status/.test(buys().stderr));
+    check("an unknown verb is refused by name",
+      buys("wat").status !== 0 && /takes on, off or status/.test(buys("wat").stderr));
+    /* The file is owner-only and full of credentials; this command reads ONE key out of it. */
+    const printed = [fresh, off, on, buys("status")].map((r) => r.stdout + r.stderr).join("");
+    check("no run of this command ever prints a line of the protected environment",
+      !printed.includes("a-secret-this-command-must-never-print") && !printed.includes("CC_SECRET"));
+    check("the hard stop is never created or removed by the buy switch",
+      !fs.existsSync(path.join(buysDir, "HARD_STOP")));
+  }
+
   const shell = fs.readFileSync(controller, "utf8");
   const releaseShell = fs.readFileSync(releaseController, "utf8");
   const runnerSource = fs.readFileSync(runner, "utf8");
@@ -889,11 +946,19 @@ export const batteryEntriesAllowed = (env = process.env) =>
   check("launchctl policy parsing supports current macOS words and confirms enable",
     shell.includes('=> disabled') && shell.includes('=> enabled') &&
     shell.includes("is_enabled()") && shell.includes("if ! is_enabled"));
-  const installCase = shell.slice(shell.indexOf("  install)"), shell.indexOf("  load)"));
-  const loadCase = shell.slice(shell.indexOf("  load)"), shell.indexOf("  unload)"));
-  const unloadCase = shell.slice(shell.indexOf("  unload)"), shell.indexOf("  arm-caps)"));
-  const armCase = shell.slice(shell.indexOf("  arm-caps)"), shell.indexOf("  status)"));
-  const uninstallCase = shell.slice(shell.indexOf("  uninstall)"));
+  /* A TOP-LEVEL CASE LABEL IS ANCHORED TO ITS NEWLINE, and that is not pedantry: these
+     slices used to search for "  status)" anywhere in the file, and a nested verb label
+     indented six spaces inside another case contains those exact characters. The `buys`
+     block has one, so the unanchored search found it first, ran the arm-caps slice
+     backwards and emptied it — a source check silently grading nothing. */
+  const caseAt = (label) => shell.indexOf(`\n  ${label})`) + 1;
+  /* `buys` is the first case in the block, so it runs from its own label to install's. */
+  const buysCase = shell.slice(caseAt("buys"), caseAt("install"));
+  const installCase = shell.slice(caseAt("install"), caseAt("load"));
+  const loadCase = shell.slice(caseAt("load"), caseAt("unload"));
+  const unloadCase = shell.slice(caseAt("unload"), caseAt("arm-caps"));
+  const armCase = shell.slice(caseAt("arm-caps"), caseAt("status"));
+  const uninstallCase = shell.slice(caseAt("uninstall"));
   const rollbackStart = shell.indexOf("rollback_load()");
   const rollbackLoad = shell.slice(rollbackStart, shell.indexOf('case "$COMMAND"', rollbackStart));
   const enableConfirmation = loadCase.slice(
@@ -935,7 +1000,20 @@ export const batteryEntriesAllowed = (env = process.env) =>
     armCase.includes("launchctl disable") && armCase.includes("arm-caps") &&
     armCase.includes("--max-sol") && armCase.includes("--daily-sol-cap") &&
     armCase.includes("--daily-loss-cap") &&
-    !/(?:rm|unlink)[^\n]*(?:PAUSE|HARD_STOP|pause-entries|hard-stop)/.test(shell));
+    /* THE PAUSE RULE, NARROWED RATHER THAN DROPPED (2026-09-17).
+     *
+     * This forbade any `rm` of a pause or hard-stop sentinel ANYWHERE in the file, which
+     * was exactly right while no command was permitted to move one. `buys` is now the one
+     * command that may — an explicit, named, operator-typed act, in the same spirit as
+     * arm-caps being the sole cap-changing command — so the invariant tightens instead of
+     * relaxing: every OTHER line of the script is still forbidden to touch a sentinel, the
+     * hard stop stays untouchable everywhere including inside `buys`, and `buys` must
+     * actually move the entry pause or the switch is decoration. */
+    !/(?:rm|unlink)[^\n]*(?:PAUSE|HARD_STOP|pause-entries|hard-stop)/
+      .test(shell.replace(buysCase, "")) &&
+    !/(?:rm|unlink|install\s+-m)[^\n]*(?:HARD_STOP|hard-stop)/.test(shell) &&
+    /rm -f "\$PAUSE_FILE"/.test(buysCase) &&
+    /install -m 600 \/dev\/null "\$PAUSE_FILE"/.test(buysCase));
   check("runner loads protected values in-process without child shell APIs",
     !/child_process|execSync|spawnSync|\beval\s*\(/.test(runnerSource));
   check("the lock-owning Node runner holds and monitors a direct AC sleep assertion",
