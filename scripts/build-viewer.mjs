@@ -217,6 +217,10 @@ const EXECUTOR_FILES = [
   /* the offline recovery tool — see burner-backup.mjs. A key on one disk is a
      stranded-funds bug waiting for its first dead host. */
   "burner-backup.mjs",
+  /* the rent tool — see reclaim-rent.mjs. Every closed round trip leaves an empty
+     token account behind holding ~0.002 SOL that is neither lost nor spendable, and
+     a bot that has traded for a day has a hundred of them. */
+  "reclaim-rent.mjs",
   "package.json", "package-lock.json",
 ];
 for (const f of EXECUTOR_FILES) {

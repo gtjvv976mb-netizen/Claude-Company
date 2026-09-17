@@ -532,7 +532,10 @@ check("installer never pipes a mutable bootstrap script into a privileged shell"
     "sol-usd-oracle.mjs", "heartbeat-health.mjs", "sleep-assertion.mjs", "monitor.mjs",
     "strategy.mjs", "trade-policy.mjs", "dexscreener-consensus.mjs", "desk-mirror.mjs",
     /* a key on exactly one disk is a stranded-funds bug waiting for its first dead host */
-    "burner-backup.mjs"];
+    "burner-backup.mjs",
+    /* and rent locked in empty token accounts is the same bug in slow motion: money in
+       the wallet that the wallet cannot spend, one more account per closed round trip */
+    "reclaim-rent.mjs"];
   check("installer stages the complete durable execution and monitoring module graph",
     required.every((f) => staged.includes(f)));
 

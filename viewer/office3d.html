@@ -7035,18 +7035,51 @@ window.__hawkBoardUpdate = () => {
   const W = 1024, H = 597;
   const INK = "#eef2f4", DIM = "#8d99a2", GOOD = "#4ec9a5", BAD = "#e0685c";
   const F = (w, px) => `${w} ${px}px "JetBrains Mono", ui-monospace, monospace`;
-  const snipe = window.__botHeartbeat?.snipe ?? window.__houseBot?.snipe ?? null;
+  /* The ROOT that carried the book, not just the book \u2014 because the age of these
+     numbers is a fact about the pulse, and it belongs on the board beside them. */
+  const root = window.__botHeartbeat?.snipe ? window.__botHeartbeat
+    : window.__houseBot?.snipe ? window.__houseBot : null;
+  const snipe = root?.snipe ?? null;
   const bk = snipe?.book ?? null;
+  /* HOW OLD IS THIS. A board with no clock on it is the failure this file's own
+     comment warns about \u2014 "a board that lies to whoever walks past it" \u2014 and it is
+     not hypothetical: the owner read this wall on 2026-09-17 while his bot had been
+     trading for eight hours without reaching the desk, and the board showed the
+     morning's numbers with nothing to say they were the morning's. Three minutes is
+     the same staleness rule __hawkStatus uses for his lamp. */
+  const seenAt = Number(root?.seenAt) > 0 ? Number(root.seenAt) : null;
+  const ageMs = seenAt ? Math.max(0, Date.now() - seenAt) : null;
+  const STALE_MS = 3 * 60e3;
+  const stale = ageMs !== null && ageMs > STALE_MS;
+  const ago = (ms) => ms < 60e3 ? `${Math.round(ms / 1000)}s`
+    : ms < 3600e3 ? `${Math.round(ms / 60e3)}m`
+    : ms < 86400e3 ? `${(ms / 3600e3).toFixed(1)}h` : `${Math.round(ms / 86400e3)}d`;
 
   x.fillStyle = "#0c1115"; x.fillRect(0, 0, W, H);
-  x.fillStyle = "#151f26"; x.fillRect(0, 0, W, 96);
-  x.strokeStyle = "#2a343b"; x.lineWidth = 3;
+  x.fillStyle = stale ? "#2a1a1c" : "#151f26"; x.fillRect(0, 0, W, 96);
+  x.strokeStyle = stale ? "#5a2f31" : "#2a343b"; x.lineWidth = 3;
   x.beginPath(); x.moveTo(0, 96); x.lineTo(W, 96); x.stroke();
   x.fillStyle = INK; x.font = F(700, 44);
   x.textBaseline = "middle"; x.textAlign = "left";
   x.fillText("HAWK-AI", 34, 49);
   x.fillStyle = "#5f7d96"; x.font = F(500, 24);
   x.fillText("LAUNCH LANE \u00b7 THE BOOK", 286, 52);
+  /* The clock, top right. STALE is said in words and in red, because a number nobody
+     can date is worse than no number \u2014 the reader assumes it is now. */
+  x.textAlign = "right";
+  if (ageMs === null) {
+    x.fillStyle = DIM; x.font = F(500, 22);
+    x.fillText("PULSE UNDATED", W - 34, 52);
+  } else if (stale) {
+    x.fillStyle = BAD; x.font = F(700, 26);
+    x.fillText(`STALE \u00b7 ${ago(ageMs)} OLD`, W - 34, 44);
+    x.fillStyle = "#b0787a"; x.font = F(400, 18);
+    x.fillText("no fresh pulse has reached the desk", W - 34, 70);
+  } else {
+    x.fillStyle = DIM; x.font = F(500, 22);
+    x.fillText(`as of ${ago(ageMs)} ago`, W - 34, 52);
+  }
+  x.textAlign = "left";
 
   if (!bk || (!bk.trades && !(bk.closed || []).length)) {
     x.fillStyle = DIM; x.font = F(500, 30); x.textAlign = "center";
