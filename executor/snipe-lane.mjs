@@ -88,6 +88,7 @@ import { venueContract } from "./snipe-venue.mjs";
 import { createSnipeShadow, SHADOW_HOPS } from "./snipe-shadow.mjs";
 import { closeSnipe, ensureSnipeBook, openSnipe, snipeFor, snipeList, updateSnipe } from "./snipe-book.mjs";
 import * as snipePolicy from "./snipe-policy.mjs";
+import { readSocials, SOCIAL_DEFAULTS } from "./snipe-socials.mjs";
 
 export const SNIPE_LANE_VERSION = "snipe-lane-v1";
 
@@ -194,6 +195,14 @@ export const SNIPE_LANE_DEFAULTS = Object.freeze({
      and an unknown fee makes every quote refuse — which is the right refusal: a quote
      priced at a fee we guessed is a ceiling we cannot defend. */
   venueFeeBps: null,
+  /* ONLY BUY A LAUNCH THAT NAMES A SOCIAL (owner, 2026-09-17). Default ON: it was asked
+     for after four losing round trips in twenty minutes, and a deployer who attaches no
+     twitter, telegram or website spent thirty seconds less on the coin than one who did.
+     `SNIPE_REQUIRE_SOCIALS=0` turns it off. Costs one metadata request per launch, issued
+     in parallel with the account read — see handleNotice — and it FAILS CLOSED, so a dead
+     gateway stops entries rather than waving them through. */
+  requireSocials: true,
+  socialsTimeoutMs: SOCIAL_DEFAULTS.timeoutMs,
   /* Forward path after the would-have-fill: how many samples, how far apart. The positive
      class (a launch nobody followed) is read off these. */
   forwardSamples: 12,
@@ -310,6 +319,8 @@ export const SNIPE_ENV = Object.freeze({
   SNIPE_RENT_FEE_LAMPORTS: Object.freeze({ key: "rentFeeLamports", parse: "number" }),
   SNIPE_NOTICE_MAX_MS: Object.freeze({ key: "noticeMaxMs", parse: "number" }),
   SNIPE_VENUE_FEE_BPS: Object.freeze({ key: "venueFeeBps", parse: "number" }),
+  SNIPE_REQUIRE_SOCIALS: Object.freeze({ key: "requireSocials", parse: "flag" }),
+  SNIPE_SOCIALS_TIMEOUT_MS: Object.freeze({ key: "socialsTimeoutMs", parse: "number" }),
   SNIPE_FORWARD_SAMPLES: Object.freeze({ key: "forwardSamples", parse: "number" }),
   SNIPE_FORWARD_INTERVAL_MS: Object.freeze({ key: "forwardIntervalMs", parse: "number" }),
   SNIPE_HOLD_MAX_MS: Object.freeze({ key: "holdMaxMs", parse: "number" }),
@@ -773,6 +784,11 @@ export function createSnipeLane({
   venue, feed = null, readers = [], control = null, cfg = {}, clock = () => Date.now(),
   state = {}, shadow = null, policy = snipePolicy, log = () => {}, book = null,
   executor = null,
+  /* THE METADATA READ, AS A PORT. Injected for the same reason the readers are: this is
+     the one call the lane makes to a host the COIN'S DEPLOYER chose, and a test must be
+     able to drive every answer — an empty document, a hang, a hostile body — without a
+     network and without a real stranger's server on the other end. */
+  socialsReader = readSocials,
 } = {}) {
   const conf = Object.freeze({ ...SNIPE_LANE_DEFAULTS, ...cfg });
   if (!SNIPE_LANE_MODES.includes(conf.lane))
@@ -892,7 +908,19 @@ export function createSnipeLane({
     const noticeAtMs = Number.isFinite(Number(record?.firstSeenAtMs)) ? Number(record.firstSeenAtMs) : clock();
     const hops = [{ hop: "notice", atMs: noticeAtMs }];
 
-    /* COST 1: the one getMultipleAccounts, on every endpoint. */
+    /* COST 1: the one getMultipleAccounts, on every endpoint — and, when the operator has
+       asked for the socials filter, the launch's metadata document ALONGSIDE it rather
+       than after it. Started here and awaited below, so the filter costs the SLOWER of the
+       two rather than their sum: on a launch sniper, a second round trip in series is a
+       second during which somebody else is buying. Never awaited when the filter is off,
+       so an operator who did not ask for it makes no request at all. */
+    const socialsPromise = conf.requireSocials === true
+      ? Promise.resolve(socialsReader({
+          uri: record?.raw?.uri ?? record?.uri ?? null,
+          timeoutMs: Number(conf.socialsTimeoutMs) || undefined,
+        })).catch((error) => Object.freeze({ ok: false, clause: "fetch_failed",
+          message: String(error?.message ?? error).slice(0, 160) }))
+      : null;
     let read;
     try {
       read = await readAcrossEndpoints({ readers, addresses: adapter.accountsFor(mint), mint });
@@ -957,6 +985,10 @@ export function createSnipeLane({
       creator: creatorFacts(record, curve),
       fees: feeModel(),
       instruction: prepared?.instruction ?? null,
+      /* Awaited here rather than at the top: it was issued before the account read and has
+         had that whole round trip to finish, so on any healthy gateway this is already
+         settled and costs nothing. */
+      socials: socialsPromise ? await socialsPromise : null,
     });
     hops.push({ hop: "gate", atMs: clock() });
 

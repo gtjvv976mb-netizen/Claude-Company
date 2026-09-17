@@ -223,10 +223,25 @@ const noticeRecord = (mint, over = {}) => Object.freeze({
 const OK_CONTROL = () => ({ hardStop: false, pauseEntries: false });
 
 /** Build a lane over one scripted world. Everything it touches is a fixture. */
+/* THE SOCIALS PORT, STUBBED, FOR EVERY LANE THIS FILE BUILDS.
+   The filter is ON by default — the owner asked for it after a run of losers — and these
+   synthetic notices carry no metadata uri, so an unstubbed lane would refuse every launch
+   at `no_socials` and every assertion about the gates BELOW it would be grading nothing.
+   The stub answers what a real pump.fun launch with a filled-in form answers. The
+   REFUSING direction is driven in test-snipe-socials.mjs against a hostile server and in
+   test-snipe-entry.mjs against the gate, so nothing is lost by passing here — and no test
+   in this file touches a network, which is the whole point of the port. */
+const PASSING_SOCIALS = async () => Object.freeze({
+  ok: true,
+  socials: { twitter: "https://x.com/fixture", telegram: null, website: null,
+    present: ["twitter"], any: true },
+  message: "the launch names twitter",
+});
+
 function laneFor({
   curve = HEALTHY_CURVE, mint = mintAccount(), slots = [446_023_104, 446_023_104],
   cfg = {}, control = OK_CONTROL, clock = makeClock(), plan = null, book = null, log = () => {},
-  venue = FAKE_VENUE,
+  venue = FAKE_VENUE, socials = null,
 } = {}) {
   const accountsFor = (m) => [curveAccount(curve), { data: Buffer.from("global") }, mint];
   const readers = makeReaders(plan ?? [
@@ -238,6 +253,20 @@ function laneFor({
     cfg: { lane: "observe", ...cfg },
     state: {},
     book: book ?? { deployedTodaySol: 0, attempts: {} },
+    /* THE SOCIALS PORT, STUBBED. The filter is ON by default — the owner asked for it
+       after a run of losers — and these synthetic notices carry no metadata uri, so
+       without a stub every launch in this file would refuse at `no_socials` and every
+       assertion about the gates BELOW it would be grading nothing. The stub answers "this
+       launch names a twitter", which is what a real pump.fun launch with a filled-in form
+       does. The refusing direction is driven in test-snipe-socials.mjs against a hostile
+       server and in test-snipe-entry.mjs against the gate itself. No test here touches a
+       network, which is the point of the port. */
+    socialsReader: socials ?? (async () => Object.freeze({
+      ok: true,
+      socials: { twitter: "https://x.com/fixture", telegram: null, website: null,
+        present: ["twitter"], any: true },
+      message: "the launch names twitter",
+    })),
   });
 }
 
@@ -292,6 +321,7 @@ ok("the shadow declares its version", SNIPE_SHADOW_VERSION === "snipe-shadow-v1"
   let started = 0;
   const feed = { async start() { started++; return {}; }, notices() { return (async function* () {})(); }, async stop() { return {}; } };
   const lane = createSnipeLane({
+    socialsReader: PASSING_SOCIALS,
     venue: FAKE_VENUE, feed, control: OK_CONTROL, cfg: { lane: "observe" }, clock: makeClock(),
     readers: makeReaders([{ id: "a", slot: 1, accounts: [] }, { id: "b", slot: 1, accounts: [] }]),
   });
@@ -684,6 +714,7 @@ section("7. THE FORWARD PATH, THE DETERMINER, AND THE POSITIVE CLASS");
   /* One launch nobody follows: the real quote reserve never moves after the fill. */
   let reserve = 110_014_725;
   const lane = createSnipeLane({
+    socialsReader: PASSING_SOCIALS,
     venue: FAKE_VENUE, control: OK_CONTROL, clock: makeClock(), cfg: { lane: "observe", forwardSamples: 3 },
     state: {}, book: { deployedTodaySol: 0, attempts: {} },
     readers: makeReaders([
@@ -731,6 +762,7 @@ section("7. THE FORWARD PATH, THE DETERMINER, AND THE POSITIVE CLASS");
   let dark = false;
   const accounts = () => (dark ? [null, null, null] : [curveAccount(HEALTHY_CURVE), {}, mintAccount()]);
   const lane = createSnipeLane({
+    socialsReader: PASSING_SOCIALS,
     venue: FAKE_VENUE, control: OK_CONTROL, clock: makeClock(), cfg: { lane: "observe", forwardSamples: 2 },
     state: {}, book: { deployedTodaySol: 0, attempts: {} },
     readers: makeReaders([{ id: "a", slot: 900, accounts }, { id: "b", slot: 900, accounts }]),
@@ -873,6 +905,7 @@ section("10. THE HOPS, AND THE FEED WIRED END TO END");
   });
   const feed = createSnipeFeed({ sources: [source("logs-a"), source("logs-b")], clock });
   const lane = createSnipeLane({
+    socialsReader: PASSING_SOCIALS,
     venue: FAKE_VENUE, feed, control: OK_CONTROL, clock, cfg: { lane: "observe" }, state: {},
     book: { deployedTodaySol: 0, attempts: {} },
     readers: makeReaders([
@@ -933,6 +966,7 @@ section("11. THE SAME INPUT REPLAYS TO BYTE-IDENTICAL DECISIONS");
     let state = HEALTHY_CURVE;
     const accounts = () => [curveAccount(state), {}, mintAccount()];
     const lane = createSnipeLane({
+      socialsReader: PASSING_SOCIALS,
       venue: FAKE_VENUE, control: OK_CONTROL, clock, state: {},
       cfg: { lane: "observe", forwardSamples: 2 },
       book: { deployedTodaySol: 0, attempts: {} },
@@ -1012,6 +1046,7 @@ section("13. THE KILL SWITCH REACHES WHAT IS ALREADY OPEN");
   const openLaneUnder = async (control) => {
     let reserve = 110_014_725;
     const lane = createSnipeLane({
+      socialsReader: PASSING_SOCIALS,
       venue: FAKE_VENUE, control, clock: makeClock(), cfg: { lane: "observe", forwardSamples: 9 },
       state: {}, book: { deployedTodaySol: 0, attempts: {} },
       readers: makeReaders([
@@ -1054,6 +1089,7 @@ section("13. THE KILL SWITCH REACHES WHAT IS ALREADY OPEN");
   let blindDown = false, blindBytes = false;
   const undecodable = () => ({ owner: VENUE_PROGRAM, data: Buffer.from("not-a-curve", "utf8") });
   const blind = createSnipeLane({
+    socialsReader: PASSING_SOCIALS,
     venue: FAKE_VENUE, control: () => ({ hardStop: blindDown, pauseEntries: false }),
     clock: makeClock(), cfg: { lane: "observe", forwardSamples: 9 },
     state: {}, book: { deployedTodaySol: 0, attempts: {} },
@@ -1104,6 +1140,7 @@ section("14. A DISAGREEMENT IS BLINDNESS BEFORE IT IS HOSTILITY");
   const laneWithSplit = (streakMax) => {
     let split = false;
     const lane = createSnipeLane({
+      socialsReader: PASSING_SOCIALS,
       venue: FAKE_VENUE, control: OK_CONTROL, clock: makeClock(),
       cfg: { lane: "observe", forwardSamples: 40, disagreeStreakMax: streakMax },
       state: {}, book: { deployedTodaySol: 0, attempts: {} },
@@ -1177,6 +1214,7 @@ section("15. THE DEPLOYER GETTING OUT — the branch that could not fire");
       { owner: VENUE_PROGRAM, data: Buffer.from("not-a-token-account", "utf8") },
     ];
     return createSnipeLane({
+      socialsReader: PASSING_SOCIALS,
       venue: FAKE_VENUE, control: OK_CONTROL, clock: makeClock(),
       cfg: { lane: "observe", forwardSamples: 40, ...cfg },
       state: {}, book: { deployedTodaySol: 0, attempts: {} },

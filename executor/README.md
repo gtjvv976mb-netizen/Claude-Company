@@ -973,6 +973,38 @@ AnchorError caused by account: bonding_curve. Error Code: MintDoesNotMatchBondin
 An opaque on-chain failure, on a coin that was never buyable. The gate makes the reason
 readable and costs nothing.
 
+### Only launches that name a social
+
+`SNIPE_REQUIRE_SOCIALS` (**on by default**) refuses any launch whose metadata names no
+twitter, telegram or website. A pump.fun `create` carries a metadata uri; a deployer who
+filled in one of those fields spent thirty seconds more on the coin than one who did not.
+
+It claims nothing beyond that. The link is never followed, scored, or asked about — a
+link is trivially faked and may point at an account three minutes old. What it filters is
+the **floor of effort**, which on a launch feed is most of the volume.
+
+Three things about how it works are deliberate:
+
+- **The request rides alongside the account read**, not after it, so the filter costs the
+  slower of the two rather than their sum. With the filter off, no request is made at all.
+- **It fails closed.** An unreadable document refuses exactly like an empty one — a filter
+  that opens when it cannot see is not a filter. The two say different things in the log,
+  though: `no_socials` is a fact about the coin, `fetch_timeout` is a fact about your
+  gateway.
+- **The uri is attacker-chosen.** Anyone can launch a coin for a fraction of a SOL, so
+  anyone can choose what this bot is asked to fetch, from a machine holding a funded key.
+  Only `http`/`https` are fetched — never `file://` or `data:` — there is a hard deadline,
+  and the body is abandoned mid-read once it passes 64 KB rather than after.
+
+| dial | default | what it does |
+|---|---|---|
+| `SNIPE_REQUIRE_SOCIALS` | `1` | `0` turns the filter off entirely |
+| `SNIPE_SOCIALS_TIMEOUT_MS` | `1500` | how long to wait for the metadata host |
+
+If your log fills with `no_socials`, that is the filter working. If it fills with
+`fetch_timeout` or `fetch_failed`, that is your metadata gateway, and the bot is refusing
+launches it could not check rather than guessing at them.
+
 ### What has and has not been proved
 
 The instruction encoders are re-encoded byte for byte against 30 mainnet transactions on
