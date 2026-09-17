@@ -1,11 +1,19 @@
 /**
- * HAWK-AI's RANGE SCOREBOARD — the physical board on the floor, not the tab panel.
+ * HAWK-AI's BOARD — the physical board on the floor, not the tab panel.
  *
- * The owner asked for "a physical board like GROX MULDER's". GROX's hangs on the wall of
- * an office because he has one; HAWK-AI has a shooting line, so his is a freestanding
- * range scoreboard on posts beside it. This file pins the handful of facts that decide
- * whether that board is VISIBLE AND TRUE, because every one of them has a failure mode
- * that renders perfectly in code review and shows nothing on the floor:
+ * The owner asked for "a physical board like GROX MULDER's". It was first built as a small
+ * freestanding scoreboard on posts beside his shooting line — honest to an archery range,
+ * and he could not find it on the floor. It was then rebuilt big, on its own partition
+ * inside his range group — findable, and still not what was asked for. The instruction that
+ * settled it: "remove the windows and put it on the window like the other board."
+ *
+ * So it is on the building. The back-wall glazing bay behind his shooting line is built
+ * UNGLAZED AND PANELLED, and the board hangs there at GROX's exact size, square to the room
+ * — the same wall treatment GROX's office builds for his, in the building's own terms.
+ *
+ * This file pins the handful of facts that decide whether that board is VISIBLE AND TRUE,
+ * because every one of them has a failure mode that renders perfectly in code review and
+ * shows nothing on the floor:
  *
  *   · A PLANE BURIED IN ITS OWN FRAME. GROX's board carries a comment about exactly this
  *     — it drew into a canvas nobody could see. The clearance is arithmetic, so it is
@@ -20,8 +28,9 @@
  *
  * Source-level, like the other viewer tests: the scene needs a WebGL context to run, and
  * a test that needs a GPU is a test that gets skipped. The rendering itself was verified
- * against a real headless Chromium when it was built — the mesh was found in the scene at
- * world (11.36, 1.42, -9.48), visible, with its canvas face reading back correctly.
+ * against a real headless Chromium at every revision — the mesh is found in the scene on
+ * the back wall, visible, with its canvas face read back and legible, and the board is
+ * visible in the floor's DEFAULT view rather than only from two metres away.
  *
  *   node test-hawk-range-board.mjs
  */
@@ -45,25 +54,51 @@ const start = src.indexOf("const hawkBoard = (() => {");
 const end = src.indexOf("window.__hawkBoardUpdate();", start);
 const block = start >= 0 && end > start ? src.slice(start, end) : "";
 
-console.log("\nthe board exists, on his range");
-ok("the scoreboard block is present", block.length > 800, `${block.length} chars`);
-ok("it is built into HAWK-AI's own range group, so it moves with HAWK_RANGE",
-  /const R = hawkFig\.range;/.test(block));
-ok("it carries its own posts and foot — a freestanding board, not a floating panel",
-  /const post = \(dz\)/.test(block) && /foot\.scale\.set/.test(block));
-ok("the canvas is the same 768x448 the other boards use",
-  /c\.width = 768; c\.height = 448;/.test(block));
+console.log("\nthe board exists, and it is on the building");
+ok("the board block is present", block.length > 800, `${block.length} chars`);
+/* IT TOOK A WINDOW. The building's back glazing is four bays; the one behind his
+   shooting line is built unglazed and panelled so the board has a wall, the way GROX's
+   office builds him one. Both halves are checked: the bay is declared, and the shell
+   actually branches on it. */
+ok("the bay it hangs in is declared once, for the shell and the board to share",
+  /const HAWK_BOARD_BAY = ([\d.]+);/.test(src));
+ok("the board is positioned from that bay, not from a number typed twice",
+  /const BX = HAWK_BOARD_BAY/.test(block));
+const bay = Number(src.match(/const HAWK_BOARD_BAY = ([\d.]+);/)?.[1]);
+const shell = src.slice(src.indexOf("(function buildShell() {"), src.indexOf("/* ═══ THE CITY BEYOND"));
+ok("that bay is one of the four the back wall actually glazes",
+  /for \(const x of \[-14\.4, -11\.2, 11\.2, 14\.4\]\)/.test(shell) && [11.2, 14.4, -11.2, -14.4].includes(bay),
+  `bay ${bay}`);
+ok("...and the shell leaves it unglazed, with a panel in place of the glass",
+  /if \(x === HAWK_BOARD_BAY\) \{/.test(shell) && /continue;/.test(shell));
+/* The window he gets is the one BEHIND HIM. A board on the far side of the room is a
+   board about somebody else. The pane is 2.3 wide, so half of it is the tolerance. */
+const rangeX = Number(src.match(/const HAWK_RANGE = \{ x: ([\d.]+),/)?.[1]);
+ok("it is the window behind HIS line, not any window",
+  Number.isFinite(rangeX) && Math.abs(bay - rangeX) <= 1.15,
+  `bay ${bay}, line ${rangeX}`);
+ok("there are no posts left — a wall board does not stand on legs",
+  !/const post = \(dz\)/.test(block) && !/foot\.scale\.set/.test(block));
+/* ON THE SCENE, NOT ON `room`. The static merger takes room's children and their
+   materials, and a merged canvas texture is a board that stops updating. */
+ok("it goes on the scene, where the static merger cannot eat its canvas",
+  /scene\.add\(mesh, frame, sill\);/.test(block) && !/room\.add\(/.test(block));
+ok("the canvas is big enough to read from the floor", /c\.width = 1024; c\.height = 597;/.test(block));
 
 console.log("\nthe plane clears its frame — the failure GROX's board has a comment about");
-/* frame box: 0.06 deep centred at x=0.02, so its front face is at 0.05.
-   The canvas plane must sit PROUD of that, with room to spare. */
-const meshX = Number(block.match(/mesh\.position\.set\(([\d.]+), BY, BZ\)/)?.[1]);
-const frameX = Number(block.match(/frame\.position\.set\(([\d.]+), BY, BZ\)/)?.[1]);
-const frameDepth = Number(block.match(/new THREE\.BoxGeometry\(([\d.]+), [\d.]+, [\d.]+\)/)?.[1]);
-ok("the three numbers are readable from the source", [meshX, frameX, frameDepth].every(Number.isFinite),
-  `mesh ${meshX}, frame ${frameX}, depth ${frameDepth}`);
-const frontFace = frameX + frameDepth / 2;
-const clearance = meshX - frontFace;
+/* The frame box's front face sits half its depth in front of its centre, and the canvas
+   must sit PROUD of that with room to spare. Read from the source rather than restated
+   here, so the check cannot drift out of step with the geometry. */
+const planeW = Number(block.match(/new THREE\.PlaneGeometry\(([\d.]+), [\d.]+\)/)?.[1]);
+ok("the board is GROX's size, to the centimetre — that is what made his readable",
+  planeW === 3.0, `${planeW}m wide`);
+const meshZ = Number(block.match(/mesh\.position\.set\(BX, BY, BZ \+ ([\d.]+)\)/)?.[1]);
+const frameZ = Number(block.match(/frame\.position\.set\(BX, BY, BZ \+ ([\d.]+)\)/)?.[1]);
+const frameDepth = Number(block.match(/new THREE\.BoxGeometry\([\d.]+, [\d.]+, ([\d.]+)\)/)?.[1]);
+ok("the three numbers are readable from the source", [meshZ, frameZ, frameDepth].every(Number.isFinite),
+  `mesh ${meshZ}, frame ${frameZ}, depth ${frameDepth}`);
+const frontFace = frameZ + frameDepth / 2;
+const clearance = meshZ - frontFace;
 ok("the canvas sits proud of the frame's front face", clearance > 0,
   `clearance ${(clearance * 1000).toFixed(0)}mm`);
 ok("...with more than a hair of it, so another driver cannot z-fight it away",
