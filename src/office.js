@@ -999,10 +999,43 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
          the same and can be re-closed in one line. */
       const insider = () => true;
 
+      /* THE BODY READER THAT TOOK THE BOT OFFLINE FOR NINE HOURS (2026-09-17).
+       *
+       * It capped at 8192 bytes, and over that it called req.destroy() and then waited
+       * for `end`. `end` NEVER FIRES on a destroyed request. So the promise never
+       * settled, the route never answered, the socket just died — and the proxy in
+       * front of this process turned that into a 502 the client could do nothing with.
+       *
+       * Then the executor heartbeat grew past 8 KiB. It carries up to 20 closes, the
+       * ledger, health, reporting and — since the launch lane got a book — up to 200
+       * snipe exits. The owner's Mac posted one every minute and got 502 every time:
+       * 146 consecutive misses, "no pulse has been acknowledged since boot", while the
+       * bot traded on perfectly well. The floor showed his desk frozen at the last
+       * pulse that happened to fit. A 413 would have said what was wrong in one line;
+       * a hung socket said nothing at all.
+       *
+       * Three fixes, and the third is the one that matters most:
+       *   · a limit sized for the payloads this API actually receives;
+       *   · no destroy — stop accumulating instead, so the client always gets an answer;
+       *   · IT CANNOT HANG. `end`, `error`, `aborted` and `close` all settle it, once.
+       *     Any future caller that is over, malformed or cut off gets a decision rather
+       *     than a promise nobody resolves.
+       * Over-size still resolves null, which every caller already renders as its own
+       * 400 — a bounded, diagnosable refusal instead of a dead connection. */
+      const MAX_BODY_BYTES = 512 * 1024;
       const readBody = () => new Promise((resolve) => {
-        let raw = ""; let over = false;
-        req.on("data", (c) => { raw += c; if (raw.length > 8192) { over = true; req.destroy(); } });
-        req.on("end", () => { if (over) return resolve(null); try { resolve(JSON.parse(raw || "{}")); } catch { resolve(null); } });
+        let raw = ""; let over = false; let settled = false;
+        const settle = (value) => { if (!settled) { settled = true; resolve(value); } };
+        req.on("data", (c) => {
+          if (over) return;
+          raw += c;
+          if (raw.length > MAX_BODY_BYTES) { over = true; raw = ""; settle(null); }
+        });
+        req.on("end", () => {
+          if (over) return settle(null);
+          try { settle(JSON.parse(raw || "{}")); } catch { settle(null); }
+        });
+        for (const dead of ["error", "aborted", "close"]) req.on(dead, () => settle(null));
       });
 
       try {
