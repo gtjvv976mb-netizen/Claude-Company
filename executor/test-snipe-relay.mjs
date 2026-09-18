@@ -204,5 +204,44 @@ console.log("\nthe module itself holds no key, no address and no endpoint");
   ok("it opens no Connection of its own", !src.includes("new Connection"));
 }
 
+console.log("\nwired into the send path, or it is a module nobody calls");
+{
+  const exec = fs.readFileSync(new URL("./snipe-execute.mjs", import.meta.url), "utf8");
+  ok("the executor takes the submitter as a port", /relaySubmitter = null,/.test(exec));
+  /* THE TIP MUST BE INSIDE THE SIGNED MESSAGE. Added afterwards it is not paid; in its
+     own transaction it is not paid either. */
+  const build = exec.slice(exec.indexOf("async function buildTransaction"), exec.indexOf("async function buildTransaction") + 900);
+  ok("the tip is compiled into the message that gets signed",
+    /\.\.\.\(tip \? \[tip\.instruction\] : \[\]\)/.test(build));
+  ok("...LAST, so the simulation that follows covers its lamports",
+    build.indexOf("tip.instruction") > build.indexOf("...instructions"));
+  ok("the tip rides on the BUY only — nobody is bidding to be the one who sells",
+    /const tip = side === "buy" \? tipFor\(\{ contention \}\) : null;/.test(exec));
+  ok("a refused tip is a log line, never a refused trade",
+    /sending untipped/.test(exec));
+  ok("the tip lands on the durable record, because it is money that left the wallet",
+    /tipLamports: tip\.lamports, tipAccount: tip\.to/.test(exec));
+  /* THE FAN-OUT MUST NOT BE ABLE TO DELAY OR FAIL THE ORDINARY SEND. */
+  ok("the relay submission is started BEFORE the RPC sends are awaited",
+    exec.indexOf("const relayPromise") < exec.indexOf("const sends = await Promise.allSettled"));
+  ok("...and its rejection is swallowed, so it can never fail a send",
+    /relaySubmitter\.submit\(Buffer\.from\(bytes\)\.toString\("base64"\)\)\.catch\(\(\) => null\)/.test(exec));
+  ok("with no submitter the path is exactly what it was",
+    /relaySubmitter && typeof relaySubmitter\.submit === "function"/.test(exec));
+
+  const poller = fs.readFileSync(new URL("./poller.mjs", import.meta.url), "utf8");
+  ok("the poller reads both lists from the environment",
+    /relaysFromEnv\(process\.env\)/.test(poller) && /tipAccountsFromEnv\(process\.env\)/.test(poller));
+  ok("...and builds no submitter at all when none are configured",
+    /snipeRelays\.length\s*\?\s*createRelaySubmitter/.test(poller));
+  ok("...passing both to the executor", /relaySubmitter: snipeRelaySubmitter,/.test(poller)
+    && /tipAccounts: snipeTipAccounts,/.test(poller));
+
+  const runner = fs.readFileSync(new URL("./launchd-runner.mjs", import.meta.url), "utf8");
+  for (const key of ["SNIPE_RELAYS", "SNIPE_TIP_ACCOUNTS", "SNIPE_TIP_BASE_LAMPORTS", "SNIPE_TIP_MAX_LAMPORTS"])
+    ok(`${key} reaches the process — an unallowlisted key aborts the whole env file`,
+      new RegExp(`"${key}"`).test(runner));
+}
+
 console.log(`\n${fail === 0 ? "PASS" : "FAIL"} test-snipe-relay  ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

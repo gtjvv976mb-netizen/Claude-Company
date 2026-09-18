@@ -3637,6 +3637,24 @@ if (SNIPE_LANE_MODE !== "off") {
       if (!EXECUTE) throw new Error("SNIPE_LANE=execute needs a live install (EXECUTE=1); the sniper signs with the desk's wallet and gates");
       if (RPC === SECONDARY_RPC) throw new Error("SNIPE_LANE=execute needs SOLANA_RPC_SECONDARY distinct from SOLANA_RPC: both providers simulate and both send, and one node must not be the whole story");
       const { createSnipeExecutor } = await import("./snipe-execute.mjs");
+      /* THE RELAY FAN-OUT AND THE TIP (owner, 2026-09-18: the fastest in the market).
+         Both read from the environment and both are EMPTY by default, so an install that
+         asks for neither sends exactly as it did before: two RPCs, no tip. A malformed
+         relay list or a tip address that is not base58 throws HERE, at construction,
+         where it stops the lane from arming — rather than at the first launch, where it
+         would be a trade lost to a typo. */
+      const { createRelaySubmitter, relaysFromEnv, tipAccountsFromEnv } =
+        await import("./snipe-relay.mjs");
+      const snipeRelays = relaysFromEnv(process.env);
+      const snipeTipAccounts = tipAccountsFromEnv(process.env);
+      const snipeRelaySubmitter = snipeRelays.length
+        ? createRelaySubmitter({ relays: snipeRelays, log: (m) => log(`[snipe] ${m}`) })
+        : null;
+      if (snipeRelaySubmitter)
+        log(`[snipe] relay fan-out armed: ${snipeRelaySubmitter.relays.join(", ")}`);
+      if (snipeTipAccounts.length)
+        log(`[snipe] tipping enabled across ${snipeTipAccounts.length} account(s), ` +
+          `${Number(process.env.SNIPE_TIP_BASE_LAMPORTS) || 0}-${Number(process.env.SNIPE_TIP_MAX_LAMPORTS) || 0} lamports`);
       /* ITS OWN PAIR for the signing path too, opened on the same two endpoints the live
          desk already proved distinct. The lane's rule (its readers never borrow the desk's
          secondary) holds here for the same reason: nothing the sniper does may depend on
@@ -3644,8 +3662,12 @@ if (SNIPE_LANE_MODE !== "off") {
       snipeExecutor = createSnipeExecutor({
         keypair: kp, journal, venue: PUMPFUN_VENUE,
         connections: [new Connection(RPC, solanaRpcConnectionConfig()), new Connection(SECONDARY_RPC, solanaRpcConnectionConfig())],
+        relaySubmitter: snipeRelaySubmitter,
         cfg: { priorityFeeLamports: laneCfg.priorityFeeLamports, maxNetworkFeeLamports: laneCfg.maxNetworkFeeLamports,
-          maxRentLamports: laneCfg.maxRentLamports },
+          maxRentLamports: laneCfg.maxRentLamports,
+          tipAccounts: snipeTipAccounts,
+          tipBaseLamports: Number(process.env.SNIPE_TIP_BASE_LAMPORTS) || 0,
+          tipMaxLamports: Number(process.env.SNIPE_TIP_MAX_LAMPORTS) || 0 },
         control: () => ({ hardStop: hardStop() === true, pauseEntries: pauseEntries() === true }),
         boundary: ({ side }) => {
           if (side !== "buy") return;
