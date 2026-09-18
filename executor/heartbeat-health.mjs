@@ -45,6 +45,12 @@ const TRADING_RUNTIME_FILES = Object.freeze([
      process's identity by any definition, and test-executor-publish.mjs is what caught
      it missing here. */
   "snipe-relay.mjs",
+  /* grpc-wire.mjs and snipe-grpc.mjs are the Yellowstone launch source: the code that
+     decides, on the fastest wire this bot has, WHICH transactions become launch notices at
+     all. A decoder that mis-reads a field here does not fail — it produces fewer launches
+     than the market had, which is invisible from every other angle. Both are in the
+     fingerprint so a machine running a different copy of them says so. */
+  "grpc-wire.mjs", "snipe-grpc.mjs",
  "balance-verification.mjs",
   "entry-quote-guard.mjs", "exit-trigger.mjs", "feed-drain.mjs", "sol-usd-oracle.mjs",
   "heartbeat-health.mjs", "sleep-assertion.mjs", "strategy.mjs", "trade-policy.mjs",

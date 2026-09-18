@@ -69,6 +69,13 @@ const ALLOWED_ENV = new Set([
      are money that leaves the wallet on EVERY attempt, landed or not, and are bounded in
      snipe-relay.mjs rather than here. */
   "SNIPE_RELAYS", "SNIPE_TIP_ACCOUNTS", "SNIPE_TIP_BASE_LAMPORTS", "SNIPE_TIP_MAX_LAMPORTS",
+  /* THE FAST WIRE (2026-09-18). SNIPE_GRPC_URL is a Yellowstone endpoint — Helius calls
+     theirs LaserStream — and SNIPE_GRPC_TOKEN is its `x-token`. They are the SAME KIND of
+     thing as SOLANA_RPC and a completely different kind of thing from CC_SECRET: this pair
+     authenticates the bot to a data provider, CC_SECRET authenticates it to its own desk,
+     and mixing them widens the blast radius of both for nothing. Both empty by default;
+     empty means the feed is exactly the two sources it has always had. */
+  "SNIPE_GRPC_URL", "SNIPE_GRPC_TOKEN", "SNIPE_GRPC_COMMITMENT",
   "SNIPE_TAKE_AT_ENTRY_X", "SNIPE_STOP_FRAC", "SNIPE_HOLD_MAX_MS", "SNIPE_PRIORITY_FEE_LAMPORTS",
   "SNIPE_MAX_PRICE_IMPACT_PCT", "SNIPE_MAX_ROUND_TRIP_LOSS_PCT",
   "BLOCK_HEIGHT_WINDOW", "BOOK_HEAT_MAX", "CC_API", "CC_FLOOR", "CC_SECRET",

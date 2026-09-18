@@ -20,6 +20,11 @@ import {
   TOKEN_2022_PROGRAM, EXECUTION_READINESS_ROUTE, validateOrderEnvelope,
 } from "./jupiter.mjs";
 import { token2022Enabled } from "./token2022.mjs";
+/* Only so a gRPC signature reads as a signature. snipe-grpc.mjs hands back the raw 64
+   bytes and defaults to hex precisely so it can stay dependency-free; this file already
+   pulls bs58 in through jupiter.mjs, and a base58 signature is one you can paste into an
+   explorer when a launch needs explaining. */
+import bs58 from "bs58";
 import {
   RpcBalanceUnavailableError, verifyTrackedBalanceWithFailover,
 } from "./balance-verification.mjs";
@@ -3622,10 +3627,15 @@ setInterval(tick, POLL_MS);
 const SNIPE_LANE_MODE = String(process.env.SNIPE_LANE || "off").trim().toLowerCase();
 if (SNIPE_LANE_MODE !== "off") {
   try {
-    const [{ createSnipeLane, snipeLaneConfig }, { PUMPFUN_VENUE }, feedMod] = await Promise.all([
+    const [{ createSnipeLane, snipeLaneConfig },
+      { PUMPFUN_VENUE, PUMPFUN_PROGRAM_ID, noticesFromLogs }, feedMod,
+      { grpcFromEnv, laserstreamTransport }] = await Promise.all([
       import("./snipe-lane.mjs"),
       import("./snipe-venue-pumpfun.mjs"),
       import("./snipe-feed.mjs"),
+      /* The fast wire, dynamic like every other lane module: `off` has to cost literally
+         nothing, and test-snipe-wiring.mjs holds that line. */
+      import("./snipe-grpc.mjs"),
     ]);
     const laneCfg = snipeLaneConfig(process.env);
     /* THE SIGNING PORT, on a live install only. Everything it needs is the desk's: the
@@ -3709,6 +3719,47 @@ if (SNIPE_LANE_MODE !== "off") {
        silent one. snipe-feed.mjs owns the ledger, dedupe and health; this only names the
        sources. */
     const laneSocket = new Connection(RPC, solanaRpcConnectionConfig());
+    /* THE THIRD SOURCE, and only when the operator has configured one. A Yellowstone Geyser
+       stream is pushed from a validator's own plugin instead of fanned out through an RPC
+       node's subscription machinery; Helius's LaserStream is one, and is included in the
+       plan this desk already pays for.
+
+       It is ADDED, never substituted. The websocket and the poll stay exactly where they
+       are, because the only way to learn whether the fast wire is worth its price is to let
+       it race the cheap ones — `firstShare` in the heartbeat's `sources` block is that
+       answer, and it does not exist if the loser is unplugged.
+
+       And it reuses the venue's OWN log decoder. A Geyser transaction update carries
+       meta.log_messages: the same lines the websocket delivers, so `noticesFromLogs` — which
+       is already pinned against bytes a real pump.fun create emitted — does the parsing on
+       both routes. The new source therefore adds a transport risk and no parsing risk, and
+       a launch found here decodes to exactly the notice the socket would have produced,
+       which is what makes the two comparable at all. */
+    /* A HALF-CONFIGURED ENDPOINT STOPS THE LANE RATHER THAN COSTING IT A SOURCE. grpcFromEnv
+       throws when one of the pair is set without the other, and that throw lands in the
+       block's own catch below — so the desk stays up, the log says "launch lane did not
+       start" with the reason, and the operator who just mistyped a variable finds out at
+       once. The alternative is a lane that runs on two sources while the operator believes
+       it is running on three, which is the same silent degradation this whole subsystem
+       exists to refuse. */
+    const grpcCfg = grpcFromEnv(process.env);
+    const grpcSource = grpcCfg ? feedMod.grpcSubscribeSource({
+      id: "grpc:pumpfun", venueId: PUMPFUN_VENUE.id,
+      programId: PUMPFUN_PROGRAM_ID, commitment: grpcCfg.commitment,
+      transport: laserstreamTransport({
+        endpoint: grpcCfg.endpoint, token: grpcCfg.token,
+        encodeSignature: (b) => (b ? bs58.encode(Buffer.from(b)) : null),
+        log: (m) => log(`[snipe] ${m}`),
+      }),
+      extractMint: (notification, context) => {
+        const [notice] = noticesFromLogs({
+          logs: notification?.logs, signature: notification?.signature ?? null,
+          slot: notification?.slot ?? context?.slot ?? null, receivedAt: Date.now(), source: "grpc",
+        });
+        return notice ? { mint: notice.mint, creator: notice.creator, slot: notice.slot } : null;
+      },
+    }) : null;
+    if (grpcCfg) log(`[snipe] gRPC source armed against ${new URL(grpcCfg.endpoint).host} at ${grpcCfg.commitment}`);
     const laneFeed = feedMod.createSnipeFeed({
       sources: [
         feedMod.sourceFromVenueWatch(PUMPFUN_VENUE, {
@@ -3718,6 +3769,7 @@ if (SNIPE_LANE_MODE !== "off") {
           id: "poll:pumpfun-list", venueId: PUMPFUN_VENUE.id,
           fetchRows: feedMod.pumpfunListingFetcher({ pages: 1 }),
         }),
+        ...(grpcSource ? [grpcSource] : []),
       ],
     });
     const lane = createSnipeLane({

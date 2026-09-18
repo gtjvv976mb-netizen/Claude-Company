@@ -1252,6 +1252,72 @@ been recording both measurements the whole time. **Grading those two gates again
 record is the next real experiment** — not a faster feed, and not a threshold copied from
 a blog.
 
+### The fast wire: a Yellowstone gRPC source
+
+The lane has always had two sources — a websocket `logsSubscribe` on the pump.fun program,
+and a 5-second HTTP poll of the listing as corroboration. There is now a third, off by
+default: a Yellowstone Geyser stream, pushed from a validator's own plugin rather than
+fanned out through an RPC node's subscription machinery. Helius calls theirs **LaserStream**
+and includes it in the Business plan; any Yellowstone endpoint works, because the wire
+protocol is the same.
+
+Two environment variables arm it, and they must be set together:
+
+```bash
+SNIPE_GRPC_URL="https://laserstream-mainnet-<region>.helius-rpc.com"
+SNIPE_GRPC_TOKEN="<your Helius API key>"
+SNIPE_GRPC_COMMITMENT="processed"   # optional; processed is the default, and the only
+                                    # level a sniper can use
+```
+
+Pick the region closest to the machine actually running the bot — the entire reason to buy
+this endpoint is milliseconds, and a transatlantic hop gives back more than the feed saves.
+
+**These are not the desk's credentials and must never be set to them.** `CC_API`,
+`CC_SECRET` and `CC_FLOOR` authenticate this bot to *its own desk*. `SOLANA_RPC`,
+`SOLANA_RPC_SECONDARY` and this pair authenticate it to *a data provider*. They are
+separate credentials with separate blast radii, and the launchd runner passes each through
+by name for exactly that reason.
+
+The source is **added, never substituted.** The websocket and the poll stay where they are,
+because the only way to learn whether the fast wire is worth its price is to let it race
+the cheap ones. That answer is `firstShare` in the heartbeat's `sources` block — the share
+of launches each source told us about *first* — and it does not exist if the loser is
+unplugged. If gRPC takes most of the firsts by a wide margin, the endpoint is earning its
+money. If the 5-second poll is still winning, the problem was never the feed.
+
+Three things about how it is built are worth knowing before trusting it:
+
+- **No new dependencies.** `@grpc/grpc-js` plus `@grpc/proto-loader` is roughly fifty
+  transitive packages, and this repository's production deploy runs `npm ci && npm test` as
+  its build command. So `grpc-wire.mjs` implements the protobuf wire format and gRPC's
+  length-prefixed framing directly on `node:http2`. Both are specifications rather than
+  schemas, and both are proven offline — by round-trip, and by chunk boundaries chosen to
+  be hostile.
+- **The field numbers are copied, not remembered.** Every constant in `snipe-grpc.mjs`'s
+  `FIELDS` table came out of the published `geyser.proto` and `solana-storage.proto`, and
+  each is asserted as a literal in `test-snipe-grpc.mjs` as a tripwire on the next edit.
+  Memory says `account_include` is field 4. It is 3.
+- **The mint parser is not new.** A Geyser transaction update carries `meta.log_messages` —
+  the same lines the websocket delivers — so the venue's own `noticesFromLogs`, already
+  pinned against bytes a real pump.fun create emitted, does the parsing on both routes. The
+  new source adds a *transport* risk and no *parsing* risk, and a launch found here decodes
+  to exactly the notice the socket would have produced, which is what makes them comparable.
+
+What it has **not** done is run against a real endpoint from inside this repository. There
+is no Geyser server in CI and no credential in the tree. So the transport carries a
+self-check: if fifty updates arrive and not one of them names a oneof branch this build
+knows, it fails loudly with `schema_mismatch` rather than sitting there looking healthy and
+delivering nothing. Being wrong is survivable. Being wrong and silent is not — a feed that
+has gone quiet is indistinguishable from a quiet market from every other angle.
+
+And it is worth saying plainly, next to the measurements above: **a faster feed is not a
+fix for this strategy.** On the burner's own 64 trades, entries under 3 seconds won 0% of
+the time for −18.5% while entries 10 seconds and later won 40% for +34.0%, and no entry
+signal ordered the outcome at all. What this source buys is the *ability to test* the
+latency hypothesis against the cheap sources it races. It does not buy an edge, and nothing
+here should be read as claiming it does.
+
 ### What has and has not been proved
 
 The instruction encoders are re-encoded byte for byte against 30 mainnet transactions on
