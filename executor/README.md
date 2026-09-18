@@ -1155,6 +1155,103 @@ result. And note the size table above ages badly — the 0.05–0.15 SOL bucket 
 trade at +0.2188 and is now seven at +0.1495. Still positive, but it was never evidence
 that small size wins.
 
+### What the coins actually did, and why the entry cannot be fixed by going faster
+
+The realised book says what the bot *captured*. It does not say what the coins *did*, and
+those are different questions with different fixes: if a coin runs 3× and you exit at +5%,
+the exit is wrong; if it never moves, the entry is.
+
+So each of the 64 coins was priced off its own curve's trade events after the fill —
+sampled (a median 22 of 49 trades per curve), which makes every "reached X" count a
+**floor**, never a ceiling.
+
+| how high it went after the fill | coins |
+|---|---|
+| 1.05× | 48/64 (75%) |
+| 1.2× | 35/64 (55%) |
+| **1.5×** | **28/64 (44%)** |
+| 2× | 16/64 (25%) |
+| 3× | 4/64 (6%) |
+
+**Forty-four per cent of these coins went up 50%, and the bot realised +50% on five of
+them.** Restricted to peaks that came strictly *after* the fill — the only ones that were
+ever sellable — 12 runs reached 1.5× and the bot took it on 4, realising a mean of −19.1%
+on the 8 it missed. That is what `SNIPE_TAKE_AT_ENTRY_X=1.5` is for, and on this record it
+is worth about +0.24 SOL at a 0.1 SOL ticket.
+
+#### The speed thesis does not survive our own record
+
+The industry answer to a losing sniper is latency: Yellowstone gRPC at 5–20 ms instead of
+`logsSubscribe` at 150–300 ms, Jito bundles, multi-relay submission, landing in slot 0
+where the quoted prize is 20–60% of the upside. This bot is on the slow path by
+construction — `web3LogsTransport` → `connection.onLogs()`, a two-endpoint account read
+before deciding, and a plain `sendRawTransaction`. Measured against the curves: **median 5
+seconds late, median 12 buyers already ahead.**
+
+Being late is real. It is not what is costing the money:
+
+| seconds late | n | won | mean realised |
+|---|---|---|---|
+| under 3s | 9 | **0%** | −18.5% |
+| 3–6s | 25 | 20% | −2.6% |
+| 6–10s | 20 | 10% | −23.4% |
+| 10s+ | 10 | **40%** | **+34.0%** |
+
+The fastest entries were the worst and the slowest were the best. The plausible mechanism
+is the one the rug literature describes: the launches reachable inside three seconds are
+the ones already bundled, and arriving right behind the bundle makes you its exit
+liquidity.
+
+#### Nothing observable at entry orders the outcome
+
+Spearman rank correlation against realised return, n=64. At this sample size |ρ| under
+about 0.25 is indistinguishable from noise:
+
+| signal | ρ |
+|---|---|
+| buyers ahead of us | +0.109 |
+| seconds late | +0.083 |
+| trades on the curve | −0.126 |
+| peak reached after entry (*not an entry signal*) | +0.199 |
+
+**This bot cannot currently pick winners, and buying faster hardware would not change
+that.** The coins that reach 1.5× average +6.8% realised and the ones that do not average
+−15.3% — a real split, and one knowable only after the fact. It is an exit rule, never an
+entry one.
+
+#### So the exit ladder is the whole lever, and it is not enough
+
+Modelled over the same 64 trades, taking at 1.5× whenever the coin got there:
+
+| time stop | late runs caught | total realised |
+|---|---|---|
+| as it happened, no take | — | −361% = −0.361 SOL |
+| 90s / 180s | 8 of 12 | −286% = −0.286 SOL |
+| 300s | 9 | −231% |
+| 600s | 11 | −182% |
+| no clock | 12 | −122% = −0.122 SOL |
+
+Two things have to be said about that table. The longer rows are **optimistic**: they keep
+each non-runner's actual result and do not model the extra bleed of holding it longer, and
+the first reading of this record found the 600s+ bucket was 18 trades and zero wins. And
+the stall exit fires at 90s on anything not above entry, so it pre-empts the clock for
+exactly the late runners the longer stop is meant to catch.
+
+**Every variant in that table still loses money.** The exits stop the bleeding; they do not
+create an edge. An edge has to come from entry selection, and nothing measured here
+provides one.
+
+#### The one honest lead left
+
+`creator_profile` and `launch_share` — creator allocation and how much of the opening quote
+was bought before us — are the two filters the rug literature names, they are already
+implemented as gates, and both are `undefined` by default, so they measure and never kill.
+That default is deliberate: *a number is not evidence until it has been run against a case
+whose answer is already known.* There are now 64 known answers, and the shadow book has
+been recording both measurements the whole time. **Grading those two gates against this
+record is the next real experiment** — not a faster feed, and not a threshold copied from
+a blog.
+
 ### What has and has not been proved
 
 The instruction encoders are re-encoded byte for byte against 30 mainnet transactions on
