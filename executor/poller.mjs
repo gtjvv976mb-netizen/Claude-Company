@@ -2583,6 +2583,28 @@ function snipeHeartbeat() {
         entryFailures: Number(s.entryFailures) || 0, exitFailures: Number(s.exitFailures) || 0,
         readErrors: Number(s.readErrors) || 0, ticks: Number(s.ticks) || 0,
         signed: Number(s.signed) || 0, sent: Number(s.sent) || 0,
+        reconciled: Number(s.reconciled) || 0,
+      };
+    }
+  } catch {}
+  /* THE LATENCY BUDGET (owner, 2026-09-18: "the fastest in the market"). The lane has
+     timed its own six hops on every notice since it shipped and nothing ever carried the
+     numbers off the machine, so "why are we five seconds late" was a question only a log
+     could answer. Percentiles, not means: a sniper is killed by its tail, and one slow
+     metadata fetch in twenty is exactly what a mean hides. Defensive like every other
+     block here — a lane that throws costs the desk this field, never the pulse. */
+  try {
+    if (lane && typeof lane.latency === "function") {
+      const l = lane.latency({ limit: 200 }) || {};
+      const leg = (x) => (x && Number(x.n) > 0
+        ? { n: Number(x.n), p50: Number(x.p50), p90: Number(x.p90), max: Number(x.max) } : null);
+      out.latency = {
+        rows: Number(l.rows) || 0,
+        noticeToDecisionMs: leg(l.noticeToDecisionMs),
+        hops: Object.fromEntries(Object.entries(l.hops || {})
+          .map(([k, v]) => [String(k).slice(0, 16), leg(v)]).filter(([, v]) => v !== null)),
+        worstHopAtP90: l.worstHopAtP90 ? String(l.worstHopAtP90).slice(0, 16) : null,
+        clockRegressions: Number(l.clockRegressions) || 0,
       };
     }
   } catch {}

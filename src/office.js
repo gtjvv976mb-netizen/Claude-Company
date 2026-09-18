@@ -506,7 +506,37 @@ export function sanitizeExecutorSnipe(value) {
       entryFailures: count(c.entryFailures), exitFailures: count(c.exitFailures),
       readErrors: count(c.readErrors), ticks: count(c.ticks),
       signed: count(c.signed), sent: count(c.sent),
+      reconciled: count(c.reconciled),
     } : null,
+    /* THE LATENCY BUDGET (owner, 2026-09-18: "the fastest in the market"). Bounded and
+       typed like everything else on this block, because it arrives from a machine the
+       desk does not control. Milliseconds are clamped to a day: a hop cannot legitimately
+       take longer than that, and an unbounded number here would render as a chart axis
+       nobody can read. Hop NAMES are matched against a fixed list rather than passed
+       through — a name is rendered, and rendering a string a stranger chose is how a
+       dashboard becomes an injection surface. */
+    latency: (() => {
+      const l = value.latency && typeof value.latency === "object" && !Array.isArray(value.latency)
+        ? value.latency : null;
+      if (!l) return null;
+      const HOPS = ["notice", "accounts", "decode", "prepare", "gate", "ceiling", "record"];
+      const ms = (input) => Math.min(86_400_000, Math.max(0, Math.round(Number(input) || 0)));
+      const leg = (x) => (x && typeof x === "object" && Number(x.n) > 0
+        ? { n: count(x.n), p50: ms(x.p50), p90: ms(x.p90), max: ms(x.max) } : null);
+      const hops = {};
+      for (const [k, v] of Object.entries(l.hops || {})) {
+        if (!HOPS.includes(String(k))) continue;
+        const one = leg(v);
+        if (one) hops[String(k)] = one;
+      }
+      return {
+        rows: count(l.rows),
+        noticeToDecisionMs: leg(l.noticeToDecisionMs),
+        hops,
+        worstHopAtP90: HOPS.includes(String(l.worstHopAtP90)) ? String(l.worstHopAtP90) : null,
+        clockRegressions: count(l.clockRegressions),
+      };
+    })(),
     feed: f ? {
       state: ["live", "degraded", "dead", "stopped", "starting"].includes(String(f.state)) ? String(f.state) : "dead",
       ok: f.ok === true,
