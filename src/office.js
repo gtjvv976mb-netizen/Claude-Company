@@ -515,6 +515,30 @@ export function sanitizeExecutorSnipe(value) {
        nobody can read. Hop NAMES are matched against a fixed list rather than passed
        through — a name is rendered, and rendering a string a stranger chose is how a
        dashboard becomes an injection surface. */
+    /* WHICH SOURCE TELLS US FIRST (owner, 2026-09-18: "the fastest sniper bot"). The
+       measurement that decides whether a faster feed is worth buying: if the 5-second
+       listing poll is winning races against the websocket, the bot is finding launches by
+       HTTP on a timer and no gRPC endpoint fixes that until the socket is understood.
+       Bounded and typed like every other block from a machine the desk does not control;
+       source ids are rendered, so they are length-capped rather than trusted. */
+    sources: (() => {
+      const v = value.sources && typeof value.sources === "object" && !Array.isArray(value.sources)
+        ? value.sources : null;
+      if (!v || !Array.isArray(v.rows)) return null;
+      const frac = (x) => (Number.isFinite(Number(x)) ? Math.min(1, Math.max(0, Number(x))) : null);
+      const ms = (x) => (Number.isFinite(Number(x)) ? Math.max(-86_400_000, Math.min(86_400_000, Math.round(Number(x)))) : null);
+      return {
+        records: count(v.records), corroborated: count(v.corroborated),
+        rows: v.rows.slice(0, 6).filter((r) => r && typeof r === "object").map((r) => ({
+          id: String(r.id || "").slice(0, 40),
+          kind: ["logs", "poll", "watch", "grpc"].includes(String(r.kind)) ? String(r.kind) : "other",
+          arrivals: count(r.arrivals), firsts: count(r.firsts),
+          firstShare: frac(r.firstShare),
+          medianLagMs: ms(r.medianLagMs),
+          medianSlotsBehind: Number.isFinite(Number(r.medianSlotsBehind)) ? Math.round(Number(r.medianSlotsBehind)) : null,
+        })),
+      };
+    })(),
     latency: (() => {
       const l = value.latency && typeof value.latency === "object" && !Array.isArray(value.latency)
         ? value.latency : null;

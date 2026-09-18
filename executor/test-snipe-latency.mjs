@@ -155,5 +155,37 @@ console.log("\nit is wired all the way to the desk, or it is a number nobody see
   ok("...and milliseconds bounded", /Math\.min\(86_400_000/.test(office));
 }
 
+console.log("\nWHO TELLS US FIRST — the measurement that decides whether a faster feed is worth buying");
+{
+  /* The lane runs two sources: a websocket on the venue's logs, and a 5-SECOND poll of
+     the pump.fun listing as corroboration. The burner's measured median entry was 5
+     seconds behind the curve's first trade, which is the poll's interval to the second.
+     If the poll is winning these races, the bot is finding launches by HTTP on a timer
+     and no gRPC endpoint fixes that until the socket is understood. The feed has always
+     computed this table; nothing ever carried it off the machine. */
+  const poller = fs.readFileSync(new URL("./poller.mjs", import.meta.url), "utf8");
+  ok("the poller puts the source race on the heartbeat",
+    /out\.sources = \{/.test(poller) && /snipeStatus\.feed\?\.latency\?\.\(\)/.test(poller));
+  ok("...carrying firstShare, which is the whole answer",
+    /firstShare: Number\.isFinite/.test(poller));
+  ok("...and how far behind the loser was, in ms and in slots",
+    /medianLagMs:/.test(poller) && /medianSlotsBehind:/.test(poller));
+  ok("...defensively, so a feed that throws costs this field and never the pulse",
+    /try \{\n    const l = snipeStatus\.feed\?\.latency/.test(poller));
+  const office = fs.readFileSync(new URL("../src/office.js", import.meta.url), "utf8");
+  ok("the desk accepts it", /sources: \(\(\) => \{/.test(office));
+  ok("...with firstShare clamped to a real fraction", /Math\.min\(1, Math\.max\(0, Number\(x\)\)\)/.test(office));
+  ok("...and source kinds matched against a list rather than rendered as given",
+    /\["logs", "poll", "watch", "grpc"\]\.includes/.test(office));
+  /* A LAG CAN BE NEGATIVE and must survive as negative: it is measured across two clocks,
+     and the feed welds a crossClock warning to it rather than clamping. */
+  ok("a negative lag is not clamped to zero on the way through the desk",
+    /Math\.max\(-86_400_000/.test(office));
+  const feed = fs.readFileSync(new URL("./snipe-feed.mjs", import.meta.url), "utf8");
+  const interval = feed.match(/pollIntervalMs: ([\d_]+),/)?.[1]?.replace(/_/g, "");
+  ok("the poll interval is known and stated, since it bounds how late that source can be",
+    Number(interval) > 0, `${interval}ms — a launch found only by this source is on average ${Number(interval)/2000}s old`);
+}
+
 console.log(`\n${fail === 0 ? "PASS" : "FAIL"} test-snipe-latency  ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

@@ -2614,6 +2614,30 @@ function snipeHeartbeat() {
       live: (h.live || []).slice(0, 8).map(String), dead: (h.dead || []).slice(0, 8).map(String),
       message: String(h.message || "").slice(0, 200) };
   } catch {}
+  /* WHICH SOURCE ACTUALLY TELLS US FIRST — the measurement that decides whether a faster
+     feed is worth buying, and another one this process has always computed and never
+     shipped. The lane runs two sources: a websocket on the venue's own logs, and a 5s
+     poll of the pump.fun listing as corroboration. If the socket wins nearly every race,
+     the seconds are being lost somewhere else and a gRPC endpoint is the next move. If
+     the POLL is winning, the bot is finding launches by HTTP on a five-second timer and
+     no amount of gRPC fixes that until the socket is understood. `firstShare` is the
+     whole answer and it costs nothing to carry. */
+  try {
+    const l = snipeStatus.feed?.latency?.();
+    if (l && Array.isArray(l.sources)) out.sources = {
+      records: Number(l.records) || 0,
+      corroborated: Number(l.corroborated) || 0,
+      rows: l.sources.slice(0, 6).map((r) => ({
+        id: String(r.id || "").slice(0, 40),
+        kind: String(r.kind || "").slice(0, 16),
+        arrivals: Number(r.arrivals) || 0,
+        firsts: Number(r.firsts) || 0,
+        firstShare: Number.isFinite(Number(r.firstShare)) ? Number(r.firstShare) : null,
+        medianLagMs: Number.isFinite(Number(r.medianLagMs)) ? Math.round(Number(r.medianLagMs)) : null,
+        medianSlotsBehind: Number.isFinite(Number(r.medianSlotsBehind)) ? Number(r.medianSlotsBehind) : null,
+      })),
+    };
+  } catch {}
   return out;
 }
 const fillReportedKey = (intentId) => `fill_reported:${intentId}`;
