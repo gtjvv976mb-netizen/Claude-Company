@@ -238,9 +238,20 @@ console.log("\nwired into the send path, or it is a module nobody calls");
     && /tipAccounts: snipeTipAccounts,/.test(poller));
 
   const runner = fs.readFileSync(new URL("./launchd-runner.mjs", import.meta.url), "utf8");
-  for (const key of ["SNIPE_RELAYS", "SNIPE_TIP_ACCOUNTS", "SNIPE_TIP_BASE_LAMPORTS", "SNIPE_TIP_MAX_LAMPORTS"])
+  const install = fs.readFileSync(new URL("./install.sh", import.meta.url), "utf8");
+  /* TWO HALVES OF ONE DECISION. The runner's ALLOWED_ENV decides whether a key reaches the
+     process at all; install.sh's carry loop decides whether it still exists after the next
+     upgrade, which rebuilds the environment file from scratch. Allowing a key without
+     carrying it is the silent half: the operator sets a tip account, watches it work,
+     upgrades, and is quietly sending with no tip and no message anywhere saying so. These
+     four shipped that way. */
+  const carryList = install.slice(install.indexOf("for dial in"), install.indexOf('upgrade_env_read "$dial"'));
+  for (const key of ["SNIPE_RELAYS", "SNIPE_TIP_ACCOUNTS", "SNIPE_TIP_BASE_LAMPORTS", "SNIPE_TIP_MAX_LAMPORTS"]) {
     ok(`${key} reaches the process — an unallowlisted key aborts the whole env file`,
       new RegExp(`"${key}"`).test(runner));
+    ok(`...and survives an upgrade, which rebuilds the env file from scratch`,
+      new RegExp(`\\b${key}\\b`).test(carryList));
+  }
 }
 
 console.log(`\n${fail === 0 ? "PASS" : "FAIL"} test-snipe-relay  ${pass} passed, ${fail} failed`);
