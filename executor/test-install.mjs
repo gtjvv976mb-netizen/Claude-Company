@@ -42,6 +42,10 @@ const need = ["poller.mjs", "journal.mjs", "jupiter.mjs", "token2022.mjs", "bala
   // the socials filter: imported by snipe-lane.mjs at module scope, so an install that
   // fetches this list without it dies at boot the moment the lane is constructed.
   "snipe-socials.mjs",
+  // the Yellowstone launch source: poller.mjs imports snipe-grpc.mjs inside the lane
+  // branch, and snipe-grpc.mjs imports grpc-wire.mjs. An install missing either cannot
+  // construct the lane at all, which is the loud failure — not a lane short one source.
+  "grpc-wire.mjs", "snipe-grpc.mjs",
   // desk-led-v4: the desk's ruler and the mirror evaluator ship with the trading process.
   "dexscreener-consensus.mjs", "desk-mirror.mjs",
   "package.json", "package-lock.json", "install.sh", "macos-launchagent.sh", "macos-release.sh", "launchd-runner.mjs"];

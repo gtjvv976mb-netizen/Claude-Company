@@ -201,6 +201,14 @@ const EXECUTOR_FILES = [
   /* The socials filter (2026-09-17): imported by snipe-lane.mjs at MODULE SCOPE, so a 404
      here is not a degraded filter — it is a lane that cannot be constructed at all. */
   "snipe-socials.mjs",
+  "snipe-relay.mjs",
+  /* The Yellowstone gRPC source (2026-09-18): imported by poller.mjs inside the lane
+     branch, and a 404 here is a lane that cannot be constructed at all — not a lane that
+     quietly runs on two sources instead of three. grpc-wire.mjs is snipe-grpc.mjs's only
+     import; publishing one without the other is an install that fetches a module and then
+     dies resolving it. */
+  "grpc-wire.mjs",
+  "snipe-grpc.mjs",
   /* Desk-led exits (2026-09-05). The bot no longer carries an exit policy of its own —
      Shrek, call 55: it sold 03:01:42Z on its own normalised stop at -13.5% while the
      desk's determined stop_hit landed 03:10:24Z. When the desk is unreachable the bot

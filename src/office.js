@@ -506,7 +506,61 @@ export function sanitizeExecutorSnipe(value) {
       entryFailures: count(c.entryFailures), exitFailures: count(c.exitFailures),
       readErrors: count(c.readErrors), ticks: count(c.ticks),
       signed: count(c.signed), sent: count(c.sent),
+      reconciled: count(c.reconciled),
     } : null,
+    /* THE LATENCY BUDGET (owner, 2026-09-18: "the fastest in the market"). Bounded and
+       typed like everything else on this block, because it arrives from a machine the
+       desk does not control. Milliseconds are clamped to a day: a hop cannot legitimately
+       take longer than that, and an unbounded number here would render as a chart axis
+       nobody can read. Hop NAMES are matched against a fixed list rather than passed
+       through — a name is rendered, and rendering a string a stranger chose is how a
+       dashboard becomes an injection surface. */
+    /* WHICH SOURCE TELLS US FIRST (owner, 2026-09-18: "the fastest sniper bot"). The
+       measurement that decides whether a faster feed is worth buying: if the 5-second
+       listing poll is winning races against the websocket, the bot is finding launches by
+       HTTP on a timer and no gRPC endpoint fixes that until the socket is understood.
+       Bounded and typed like every other block from a machine the desk does not control;
+       source ids are rendered, so they are length-capped rather than trusted. */
+    sources: (() => {
+      const v = value.sources && typeof value.sources === "object" && !Array.isArray(value.sources)
+        ? value.sources : null;
+      if (!v || !Array.isArray(v.rows)) return null;
+      const frac = (x) => (Number.isFinite(Number(x)) ? Math.min(1, Math.max(0, Number(x))) : null);
+      const ms = (x) => (Number.isFinite(Number(x)) ? Math.max(-86_400_000, Math.min(86_400_000, Math.round(Number(x)))) : null);
+      return {
+        records: count(v.records), corroborated: count(v.corroborated),
+        rows: v.rows.slice(0, 6).filter((r) => r && typeof r === "object").map((r) => ({
+          id: String(r.id || "").slice(0, 40),
+          kind: ["logs", "poll", "watch", "grpc"].includes(String(r.kind)) ? String(r.kind) : "other",
+          arrivals: count(r.arrivals), firsts: count(r.firsts),
+          firstShare: frac(r.firstShare),
+          medianLagMs: ms(r.medianLagMs),
+          medianSlotsBehind: Number.isFinite(Number(r.medianSlotsBehind)) ? Math.round(Number(r.medianSlotsBehind)) : null,
+        })),
+      };
+    })(),
+    latency: (() => {
+      const l = value.latency && typeof value.latency === "object" && !Array.isArray(value.latency)
+        ? value.latency : null;
+      if (!l) return null;
+      const HOPS = ["notice", "accounts", "decode", "prepare", "gate", "ceiling", "record"];
+      const ms = (input) => Math.min(86_400_000, Math.max(0, Math.round(Number(input) || 0)));
+      const leg = (x) => (x && typeof x === "object" && Number(x.n) > 0
+        ? { n: count(x.n), p50: ms(x.p50), p90: ms(x.p90), max: ms(x.max) } : null);
+      const hops = {};
+      for (const [k, v] of Object.entries(l.hops || {})) {
+        if (!HOPS.includes(String(k))) continue;
+        const one = leg(v);
+        if (one) hops[String(k)] = one;
+      }
+      return {
+        rows: count(l.rows),
+        noticeToDecisionMs: leg(l.noticeToDecisionMs),
+        hops,
+        worstHopAtP90: HOPS.includes(String(l.worstHopAtP90)) ? String(l.worstHopAtP90) : null,
+        clockRegressions: count(l.clockRegressions),
+      };
+    })(),
     feed: f ? {
       state: ["live", "degraded", "dead", "stopped", "starting"].includes(String(f.state)) ? String(f.state) : "dead",
       ok: f.ok === true,
