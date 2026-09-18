@@ -362,6 +362,19 @@ console.log("\nit is wired into the runtime, or it is a module nobody loads");
   const runner = fs.readFileSync(new URL("./launchd-runner.mjs", import.meta.url), "utf8");
   ok("the runner passes the three env vars through, or the dial does nothing under launchd",
     /"SNIPE_GRPC_URL"/.test(runner) && /"SNIPE_GRPC_TOKEN"/.test(runner) && /"SNIPE_GRPC_COMMITMENT"/.test(runner));
+  /* THE OTHER HALF OF THAT DECISION, and the half that is silent when it is missed.
+     install.sh rebuilds the environment file from scratch on every upgrade and re-emits
+     only the dials its carry loop names. A key the runner allows but the carry loop does
+     not survives until the next upgrade and then vanishes with no message at all — the
+     operator sets the fastest source, sees it work, upgrades, and is quietly back on two
+     sources. This shipped exactly that way and is pinned here so it cannot again. */
+  const carryList = install.slice(install.indexOf("for dial in"), install.indexOf('upgrade_env_read "$dial"'));
+  ok("an upgrade carries the endpoint forward", /\bSNIPE_GRPC_URL\b/.test(carryList));
+  ok("...and the token, so a credential is not retyped on every upgrade",
+    /\bSNIPE_GRPC_TOKEN\b/.test(carryList));
+  ok("...and the commitment", /\bSNIPE_GRPC_COMMITMENT\b/.test(carryList));
+  ok("the carry loop never echoes a value, which is what lets a credential ride it",
+    /if upgrade_env_read "\$dial" && \[ -n "\$UPGRADE_VALUE" \]; then write_env_line "\$dial" "\$UPGRADE_VALUE"; fi/.test(install));
   const poller = fs.readFileSync(new URL("./poller.mjs", import.meta.url), "utf8");
   ok("the poller adds the source only when the operator configured one",
     /grpcFromEnv\(/.test(poller) && /grpcSubscribeSource\(/.test(poller));
