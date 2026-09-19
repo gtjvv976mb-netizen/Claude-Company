@@ -46,6 +46,9 @@ const need = ["poller.mjs", "journal.mjs", "jupiter.mjs", "token2022.mjs", "bala
   // branch, and snipe-grpc.mjs imports grpc-wire.mjs. An install missing either cannot
   // construct the lane at all, which is the loud failure — not a lane short one source.
   "grpc-wire.mjs", "snipe-grpc.mjs",
+  // the shadow book on disk and its grader: poller.mjs imports shadow-sink.mjs inside
+  // the lane branch, and grade-entry-gates.mjs is the command the owner runs by hand.
+  "shadow-sink.mjs", "grade-entry-gates.mjs",
   // desk-led-v4: the desk's ruler and the mirror evaluator ship with the trading process.
   "dexscreener-consensus.mjs", "desk-mirror.mjs",
   "package.json", "package-lock.json", "install.sh", "macos-launchagent.sh", "macos-release.sh", "launchd-runner.mjs"];
