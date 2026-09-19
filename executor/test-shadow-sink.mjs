@@ -31,6 +31,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import {
   createShadowSink, readShadowRows, shadowBookPath, DEFAULT_MAX_BYTES,
 } from "./shadow-sink.mjs";
@@ -240,6 +242,48 @@ console.log("\nthe command itself");
   ok("--json emits a machine-readable scorecard", code2 === 0 && parsed.scorecard.judged === 4,
     `judged ${parsed.scorecard?.judged}`);
   ok("...carrying the read's honesty fields", parsed.read.total === 4 && parsed.read.malformed === 0);
+}
+
+console.log("\nRUN THROUGH A SYMLINK — the way the owner is told to run it");
+{
+  /* THE BUG THIS PINS. Node resolves a module's own URL through symlinks, so
+     `import.meta.url` is the realpath while `process.argv[1]` is whatever was typed. The
+     documented command is `node ~/claudeco-executor/current/grade-entry-gates.mjs` and
+     `current` is a symlink into the release tree — so comparing the two raw strings never
+     matched, main() never ran, and the command printed NOTHING. Not an error, not an
+     empty report: silence, which reads exactly like a tool with nothing to say.
+     Measured on the owner's Mac at 04:37Z on 2026-09-19, the first time he ran it. A
+     source grep cannot catch this; only actually spawning it through a link can. */
+  const linkDir = path.join(tmp, "current");
+  fs.symlinkSync(path.dirname(new URL(import.meta.url).pathname), linkDir);
+  const fixture = book("symlinked");
+  const s = createShadowSink({ file: fixture });
+  for (let i = 0; i < 6; i++) s(row({ mint: `S${i}`, followed: i % 2 === 0 }));
+
+  const viaLink = spawnSync(process.execPath,
+    [path.join(linkDir, "grade-entry-gates.mjs"), "--file", fixture], { encoding: "utf8" });
+  ok("running it through a symlink produces output at all",
+    viaLink.stdout.trim().length > 0, JSON.stringify(viaLink.stdout.slice(0, 80)));
+  ok("...and it is the real report, not a stub",
+    /grading the two entry rulers/.test(viaLink.stdout) && /judged      6/.test(viaLink.stdout),
+    viaLink.stdout.split("\n").find((l) => /judged/.test(l)));
+
+  const viaReal = spawnSync(process.execPath,
+    [fileURLToPath(new URL("./grade-entry-gates.mjs", import.meta.url)), "--file", fixture],
+    { encoding: "utf8" });
+  ok("the real path still works, unchanged", /grading the two entry rulers/.test(viaReal.stdout));
+
+  /* And the other half of the guard: imported rather than executed, it must NOT run. */
+  const asImport = spawnSync(process.execPath,
+    ["--input-type=module", "-e",
+      `import { runningAsScript } from ${JSON.stringify(fileURLToPath(new URL("./grade-entry-gates.mjs", import.meta.url)))};` +
+      `process.stdout.write(String(runningAsScript()))`],
+    { encoding: "utf8" });
+  ok("imported, it does not run itself", asImport.stdout.trim() === "false", asImport.stdout.trim() || asImport.stderr.slice(0, 120));
+
+  const monitor = fs.readFileSync(new URL("./monitor.mjs", import.meta.url), "utf8");
+  ok("monitor.mjs's CLI guard resolves the symlink too — a watchdog that silently does not run reads as a clean bill",
+    /fs\.realpathSync\(process\.argv\[1\]\) === mine/.test(monitor));
 }
 
 console.log("\nit is wired, or it is a book nobody writes");

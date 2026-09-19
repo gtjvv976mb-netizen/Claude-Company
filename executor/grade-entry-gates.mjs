@@ -46,7 +46,8 @@
  */
 
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { readShadowRows, shadowBookPath } from "./shadow-sink.mjs";
 import {
   snipeScorecard, outcomeKnown, SNIPE_PROXIES,
@@ -173,9 +174,30 @@ export async function main(argv = process.argv.slice(2), env = process.env, out 
   return 0;
 }
 
-/* Only when run directly. Imported by the test, which drives main() with its own argv and
-   a fixture book rather than the owner's. */
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+/**
+ * Only when run directly — and THE GUARD HAS TO SURVIVE A SYMLINK.
+ *
+ * Node resolves a module's own URL through symlinks, so `import.meta.url` is the REALPATH
+ * while `process.argv[1]` is whatever the operator typed. The documented way to run this is
+ *
+ *     node ~/claudeco-executor/current/grade-entry-gates.mjs
+ *
+ * and `current` is a symlink into the release tree. Comparing those two strings raw
+ * therefore never matched on a real install: main() did not run, nothing printed, and the
+ * command looked exactly like a tool that had found nothing worth saying. Measured on the
+ * owner's Mac at 04:37Z on 2026-09-19, the first time he ran it.
+ *
+ * This is the same `current`-symlink trap that made `macos-launchagent.sh load` refuse a
+ * live install the day before. Resolve both sides to a real path and compare those.
+ */
+export const runningAsScript = (argv = process.argv[1], moduleUrl = import.meta.url) => {
+  if (!argv) return false;
+  const mine = fileURLToPath(moduleUrl);
+  try { return realpathSync(argv) === mine; }
+  catch { return path.resolve(argv) === mine; }   // argv may not exist on disk in a test
+};
+
+if (runningAsScript()) {
   main().then((code) => { process.exitCode = code; });
 }
 
