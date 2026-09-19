@@ -209,6 +209,12 @@ const EXECUTOR_FILES = [
      dies resolving it. */
   "grpc-wire.mjs",
   "snipe-grpc.mjs",
+  /* The shadow book on disk (2026-09-19), and the command that grades it. The sink is
+     written by the trading process on every launch it evaluates; without it the two
+     entry rulers measure and are discarded, which is exactly how 64 traded launches
+     ended up with known outcomes and no retained measurements. */
+  "shadow-sink.mjs",
+  "grade-entry-gates.mjs",
   /* Desk-led exits (2026-09-05). The bot no longer carries an exit policy of its own —
      Shrek, call 55: it sold 03:01:42Z on its own normalised stop at -13.5% while the
      desk's determined stop_hit landed 03:10:24Z. When the desk is unreachable the bot
