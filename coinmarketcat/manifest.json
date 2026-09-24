@@ -35,6 +35,8 @@
   "content_scripts": [
     {
       "matches": [
+        "https://catintelligenceagency.com/console/*",
+        "https://www.catintelligenceagency.com/console/*",
         "https://gtjvv976mb-netizen.github.io/coinmarketcat/console/*",
         "https://claudedotcompany.com/hawk*",
         "https://www.claudedotcompany.com/hawk*",
@@ -54,6 +56,8 @@
         "injected.js"
       ],
       "matches": [
+        "https://catintelligenceagency.com/*",
+        "https://www.catintelligenceagency.com/*",
         "https://gtjvv976mb-netizen.github.io/*",
         "https://claudedotcompany.com/*",
         "https://www.claudedotcompany.com/*",

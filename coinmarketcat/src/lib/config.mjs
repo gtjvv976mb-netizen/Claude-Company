@@ -119,7 +119,7 @@ export const CONFIG_DEFAULTS = Object.freeze({
   rpcUrl: "",                 // https://… — Helius, Triton, QuickNode; the public RPC 403s browsers
   rpcWsUrl: "",               // wss://… — derived from rpcUrl when blank
   secondaryRpcUrl: "",        // optional second reader; when set, both must agree on the curve
-  consoleUrl: "https://gtjvv976mb-netizen.github.io/coinmarketcat/console/",   // the page Phantom lives on; a manifest match, not free text
+  consoleUrl: "https://catintelligenceagency.com/console/",   // the page Phantom lives on; a manifest match, not free text
   /* ── the lane ───────────────────────────────────────────────────────────────────── */
   lane: "off",                // off | observe | execute
   maxSolPerTrade: SNIPE_LANE_DEFAULTS.maxSolPerTrade,
@@ -399,7 +399,9 @@ export function normalizeQuoteMints(value) {
 
 /** The console pages the manifest's content script matches; the bridge exists nowhere else. */
 export const CONSOLE_URLS = Object.freeze([
-  "https://gtjvv976mb-netizen.github.io/coinmarketcat/console/",
+  "https://catintelligenceagency.com/console/",       // the agency's own domain (GitHub Pages, custom domain)
+  "https://www.catintelligenceagency.com/console/",
+  "https://gtjvv976mb-netizen.github.io/coinmarketcat/console/",  // the Pages address, until the domain's DNS points at it
   "https://claudedotcompany.com/hawk",
   "https://www.claudedotcompany.com/hawk",
   "http://localhost:4949/console/",  // the site served locally: python3 -m http.server 4949 --directory site

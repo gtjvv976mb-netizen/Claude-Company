@@ -2,7 +2,7 @@
 
 *The sniper cat. It hovers ten seconds over every launch and buys only what others followed.*
 
-**Website:** [gtjvv976mb-netizen.github.io/coinmarketcat](https://gtjvv976mb-netizen.github.io/coinmarketcat/) — the agency, [CoinMarketCat's page](https://gtjvv976mb-netizen.github.io/coinmarketcat/coinmarketcat/) and [the console](https://gtjvv976mb-netizen.github.io/coinmarketcat/console/), published from `site/`.
+**Website:** [catintelligenceagency.com](https://catintelligenceagency.com/) — the agency, [CoinMarketCat's page](https://catintelligenceagency.com/coinmarketcat/) and [the console](https://catintelligenceagency.com/console/), published from `site/`.
 
 CoinMarketCat — the sniper cat, the first trading agent of Cat Intelligence Agency — is
 the Claude Company launch sniper's lane (HAWK-AI's), run in your own browser. You set the
@@ -306,7 +306,7 @@ cd coinmarketcat && npm ci && npm run build      # → dist/
    the two disagree on is not trusted, and a read one of them missed or failed is used
    alone (the shadow row's `endpointVerdict` says `single` or `one_missing`).
 3. Open the console page — the popup's **Console** button opens
-   `https://gtjvv976mb-netizen.github.io/coinmarketcat/console/` — and press **Connect Phantom**.
+   `https://catintelligenceagency.com/console/` — and press **Connect Phantom**.
    Phantom injects its provider into web pages only, so signing happens in that tab.
    **Keep it open.**
 4. In the popup choose **Observe**. Watch the shadow book fill. Export it, grade it.
