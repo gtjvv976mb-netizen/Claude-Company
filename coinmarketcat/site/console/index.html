@@ -61,7 +61,6 @@ nav a.agency{margin-left:auto;font-size:11px;letter-spacing:.12em;text-transform
 nav a.agency:hover{color:var(--sol-green)}
 nav a.agency + a.back{margin-left:0}
 @media (max-width:560px){nav .wrap{gap:10px} .brand{font-size:20px} nav a.agency{display:none} nav a.agency + a.back{margin-left:auto} nav a.back{padding:6px 9px;letter-spacing:.08em}}
-.pill.observe{color:var(--ink)}
 nav a.back{margin-left:auto;font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:600;
   color:rgba(239,234,255,.8);text-decoration:none;border:1px solid rgba(239,234,255,.3);padding:6px 12px;border-radius:5px}
 nav a.back:hover{background:var(--amber);color:#2a2018;border-color:var(--amber)}
@@ -73,7 +72,7 @@ h2{font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:26px;m
 .console{background:var(--card);border:1px solid var(--card-line);border-radius:12px;padding:18px 20px;margin:10px 0 26px}
 .console .head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .pill{font-family:"JetBrains Mono",monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;padding:4px 9px;border-radius:4px;border:1px solid var(--card-line);color:var(--ink-soft)}
-.pill.live{border-color:var(--bad);color:var(--bad)} .pill.observe{border-color:var(--teal);color:var(--cream)} .pill.absent{border-color:var(--warn);color:var(--warn)}
+.pill.live{border-color:var(--bad);color:var(--bad)} .pill.observe{border-color:var(--teal);color:var(--ink)} .pill.absent{border-color:var(--warn);color:var(--warn)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-top:14px}
 .stat{background:var(--panel);border:1px solid var(--panel-line);border-radius:8px;padding:10px 12px}
 .stat .k{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);font-weight:600}
@@ -107,10 +106,12 @@ code{font-family:"JetBrains Mono",monospace;font-size:12.5px;background:var(--pa
 pre{background:var(--panel);border:1px solid var(--panel-line);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12.5px}
 .fine{margin-top:34px;font-size:13px;color:var(--ink-faint);line-height:1.6}
 .fine b{color:var(--ink-soft)}
-a{color:var(--sol-violet)} :root[data-theme="light"] a{color:var(--teal)} a:hover{color:var(--sol-green)}
-nav a.brand,nav a.brand:hover{color:inherit}
+main a{color:#b58cff} :root[data-theme="light"] main a{color:var(--teal)} main a:hover{color:var(--sol-green)}
 .wrap{overflow-wrap:break-word}
-.shift{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.08em;padding:5px 10px;border-radius:3px;
+.stat .v{word-break:normal;overflow-wrap:anywhere} .stat .v.mono{word-break:break-all}
+ol li{min-width:0} ol li pre{max-width:100%} p code,li code{overflow-wrap:anywhere}
+@media (max-width:520px){.wrap{padding:0 16px} h1{font-size:36px} .grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px} .grid .stat:first-child,.grid .stat:last-child{grid-column:1 / -1} .console{padding:16px 14px} table{font-size:12.5px} th,td{padding:6px 5px}}
+.shift{font-family:system-ui,"Segoe UI Symbol","Apple Symbols",sans-serif;font-size:15px;line-height:1;letter-spacing:0;padding:5px 10px;border-radius:3px;
   border:1px solid var(--panel-line);background:var(--card);color:var(--ink-soft);cursor:pointer;white-space:nowrap}
 .shift:hover{color:var(--ink);border-color:var(--ink-faint)}
 p{color:var(--ink-soft)}
@@ -118,7 +119,7 @@ p{color:var(--ink-soft)}
 </head>
 <body>
 <nav><div class="wrap">
-  <a class="brand" href="../coinmarketcat/" aria-label="CoinMarketCat, the sniper cat"><img src="../icons/coinmarketcat.svg" width="30" height="30" alt="">CoinMarket<em>Cat</em></a>
+  <a class="brand" href="../coinmarketcat/" aria-label="CoinMarketCat, the sniper cat"><img src="../icons/coinmarketcat.svg" width="30" height="30" alt=""><span>CoinMarket<em>Cat</em></span></a>
   <a class="agency" href="../">Cat Intelligence Agency</a>
   <a class="back" href="https://github.com/gtjvv976mb-netizen/coinmarketcat" rel="noopener">GitHub</a>
   <button class="shift" id="shiftbtn" type="button" aria-label="Switch between day and night shift" title="Switch the floor's lighting">&#9790;</button>
@@ -126,7 +127,7 @@ p{color:var(--ink-soft)}
 <main><div class="wrap">
   <div class="eyebrow">Agent 001 · CoinMarketCat · the console</div>
   <h1>The sniper cat's console</h1>
-  <p class="lead">CoinMarketCat crouches ten seconds over every new launch and pounces only if it is still at or above its entry price. This page is where it meets your wallet: the extension runs the cat, Phantom lives here, and every approval the cat asks of Phantom comes from this tab. <b>Keep this tab open while the cat is armed.</b></p>
+  <p class="lead">CoinMarketCat crouches ten seconds over every new launch and pounces only if it is still at or above its entry price. This page is where it meets your wallet: the extension runs the cat, Phantom lives here, and every approval the cat asks of Phantom comes from this tab. <b>Keep this tab open while the cat is armed.</b> (On Autopilot, the cat's own wallet signs its trades, and this tab is needed only to fund that wallet from Phantom.)</p>
 
   <section class="console" id="console" aria-live="polite">
     <div class="head">
@@ -154,8 +155,8 @@ p{color:var(--ink-soft)}
 
   <h2>What the cat does, and what it does not</h2>
   <p>It listens to pump.fun's own program logs, runs every launch through <b>the same entry contract WALL-ST-E runs</b> — the executor's <code>snipe-entry.mjs</code>, vendored from a named commit of Claude-Company and hashed — and keeps a would-have position for every launch that clears, sampled forward into a shadow book in the executor's own row schema. That book grades the two entry rulers the rug literature names, and you can export it and grade it with the command the repository ships.</p>
-  <p>When you arm it, a cleared launch becomes a buy only after it is <b>ten seconds old and still marks at or above its own would-have fill</b> — then the lane re-reads the curve, rebuilds and simulates the exact <code>buy_v2</code> it will sign, and asks Phantom. The position leaves in full at the take, the stop, the creator's exit or the clock, and each of those is one more Phantom window. <b>A stop that needs a click is a weaker stop than a key's.</b> A sell you decline is asked again eight seconds later, and a window you leave unanswered is abandoned after thirty-two seconds and asked again, for as long as the determiner still says sell; it cannot answer for you.</p>
-  <p>It never sees a key. It does not use Phantom's sign-and-send; it sends the bytes you signed through the RPC you chose, with preflight skipped, exactly as the executor does, and it refuses to send anything whose message is not the one it asked you to sign.</p>
+  <p>When you arm it, a cleared launch becomes a buy only after it is <b>ten seconds old and still marks at or above its own would-have fill</b> — then the lane re-reads the curve, rebuilds and simulates the exact <code>buy_v2</code> it will sign, and asks Phantom. The position leaves in full at the take, the stop, the creator's exit or the clock, and in Phantom mode each of those is one more Phantom window. <b>A stop that needs a click is a weaker stop than a key's.</b> A sell you decline is asked again eight seconds later, and a window you leave unanswered is abandoned after thirty-two seconds and asked again, for as long as the determiner still says sell; it cannot answer for you.</p>
+  <p>In Phantom mode — the default — it never sees a key. On Autopilot it holds exactly one: the key of the separate wallet it created, encrypted under your passphrase, in your browser only (<a href="../coinmarketcat/#signing">the trade-off, plainly</a>). Either way it does not use Phantom's sign-and-send; it sends the bytes you signed through the RPC you chose, with preflight skipped, exactly as the executor does, and it refuses to send anything whose message is not the one it asked you to sign.</p>
 
   <h2>What the desk's losing record taught it</h2>
   <p>The executor's live record, read back off mainnet in full on 2026-09-17: <b>10 up, 48 down, −1.58 SOL</b> over 58 round trips; six more under the socials filter and the stall exit went 1 up, 5 down. Eighteen positions ran to the old ten-minute clock and none won. Every SOL of the net loss sat in tickets of 0.35 SOL and up.</p>
@@ -175,13 +176,13 @@ p{color:var(--ink-soft)}
       <pre>git clone https://github.com/gtjvv976mb-netizen/coinmarketcat
 cd coinmarketcat &amp;&amp; npm ci &amp;&amp; npm run build</pre></li>
     <li>Open <code>chrome://extensions</code>, turn on <b>Developer mode</b>, press <b>Load unpacked</b>, choose <code>coinmarketcat/dist</code>.</li>
-    <li>Open the extension's <b>Options</b> and paste an RPC URL — Helius, Triton or QuickNode. The public RPC refuses browsers.</li>
+    <li>The setup page opens on install: paste an RPC URL — Helius, Triton or QuickNode; the public RPC refuses browsers — set your limits and choose who signs. Saving puts the cat in <b>Observe</b>.</li>
     <li>Come back to <b>this page</b>, press <b>Connect Phantom</b>, approve the connection.</li>
-    <li>In the popup, choose <b>Observe</b>. Watch the shadow book fill. Export it and grade it with <code>node vendor/executor/grade-entry-gates.mjs --file &lt;export&gt;</code>.</li>
+    <li>Leave it on <b>Observe</b>. Watch the shadow book fill. Export it and grade it with <code>node vendor/executor/grade-entry-gates.mjs --file &lt;export&gt;</code>.</li>
     <li>Only then: <b>Execute</b>, at the 0.005 SOL canary, with the sentence the lane prints for your wallet typed into the box.</li>
   </ol>
 
-  <p class="fine"><b>What this is.</b> CoinMarketCat is Agent 001 of <a href="../">Cat Intelligence Agency</a>. A user-operated tool that runs in your own browser against your own wallet, one approval at a time. No server receives a key, signs, or can reach this lane; this page ships no signing code — the extension you built carries it. Not advice, not a signal service, and nothing here has an edge until you have graded its book over a real sample. <b>Every position it opens can be sold only by a click you make</b>; if you close this tab, the lane cannot ask.
+  <p class="fine"><b>What this is.</b> CoinMarketCat is Agent 001 of <a href="../">Cat Intelligence Agency</a>. A user-operated tool that runs in your own browser against your own wallet. No server receives a key, signs, or can reach this lane; this page ships no signing code — the extension you built carries it. Not advice, not a signal service, and nothing here has an edge until you have graded its book over a real sample. <b>In Phantom mode every position it opens can be sold only by a click you make</b>; if you close this tab, the lane cannot ask. On Autopilot a locked wallet signs nothing, sells included.
     <br><br><b>Cat Intelligence Agency is a software project, not a government agency.</b> <b>CoinMarketCat is not affiliated with CoinMarketCap</b>, nor with Phantom, pump.fun, Jupiter or Backed (xStocks). An independent project. Not affiliated with, endorsed by, or connected to Anthropic.</p>
 </div></main>
 <script>

@@ -113,15 +113,15 @@
       <div class="card">
         <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg></div>
         <h3>Launches paired with stocks</h3>
-        <p>pump.fun launches priced in a tokenised stock instead of SOL — xStocks such as <b>GLDx</b>, <b>TSLAx</b> and <b>SPYx</b>. It trades only the stocks you list, each sized in that stock's own units, and its first live buy in each is a small canary.</p>
+        <p>pump.fun launches priced in a tokenised stock instead of SOL — xStocks such as <b>GLDx</b>, <b>TSLAx</b> and <b>SPYx</b>. It pays from the stock already in your wallet, only in the stocks you list, sized in that stock's own units; its first live buy in each is a small canary. With none listed, it refuses them all.</p>
       </div>
       <div class="card">
         <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h11l-3-3M17 17H6l3 3"/></svg></div>
         <h3>Stock-paired pools, through Jupiter</h3>
-        <p>New pools across Solana that pair a token with a tokenised stock, traded through Jupiter's routing. Same crouch, same pounce rule, same limits.</p>
+        <p>Off until you switch it on. It reads public new-pool feeds for pools on any Solana exchange that pair a new token with a stock you watch, and trades them through Jupiter, paid in that stock. Same crouch, same pounce rule, same limits — and every transaction Jupiter builds is decoded and checked before anything signs it.</p>
       </div>
     </div>
-    <p class="source">Every launch it sees becomes a row in its <b>shadow book</b> — what it would have done, traded or not — which you can export and grade with the grader the repository ships. Nothing has been measured yet about stock-paired launches or pools: no win rate, no fill quality.</p>
+    <p class="source">Every launch it sees becomes a row in its <b>shadow book</b> — what it would have done, traded or not — which you can export and grade with the grader the repository ships. Nothing has been measured yet about stock-paired launches or pools: no win rate, no follow-through. The pool feeds see a pool a minute or more after it is created, so for pools the ten seconds run from first sight.</p>
   </section>
 </div>
 
@@ -204,7 +204,7 @@
   <section id="limits" aria-labelledby="limits-title">
     <div class="sec-head"><span class="label">Your limits</span></div>
     <h2 id="limits-title">You set the numbers. <em>It never crosses them.</em></h2>
-    <p class="sub">They are checked before every buy, not after. The defaults below are the extension's own starting values — deliberately tiny — not recommendations.</p>
+    <p class="sub">They are checked before every buy, not after. A setup page opens when you install it and walks you through them. The defaults below are the extension's own starting values — deliberately tiny — not recommendations.</p>
     <div class="grid four">
       <div class="card">
         <span class="label">Take-profit</span>
@@ -224,13 +224,14 @@
       <div class="card">
         <span class="label">Stock focus</span>
         <div class="dial"><span class="v">none</span><span class="u">SOL only</span></div>
-        <p>List up to eight tokenised stocks — GLDx, TSLAx and SPYx are offered as shortcuts — each with its own per-trade size, daily cap and first-buy canary.</p>
+        <p>List up to eight tokenised stocks, each with its own per-trade size, daily cap and first-buy canary in that stock's units. The setup page offers GLDx, TSLAx, SPYx, AAPLx and NVDAx.</p>
       </div>
     </div>
     <div class="notice arm">
       <p><b>Going live is a sentence you type.</b> To arm it, you type a sentence the extension prints for your wallet and your numbers, and it is compared byte for byte. It reads like this:</p>
       <pre><code>I arm HAWK-AI v1 for &lt;your wallet&gt;: 0.005 SOL per launch, 0.01 SOL per day, sold in full at the take, the stop, the creator's exit or the clock</code></pre>
-      <p>Change a number, or list a stock, and the sentence changes with it: a sentence typed for one set of limits cannot arm another. In Autopilot mode there is one more, harder limit — the separate wallet only holds what you sent it.</p>
+      <p>Change a number, list a stock or switch on the pool venue, and the sentence changes with it: a sentence typed for one set of limits cannot arm another. On Autopilot it names the autopilot wallet and says it signs without asking you. And on Autopilot there is one more, harder limit: the wallet only holds what you sent it.</p>
+      <p class="source">The setup page offers three starting styles. <b>Balanced</b> is the defaults above. <b>Cautious</b> is tighter on three dials — a choice, not a measured improvement. <b>Bold</b> is larger and looser, and the page labels it looser than the record supports. Every style keeps the ten-second crouch and the pounce rule.</p>
     </div>
   </section>
 </div>
@@ -241,7 +242,7 @@
   <section id="signing" aria-labelledby="signing-title">
     <div class="sec-head"><span class="label">Two ways to sign</span></div>
     <h2 id="signing-title">Approve every trade, <em>or send it on Autopilot.</em></h2>
-    <p class="sub">Either way the cat trades from a wallet you control, and your Phantom key never leaves Phantom.</p>
+    <p class="sub">Either way the cat trades from a wallet you control, and your Phantom key never leaves Phantom. Approving in Phantom is the default.</p>
     <div class="duo">
       <div class="card">
         <span class="label">Mode one</span>
@@ -257,12 +258,12 @@
       <div class="card auto">
         <span class="label">Mode two</span>
         <h3>Autopilot</h3>
-        <p>A separate wallet inside the extension signs the cat's trades without a window each time.</p>
+        <p>A separate wallet inside the extension signs the cat's trades without a window each time. The console tab is needed only to fund it.</p>
         <ul>
-          <li><b>Fund</b> it from Phantom with your daily budget, in one approved transfer.</li>
+          <li><b>Fund</b> it from Phantom with your daily budget — or an amount you choose — in one approved transfer.</li>
           <li><b>Encrypted</b> under your passphrase (at least 12 characters, never stored) with AES-GCM and a PBKDF2 key, in your browser only.</li>
-          <li><b>Unlocked</b> per session — eight hours by default, gone when the browser closes.</li>
-          <li><b>Swept</b> back to Phantom when you are done, then locked.</li>
+          <li><b>Unlocked</b> per session — eight hours by default, gone when the browser closes. A locked wallet signs nothing, sells included.</li>
+          <li><b>Swept</b> back to Phantom when you are done — every token and the SOL — then locked.</li>
         </ul>
       </div>
     </div>
@@ -273,7 +274,7 @@
       </div>
       <div>
         <span class="label">What it costs</span>
-        <p>A private key in a browser is a bigger target than Phantom. While it is unlocked, malware on your machine or another extension with the wrong permissions could read it, and a keylogger could take the passphrase. There is no passphrase reset. Fund it only with what you can lose, sweep it, and lock it.</p>
+        <p>A private key in a browser is a bigger target than Phantom. While it is unlocked, malware on your machine or another extension with the wrong permissions could read it, and a keylogger could take the passphrase. There is no passphrase reset. And it is new: no Autopilot trade, fund or sweep has yet been made on mainnet. Fund it only with what you can lose, sweep it, and lock it.</p>
       </div>
     </div>
     <p class="source">The full threat model is in <a href="https://github.com/gtjvv976mb-netizen/coinmarketcat/blob/main/docs/session-wallet.md" rel="noopener">docs/session-wallet.md</a>. Only one file in the repository may touch that key; a test scans every other source file, and the built bundle when there is one, on every run.</p>
@@ -295,9 +296,9 @@ cd coinmarketcat</code></pre></div></li>
         <pre><code>npm ci
 npm run build</code></pre></div></li>
       <li><div><b>Load it unpacked.</b> Open <code>chrome://extensions</code>, turn on <b>Developer mode</b>, press <b>Load unpacked</b> and choose the <code>dist</code> folder.</div></li>
-      <li><div><b>Give it an RPC.</b> In the extension's <b>Options</b>, paste an RPC URL from a provider such as Helius, Triton or QuickNode. The public Solana RPC refuses browsers.</div></li>
+      <li><div><b>Walk through the setup page.</b> It opens on install: paste an RPC URL from a provider such as Helius, Triton or QuickNode (the public Solana RPC refuses browsers), set your limits, pick any stocks, and choose who signs. Saving puts the cat in <b>Observe</b>. Everything stays editable in Options.</div></li>
       <li><div><b>Open the console and connect Phantom.</b> The popup's <b>Console</b> button opens <a href="../console/">the console page</a>. Press <b>Connect Phantom</b> and approve. Keep that tab open.</div></li>
-      <li><div><b>Choose Observe.</b> Let it fill its shadow book, export it, grade it. Arm it only after that — at the canary size.</div></li>
+      <li><div><b>Watch before you arm.</b> Let it fill its shadow book, export it, grade it. Arm it only after that — at the canary size — by typing the sentence it prints.</div></li>
     </ol>
   </section>
 </div>
@@ -310,8 +311,8 @@ npm run build</code></pre></div></li>
       <ul>
         <li><b>Launch sniping loses money more often than not.</b> A launch reachable within seconds has often already been bought in bulk by its insiders, and a fast bot arriving right behind them is the buyer they sell to.</li>
         <li><b>The lane this cat learned from has been unprofitable.</b> The desk's HAWK-AI lane went 10 up and 48 down over its first 58 round trips, for −1.58 SOL, and every modelled variant of it still lost.</li>
-        <li><b>This cat's own live record is unmeasured.</b> Nobody has a live track record for it, for stock-paired launches, or for stock-paired pools. There is no return to quote, and none is quoted.</li>
-        <li><b>Fees are large at small sizes.</b> Under the fee model the desk uses, a round trip at the 0.005 SOL canary has to rise about 22% just to break even.</li>
+        <li><b>This cat's own live record is unmeasured.</b> Nobody has a live track record for it, for stock-paired launches, for stock-paired pools, or for Autopilot. There is no return to quote, and none is quoted.</li>
+        <li><b>Costs are large at small sizes.</b> Under the fee model the desk uses, a round trip at the 0.005 SOL canary has to rise about 22% just to break even. On the one stock-paired pool read while the Jupiter venue was built, a round trip through Jupiter cost about 10% before network fees — one reading, not a measurement.</li>
         <li><b>Tokenised stocks carry their issuer's controls.</b> The xStock mints it has read can be frozen or paused by their issuer, and they are subject to the issuer's terms and your jurisdiction's rules.</li>
         <li><b>Software fails.</b> An RPC can lag, a window can be missed, a launch can graduate to a pool this lane cannot sell on — then you sell by hand.</li>
       </ul>
@@ -325,21 +326,21 @@ npm run build</code></pre></div></li>
     <div class="sec-head"><span class="label">Questions</span></div>
     <h2 id="faq-title">Frequently <em>asked.</em></h2>
     <div class="faq">
-      <details>
+      <details open>
         <summary>How much does it make?</summary>
         <div><p>Unmeasured. This extension has no live track record, and the desk lane it learned from lost money. We do not quote returns or win rates. The shadow book is how you find out for yourself, over your own sample, before you arm it.</p></div>
       </details>
       <details>
         <summary>Does it ever see my Phantom key?</summary>
-        <div><p>No. In Phantom mode, Phantom signs and the extension receives only the signed transaction, which it checks is the exact one it asked for. In Autopilot mode the extension holds the key of a <b>separate</b> wallet it created, encrypted under your passphrase, in your browser only. Neither key is sent anywhere.</p></div>
+        <div><p>No. In Phantom mode — the default — Phantom signs and the extension receives only the signed transaction, which it checks is the exact one it asked for. In Autopilot mode the extension holds the key of a <b>separate</b> wallet it created, encrypted under your passphrase, in your browser only. Neither key is sent anywhere; the only way the autopilot key leaves the extension is the recovery export you ask for with your passphrase.</p></div>
       </details>
       <details>
         <summary>Is there an account, a server, or a fee?</summary>
-        <div><p>No. There is no sign-up and no agency server; this site is static pages. The extension runs in your browser and talks to the RPC you chose. The console page only draws the status the extension hands it — it has no signing code. The only costs are the network's and the venue's own trading fees, and whatever your RPC provider charges.</p></div>
+        <div><p>No. There is no sign-up and no agency server; this site is static pages. The extension runs in your browser and talks to the RPC you chose — and, if you switch on the pool venue, to the public pool feeds and Jupiter's API. The console page only draws the status the extension hands it — it has no signing code. The only costs are the network's and the venues' own fees, and whatever your RPC provider charges.</p></div>
       </details>
       <details>
         <summary>What does observe mode do?</summary>
-        <div><p>Everything except spend. It watches every launch, runs the same checks, crouches, and writes down what it would have bought and how it would have left, in a shadow book you can export as JSONL and grade with <code>node vendor/executor/grade-entry-gates.mjs --file &lt;export&gt;</code>. It is where every cat starts: a fresh install trades nothing, and only the typed arm sentence moves it to execute.</p></div>
+        <div><p>Everything except spend. It watches every launch, runs the same checks, crouches, and writes down what it would have bought and how it would have left, in a shadow book you can export as JSONL and grade with <code>node vendor/executor/grade-entry-gates.mjs --file &lt;export&gt;</code>. Saving the setup page puts the cat here; a fresh install trades nothing, and only the typed arm sentence moves it to execute.</p></div>
       </details>
       <details>
         <summary>Why wait ten seconds? Isn't the point of sniping to be first?</summary>
@@ -347,7 +348,7 @@ npm run build</code></pre></div></li>
       </details>
       <details>
         <summary>How do I stop it?</summary>
-        <div><p>From the popup: pause new entries, switch the lane back to Observe or Off, or press <b>HARD STOP</b> — sell everything, buy nothing. On Autopilot, lock the wallet and sweep it back to Phantom. Whatever it holds sits in a wallet you control.</p></div>
+        <div><p>From the popup: pause new entries, switch the lane back to Observe or Off, or press <b>HARD STOP</b> — sell everything, buy nothing. On Autopilot, once nothing is held, sweep the wallet back to Phantom and lock it; a locked wallet signs nothing, sells included, so lock it after the sells, not before. Whatever it holds sits in a wallet you control.</p></div>
       </details>
       <details>
         <summary>What are GLDx, TSLAx and SPYx?</summary>

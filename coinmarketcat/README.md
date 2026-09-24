@@ -2,6 +2,8 @@
 
 *The sniper cat. It hovers ten seconds over every launch and buys only what others followed.*
 
+**Website:** [gtjvv976mb-netizen.github.io/coinmarketcat](https://gtjvv976mb-netizen.github.io/coinmarketcat/) — the agency, [CoinMarketCat's page](https://gtjvv976mb-netizen.github.io/coinmarketcat/coinmarketcat/) and [the console](https://gtjvv976mb-netizen.github.io/coinmarketcat/console/), published from `site/`.
+
 CoinMarketCat — the sniper cat, the first trading agent of Cat Intelligence Agency — is
 the Claude Company launch sniper's lane (HAWK-AI's), run in your own browser. You set the
 limits: the take-profit, the SOL per trade, the daily budget it will not exceed, the stop,
@@ -372,7 +374,7 @@ src/popup/ src/options/  the UI
 src/welcome/             the first-run setup page, opened once on install
 vendor/executor/         the executor's decision modules, verbatim, from PROVENANCE.json's commit
 scripts/sync-executor.mjs  --from <checkout> re-vendors; --check reports drift from upstream main
-site/                    the website: the landing page, and under console/ the page Phantom lives on
+site/                    the website: the agency (index.html), the cat's page (coinmarketcat/), and under console/ the page Phantom lives on
 ```
 
 What a buy is, end to end: the feed's `logsSubscribe` notice → `noticesFromLogs` (the
@@ -418,6 +420,7 @@ on every push to `main`.
 | `test-hawk-xstock-venue.mjs` | the second venue against a chain double that runs Jupiter's `route_v2` on a constant-product pool, a scripted Jupiter and scripted feeds, no network: the venue off by default and silent; the captured GeckoTerminal and DexScreener pages parsed and classified; the poller's backoff on the captured 429, dedupe and horizon; the Jupiter client's rate budget; the quote and transaction checks on the **live** GLDx → GAYMF bytes and every hostile edit of them; observe with each gate refusing by name; armed on Phantom: wait, follow-through, buy, 1.5× take, sell, booked in GLDx; ten hostile Jupiter transactions and two hostile pools refused before signing; the canary, full ticket, day caps and a short wallet; an unreadable buy blocking the stock; autopilot signing with nothing secret on the wire; the pump.fun lane unchanged |
 | `test-hawk-bundle.mjs` | the shims agree with what they replace; the build succeeds; every entry parses with no `node:` specifier; the bundled contract refuses a stale notice at the same gate the vendored contract does |
 | `test-vendor-integrity.mjs` | every vendored module hashes to the manifest, from a named upstream commit |
+| `test-site.mjs` | the website: every dial and record figure it quotes read from the code that decides it; the console still the bridge (protocol.mjs's channel and types, its own origin, every element it draws); no page that signs, collects, stores beyond the theme or calls out; the risk notice, the disclaimers, no hype, no invented counts; titles, descriptions, og tags and every local link |
 | `vendor/executor/test-snipe-stall-default.mjs` | the executor's stall-default fix, as vendored |
 | `vendor/executor/test-snipe-quote-mint.mjs` | the executor's stock-quote contract, as vendored: the allowlist, `quoteTicketFor`, `describeMint` on the live xStock bytes, the book row at eight decimals, one scorecard per quote |
 
