@@ -1,0 +1,43 @@
+# The suite, the build, and a drift check against the executor upstream, on every push
+# and pull request. The built extension is attached to the run as an artifact so a
+# reviewer can load exactly what CI built; nothing is published anywhere.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Regression suite
+        run: npm test
+      - name: Build the extension
+        run: npm run build
+      - name: Vendored executor against upstream main
+        # Informational for now, and continue-on-error says so in the only way CI reads:
+        # the vendored commit is Claude-Company PR #44's head, which carries the stall-default
+        # fix and its test, neither yet on upstream main, so this step reports drift today.
+        # Once #44 merges: drop continue-on-error and add --strict on push, so a drift
+        # upstream goes red here and is synced, not ignored.
+        continue-on-error: true
+        run: node scripts/sync-executor.mjs --check
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: extension-dist
+          path: dist
+          if-no-files-found: error

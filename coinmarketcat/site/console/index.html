@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>CoinMarketCat — the sniper cat for Phantom</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="COINMARKETCAT: the Claude Company launch sniper in your browser. It hovers ten seconds over every pump.fun launch, buys only what others followed, and signs every trade with your own Phantom. This page is where the extension meets the wallet.">
+<link rel="icon" href="../icons/coinmarketcat-32.png" type="image/png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<script>
+(function () {
+  let t = null;
+  try { t = localStorage.getItem("cc_theme"); } catch {}
+  document.documentElement.dataset.theme = t === "light" ? "light" : "dark";
+})();
+</script>
+<style>
+/* SOLANA TOWER THEME — the tokens the Claude Company site uses, so this console reads as a
+   room of the building. Night-first; [data-theme="light"] restates the surfaces only. */
+:root{
+  --cream:#e6ddf5; --teal:#9945ff; --amber:#d1a84f; --metal:#7a7f9a; --terracotta:#bf623c;
+  --sol-green:#14f195; --sol-soft:#5ef0b4; --sol-pale:#a9ffd8; --sol-violet:#9945ff;
+  --ink:#efeaff; --ink-soft:#b0a4cf; --ink-faint:#7a6d9c;
+  --panel:#120c1f; --panel-line:#241a3a; --card:#171029; --card-line:#2e2148;
+  --good:#3ee6a8; --warn:#e0ad3d; --bad:#ff6b5a;
+  --bar:#08050f; --bar-ink:#efeaff; --bg:#08050f; --line:#2e2148;
+}
+:root[data-theme="light"]{
+  --bar:#efecf7; --bar-ink:#1b1430; --panel:#f7f5fc; --panel-line:#ddd6ec; --card:#ffffff; --card-line:#e6e0f2;
+  --ink:#1b1430; --ink-soft:#4e4470; --ink-faint:#6b6390; --good:#0d7a52; --warn:#8a6410; --bad:#b8372a;
+  --teal:#6d28c9; --amber:#8a6410; --bg:#efecf7; --line:#e6e0f2;
+}
+:root[data-theme="light"] nav a.back{color:rgba(27,20,48,.8); border-color:rgba(27,20,48,.3)}
+:root[data-theme="light"] nav a.back:hover{color:#ffffff; border-color:var(--amber)}
+:root[data-theme="light"] .brand em{color:var(--teal)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Archivo,system-ui,sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased}
+nav{background:var(--bar);color:var(--bar-ink);padding:13px 0;border-bottom:1px solid var(--sol-green);
+  border-image:linear-gradient(90deg,var(--sol-violet) 0%,var(--sol-green) 100%) 1;
+  box-shadow:0 1px 14px rgba(20,241,149,.22), 0 1px 26px rgba(153,69,255,.18)}
+.wrap{max-width:820px;margin:0 auto;padding:0 24px}
+nav .wrap{display:flex;align-items:center;gap:16px}
+.brand{font-family:"Instrument Serif",Georgia,serif;font-size:24px;text-decoration:none;color:inherit}
+.brand em{font-style:italic;color:var(--sol-soft)}
+nav a.back{margin-left:auto;font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:600;
+  color:rgba(239,234,255,.8);text-decoration:none;border:1px solid rgba(239,234,255,.3);padding:6px 12px;border-radius:5px}
+nav a.back:hover{background:var(--amber);color:#2a2018;border-color:var(--amber)}
+main{padding:48px 0 80px}
+h1{font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:44px;line-height:1.05;margin:0 0 8px}
+h2{font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:26px;margin:36px 0 8px}
+.eyebrow{font-family:"JetBrains Mono",monospace;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--amber);font-weight:600}
+.lead{font-size:17px;color:var(--ink-soft);margin:0 0 22px}
+.console{background:var(--card);border:1px solid var(--card-line);border-radius:12px;padding:18px 20px;margin:10px 0 26px}
+.console .head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.pill{font-family:"JetBrains Mono",monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;padding:4px 9px;border-radius:4px;border:1px solid var(--card-line);color:var(--ink-soft)}
+.pill.live{border-color:var(--bad);color:var(--bad)} .pill.observe{border-color:var(--teal);color:var(--cream)} .pill.absent{border-color:var(--warn);color:var(--warn)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-top:14px}
+.stat{background:var(--panel);border:1px solid var(--panel-line);border-radius:8px;padding:10px 12px}
+.stat .k{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);font-weight:600}
+.stat .v{font-size:15px;margin-top:2px;word-break:break-all}
+.mono{font-family:"JetBrains Mono",monospace;font-size:12px}
+.btn{display:inline-block;padding:11px 18px;border-radius:7px;background:var(--teal);color:var(--cream);text-decoration:none;
+  font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;border:0;cursor:pointer}
+.btn:hover{background:var(--sol-green);color:#04160e}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.btn:focus-visible{outline:2px solid var(--amber);outline-offset:3px}
+.rows{display:grid;gap:6px;margin-top:14px}
+.row{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:8px 11px;border:1px solid var(--card-line);border-radius:8px;background:var(--panel);font-size:13px}
+.row .m{grid-column:1 / -1;color:var(--ink-soft);font-size:12px}
+.row .r{font-family:"JetBrains Mono",monospace;color:var(--amber);font-size:12px}
+.row.pending{border-color:var(--warn);background:rgba(224,173,61,.08)}
+.row.live{border-color:var(--bad)}
+.log{margin-top:12px;font-family:"JetBrains Mono",monospace;font-size:11.5px;color:var(--ink-soft);display:grid;gap:2px;max-height:220px;overflow:auto}
+.log div{border-bottom:1px solid rgba(46,33,72,.5);padding:2px 0;white-space:pre-wrap;word-break:break-word}
+.notice{background:var(--card);border:1px solid var(--card-line);border-left:4px solid var(--terracotta);border-radius:10px;padding:18px 22px;margin:20px 0}
+.notice p{margin:0 0 10px;color:var(--ink-soft);font-size:14.5px} .notice p:last-child{margin:0}
+ol{counter-reset:s;margin:16px 0 0;padding:0;list-style:none;display:grid;gap:12px}
+ol li{counter-increment:s;position:relative;padding-left:38px;color:var(--ink-soft);font-size:15px}
+ol li::before{content:counter(s);position:absolute;left:0;top:2px;width:25px;height:25px;border-radius:50%;
+  background:var(--teal);color:var(--cream);font-size:12px;font-weight:700;display:grid;place-content:center;font-family:"JetBrains Mono",monospace}
+ol b, p b{color:var(--ink)}
+table{width:100%;border-collapse:collapse;margin:10px 0 4px;font-size:13.5px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--card-line)}
+th{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);font-weight:600}
+td.n{font-family:"JetBrains Mono",monospace;color:var(--amber)}
+code{font-family:"JetBrains Mono",monospace;font-size:12.5px;background:var(--panel);border:1px solid var(--panel-line);border-radius:4px;padding:1px 5px}
+pre{background:var(--panel);border:1px solid var(--panel-line);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12.5px}
+.fine{margin-top:34px;font-size:13px;color:var(--ink-faint);line-height:1.6}
+.shift{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.08em;padding:5px 10px;border-radius:3px;
+  border:1px solid var(--panel-line);background:var(--card);color:var(--ink-soft);cursor:pointer;white-space:nowrap}
+.shift:hover{color:var(--ink);border-color:var(--ink-faint)}
+p{color:var(--ink-soft)}
+</style>
+</head>
+<body>
+<nav><div class="wrap">
+  <a class="brand" href="../">COINMARKET<em>CAT</em></a>
+  <a class="back" href="https://github.com/gtjvv976mb-netizen/coinmarketcat" rel="noopener">The repository</a>
+  <button class="shift" id="shiftbtn" type="button" aria-label="Switch between day and night shift" title="Switch the floor's lighting">&#9790;</button>
+</div></nav>
+<main><div class="wrap">
+  <div class="eyebrow">COINMARKETCAT · HAWK-AI's lane, in your browser</div>
+  <h1>The launch sniper that waits before it strikes</h1>
+  <p class="lead">A sniper bot for Phantom: it hovers ten seconds over every launch and buys only what others followed. This page is the console. The extension runs the lane; Phantom lives here; every buy and every sell is one approval window you press yourself. <b>Keep this tab open while the lane is armed</b> — the approval windows come from it.</p>
+
+  <section class="console" id="console" aria-live="polite">
+    <div class="head">
+      <div><span class="eyebrow" id="extLine">looking for the extension…</span></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span class="pill" id="lanePill">—</span>
+        <button class="btn" id="btnConnect" disabled>Connect Phantom</button>
+      </div>
+    </div>
+    <div class="grid">
+      <div class="stat"><div class="k">Wallet</div><div class="v mono" id="walletLine">—</div></div>
+      <div class="stat"><div class="k">Feed</div><div class="v" id="feedLine">—</div></div>
+      <div class="stat"><div class="k">Today</div><div class="v" id="dayLine">—</div></div>
+      <div class="stat"><div class="k">Live book</div><div class="v" id="bookLine">—</div></div>
+      <div class="stat"><div class="k">Shadow book</div><div class="v" id="shadowLine">—</div></div>
+      <div class="stat"><div class="k">Rule</div><div class="v" id="ruleLine">—</div></div>
+    </div>
+    <div class="rows" id="positions"></div>
+    <div class="log" id="log"></div>
+  </section>
+
+  <div class="notice" id="noext">
+    <p><b>No extension yet?</b> It is not in a store. You build it from <a href="https://github.com/gtjvv976mb-netizen/coinmarketcat" rel="noopener">the repository</a> and load it unpacked — two commands and one click, below. Until then this page is a description, and the panel above stays quiet.</p>
+  </div>
+
+  <h2>What it does, and what it does not</h2>
+  <p>It listens to pump.fun's own program logs, runs every launch through <b>the same entry contract WALL-ST-E runs</b> — the executor's <code>snipe-entry.mjs</code>, vendored from a named commit of Claude-Company and hashed — and keeps a would-have position for every launch that clears, sampled forward into a shadow book in the executor's own row schema. That book grades the two entry rulers the rug literature names, and you can export it and grade it with the command the repository ships.</p>
+  <p>When you arm it, a cleared launch becomes a buy only after it is <b>ten seconds old and still marks at or above its own would-have fill</b> — then the lane re-reads the curve, rebuilds and simulates the exact <code>buy_v2</code> it will sign, and asks Phantom. The position leaves in full at the take, the stop, the creator's exit or the clock, and each of those is one more Phantom window. <b>A stop that needs a click is a weaker stop than a key's.</b> A sell you decline is asked again eight seconds later, and a window you leave unanswered is abandoned after thirty-two seconds and asked again, for as long as the determiner still says sell; it cannot answer for you.</p>
+  <p>It never sees a key. It does not use Phantom's sign-and-send; it sends the bytes you signed through the RPC you chose, with preflight skipped, exactly as the executor does, and it refuses to send anything whose message is not the one it asked you to sign.</p>
+
+  <h2>What HAWK-AI's trades taught it</h2>
+  <p>The executor's live record, read back off mainnet in full on 2026-09-17: <b>10 up, 48 down, −1.58 SOL</b> over 58 round trips; six more under the socials filter and the stall exit went 1 up, 5 down. Eighteen positions ran to the old ten-minute clock and none won. Every SOL of the net loss sat in tickets of 0.35 SOL and up.</p>
+  <table>
+    <tr><th>seconds late at entry</th><th>n</th><th>won</th><th>mean realised</th></tr>
+    <tr><td>under 3s</td><td class="n">9</td><td class="n">0%</td><td class="n">−18.5%</td></tr>
+    <tr><td>3–6s</td><td class="n">25</td><td class="n">20%</td><td class="n">−2.6%</td></tr>
+    <tr><td>6–10s</td><td class="n">20</td><td class="n">10%</td><td class="n">−23.4%</td></tr>
+    <tr><td>10s and later</td><td class="n">10</td><td class="n">40%</td><td class="n">+34.0%</td></tr>
+  </table>
+  <p>The fastest entries were the worst. The plausible mechanism is the one the rug literature describes: a launch reachable inside three seconds is one already bundled, and arriving right behind the bundle makes you its exit liquidity. So this lane <b>waits</b>, and buys only what somebody else followed. It takes at <b>1.5×</b> rather than 2×: 44% of the coins reached 1.5× and the bot realised it on five of them; 25% reached 2×. It keeps the stall exit at 90 seconds and the time stop at three minutes, because the ten-minute bucket was 18 for 18.</p>
+  <p><b>None of this is evidence of an edge.</b> Nothing measured at entry ordered the outcome (every Spearman ρ under 0.13 at n=64), and every modelled exit ladder over the 64 still loses. What the record supports is a rule that keeps this lane out of the one bucket that never won, and a shadow book that will say, over thousands of unselected rows, whether the rulers separate anything. Observe first. Grade the book. Arm a canary.</p>
+
+  <h2>Install</h2>
+  <ol>
+    <li>Clone the repository and build the extension:
+      <pre>git clone https://github.com/gtjvv976mb-netizen/coinmarketcat
+cd coinmarketcat &amp;&amp; npm ci &amp;&amp; npm run build</pre></li>
+    <li>Open <code>chrome://extensions</code>, turn on <b>Developer mode</b>, press <b>Load unpacked</b>, choose <code>coinmarketcat/dist</code>.</li>
+    <li>Open the extension's <b>Options</b> and paste an RPC URL — Helius, Triton or QuickNode. The public RPC refuses browsers.</li>
+    <li>Come back to <b>this page</b>, press <b>Connect Phantom</b>, approve the connection.</li>
+    <li>In the popup, choose <b>Observe</b>. Watch the shadow book fill. Export it and grade it with <code>node vendor/executor/grade-entry-gates.mjs --file &lt;export&gt;</code>.</li>
+    <li>Only then: <b>Execute</b>, at the 0.005 SOL canary, with the sentence the lane prints for your wallet typed into the box.</li>
+  </ol>
+
+  <p class="fine"><b>What this is.</b> A user-operated tool that runs in your own browser against your own wallet, one approval at a time. No server receives a key, signs, or can reach this lane; this page ships no signing code — the extension you built carries it. Not advice, not a signal service, and nothing here has an edge until you have graded its book over a real sample. <b>Every position it opens can be sold only by a click you make</b>; if you close this tab, the lane cannot ask.
+    <br><br>An independent project. Not affiliated with, endorsed by, or connected to Anthropic.</p>
+</div></main>
+<script>
+/* The console panel: renders whatever the extension's content script relays. This page
+   never talks to Phantom itself and never sees a transaction; it asks the extension two
+   things — "are you there?" and "connect" — and draws the status it is handed. */
+(function console_() {
+  const CHANNEL = "claudeco-hawk";
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const short = (k) => (typeof k === "string" && k.length > 12 ? k.slice(0, 4) + "…" + k.slice(-4) : String(k ?? "—"));
+  const ago = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? s + "s" : Math.floor(s / 60) + "m" + (s % 60) + "s"; };
+  let seen = false;
+  const hello = () => window.postMessage({ channel: CHANNEL, type: "hawk:page:hello" }, location.origin);
+  window.addEventListener("message", (event) => {
+    if (event.source !== window) return;
+    const d = event.data;
+    if (!d || d.channel !== CHANNEL || d.from !== "hawk-extension" || d.type !== "hawk:bridge:status" || !d.status) return;
+    seen = true;
+    render(d.status);
+  });
+  function render(s) {
+    const now = Date.now();
+    $("noext").style.display = "none";
+    $("extLine").textContent = "extension attached" + (s.version ? " · " + s.version : "");
+    const pill = $("lanePill");
+    pill.textContent = s.executing ? "LIVE" : s.lane === "execute" ? "execute — not armed" : s.lane || "off";
+    pill.className = "pill " + (s.executing ? "live" : s.lane === "observe" ? "observe" : "");
+    $("btnConnect").disabled = false;
+    $("btnConnect").textContent = s.wallet ? "Reconnect Phantom" : "Connect Phantom";
+    $("walletLine").textContent = s.wallet || "not connected";
+    $("feedLine").textContent = (s.feed && s.feed.state) || "stopped";
+    $("dayLine").textContent = Number(s.deployedTodaySol || 0).toFixed(4) + " / " + (s.dailySolCap ?? "—") + " SOL";
+    const b = s.book || {};
+    $("bookLine").textContent = b.liveTrades ? b.liveTrades + " trades · " + b.liveWins + " up · " + b.liveLosses + " down · " + (b.realizedSol >= 0 ? "+" : "") + Number(b.realizedSol).toFixed(4) + " SOL" : "no live trades";
+    const sh = s.shadow || {};
+    $("shadowLine").textContent = (sh.rows || 0) + " rows · " + ((sh.scorecard && sh.scorecard.judged) || 0) + " judged";
+    $("ruleLine").textContent = "wait " + Math.round((s.entryWaitMs || 0) / 1000) + "s · follow-through ≥" + s.entryFollowThroughX + "× · take " + ((s.policy && s.policy.takeAtEntryX) || "—") + "× · ticket " + s.maxSolPerTrade + " SOL";
+    const open = s.open || [];
+    $("positions").innerHTML = open.map((p) => {
+      const state = p.graduated ? "graduated — sell by hand" : p.pendingSell ? "APPROVE THE SELL IN PHANTOM — " + esc(p.pendingSell.reason) : p.waitedOut ? "not bought: " + esc(p.waitedOut) : p.live ? "held" : "watching";
+      return '<div class="row ' + (p.live ? "live" : "") + (p.pendingSell ? " pending" : "") + '"><div>' + esc(p.symbol || short(p.mint)) + " <span class=\"mono\">" + (p.live ? "live" : "would-have") + "</span></div>" +
+        '<div class="r">' + (p.lastMarkX == null ? "unread" : Number(p.lastMarkX).toFixed(3) + "x") + " · " + ago(now - Number(p.openedAt)) + "</div>" +
+        '<div class="m">' + state + " · " + Number(p.sizeSol).toFixed(4) + " SOL</div></div>";
+    }).join("") || '<div class="row"><div>nothing open</div></div>';
+    $("log").innerHTML = (s.log || []).slice(0, 12).map((l) => "<div>" + (Number.isFinite(l.at) ? esc(new Date(l.at).toISOString().slice(11, 19)) : "") + " " + esc(l.line) + "</div>").join("");
+  }
+  $("btnConnect").addEventListener("click", () => window.postMessage({ channel: CHANNEL, type: "hawk:page:connect" }, location.origin));
+  hello();
+  let tries = 0;
+  const t = setInterval(() => { if (seen || ++tries > 20) { clearInterval(t); if (!seen) $("extLine").textContent = "no extension attached to this page"; return; } hello(); }, 1000);
+})();
+(function shiftSwitch() {
+  const btn = document.getElementById("shiftbtn");
+  if (!btn) return;
+  const label = () => {
+    const day = document.documentElement.dataset.theme === "light";
+    btn.textContent = day ? "☀" : "☾";
+    btn.title = day ? "Day shift. Click for the night shift." : "Night shift. Click for the day shift.";
+  };
+  btn.addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("cc_theme", next); } catch {}
+    label();
+  });
+  label();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+{
+  "name": "coinmarketcat",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "COINMARKETCAT — the Claude Company launch sniper for Phantom. It hovers ten seconds over every pump.fun launch, buys only what others followed, and signs every trade with your own hand. It never holds a key.",
+  "engines": {
+    "node": ">=22.13 <25"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "test": "node scripts/test-all.mjs",
+    "sync": "node scripts/sync-executor.mjs --from ../Claude-Company",
+    "check-upstream": "node scripts/sync-executor.mjs --check"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.9"
+  },
+  "dependencies": {
+    "@solana/web3.js": "1.98.4",
+    "bs58": "4.0.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gtjvv976mb-netizen/coinmarketcat"
+  }
+}

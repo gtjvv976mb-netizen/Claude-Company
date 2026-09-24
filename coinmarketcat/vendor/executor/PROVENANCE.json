@@ -1,0 +1,29 @@
+{
+  "sourceRepo": "https://github.com/gtjvv976mb-netizen/Claude-Company",
+  "sourceCommit": "08dfb5a57493e0b1f6f1898451a3cf433c6a66e8",
+  "sourceCommittedAt": "2026-09-24T06:37:07+00:00",
+  "modules": {
+    "entry-sizing.mjs": "3757952659b66d41c6bdec9821f128546aacaede0cf240f257acf9af3e1dd701",
+    "network-fee-budget.mjs": "a98f5f6338567947230b8ddd566895e18d9931a89027d93d1cbf385b8a2ffb97",
+    "snipe-book.mjs": "117dbd2dec9902e8279668dbcdd2db710c2f76ef37458c815fa2073bc32d5790",
+    "snipe-curve.mjs": "d1bf058189bb100909a6bafd16b456715e88dcab3848df637c548dfebf9da8ef",
+    "snipe-entry.mjs": "ab9228b3b193e718b601829fb5e89a05f2f83e43e3fb9154be2c1a582ff4cbd9",
+    "snipe-lane.mjs": "f60151deb27522277f0f6ddb12f1499920758d37e2851d4c9c6c79aadaf0295c",
+    "snipe-policy.mjs": "58a7c2d8a8e5f0c9cf2059c7a19579bafa2c87624ada1237f68b36c2f9e1b28c",
+    "snipe-shadow.mjs": "dff5c810b9bfe8247f2d7641e08451d9f2521bae8da5f23c766bcc69b4242952",
+    "snipe-socials.mjs": "ed0c15118a635df7a69fcf50fe0e0bfdea57e7d68c6d21c4532eb800c35984a9",
+    "snipe-venue-pumpfun.mjs": "8c6a90874ac7e844913cc0960fe86abca29d41588d26c159337b7a0f57d7952f",
+    "snipe-venue.mjs": "55a8ec8a34a3cd6d624d13821588a2750b6147a34e902c97c755db6056a32ef5",
+    "sol-usd-oracle.mjs": "bb84cdf6ce8d43d88c165a86043fa856d75ac6cbcb308a1152dad5a54261837e",
+    "strategy.mjs": "1c37182f8fe1cb3cd5605ae18e5c893717cbe0df7300ef99c5535f7ec3b5f145",
+    "token2022.mjs": "3b13aa242d703cba65b2089af78a3738b3071c0c9e0d4b2ec6e3a2cbe18213f5",
+    "trade-policy.mjs": "15521eeb35bd1ec3fcbabbdc80c643299ee53b622f19907bcaf6b33333db5d57",
+    "shadow-sink.mjs": "e96c607e75882c8bce72eea616de347ce5ad28c20a1557987e837124d892afab",
+    "grade-entry-gates.mjs": "83b95b1d52424392eccb20e0524f9ebd365acec4aa99f49c494c2298df412e95",
+    "test-snipe-stall-default.mjs": "9a176cbf1bec9e400b17bae9b29b6756492ddf497717623e43424f9d95d6fade"
+  },
+  "standIns": [
+    "jupiter.mjs"
+  ],
+  "note": "Copied verbatim from executor/ at sourceCommit by scripts/sync-executor.mjs. Never edit these files here; change them upstream and sync."
+}
