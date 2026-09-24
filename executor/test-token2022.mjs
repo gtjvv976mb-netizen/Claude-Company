@@ -8,7 +8,7 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 import { Keypair, PublicKey } from "@solana/web3.js";
 import {
   ALLOWED_MINT_EXTENSIONS, EXTENSION_NAMES, MINT_CONSENSUS_FIELDS, TOKEN_2022_PROGRAM, TOKEN_PROGRAM,
-  auditMintAccount, parseMintExtensions, token2022Enabled,
+  auditMintAccount, describeMint, parseMintExtensions, token2022Enabled,
 } from "./token2022.mjs";
 import {
   associatedTokenAddress, independentClassicMintDecimals, independentMintProgram, mintTokenProgram,
@@ -241,6 +241,90 @@ await ok("wallet custody checks work for a Token-2022 token account (ImmutableOw
     /is not a token program/);
   assert.equal(walletTokenAmount(null, { program: TOKEN_2022_PROGRAM, mint: MINT, wallet: WALLET, allowMissing: true }), 0n);
   assert.notEqual(associatedTokenAddress(WALLET, MINT, TOKEN_2022_PROGRAM), associatedTokenAddress(WALLET, MINT, TOKEN_PROGRAM));
+});
+
+/* Quote mints. A pump.fun curve can be quoted in an xStock; the wallet PAYS with that
+ * mint and never holds it as a position, so it is described, never judged. The fixture
+ * is the real bytes of three xStock mints plus a live curve quoted in GLDx. */
+const XSTOCK = JSON.parse(fs.readFileSync(here + "fixtures/pumpfun-xstock-quote.json", "utf8"));
+const fixtureAccount = (address) => {
+  const row = XSTOCK.accounts.find((a) => a.address === address);
+  return { owner: row.owner, data: Buffer.from(row.data[0], "base64") }; // a fresh copy each call
+};
+const GLDX = "Xsv9hRk1z5ystj9MhnA7Lq4vjSsLwzL2nxrwmwtD3re";
+const TSLAX = "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB";
+const SPYX = "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W";
+const XSTOCK_DELEGATE = "5aMNNLQJwAEeoemTEMkv5NVjqKwvvefRYCQ5Z67HFvEq";
+const XSTOCK_PAUSER = "JDq14BWvqCRFNu1krb12bcRpbGtJZ1FLEakMw6FdxJNs";
+const XSTOCK_EXTENSIONS = ["MetadataPointer", "PermanentDelegate", "DefaultAccountState", "ScaledUiAmount",
+  "Pausable", "ConfidentialTransferMint", "TransferHook", "TokenMetadata"];
+
+await ok("the xStock quote fixture is the live bytes it claims to be", async () => {
+  assert.ok(Number.isInteger(XSTOCK.slot) && XSTOCK.slot > 0);
+  assert.deepEqual(XSTOCK.rentExemptLamports, { 165: 1488440, 170: 1513840, 179: 1559560 });
+  const sizes = Object.fromEntries(XSTOCK.accounts.map((a) => [a.address, Buffer.from(a.data[0], "base64").length]));
+  assert.deepEqual(sizes, {
+    [GLDX]: 675, [TSLAX]: 678, [SPYX]: 676,
+    JXJC7sJa235q7GbFjsQ9oorm6wHForQ8MZJoF1MedDP: 151, // the curve, quoted in GLDx
+    "4oYp7TZ1tBrvHHfMTA8oVYATbVVfiE19vRTfbRvPd5EL": 179, // its GLDx vault: 165 + type + ImmutableOwner + TransferHookAccount + PausableAccount
+  });
+  for (const a of XSTOCK.accounts)
+    assert.equal(a.owner, a.address.startsWith("JXJC") ? "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P" : TOKEN_2022_PROGRAM, a.address);
+});
+
+await ok("describeMint reads the live xStock quote mints that the audit refuses", async () => {
+  for (const [address, symbol, name, multiplier] of [
+    [GLDX, "GLDx", "Gold xStock", 1], [TSLAX, "TSLAx", "Tesla xStock", 1], [SPYX, "SPYx", "SP500 xStock", 1.003909240011759],
+  ]) {
+    const described = describeMint(fixtureAccount(address), address);
+    assert.ok(Object.isFrozen(described));
+    assert.equal(described.mint, address);
+    assert.equal(described.program, TOKEN_2022_PROGRAM);
+    assert.equal(described.decimals, 8);
+    assert.equal(described.initialized, true);
+    assert.equal(described.mintAuthority, "7pt9tkctJPK7PPNQJ77GKg8ZffSF6QxoMiCFYHxrtaCj");
+    assert.equal(described.freezeAuthority, XSTOCK_PAUSER);
+    assert.deepEqual(described.extensionNames, XSTOCK_EXTENSIONS);
+    assert.equal(described.paused, false, `${symbol} is not paused`);
+    assert.equal(described.pausableAuthority, XSTOCK_PAUSER);
+    assert.equal(described.transferHookProgram, null, `${symbol}'s hook is the zero program`);
+    assert.equal(described.permanentDelegate, XSTOCK_DELEGATE);
+    assert.equal(described.defaultAccountState, 1);
+    assert.equal(described.metadataName, name);
+    assert.equal(described.metadataSymbol, symbol);
+    assert.ok(Math.abs(described.scaledUiMultiplier - multiplier) < 1e-12, `${symbol} multiplier ${described.scaledUiMultiplier}`);
+  }
+});
+
+await ok("a paused xStock reads paused; the audit still refuses the same bytes", async () => {
+  const flipped = fixtureAccount(GLDX);
+  const pausable = parseMintExtensions(flipped.data).find((ext) => ext.type === 26);
+  assert.equal(pausable.length, 33);
+  pausable.value[32] = 1; // the subarray shares the copy's memory
+  assert.equal(describeMint(flipped, GLDX).paused, true);
+  assert.equal(describeMint(fixtureAccount(GLDX), GLDX).paused, false, "the fixture itself is untouched");
+  // The point of describeMint: the SAME bytes are a kill for a base mint. Pin that the
+  // audit keeps refusing them so nobody widens the kill set by routing a base mint here.
+  assert.throws(() => auditMintAccount(fixtureAccount(GLDX), GLDX), /Token-2022 extension PermanentDelegate is refused/);
+  assert.throws(() => auditMintAccount(fixtureAccount(SPYX), SPYX), /Token-2022 extension PermanentDelegate is refused/);
+});
+
+await ok("describeMint reads a classic SPL mint and refuses only what is not a mint", async () => {
+  const classic = describeMint(classicMint(), MINT); // 82 bytes, option tags 0 at 0 and 46, decimals 6, initialized
+  assert.equal(classic.program, TOKEN_PROGRAM);
+  assert.equal(classic.decimals, 6);
+  assert.equal(classic.initialized, true);
+  assert.deepEqual(classic.extensionNames, []);
+  assert.equal(classic.paused, false);
+  for (const field of ["mintAuthority", "freezeAuthority", "pausableAuthority", "transferHookProgram",
+    "permanentDelegate", "defaultAccountState", "scaledUiMultiplier", "metadataName", "metadataSymbol"])
+    assert.equal(classic[field], null, field);
+  // A pump-style base mint describes too, but with nothing to say; it is still not a judgement.
+  assert.deepEqual(describeMint(token2022Mint(), MINT).extensionNames, ["MetadataPointer", "TokenMetadata"]);
+  assert.throws(() => describeMint({ owner: PublicKey.default, data: baseMint() }, MINT), /not owned by a token program/);
+  assert.throws(() => describeMint({ owner: new PublicKey(TOKEN_PROGRAM), data: Buffer.alloc(81) }, MINT), /classic SPL mint layout/);
+  assert.throws(() => describeMint(token2022Mint({}, [...PUMP_STYLE, [40, Buffer.alloc(8)]]), MINT), /unknown extension type 40/);
+  assert.throws(() => describeMint(null, MINT), /mint account is unavailable/);
 });
 
 console.log(`${passed} passed${failed ? `, ${failed} FAILED` : ""}`);

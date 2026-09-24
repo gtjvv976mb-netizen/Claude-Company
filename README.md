@@ -12,8 +12,12 @@ link. This repository also contains WALL-ST-E, an isolated polling executor that
 the user's own Linux host. It defaults to paper mode; an explicitly armed, supervised
 live canary can sign from a dedicated local burner only after the durable journal,
 transaction validation, two-private-RPC, freshness, fee, slippage, and risk gates pass.
-The legacy webhook executor remains dry-run-only. Browser signing is absent and the old
-hosted RPC relay returns `410 Gone` without contacting Solana.
+The legacy webhook executor remains dry-run-only. The hosted pages ship no signer and the
+old hosted RPC relay returns `410 Gone` without contacting Solana. The one browser path is
+**HAWK-AI for Phantom** (`extension/`): a user-built extension that runs the launch
+sniper's lane in the user's own browser and asks the user's own Phantom for every
+signature, one approval window per trade — it holds no key and the hosted desk cannot
+reach it.
 
 ---
 
@@ -301,6 +305,28 @@ user's machine; paper mode is the default, and the sole live-capable path is the
 polling canary documented in `executor/README.md`. The legacy webhook adapter remains
 dry-run-only.
 
+## HAWK-AI in the browser
+
+`extension/` is the launch sniper for people whose wallet is Phantom rather than a
+burner on a Linux box. It is a Chrome extension you build from this repository and load
+unpacked; it imports the executor's own `snipe-entry.mjs`, `snipe-policy.mjs`,
+`snipe-venue-pumpfun.mjs` and `snipe-shadow.mjs` into its bundle, so it refuses what
+WALL-ST-E refuses and books what WALL-ST-E books. What differs is the signer: **every
+buy and every sell is one Phantom approval window**, on the console page at `/hawk`, and
+the extension never sees a key.
+
+It also carries what HAWK-AI's live record taught: it waits ten seconds and buys only a
+launch that still marks at or above its own would-have fill (entries under three seconds
+won 0 of 9; entries past ten seconds won 4 of 10), it takes at 1.5× (44% of the coins got
+there; 25% got to 2×), and it keeps the executor's shadow book so the two entry rulers can
+be graded with `executor/grade-entry-gates.mjs --file`. Wiring it found a bug in the
+executor — an unset `SNIPE_STALL_MS` read as `0`, which is *off*, so the 90-second stall
+exit the 18-for-18 record justified was never running by default. Fixed, and pinned by
+`executor/test-snipe-stall-default.mjs`.
+
+The record it is built on loses money, and the extension says so beside its own arming
+switch. Read `extension/README.md` before you type the sentence.
+
 ## What it costs
 
 Model defaults are cost-aware: Haiku scouts, reads the book for the Liquidity seat and
@@ -326,8 +352,12 @@ default stays `high`, because its verdict feeds a safety gate.
   as a backtest you are watching forward.
 - **The live executor is an experimental local canary, not evidence of an edge.** It is
   Metis exact-in/classic-SPL-only, code-bounded with locally acknowledged cap changes, and requires operator-owned infrastructure;
-  browser and webhook signing remain disabled. Dry runs, simulations, and successful fills
+  hosted browser and webhook signing remain disabled. Dry runs, simulations, and successful fills
   do not establish positive expectancy.
+- **The browser sniper's stops need a click.** HAWK-AI for Phantom cannot sell without
+  the user pressing Approve; it asks again every eight seconds and says so, but a stop
+  that waits on a person is weaker than a key's, and a closed console tab is a lane that
+  cannot ask at all.
 
 ## The charter
 

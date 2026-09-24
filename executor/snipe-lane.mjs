@@ -219,6 +219,14 @@ export const SNIPE_LANE_DEFAULTS = Object.freeze({
      answer. src/launch-shadow.js states the discipline; snipe-shadow.mjs scores them. */
   maxCreatorSharePct: undefined,
   maxLaunchSharePct: undefined,
+  /* QUOTE MINTS THIS LANE MAY PAY IN BESIDES SOL. EMPTY on the Node lane by construction:
+     no SNIPE_ env name maps to it (the boot check below enforces env ⊆ defaults, not the
+     reverse), because the burner holds only SOL and snipe-execute.mjs reads every fill
+     and spend in lamports — README "Coins this lane cannot pay for". The browser lane,
+     whose signer is a wallet that can hold an xStock, sets it from its own config and
+     hands the contract the quote mint's facts beside it; the contract's `quote_not_sol`
+     gate admits a curve quoted in a listed mint and refuses every other, as before. */
+  quoteMintAllowlist: Object.freeze([]),
   /* Consecutive two-endpoint disagreements before blindness is treated as hostility and
      the position leaves. THREE, matching snipe-policy's confirmWindow, and for the same
      reason: it is the smallest run in which a single outlier cannot be the whole story.
@@ -452,14 +460,26 @@ export function effectiveLaneConfig(cfg = {}) {
      and nothing else, so a dial parked at the top level of the config would be a dial the
      determiner never reads — set, printed, and inert. Folded in once, where the mode's own
      overrides already live, so every consumer of the effective config sees the same take. */
-  const take = Number(cfg.takeAtEntryX);
-  const stop = Number(cfg.stopFrac);
+  /* UNSET IS NOT ZERO. SNIPE_LANE_DEFAULTS carries every policy dial as `null`, meaning
+     "snipe-policy's own default", and `Number(null)` is 0. For the four dials bounded at
+     > 0 that 0 simply failed the bound and nothing was folded — the intended behaviour,
+     by accident. `stallMs` is bounded at >= 0 because 0 is the operator's way of turning
+     the stall OFF, so Number(null) folded a stallMs of 0 into the policy on every lane
+     that had not typed SNIPE_STALL_MS: the stall exit the 18-for-18 record justified was
+     printed as 90000 by the README and read as 0 by the determiner. The record carries
+     the fingerprint — the four post-change losers sat in the 120–300s band, which is
+     where the 180s time stop puts a position the 90s stall never saw. Found 2026-09-24
+     while wiring the browser lane, whose config carries the same nulls. `num` reads an
+     absent dial as NaN, which no bound accepts; test-snipe-stall-default.mjs pins it. */
+  const num = (v) => (v === null || v === undefined || v === "" ? NaN : Number(v));
+  const take = num(cfg.takeAtEntryX);
+  const stop = num(cfg.stopFrac);
   /* The stall dials fold in the same way and for the same reason — parked at the top
      level they would be read by nobody. `stallMs` accepts 0, which is how an operator
      turns the stall exit off, so it is bounded at >= 0 rather than > 0. */
-  const stall = Number(cfg.stallMs);
-  const stallAt = Number(cfg.stallAtX);
-  const timeStop = Number(cfg.timeStopMs);
+  const stall = num(cfg.stallMs);
+  const stallAt = num(cfg.stallAtX);
+  const timeStop = num(cfg.timeStopMs);
   const folded = {
     ...(Number.isFinite(take) && take > 0 ? { takeAtEntryX: take } : {}),
     ...(Number.isFinite(stop) && stop > 0 ? { stopFrac: stop } : {}),

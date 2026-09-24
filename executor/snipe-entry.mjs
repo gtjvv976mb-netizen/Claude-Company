@@ -108,7 +108,9 @@ import {
 } from "./snipe-curve.mjs";
 import { venueContract } from "./snipe-venue.mjs";
 import { assertNetworkFeeBudget } from "./network-fee-budget.mjs";
-import { ALLOWED_MINT_EXTENSIONS, EXTENSION_NAMES, auditMintAccount } from "./token2022.mjs";
+import {
+  ALLOWED_MINT_EXTENSIONS, EXTENSION_NAMES, auditMintAccount, TOKEN_PROGRAM, TOKEN_2022_PROGRAM,
+} from "./token2022.mjs";
 
 export const SNIPE_ENTRY_VERSION = "snipe-entry-v1";
 
@@ -541,6 +543,21 @@ const GATE_IMPLS = Object.freeze({
      every attempt_fee_event into deployedTodaySol. Nothing new is charged here; the gate
      only refuses to exceed what the day has left. */
   daily_capacity: (c) => {
+    /* A STOCK-QUOTED TICKET IS CAPPED IN THE STOCK. The day's ledger for a quote token is
+       the caller's — the wallet's own balance of it, or the browser lane's per-mint day
+       book — and arrives inside the quote facts as raw integers, so this limb is exact
+       BigInt with no float epsilon. Network fees still land in SOL and are bounded by the
+       absolute caps at gates 22/23, never by this ledger. */
+    if (c.quoteTicket) {
+      const q = c.quoteTicket;
+      const after = q.deployedTodayRaw + q.ticketRaw;
+      return after > q.dailyCapRaw ? {
+        message: `this ${units(q.ticketRaw, q.decimals)} ${q.symbol} ticket would take the day to ` +
+          `${units(after, q.decimals)} ${q.symbol} against a ${units(q.dailyCapRaw, q.decimals)} ${q.symbol} cap ` +
+          `(already deployed ${units(q.deployedTodayRaw, q.decimals)})`,
+        deployedTodayRaw: q.deployedTodayRaw, wouldBeRaw: after, quoteMint: q.mint,
+      } : null;
+    }
     /* The ticket is read here first because this is the first gate that needs a NUMBER
        out of the config rather than a switch. A malformed maxSolPerTrade refused four
        gates later, under an internal-invariant message, would name the wrong fact. */
@@ -637,17 +654,44 @@ const GATE_IMPLS = Object.freeze({
    * (6004) — an opaque failure on a coin that was never buyable. Refused here, by name,
    * before an instruction exists.
    *
-   * This is a REFUSAL and not a TODO. Supporting a non-SOL quote is not a matter of
-   * passing a different mint: it needs the quote token's own program, its decimals, a
-   * balance of it in the wallet, and a sizing and risk vocabulary that is not lamports.
+   * Supporting a non-SOL quote is not a matter of passing a different mint: it needs the
+   * quote token's own program, its decimals, a balance of it in the wallet, and a sizing
+   * and risk vocabulary that is not lamports. THE ALLOWLIST IS WHERE THAT IS SUPPLIED.
+   * A curve quoted in a mint on `cfg.quoteMintAllowlist` passes here when — and only
+   * when — the caller handed the contract that mint's facts (`args.quote`: `describeMint`
+   * of the quote mint plus the wallet's ticket, cap and day ledger in its raw units) and
+   * those facts survived `quoteTicketFor`. Then the ticket above is already denominated
+   * in the quote, and every gate below judges in it. The xStocks (GLDx, TSLAx, SPYx,
+   * measured 2026-09-24 in fixtures/pumpfun-xstock-quote.json) are Token-2022 mints with
+   * a permanent delegate, a live freeze authority and a Pausable extension: the kill set
+   * this lane applies to the BASE mint would refuse every one of them, and rightly so —
+   * the buyer never holds the quote long enough for those to matter. What does matter is
+   * `paused`: a paused mint moves nothing, so a paused quote is a refusal by name.
+   *
+   * With an EMPTY allowlist — the executor's default, and the browser lane's until the
+   * user lists a mint — this gate refuses exactly as it did before the allowlist existed.
    */
   quote_not_sol: (c) => {
-    const quote = c.curveRaw?.quoteMint ?? null;
-    if (quote === null || quote === undefined) return null;      // pre-quote_mint curve: SOL
-    if (c.curveRaw?.quoteIsSol === true) return null;
-    if (quote === SOL_QUOTE_MINT) return null;
+    if (c.curveQuote === SOL_QUOTE_MINT) return null;
+    const quote = c.curveQuote;
+    if (c.quoteTicket) {
+      if (c.quoteTicket.paused)
+        return { message: `the curve is quoted in ${c.quoteTicket.symbol} (${quote}) and that mint is PAUSED — ` +
+          "no transfer of it can settle, so neither leg of this position could", quoteMint: quote, paused: true };
+      return null;
+    }
+    if (c.quoteAllowlist.includes(quote)) {
+      const why = c.quoteError ? `: ${c.quoteError}`
+        : c.quoteFacts ? ` (the facts supplied describe ${c.quoteFacts.mint}, not this quote)`
+          : " (no quote facts were supplied)";
+      return { message: `the curve is quoted in ${quote}, which is on the quote allowlist, but no usable ` +
+        `facts about that mint reached this contract${why} — unverified is not payable`, quoteMint: quote };
+    }
+    const listed = c.quoteAllowlist.length === 0
+      ? "the allowlist is empty: this lane pays in SOL only"
+      : `${c.quoteAllowlist.length} other mint${c.quoteAllowlist.length === 1 ? " is" : "s are"} listed`;
     return { message: `the curve is quoted in ${quote}, not SOL — this lane sizes, caps and books ` +
-      "in lamports and the wallet holds no such token, so there is nothing here it could spend",
+      `in lamports and the wallet holds no such token, so there is nothing here it could spend (${listed})`,
       quoteMint: quote };
   },
 
@@ -737,6 +781,10 @@ const GATE_IMPLS = Object.freeze({
      cap it passes exactly: stopFrac 0.8000, minViableSol 0.005000 against a 0.005 ticket.
      A tighter stop is not safer, it is unfundable. */
   stop_floor: (c) => {
+    /* A stock-quoted ticket has no SOL fee rail to invert — its network fees are lamports
+       against a basis in another unit, which is not a fraction — so the floor is the
+       quote's own `minTicketRaw`, judged at `size_under_minimum`. Traced as unmeasured. */
+    if (c.quoteTicket) { c.trace.measured.stop_floor = null; return null; }
     let floor;
     try { floor = snipeFloor({ cfg: c.cfg, sol: c.ticketSol }); }
     catch (error) { return { message: `the stop floor could not be derived: ${error.message}` }; }
@@ -753,6 +801,14 @@ const GATE_IMPLS = Object.freeze({
   size_under_minimum: (c) => {
     if (!c.plan.deliverable || c.plan.baseOutRaw <= 0n)
       return { message: `the ticket buys nothing at this state (baseOut ${c.plan.baseOutRaw})` };
+    if (c.quoteTicket) {
+      const q = c.quoteTicket;
+      return c.plan.spendLamports < q.minTicketRaw ? {
+        message: `the ladder had to come down to ${units(c.plan.spendLamports, q.decimals)} ${q.symbol} to ` +
+          `clear the cost caps, which is under the ${units(q.minTicketRaw, q.decimals)} ${q.symbol} minimum ticket`,
+        chosenRaw: c.plan.spendLamports, minTicketRaw: q.minTicketRaw, halvings: c.plan.halvings, quoteMint: q.mint,
+      } : null;
+    }
     const chosenSol = Number(c.plan.spendLamports) / LAMPORTS_PER_SOL;
     let minViable;
     try { minViable = snipeFloor({ cfg: c.cfg, sol: c.ticketSol }).minViableSol; }
@@ -831,12 +887,16 @@ function proxyGate(c, gate, { measured, threshold, describe, extra = null }) {
 function feeGate(c, { includeRent }) {
   const basis = c.plan.maxQuoteInRaw;
   if (basis <= 0n) return { message: "there is no fee basis: the entry ceiling is zero lamports" };
+  /* A stock-quoted entry pays its network fees in lamports against a basis in the quote's
+     raw units, and a percentage of GLDx expressed in lamports is not a number. A null
+     basis tells the budget "absolute caps only" — see network-fee-budget.mjs. */
+  const feeBasis = c.quoteTicket ? null : basis;
   try {
     const budget = assertNetworkFeeBudget({
       signatureFeeLamports: c.fees.signatureFeeLamports ?? 0,
       prioritizationFeeLamports: c.fees.prioritizationFeeLamports ?? 0,
       rentFeeLamports: includeRent ? (c.fees.rentFeeLamports ?? 0) : 0,
-      feeBasisLamports: basis,
+      feeBasisLamports: feeBasis,
       cfg: c.cfg,
     });
     if (includeRent) c.trace.feeBudget = budget;
@@ -844,8 +904,72 @@ function feeGate(c, { includeRent }) {
   } catch (error) {
     /* The two limbs are separated by which run threw. The rent limb only ever fires on
        the second run, because the first zeroes rent. */
-    return { message: error.message, feeBasisLamports: basis.toString() };
+    return { message: error.message, feeBasisLamports: feeBasis === null ? null : basis.toString() };
   }
+}
+
+/** A raw integer amount as a decimal string in the token's own units, exact — no float
+ *  crosses this: "150000000" at 8 decimals is "1.50000000". For messages and rows only. */
+function units(raw, decimals) {
+  const s = toBig(raw, "raw amount").toString().padStart(decimals + 1, "0");
+  return decimals === 0 ? s : `${s.slice(0, s.length - decimals)}.${s.slice(s.length - decimals)}`;
+}
+
+/**
+ * THE QUOTE TOKEN'S FACTS, VALIDATED INTO A TICKET IN ITS OWN UNITS.
+ *
+ * `quote` is what the lane read about the curve's quote mint on the same account fetch
+ * as the curve — `describeMint` of the mint (never `auditMintAccount`, whose kill set is
+ * for the BASE mint and would refuse every xStock) — folded with the wallet's sizing in
+ * that token. Every number is a raw integer in the mint's own decimals; nothing here is
+ * SOL, and nothing here is a float. A malformed record throws, the contract catches the
+ * message, and `quote_not_sol` names it: a quote this lane cannot describe is one it
+ * cannot pay in.
+ *
+ * @param {object} quote
+ * @param {string}  quote.mint             the quote mint, base58
+ * @param {number}  quote.decimals         0..18
+ * @param {string}  quote.tokenProgram     the mint's owner: Token or Token-2022
+ * @param {string}  [quote.symbol]         for messages; defaults to the mint's first four chars
+ * @param {bigint|number|string} quote.ticketRaw          the per-trade ticket, raw
+ * @param {bigint|number|string} quote.dailyCapRaw        the day cap in this token, raw
+ * @param {bigint|number|string} [quote.deployedTodayRaw] already spent today in it, raw
+ * @param {bigint|number|string} [quote.minTicketRaw]     below this the ladder refuses
+ * @param {boolean} quote.paused           the Pausable extension's byte, strict boolean
+ * @param {string|null} [quote.transferHookProgram]  a live hook program, or null
+ */
+export function quoteTicketFor(quote) {
+  if (!isPlainObject(quote)) throw new Error(`quote facts must be an object, got ${JSON.stringify(quote)}`);
+  const mint = isStr(quote.mint) ? quote.mint.trim() : null;
+  if (!mint) throw new Error("quote.mint is missing");
+  const decimals = quote.decimals;
+  if (!(Number.isInteger(decimals) && decimals >= 0 && decimals <= 18))
+    throw new Error(`quote.decimals ${JSON.stringify(decimals)} is outside the executor's 0-18 range`);
+  const tokenProgram = quote.tokenProgram;
+  if (tokenProgram !== TOKEN_PROGRAM && tokenProgram !== TOKEN_2022_PROGRAM)
+    throw new Error(`quote.tokenProgram ${JSON.stringify(tokenProgram)} is not a token program this lane knows`);
+  if (typeof quote.paused !== "boolean")
+    throw new Error(`quote.paused must be a strict boolean, got ${JSON.stringify(quote.paused)}`);
+  const hook = quote.transferHookProgram ?? null;
+  if (hook !== null && !isStr(hook))
+    throw new Error(`quote.transferHookProgram must be a program id or null, got ${JSON.stringify(hook)}`);
+  const ticketRaw = toBig(quote.ticketRaw, "quote.ticketRaw", { allowZero: false });
+  const dailyCapRaw = toBig(quote.dailyCapRaw, "quote.dailyCapRaw", { allowZero: false });
+  const deployedTodayRaw = toBig(quote.deployedTodayRaw ?? 0n, "quote.deployedTodayRaw");
+  const minTicketRaw = toBig(quote.minTicketRaw ?? 0n, "quote.minTicketRaw");
+  return Object.freeze({
+    mint,
+    decimals,
+    tokenProgram,
+    symbol: isStr(quote.symbol) ? quote.symbol.trim() : mint.slice(0, 4),
+    ticketRaw,
+    ticketUnits: Number(units(ticketRaw, decimals)),
+    dailyCapRaw,
+    deployedTodayRaw,
+    minTicketRaw,
+    paused: quote.paused,
+    transferHookProgram: hook,
+  });
 }
 
 /* The list above and the ordered array must never drift. Asserted at import, so a
@@ -898,6 +1022,9 @@ function holderFor(mint) {
  * @param {object} [args.creator] {shareOfSupplyPct, priorLaunches} — the statistical layer
  * @param {object} [args.fees]    {signatureFeeLamports, prioritizationFeeLamports, rentFeeLamports}
  * @param {object} [args.instruction] the buy instruction to decode back, when one exists
+ * @param {object} [args.quote]   the curve's QUOTE mint facts, for a curve not quoted in
+ *                                SOL — see `quoteTicketFor`. Ignored for a SOL curve, and
+ *                                for a quote that is not on `cfg.quoteMintAllowlist`.
  *
  * @returns {{ok, gate, detail, trace}} — `gate` is null on a pass and names the FIRST
  *   refusal otherwise. `trace` is the ordered record of every gate evaluated, which is
@@ -906,7 +1033,7 @@ function holderFor(mint) {
 export function snipeContract({
   notice = {}, curve = null, adapter = null, cfg = {}, book = {}, nowMs = null,
   control = {}, mint: mintAccount = null, creator = {}, fees = {}, instruction = null,
-  socials = null,
+  socials = null, quote = null,
 } = {}) {
   const lane = isStr(cfg.lane) ? cfg.lane.trim() : "off";
   const mint = isStr(notice.mint) ? notice.mint.trim() : null;
@@ -917,6 +1044,33 @@ export function snipeContract({
   let ticketSol = NaN; let ticketLamports = 0n; let ticketError = null;
   try { ticketLamports = solToLamports(cfg.maxSolPerTrade, "cfg.maxSolPerTrade"); ticketSol = Number(cfg.maxSolPerTrade); }
   catch (error) { ticketError = error.message; }
+
+  /* THE MINT THE CURVE IS QUOTED IN, normalised: a layout that predates `quote_mint`, a
+     decoder that says `quoteIsSol`, and WSOL by address are all SOL. Anything else is the
+     curve's own word for it. */
+  const curveRaw = isPlainObject(curve) ? curve : null;
+  const curveQuote = curveRaw === null || curveRaw.quoteMint === null || curveRaw.quoteMint === undefined
+    || curveRaw.quoteIsSol === true || curveRaw.quoteMint === SOL_QUOTE_MINT
+    ? SOL_QUOTE_MINT : String(curveRaw.quoteMint);
+
+  /* A STOCK-QUOTED CURVE PAYS IN THE STOCK. The ticket is re-denominated in the quote's
+     raw units when three things hold at once: the caller supplied that mint's facts and
+     they validate; the mint is the one the curve actually names; and the mint is on the
+     operator's allowlist. Any one missing leaves the SOL ticket standing, so the plan is
+     still sized and `quote_not_sol` says by name why the curve is refused. A quote that
+     applies overrides `ticketLamports`/`ticketSol` — the plan below and every gate under
+     it then read raw quote units where they say lamports; the verdict's `quote` block
+     says which. */
+  const quoteAllowlist = Array.isArray(cfg.quoteMintAllowlist)
+    ? cfg.quoteMintAllowlist.filter(isStr).map((m) => m.trim()) : [];
+  let quoteFacts = null; let quoteError = null;
+  if (quote !== null && quote !== undefined) {
+    try { quoteFacts = quoteTicketFor(quote); }
+    catch (error) { quoteError = error.message; }
+  }
+  const quoteTicket = quoteFacts !== null && curveQuote !== SOL_QUOTE_MINT
+    && quoteFacts.mint === curveQuote && quoteAllowlist.includes(curveQuote) ? quoteFacts : null;
+  if (quoteTicket) { ticketLamports = quoteTicket.ticketRaw; ticketSol = quoteTicket.ticketUnits; ticketError = null; }
 
   let state = null; let curveError = null;
   try { state = curve === null ? null : (curve.k !== undefined ? curve : snipeCurveState(curve)); }
@@ -937,7 +1091,8 @@ export function snipeContract({
     /* The DECODED curve as handed in, beside the arithmetic state derived from it.
        `snipeCurveState` keeps the numbers; the quote mint is a fact about the coin, not a
        number, and `quote_not_sol` needs it. */
-    curveRaw: isPlainObject(curve) ? curve : null,
+    curveRaw,
+    curveQuote, quoteAllowlist, quoteFacts, quoteError, quoteTicket,
     /* The settled result of the lane's metadata read — see the `no_socials` gate for why
        it arrives as a fact rather than being awaited here. */
     socials: isPlainObject(socials) ? socials : null,
@@ -988,6 +1143,17 @@ function frozenVerdict(ok, gate, detail, steps, ctx) {
       roundTripLossPct: ctx.plan?.roundTripLossPct ?? null,
       halvings: ctx.plan?.halvings ?? null,
       launchSharePct: ctx.launchSharePct,
+      /* WHAT THE TICKET ABOVE IS DENOMINATED IN. `curveMint` is the curve's own word (SOL
+         when the layout predates quote_mint); `mint` is what the ticket was sized in. The
+         two differ exactly when a non-SOL curve was refused on the SOL ticket. */
+      quote: Object.freeze(ctx.quoteTicket ? {
+        curveMint: ctx.curveQuote, mint: ctx.quoteTicket.mint, symbol: ctx.quoteTicket.symbol,
+        decimals: ctx.quoteTicket.decimals, tokenProgram: ctx.quoteTicket.tokenProgram,
+        ticketRaw: ctx.quoteTicket.ticketRaw, isSol: false,
+      } : {
+        curveMint: ctx.curveQuote, mint: SOL_QUOTE_MINT, symbol: "SOL", decimals: 9,
+        tokenProgram: TOKEN_PROGRAM, ticketRaw: ctx.ticketLamports, isSol: true,
+      }),
       measured: Object.freeze({ ...ctx.trace.measured }),
       instruction: ctx.trace.instruction,
       feeBudget: ctx.trace.feeBudget,

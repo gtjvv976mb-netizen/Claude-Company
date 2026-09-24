@@ -223,7 +223,9 @@ console.log("\nthe command itself");
 {
   ok("--limit is validated", threw(() => parseArgs(["--limit", "0"])) !== null);
   ok("an unknown flag is refused rather than ignored", threw(() => parseArgs(["--wat"])) !== null);
-  ok("flags parse", JSON.stringify(parseArgs(["--json", "--limit", "5"])) === JSON.stringify({ file: null, limit: 5, json: true }));
+  ok("flags parse", JSON.stringify(parseArgs(["--json", "--limit", "5"])) === JSON.stringify({ file: null, limit: 5, json: true, quote: null }));
+  ok("--quote names the card to print",
+    parseArgs(["--quote", "Xsv9hRk1z5ystj9MhnA7Lq4vjSsLwzL2nxrwmwtD3re"]).quote === "Xsv9hRk1z5ystj9MhnA7Lq4vjSsLwzL2nxrwmwtD3re");
   ok("the default book is derived from STATE_DB",
     defaultBookPath({ STATE_DB: "/s/db.sqlite" }) === "/s/db.sqlite.shadow.jsonl");
 

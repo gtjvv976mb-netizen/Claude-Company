@@ -43,8 +43,11 @@ constraints, not documentation.
    executor. It requires a dedicated burner, wallet acknowledgement, two independent
    RPCs, a durable transaction journal, instruction-level validation, simulation, and
    immutable canary caps. `EXECUTE=1` alone is not an activation procedure.
-4. **The browser signer is closed too.** Signer and swap code do not ship in the page, and
-   the old hosted RPC relay is retired. Legacy browser burners expose recovery only.
+4. **The hosted pages ship no signer.** Signer and swap code do not ship in any page this
+   service serves, and the old hosted RPC relay is retired; legacy browser burners expose
+   recovery only. The one browser path is the user-built HAWK-AI extension (`extension/`):
+   it runs in the user's own browser, holds no key, and asks the user's own Phantom for
+   every signature. The hosted desk cannot reach it, arm it, or see it.
 5. **Model credit is a readiness dependency.** A reachable HTTP server is not a working
    desk when Anthropic credits are exhausted. `/api/heartbeat` exposes it as `BLOCKED`
    until a successful paid seat at least five minutes after the last credit failure proves

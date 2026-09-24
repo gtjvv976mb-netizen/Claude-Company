@@ -1,0 +1,59 @@
+{
+  "manifest_version": 3,
+  "name": "HAWK-AI for Phantom — Claude Company",
+  "short_name": "HAWK-AI",
+  "version": "0.1.0",
+  "description": "The Claude Company launch sniper, in your browser. It watches pump.fun, runs every launch through the same entry contract as WALL-ST-E, and asks your Phantom to sign each buy and each sell. It never holds a key.",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "32": "icons/hawk-32.png",
+    "128": "icons/hawk-128.png",
+    "512": "icons/hawk-512.png"
+  },
+  "action": {
+    "default_title": "HAWK-AI",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "32": "icons/hawk-32.png",
+      "128": "icons/hawk-128.png"
+    }
+  },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "storage",
+    "alarms",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://*/*",
+    "wss://*/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://claudedotcompany.com/hawk*",
+        "https://www.claudedotcompany.com/hawk*",
+        "http://localhost:4949/hawk*",
+        "http://127.0.0.1:4949/hawk*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["injected.js"],
+      "matches": [
+        "https://claudedotcompany.com/*",
+        "https://www.claudedotcompany.com/*",
+        "http://localhost:4949/*",
+        "http://127.0.0.1:4949/*"
+      ]
+    }
+  ]
+}

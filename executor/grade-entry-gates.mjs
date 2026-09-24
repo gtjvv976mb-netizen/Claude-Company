@@ -50,16 +50,18 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { readShadowRows, shadowBookPath } from "./shadow-sink.mjs";
 import {
-  snipeScorecard, outcomeKnown, SNIPE_PROXIES,
+  snipeScorecard, outcomeKnown, SNIPE_PROXIES, quoteMintsOf,
   PROMOTION_PRECISION_BAR, PROMOTION_MIN_ROWS, PROMOTION_MIN_FLAGGED,
 } from "./snipe-shadow.mjs";
+import { SOL_QUOTE_MINT } from "./snipe-entry.mjs";
 
 export function parseArgs(argv = []) {
-  const out = { file: null, limit: 0, json: false };
+  const out = { file: null, limit: 0, json: false, quote: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--json") out.json = true;
     else if (a === "--file") { out.file = argv[++i] ?? null; }
+    else if (a === "--quote") { out.quote = argv[++i] ?? null; if (!out.quote) throw new Error("--quote needs a mint"); }
     else if (a === "--limit") {
       const n = Number(argv[++i]);
       if (!Number.isInteger(n) || n <= 0) throw new Error("--limit must be a positive integer");
@@ -83,7 +85,7 @@ const pct = (v) => (v == null ? "  —  " : `${(v * 100).toFixed(1)}%`);
  * The report, as text. Pure — it takes the scorecard and returns lines — so the shape of
  * what the owner reads is testable without a disk, an RPC or a wallet.
  */
-export function formatReport({ scorecard, read, bookPath }) {
+export function formatReport({ scorecard, read, bookPath, scorecardByQuote = null }) {
   const L = [];
   L.push("");
   L.push("HAWK-AI — grading the two entry rulers against the shadow book");
@@ -91,6 +93,14 @@ export function formatReport({ scorecard, read, bookPath }) {
   L.push(`book        ${bookPath}`);
   L.push(`rows        ${read.total} retained across ${read.files} file(s)` +
     (read.malformed ? `, ${read.malformed} unparseable line(s) skipped` : ""));
+  /* ONE BLOCK PER QUOTE MINT, SOL first. A GLDx-quoted launch and a SOL-quoted one are
+     different populations; the SOL block below is exactly what this report always was. */
+  const others = scorecardByQuote
+    ? Object.entries(scorecardByQuote).filter(([q]) => q !== (scorecard.quoteMint ?? SOL_QUOTE_MINT))
+    : [];
+  const excluded = Object.entries(scorecard.excludedByQuote ?? {});
+  L.push(`quote       ${scorecard.quoteMint && scorecard.quoteMint !== SOL_QUOTE_MINT ? scorecard.quoteMint : "SOL"}` +
+    (excluded.length ? `   (${excluded.map(([q, n]) => `${n} judged row${n === 1 ? "" : "s"} in ${q} graded separately below`).join("; ")})` : ""));
   L.push(`judged      ${scorecard.judged} rows have a known outcome`);
   L.push(`positives   ${scorecard.positives} of those are the positive class`);
   L.push(`            (${scorecard.positiveClass})`);
@@ -141,6 +151,15 @@ export function formatReport({ scorecard, read, bookPath }) {
     L.push("a different signal entirely or not trading this book at all — not a faster feed,");
     L.push("and not another exit ladder.");
   }
+  for (const [quote, card] of others) {
+    L.push("");
+    L.push(`── quote ${quote} ${"─".repeat(Math.max(0, 54 - quote.length))}`);
+    L.push(`judged      ${card.judged}   positives ${card.positives}`);
+    for (const [name, p] of Object.entries(card.proxies)) {
+      L.push(`   ${name}: measured ${p.n}, flagged ${p.flagged} (true ${p.tp} / false ${p.fp}), missed ${p.fn}, ` +
+        `precision ${pct(p.precision)}, recall ${pct(p.recall)} — ${p.promotable ? "PROMOTABLE" : "not promotable"}: ${p.why}`);
+    }
+  }
   return L.join("\n");
 }
 
@@ -149,7 +168,7 @@ export async function main(argv = process.argv.slice(2), env = process.env, out 
   try { args = parseArgs(argv); }
   catch (e) { out(`grade-entry-gates: ${e.message}`); return 2; }
   if (args.help) {
-    out("usage: node grade-entry-gates.mjs [--file PATH] [--limit N] [--json]");
+    out("usage: node grade-entry-gates.mjs [--file PATH] [--limit N] [--quote MINT] [--json]");
     return 0;
   }
 
@@ -165,12 +184,13 @@ export async function main(argv = process.argv.slice(2), env = process.env, out 
     return 1;
   }
 
-  const scorecard = snipeScorecard(read.rows);
+  const scorecardByQuote = Object.fromEntries(quoteMintsOf(read.rows).map((q) => [q, snipeScorecard(read.rows, { quoteMint: q })]));
+  const scorecard = args.quote ? snipeScorecard(read.rows, { quoteMint: args.quote }) : scorecardByQuote[SOL_QUOTE_MINT];
   if (args.json) {
-    out(JSON.stringify({ bookPath, read: { total: read.total, malformed: read.malformed, files: read.files }, scorecard }, null, 2));
+    out(JSON.stringify({ bookPath, read: { total: read.total, malformed: read.malformed, files: read.files }, scorecard, scorecardByQuote }, null, 2));
     return 0;
   }
-  out(formatReport({ scorecard, read, bookPath }));
+  out(formatReport({ scorecard, read, bookPath, scorecardByQuote: args.quote ? null : scorecardByQuote }));
   return 0;
 }
 

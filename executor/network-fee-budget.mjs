@@ -115,10 +115,16 @@ export function assertNetworkFeeBudget({
   const networkFees = signatureFee + priorityFee;
   if (networkFees > cfg.maxNetworkFeeLamports)
     throw new Error(`non-rent network fees ${networkFees} lamports exceed cap ${cfg.maxNetworkFeeLamports}`);
-  const feeBasis = BigInt(String(feeBasisLamports));
+  /* A NULL BASIS MEANS "ABSOLUTE CAPS ONLY". The browser lane's stock-quoted entries pay
+     their network fees in lamports against a basis that is in the quote token's raw units
+     (GLDx at eight decimals, say), and a percentage of GLDx expressed in lamports is not a
+     number. An explicit `null` — never undefined, which still fails below as it always
+     did — says so; the absolute limbs above and below bind exactly as before. */
+  const basisKnown = feeBasisLamports !== null;
+  const feeBasis = basisKnown ? BigInt(String(feeBasisLamports)) : null;
   const maxNetworkFeePct = Number(cfg.maxNetworkFeePct ?? 10);
-  if (feeBasis <= 0n || !Number.isFinite(maxNetworkFeePct) || maxNetworkFeePct < 0 ||
-      BigInt(Math.ceil(networkFees)) * 10_000n > feeBasis * BigInt(Math.floor(maxNetworkFeePct * 100)))
+  if (basisKnown && (feeBasis <= 0n || !Number.isFinite(maxNetworkFeePct) || maxNetworkFeePct < 0 ||
+      BigInt(Math.ceil(networkFees)) * 10_000n > feeBasis * BigInt(Math.floor(maxNetworkFeePct * 100))))
     throw new Error(`estimated network fees exceed ${maxNetworkFeePct}% of the trade basis`);
   const maxRentLamports = cfg.maxRentLamports ?? MAX_GROSS_RENT_LAMPORTS;
   if (rentFee > maxRentLamports)
@@ -135,8 +141,11 @@ export function assertNetworkFeeBudget({
        arithmetic the gate used: the gate refuses when ceil(fees)*10_000 exceeds
        basis*floor(pct*100), so the last accepted integer is the floor of the quotient.
        Exact, BigInt, and the number a caller should size against. */
-    networkFeeCeilingLamports: (feeBasis * BigInt(Math.floor(maxNetworkFeePct * 100))) / 10_000n,
-    /* REPORT ONLY — float, for a log line. The decision above was integer. */
-    pctOfBasis: feeBasis > 0n ? (networkFees / Number(feeBasis)) * 100 : Number.POSITIVE_INFINITY,
+    networkFeeCeilingLamports: basisKnown
+      ? (feeBasis * BigInt(Math.floor(maxNetworkFeePct * 100))) / 10_000n
+      : BigInt(cfg.maxNetworkFeeLamports),
+    /* REPORT ONLY — float, for a log line. The decision above was integer. Null when the
+       basis was null: there is no percentage to report of a basis in another unit. */
+    pctOfBasis: !basisKnown ? null : feeBasis > 0n ? (networkFees / Number(feeBasis)) * 100 : Number.POSITIVE_INFINITY,
   });
 }

@@ -37,6 +37,7 @@ const PAGES = [
   { src: "tower.html",    out: "tower.html" },
   { src: "office3d.html", out: "floor.html" },
   { src: "buy.html",      out: "buy.html" },
+  { src: "hawk.html",     out: "hawk.html" },    // the browser sniper's console; the extension's content script matches /hawk
   { src: "404.html",      out: "404.html" },
 ];
 const ASSETS = [
@@ -412,6 +413,7 @@ for (const { src: name, out } of PAGES) {
     `<meta name="theme-color" content="${WEB_APP.ground}">`,
   ].join("\n"));
   html = html.replace(/href="\/tower"/g, 'href="tower.html"');
+  html = html.replace(/href="\/hawk"/g, 'href="hawk.html"');
   html = html.replace(/href="\/solana(#[\w-]*)?"/g, (_, hash) => `href="solana.html${hash || ""}"`);
   html = html.replace(/href="\/floor\/(\d+)"/g, (_, n) => `href="floor.html?floor=${n}"`);
   html = html.replace(/href="\/"(?=[ >])/g, 'href="index.html"');

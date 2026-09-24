@@ -235,6 +235,102 @@ export function auditMintAccount(account, mint, { allowToken2022 = true } = {}) 
   };
 }
 
+/* Describe a QUOTE mint: the token the wallet PAYS with on a pump.fun curve that is not
+ * quoted in SOL (an xStock such as GLDx). This never refuses a mint; it reports what the
+ * bytes say. It MUST NEVER be used on a base mint. The kill set for a base mint lives in
+ * auditMintAccount and nowhere else, and nothing here may be read as an acceptance.
+ *
+ * The two are different questions. A base mint is a position: the desk HOLDS it between
+ * entry and exit, so any extension that can tax, block, redirect, freeze, pause or
+ * re-denominate a transfer is a way to lose the exit, and the audit kills on it. A quote
+ * mint is what the desk hands over and takes back through the curve. Every live xStock
+ * carries a PermanentDelegate (the issuer can claw back), a TransferHook (pointed at the
+ * zero program today, re-pointable tomorrow), a Pausable switch (the issuer can halt
+ * every transfer), a live freeze authority and, on SPYx, a ScaledUiAmount multiplier.
+ * The audit refuses all of that on sight, so a curve quoted in an xStock could never be
+ * traded through it. Those extensions still matter here: a paused quote mint fails the
+ * buy and, worse, the sell, and a hook that stops being the zero program would run
+ * third-party code on every fill. So each one is described plainly, and the caller
+ * decides (skip while paused, refuse an unexpected hook program, log the delegate)
+ * instead of inheriting a blanket refusal that was written for a different risk.
+ *
+ * Throws only when the account is not a mint at all: an owner that is neither token
+ * program, data shorter than the base layout, or a Token-2022 TLV that will not parse
+ * (parseMintExtensions fails closed). A value shorter than the field being read is
+ * reported as null rather than thrown on; the program itself never writes one.
+ *
+ * Value layouts read here (spl-token-2022 `extension/*`):
+ *   Pausable (26)           authority[0..32], paused u8 at 32
+ *   TransferHook (14)       authority[0..32], program_id[32..64]; zero key = no hook
+ *   PermanentDelegate (12)  delegate[0..32]
+ *   DefaultAccountState (6) u8: 0 uninitialized, 1 initialized, 2 frozen
+ *   ScaledUiAmount (25)     authority[0..32], multiplier f64 LE [32..40], then the
+ *                           scheduled new_multiplier_effective_timestamp and new_multiplier
+ *   TokenMetadata (19)      update_authority[0..32], mint[32..64], then borsh strings
+ *                           name, symbol, uri (u32 LE length + utf8 each)
+ */
+const ZERO_KEY = PublicKey.default.toBase58();
+
+function keyAt(value, offset) {
+  if (value.length < offset + 32) return null;
+  return new PublicKey(value.subarray(offset, offset + 32)).toBase58();
+}
+
+/* One borsh string at `offset`: [text | null, offset of the next field]. */
+function borshString(value, offset) {
+  if (value.length < offset + 4) return [null, value.length];
+  const end = offset + 4 + value.readUInt32LE(offset);
+  if (end > value.length) return [null, value.length];
+  return [value.toString("utf8", offset + 4, end), end];
+}
+
+export function describeMint(account, mint) {
+  if (!account) throw new Error(`mint account is unavailable: ${mint}`);
+  const owner = ownerOf(account);
+  const data = accountBytes(account);
+  if (owner !== TOKEN_PROGRAM && owner !== TOKEN_2022_PROGRAM)
+    throw new Error(`mint ${mint} is not owned by a token program`);
+  if (!data || data.length < BASE_MINT_LENGTH)
+    throw new Error(`mint ${mint} does not have the classic SPL mint layout`);
+  let extensions = [];
+  if (owner === TOKEN_2022_PROGRAM) {
+    try { extensions = parseMintExtensions(data); }
+    catch (error) { throw new Error(`mint ${mint}: ${error.message}`); }
+  }
+  const valueOf = (type) => extensions.find((ext) => ext.type === type)?.value ?? null;
+  const pausable = valueOf(26);
+  const hook = valueOf(14);
+  const delegate = valueOf(12);
+  const defaultState = valueOf(6);
+  const scaled = valueOf(25);
+  const metadata = valueOf(19);
+  const hookProgram = hook ? keyAt(hook, 32) : null;
+  let metadataName = null;
+  let metadataSymbol = null;
+  if (metadata) {
+    let next;
+    [metadataName, next] = borshString(metadata, 64);
+    [metadataSymbol] = borshString(metadata, next);
+  }
+  return Object.freeze({
+    mint,
+    program: owner,
+    decimals: data[44],
+    initialized: data[45] === 1,
+    mintAuthority: optionKey(data, 0, "mint authority"),
+    freezeAuthority: optionKey(data, 46, "freeze authority"),
+    extensionNames: extensions.map((ext) => ext.name),
+    paused: pausable ? pausable[32] === 1 : false,
+    pausableAuthority: pausable ? keyAt(pausable, 0) : null,
+    transferHookProgram: hookProgram === ZERO_KEY ? null : hookProgram,
+    permanentDelegate: delegate ? keyAt(delegate, 0) : null,
+    defaultAccountState: defaultState?.length ? defaultState[0] : null,
+    scaledUiMultiplier: scaled && scaled.length >= 40 ? scaled.readDoubleLE(32) : null,
+    metadataName,
+    metadataSymbol,
+  });
+}
+
 /** Fields two RPC views must agree on. `dataHash` last so the first mismatch is legible. */
 export const MINT_CONSENSUS_FIELDS = Object.freeze([
   "owner", "dataLength", "initialized", "decimals", "mintAuthority", "freezeAuthority",
