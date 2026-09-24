@@ -2,15 +2,16 @@
 
 Copy for the X page, the launch, the agents, the memecoin and the site. Paste-ready text sits in the grey blocks; anything in `[square brackets]` is a slot to fill.
 
+- **Website.** `https://catintelligenceagency.com`. CoinMarketCat's page is at `/coinmarketcat/` and its console at `/console/`.
 - **Ticker.** `$CIA` is a working placeholder. The owner may change it; if so, replace it everywhere in this file.
 - **OWNER TO CONFIRM** marks a decision that has not been made yet. Do not publish those lines until it has.
-- **Grumpy Cat** is a registered trademark. Read section 7 before anything with that name goes public. The owner's names stay the defaults throughout.
+- **Names to check.** "Grumpy Cat" is a registered trademark, and "Popcat" is also the name of an existing memecoin. Read section 7 before either name goes public. The owner's names stay the defaults throughout.
 - **How the counts work.** Every X post and bio below is plain ASCII, so the count printed under it is what X counts. X counts any link as 23 characters, however long it is. A post with a contract-address slot `[CA]` is counted as if it held a full 44-character Solana address.
 
 **The rules this copy follows. Keep to them in every new post:**
 
 1. No price talk, no talk of returns or multiples, no space-travel metaphors, no certainty words. No invented numbers, holders, partners or dates.
-2. Crying Cat, Grumpy Cat and CashCat are **characters**. Their cases are posts the agency writes from public data. They are not bots, AI or a scanner, so never write "detected", "flagged" or "our tool".
+2. Crying Cat, Grumpy Cat, CashCat and Popcat are **characters**. Their cases are posts the agency writes from public data. They are not bots, AI or a scanner (Popcat's radar is a prop), so never write "detected", "flagged" or "our tool".
 3. CoinMarketCat is **real software** and is described exactly as it is, including the losing record it learned from.
 4. `$CIA` is a meme and nothing more. It unlocks nothing and nobody is promised anything.
 
@@ -39,44 +40,47 @@ Count: 30 / 50. Use this one only after the ticker is final.
 
 **Option 1 (recommended)**
 ```text
-Every agent is a cat built for crypto. We read the chain so you don't get played: rugs, fake hype, whales, receipts on-chain. Not a government agency. NFA.
+Every agent is a cat built for crypto. We read the chain so you don't get played: rugs, fake hype, whales, copycat cat coins. Not a government agency. NFA.
 ```
 Count: 155 / 160
 
 **Option 2**
 ```text
-Crying Cat takes the rugs. Grumpy Cat takes the fake hype. CashCat follows the whales. Agent 001 is real software. Receipts on-chain. NFA.
+Crying Cat: rugs. Grumpy Cat: fake hype. CashCat: whales. Popcat: new cat coins. Agent 001 is real software. Receipts on-chain. NFA.
 ```
-Count: 138 / 160
+Count: 132 / 160
 
 **Option 3**
 ```text
-Cats built for crypto, investigating the market in public: rugs, bundles, whales, paid KOLs. Every case links on-chain evidence. Not that CIA. NFA.
+Cats built for crypto, investigating the market in public: rugs, bundles, whales, copycat cat coins. Every case links on-chain evidence. Not that CIA. NFA.
 ```
-Count: 147 / 160
+Count: 155 / 160
 
-Option 1 is the recommendation. It says what the agency is and has a hook, and it carries both disclaimers without sounding like a lawyer wrote it. Option 2 names Grumpy Cat, so it inherits the section 7 risk.
+Option 1 is the recommendation. It says what the agency is and has a hook, and it carries both disclaimers without sounding like a lawyer wrote it. Option 2 names Grumpy Cat and Popcat, so it inherits both risks in section 7.
 
 ### Header image (1500 x 500)
 
-**Scene.** A dark briefing room lit by one lamp. The Director sits at the head of the table in sunglasses, indoors. Along the table:
-- CoinMarketCat with a crosshair reflected in one eye.
+**Scene.** The agents are pixel kittens in black suits, standing in a row on a 2D pixel floor at night. The Director stands in the middle, in sunglasses. Around it:
+- CoinMarketCat with a crosshair glinting in one eye.
 - Crying Cat, tears on a case file stamped `RUGGED`.
-- Grumpy Cat pushing a file stamped `NOT IMPRESSED` off the edge of the table, because cats.
+- Grumpy Cat pushing a file stamped `NOT IMPRESSED` off the edge of the frame, because cats.
 - CashCat holding a magnifying glass over a wallet address.
+- Popcat with its mouth popped wide open in a round O, holding up a radar whose screen is the only hot pink (`#ff4fd8`) in the frame.
 
 Behind them hangs a cork board of wallet addresses joined by red string.
 
 **Text on the image:** `CAT INTELLIGENCE AGENCY — WE READ THE CHAIN.`
 
-**Art rules.** Original artwork only. No seals, eagles, shields, stars or badges, and nothing that reads as a government emblem. Grumpy Cat must not resemble the real Grumpy Cat (see section 7).
+**Art rules.**
+- Original artwork only.
+- No seals, eagles, shields, stars or badges, and nothing that reads as a government emblem.
+- Grumpy Cat must not resemble the real Grumpy Cat, and Popcat must not trace the photo behind the Popcat meme (see section 7).
 
 ### Website field
 
 ```text
-https://gtjvv976mb-netizen.github.io/coinmarketcat/
+https://catintelligenceagency.com
 ```
-This is the address until the agency has its own domain.
 
 ### Handle ideas (X allows 15 characters; none of these has been checked or claimed)
 
@@ -91,11 +95,11 @@ Keep "CIA" out of the handle (see section 7).
 ```text
 Cat Intelligence Agency.
 
-Every agent is a cat built for crypto. We investigate rugs, fake hype and whales in public, and every case links its on-chain evidence.
+Every agent is a cat built for crypto. We investigate rugs, fake hype, whales and copycat cat coins in public, every case with on-chain evidence.
 
-Findings are our opinion on public data. Not financial advice. We will never DM you.
+Findings are our opinion on public data, not advice. We will never DM you.
 
-https://gtjvv976mb-netizen.github.io/coinmarketcat/
+https://catintelligenceagency.com
 ```
 Count: 272 / 280
 
@@ -109,41 +113,31 @@ On launch day, pin the launch-day post from section 5 in its place. The real con
 ```text
 gm. The Cat Intelligence Agency is open.
 
-Every agent is a cat built for crypto. The Director runs the desk; the cats work the market in public: rugs, fake hype, whales, paid KOLs. Every case links its on-chain evidence.
+Every agent is a cat built for crypto. The Director runs the desk; the cats work the market in public: rugs, fake hype, whales, paid KOLs, copycat cat coins. Every case links its on-chain evidence.
 
 Not that CIA. Meet the agents. 1/8
 ```
-Count: 256 / 280
+Count: 275 / 280
 
 **2/8**
 ```text
-Agent 001: COINMARKETCAT, the sniper. The one cat that is real software.
+Agent 001: COINMARKETCAT, the sniper. Real software: a Chrome extension that snipes new Solana launches from your Phantom wallet, inside your limits.
 
-A Chrome extension that snipes new Solana launches from your Phantom wallet, inside limits you set: take-profit, SOL per trade, daily budget, and which stock-paired tokens (GLDx, TSLAx, SPYx) to hunt. 2/8
+Starts in Observe. Waits 10s, buys only if still at or above entry. Learned from a losing record: 58 round trips, -1.58 SOL. 2/8
 ```
-Count: 278 / 280
+Count: 279 / 280
 
 **3/8**
-```text
-It starts in Observe and trades nothing until you arm it.
-
-Its rule: wait 10s, buy only if the launch is still at or above entry, take profit at 1.5x by default.
-
-The rule comes from a losing record: 58 round trips, 10 up, 48 down, -1.58 SOL. Printed next to the arm switch. 3/8
-```
-Count: 278 / 280
-
-**4/8**
 ```text
 Agent 002: CRYING CAT. Beat: ruggers.
 
 Liquidity pulled. Devs who dump on their own holders. Mint authority used after launch. Crying Cat lays out the transactions, the wallets and the timestamps. Then it cries.
 
-It cries so you don't have to. 4/8
+It cries so you don't have to. 3/8
 ```
 Count: 247 / 280
 
-**5/8**
+**4/8**
 ```text
 Agent 003: GRUMPY CAT. Beat: fake hype.
 
@@ -151,11 +145,11 @@ Bundled launches. Wash-traded volume. Bot swarms in the replies. Bought follower
 
 Grumpy Cat has seen it all before, and brings the links to prove it.
 
-Not impressed. 5/8
+Not impressed. 4/8
 ```
 Count: 258 / 280
 
-**6/8**
+**5/8**
 ```text
 Agent 004: CASHCAT. Beat: whales and KOLs.
 
@@ -163,9 +157,19 @@ Big wallets. Who bought before the call. Paid promos that forgot to say so. Infl
 
 CashCat puts the buys, the call and the sells side by side, timestamps and all.
 
-Follow the wallet. 6/8
+Follow the wallet. 5/8
 ```
 Count: 271 / 280
+
+**6/8**
+```text
+Agent 005: POPCAT. Beat: new cat coins.
+
+The cat-coin meta never sleeps. Popcat checks the new ones as they launch: real community, or copycat, clone or honeypot? Who deployed it, what it copies, whether anyone can sell it.
+
+Real cat or copycat? 6/8
+```
+Count: 249 / 280
 
 **7/8** (the second paragraph is OWNER TO CONFIRM)
 ```text
@@ -195,7 +199,7 @@ House rules: every case links on-chain evidence. Findings are our opinion on pub
 
 Follow, notifications on. Got a lead? Quote-post it with the tx link and tag us. NFA.
 
-https://gtjvv976mb-netizen.github.io/coinmarketcat/ 8/8
+https://catintelligenceagency.com 8/8
 ```
 Count: 277 / 280
 
@@ -212,7 +216,7 @@ All timestamps are UTC. Keep only the evidence lines that apply to the case, and
 ### THE DIRECTOR (mascot and logo)
 
 - **Role:** runs the agency, speaks for the main account and signs every correction. The logo.
-- **Look:** a secret-agent cat in a dark suit and sunglasses, with an earpiece. Original art, with no seals, eagles, shields or badges.
+- **Look:** a secret-agent pixel kitten in a black suit and sunglasses, with an earpiece. Original art, with no seals, eagles, shields or badges.
 - **Lines:** "Case open." / "Case closed." / "The chain remembers."
 
 **Correction template.** Post it from the same account, quote-posting the original case. If the case was pinned, pin the correction.
@@ -254,7 +258,7 @@ Shadow book (JSONL): [link] (2/3)
 One window is not a track record. This lane is unmeasured; the lane it learned from lost money. Not advice.
 
 Ten seconds. Then maybe.
-[link to CoinMarketCat's page] (3/3)
+https://catintelligenceagency.com/coinmarketcat/ (3/3)
 ```
 
 ### AGENT 002: CRYING CAT
@@ -354,6 +358,44 @@ Our read: [one or two sentences]
 This is our opinion on public data, not an accusation of a crime. Wrong? Reply with a tx. Corrections go out as loud as this. (3/3)
 ```
 
+### AGENT 005: POPCAT
+
+- **Codename:** POPCAT (see section 7: an existing memecoin has the same name)
+- **What it is:** a character the agency posts as on X. Its cases are posts the agency writes from public data. It is not software and not a bot. The radar it carries is a prop, not a scanner.
+- **Look:** a pixel kitten with its mouth popped wide open in a round O, holding a radar scanner with a hot-pink screen. Accent colour `#ff4fd8`.
+- **Beat:** emerging cat memecoins. New cat-themed tokens as they launch: which ones look like real communities, and which are copycats, clones and honeypots.
+- **Catchphrase:** "Real cat or copycat?"
+- **Bio:** Popcat checks the new cat coins as they launch and asks every one of them the same question: real cat or copycat? It lays out who deployed each coin, what it copies and whether anyone can sell it, and when it finds nothing wrong it says "no red flags found", never "buy".
+
+**Case template.** The verdict is one of COPYCAT, CLONE, HONEYPOT or NO RED FLAGS FOUND. The agency never posts "real community" or "safe" as a verdict: finding no red flags is not an endorsement.
+- A **copycat** reuses an older coin's name, ticker or art.
+- A **clone** copies its site, roadmap or socials.
+- A **honeypot** is a coin people can buy but not sell.
+```text
+POPCAT | CASE POP-[001] | CAT CHECK
+
+Token: [name] ($[TICKER])
+Mint: [explorer link]
+Launched: [YYYY-MM-DD HH:MM] UTC
+Verdict: [COPYCAT / CLONE / HONEYPOT / NO RED FLAGS FOUND]
+
+Real cat or copycat? (1/3)
+```
+```text
+Evidence (UTC):
+Original: [explorer link], launched [YYYY-MM-DD]
+Same name/art: [archive link]
+Failed sells: [tx link]
+Mint authority: [revoked / live] | Freeze: [revoked / live]
+Token-2022 extras: [none / transfer fee / transfer hook / permanent delegate / pausable]
+Deployer: [wallet link] (2/3)
+```
+```text
+Our read: [one or two sentences]
+
+"No red flags found" is not an endorsement or a buy signal. Opinion on public data, not an accusation of a crime. Wrong? Reply with a tx. (3/3)
+```
+
 ---
 
 ## 4. INVESTIGATION HOUSE RULES (to publish)
@@ -362,13 +404,13 @@ This is our opinion on public data, not an accusation of a crime. Wrong? Reply w
 >
 > **1. Every case links its evidence.** Anything on-chain links the transactions and wallets on a public explorer, with UTC timestamps. Anything off-chain (posts, sites, roadmaps) links an archived copy. No link, no case.
 >
-> **2. Opinion, not accusation.** Every finding is the agency's opinion on public data. We say what wallets did. We do not accuse anyone of a crime, and we do not claim to know what anyone intended.
+> **2. Opinion, not accusation.** Every finding is the agency's opinion on public data. We say what wallets did. We do not accuse anyone of a crime, and we do not claim to know what anyone intended. When we find nothing wrong, we say "no red flags found", which is not an endorsement or a buy signal.
 >
 > **3. No doxxing.** We name wallets and public accounts, never private individuals. We post no real names, faces, addresses, workplaces or families. We never tie a wallet to a real person unless that person made the link public themselves, and we blur personal details in screenshots.
 >
 > **4. Corrections as loud as the case.** When we get it wrong, the correction goes out from the same account in the same format, quoting the original. If the case was pinned, the correction is pinned.
 >
-> Crying Cat, Grumpy Cat and CashCat are characters. Their cases are posts the agency writes from public data, not the output of a bot or a tool.
+> Crying Cat, Grumpy Cat, CashCat and Popcat are characters. Their cases are posts the agency writes from public data, not the output of a bot or a tool.
 
 **Two more rules worth publishing (OWNER TO CONFIRM):**
 
@@ -376,7 +418,7 @@ This is our opinion on public data, not an accusation of a crime. Wrong? Reply w
 >
 > **6. Not for sale.** We take no payment to open, drop or soften a case, and we run no paid promos.
 
-Rule 6 matters more than it looks. CashCat investigates paid promos, so the agency has to pass its own test.
+Rule 6 matters more than it looks. CashCat investigates paid promos, and Popcat's "no red flags found" is exactly the line a paid shill would want. The agency has to pass its own test.
 
 ---
 
@@ -390,29 +432,29 @@ Rule 6 matters more than it looks. CashCat investigates paid promos, so the agen
 | Image | The Director |
 | Launch mechanics | **OWNER TO CONFIRM:** a fair launch on pump.fun, with no presale and no team allocation. |
 
-**The dev buy.** If the creator wallet buys at creation (a "dev buy"), say so in the launch-day post, with the amount and the wallet. Crying Cat investigates devs who dump, so the agency's own coin has to pass the agency's own house rules.
+**The dev buy.** If the creator wallet buys at creation (a "dev buy"), say so in the launch-day post, with the amount and the wallet. Crying Cat investigates devs who dump and Popcat checks every new cat coin, so the agency's own coin has to pass the agency's own house rules.
 
 ### pump.fun description (limit 500)
 
 **Recommended.** Use it only if the fair-launch terms are confirmed; otherwise use the alternate below.
 ```text
-Cat Intelligence Agency: every agent is a cat built for crypto. On X, the agency investigates the market in public (rugs, fake hype, whales), and every case links its on-chain evidence. Agent 001, CoinMarketCat, is a real Chrome extension. $CIA is the agency's memecoin: a meme with no intrinsic value and no expectation of profit. Fair launch, no presale, no team allocation. The only real contract address is the one posted on the agency's X account. We will never DM you. Not financial advice.
+Cat Intelligence Agency: every agent is a cat built for crypto. On X, it investigates the market in public (rugs, fake hype, whales, copycat cat coins), every case with on-chain evidence. Agent 001, CoinMarketCat, is a real Chrome extension. $CIA is the agency's memecoin: a meme with no intrinsic value and no expectation of profit. Fair launch, no presale, no team allocation. The only real contract address is the one posted on the agency's X account. We will never DM you. Not financial advice.
 ```
-Count: 496 / 500
+Count: 498 / 500
 
 **Alternate, without the launch terms**
 ```text
-Cat Intelligence Agency: every agent is a cat built for crypto. On X, the agency investigates the market in public (rugs, fake hype, whales), and every case links its on-chain evidence. Agent 001, CoinMarketCat, is a real Chrome extension. $CIA is the agency's memecoin: a meme with no intrinsic value and no expectation of profit. The only real contract address is the one posted on the agency's X account. We will never DM you. Not financial advice.
+Cat Intelligence Agency: every agent is a cat built for crypto. On X, it investigates the market in public (rugs, fake hype, whales, copycat cat coins), every case with on-chain evidence. Agent 001, CoinMarketCat, is a real Chrome extension. $CIA is the agency's memecoin: a meme with no intrinsic value and no expectation of profit. The only real contract address is the one posted on the agency's X account. We will never DM you. Not financial advice.
 ```
-Count: 451 / 500
+Count: 453 / 500
 
-Neither version names the individual cats. That keeps "Grumpy Cat" off the coin listing, which is where section 7's risk is sharpest.
+Neither version names the individual cats. That keeps "Grumpy Cat" and "Popcat" off the coin listing, which is where section 7's risks are sharpest.
 
 ### Social fields on pump.fun
 
 | Field | Value |
 |---|---|
-| Website | `https://gtjvv976mb-netizen.github.io/coinmarketcat/` |
+| Website | `https://catintelligenceagency.com` |
 | X (Twitter) | `https://x.com/[handle]`: fill it in once the handle is claimed |
 | Telegram | Leave blank unless the agency actually runs a Telegram group |
 
@@ -440,7 +482,7 @@ Anyone can launch a token called Cat Intelligence Agency with the ticker $CIA. O
 
 The only real contract address is the one posted on the agency's X account. We will never DM you. Anyone who does is not us.
 
-Crying Cat has seen how this ends.
+Real cat or copycat? Check the CA.
 ```
 Count: 273 / 280
 
@@ -448,27 +490,29 @@ Count: 273 / 280
 
 ## 6. SITE COPY
 
+The site lives at `https://catintelligenceagency.com`.
+
 ### Meta description (limit 160)
 ```text
-Crypto cats investigating rugs, fake hype and whales in public, with on-chain receipts. Plus CoinMarketCat, a Solana launch sniper that trades in your limits.
+Crypto cats investigating rugs, fake hype, whales and cat-coin copycats in public, with receipts. Plus CoinMarketCat, a Solana launch sniper in your limits.
 ```
-Count: 158 / 160
+Count: 156 / 160
 
 ### Hero
 
 **Option A**
 - Headline: **We read the chain.**
-- Subline: Cat Intelligence Agency is a crew of cats built for crypto. On X, they investigate rugs, fake hype and whales in public, and every case links its on-chain evidence. Agent 001 is software you can run yourself.
+- Subline: Cat Intelligence Agency is a crew of cats built for crypto. On X, they investigate rugs, fake hype, whales and copycat cat coins in public, and every case links its on-chain evidence. Agent 001 is software you can run yourself.
 
 **Option B**
 - Headline: **Every agent is a cat. Every case has receipts.**
-- Subline: Crying Cat takes the rugs. Grumpy Cat takes the fake hype. CashCat follows the whales. And CoinMarketCat, the sniper, is a Chrome extension that trades only inside the limits you set.
+- Subline: Crying Cat takes the rugs. Grumpy Cat takes the fake hype. CashCat follows the whales. Popcat checks the new cat coins. And CoinMarketCat, the sniper, is a Chrome extension that trades only inside the limits you set.
 
 **Buttons:** `Follow the agency on X` · `Meet Agent 001`
 
 ### Agent cards
 
-**Section heading:** *Four agents. One of them is software.*
+**Section heading:** *Five agents. One of them is software.*
 
 **Section intro:** The investigators are characters: their cases are posts on the agency's X account, written from public data. The sniper is a real Chrome extension.
 
@@ -505,11 +549,18 @@ Count: 158 / 160
 - **Catchphrase:** *Follow the wallet.*
 - **Link:** `Read its cases on X`
 
+**Agent 005 · Popcat** (*new cat coins*)
+- **Type:** Character. Its cases are posts on X, not software. The radar is a prop.
+- **Beat:** Cat-themed tokens as they launch: copycats, clones and honeypots, and the ones that look like real communities.
+- **Method:** Lays out who deployed each coin, what it copies and whether anyone can sell it. When it finds nothing wrong, it says "no red flags found", which is not an endorsement.
+- **Catchphrase:** *Real cat or copycat?*
+- **Link:** `Read its cases on X`
+
 ### Memecoin section
 
 **Heading:** $CIA, the agency's memecoin.
 
-**Body:** Every agency needs a mascot with a ticker. Cat Intelligence Agency ($CIA) is ours. It's a meme. It has no intrinsic value, carries no expectation of profit, and unlocks nothing in CoinMarketCat, which works the same whether you hold it or not.
+**Body:** Every agency needs a mascot with a ticker. Cat Intelligence Agency ($CIA) is ours. It's a meme. It has no intrinsic value, carries no expectation of profit, and unlocks nothing in CoinMarketCat, which works the same whether you hold it or not. It's also a cat coin, so Popcat will check it like any other.
 
 | | |
 |---|---|
@@ -546,15 +597,15 @@ You need:
 
 The agency holds nothing of yours: no account, no deposit, no server.
 
-**Buttons:** `Get the source on GitHub` · `Read the README` · `Open the console`
+**Buttons:** `Get the source on GitHub` · `Read the README` · `Open the console` (`https://catintelligenceagency.com/console/`)
 
 ### Footer disclaimers
 
 - Cat Intelligence Agency is a meme and software project, not a government agency, and is not affiliated with the U.S. Central Intelligence Agency.
 - CoinMarketCat is not affiliated with CoinMarketCap, and is not endorsed by or connected to it. Nor is the project affiliated with Phantom, pump.fun, Jupiter or Backed (xStocks).
-- The cat characters are original artwork. The project is not affiliated with the owners of any real cat or meme.
+- The cat characters are original artwork. The project is not affiliated with the owners of any real cat or meme. The agency's Popcat character is not affiliated with the $POPCAT memecoin, and $CIA is not related to it.
 - $CIA is a memecoin with no intrinsic value and no expectation of profit.
-- Investigations are the agency's opinion on public data, not accusations of any crime.
+- Investigations are the agency's opinion on public data, not accusations of any crime. "No red flags found" is not an endorsement.
 - Nothing here is financial advice. A trading agent can lose all of the money you let it trade.
 
 ---
@@ -573,6 +624,10 @@ This file keeps "Grumpy Cat" as the default, as the owner asked. Before the agen
 
 Avoid near-misses such as "Grumpy Kitty" or "Grumpi Cat": a close imitation carries the same risk. Whatever the name, the art has to be original and must not resemble the real cat's face.
 
+### Popcat: an existing memecoin
+
+POPCAT is also the name of an existing Solana memecoin ($POPCAT), and the open-mouthed look comes from a well-known meme of a real cat, so no post, page or listing should ever imply that the agency is affiliated with that coin or that $CIA is related to it.
+
 ### Also worth a check before launch (no change made here)
 
 - **"CIA" and `$CIA`.** U.S. federal law (the Central Intelligence Agency Act) restricts using the initials "CIA", the agency's name or its seal in commercial activity in a way reasonably calculated to suggest the agency approved it. A plain parody is not that, but a coin ticker is commercial activity. Keep the disclaimers loud, never use a seal, eagle, shield or badge, and have a lawyer look before launch. The ticker is a placeholder anyway.
@@ -588,6 +643,8 @@ Avoid near-misses such as "Grumpy Kitty" or "Grumpi Cat": a close imitation carr
 
 - **The disclaimer sentence.** Every page must contain "Cat Intelligence Agency is a software project, not a government agency." The owner's new line reads "a meme and software project". Change the test's expected sentence, or keep both sentences.
 - **Banned words.** The test bans the word "CIA", and "seal", "eagle" and "badge", anywhere in `site/`. `$CIA` in the memecoin section will fail it.
-- **Agents in training.** The test expects them to be silhouettes. The three investigator cards replace them.
+- **Agents in training.** The test expects them to be silhouettes. The four investigator cards replace them.
 - **Rules already met.** The CoinMarketCat card keeps "Unmeasured in this lane", which the test requires. None of the test's hype words, user counts or quoted returns appear anywhere in this copy.
 - **No licence.** The repository has no LICENSE file, so this copy says "source on GitHub", never "open source".
+
+**Console links and DNS.** The extension's manifest lets it into the console at `https://catintelligenceagency.com/console/`. It still also allows the github.io console (`https://gtjvv976mb-netizen.github.io/coinmarketcat/console/`) until the domain's DNS points at the site. If the domain isn't live yet when this copy ships, point `Console` links at the github.io address; never at any other page.
