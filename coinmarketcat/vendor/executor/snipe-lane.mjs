@@ -219,6 +219,14 @@ export const SNIPE_LANE_DEFAULTS = Object.freeze({
      answer. src/launch-shadow.js states the discipline; snipe-shadow.mjs scores them. */
   maxCreatorSharePct: undefined,
   maxLaunchSharePct: undefined,
+  /* QUOTE MINTS THIS LANE MAY PAY IN BESIDES SOL. EMPTY on the Node lane by construction:
+     no SNIPE_ env name maps to it (the boot check below enforces env ⊆ defaults, not the
+     reverse), because the burner holds only SOL and snipe-execute.mjs reads every fill
+     and spend in lamports — README "Coins this lane cannot pay for". The browser lane,
+     whose signer is a wallet that can hold an xStock, sets it from its own config and
+     hands the contract the quote mint's facts beside it; the contract's `quote_not_sol`
+     gate admits a curve quoted in a listed mint and refuses every other, as before. */
+  quoteMintAllowlist: Object.freeze([]),
   /* Consecutive two-endpoint disagreements before blindness is treated as hostility and
      the position leaves. THREE, matching snipe-policy's confirmWindow, and for the same
      reason: it is the smallest run in which a single outlier cannot be the whole story.

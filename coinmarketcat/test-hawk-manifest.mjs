@@ -51,7 +51,30 @@ ok("and only to the console origins", (war[0]?.matches ?? []).every((m) => CONSO
 ok("the default console URL is one the content script matches", CONSOLE_URLS.includes(CONFIG_DEFAULTS.consoleUrl), CONFIG_DEFAULTS.consoleUrl);
 ok("no externally_connectable — no other site or extension may message the worker", manifest.externally_connectable === undefined);
 ok("the icons are the building's own marks, under the bot's name", ["32", "128", "512"].every((s) => manifest.icons?.[s]?.startsWith("icons/coinmarketcat-")), JSON.stringify(manifest.icons));
-ok("the description says what it never does", /never holds a key/i.test(manifest.description), manifest.description.slice(0, 80));
+/* The description used to say "It never holds a key". With the autopilot wallet that is
+   false in one mode, so the charter now says what is true in both, and may not say the
+   old sentence again. */
+ok("the description does not claim the extension never holds a key (on autopilot it holds one)", !/never holds a key|holds no key/i.test(manifest.description), manifest.description);
+ok("the description names both signers: Phantom per trade, and an autopilot wallet you fund", /Phantom per trade/i.test(manifest.description) && /autopilot wallet you fund/i.test(manifest.description), manifest.description);
+ok("the description fits Chrome's 132-character limit", manifest.description.length <= 132, `${manifest.description.length} characters`);
+
+console.log("\nTHE FIRST-RUN SETUP PAGE\n────────────────────────");
+{
+  const { ENTRIES, STATIC } = await import("./build.mjs");
+  ok("the build bundles the setup page's script", ENTRIES["welcome.js"] === "welcome/welcome.mjs", JSON.stringify(ENTRIES["welcome.js"]));
+  const statics = STATIC.map(([from, to]) => `${from} → ${to}`);
+  ok("the build copies welcome.html and welcome.css", STATIC.some(([f, t]) => f === "src/welcome/welcome.html" && t === "welcome.html") && STATIC.some(([f, t]) => f === "src/welcome/welcome.css" && t === "welcome.css"), statics.filter((x) => /welcome/.test(x)).join(", "));
+  const html = fs.readFileSync(path.join(here, "src", "welcome", "welcome.html"), "utf8");
+  ok("welcome.html loads welcome.js and welcome.css by their built names", /<script type="module" src="welcome\.js"><\/script>/.test(html) && /href="welcome\.css"/.test(html));
+  ok("welcome.html shows the cat by the bot's own icon", /src="icons\/coinmarketcat-128\.png"/.test(html) && /Cat Intelligence Agency/.test(html) && /sniper cat/.test(html));
+  ok("welcome.html loads nothing from the network (an extension page: its own files only)", !/(src|href)="(https?:)?\/\//.test(html));
+  ok("the setup page is not web-accessible: no web page can frame or open it", !(manifest.web_accessible_resources ?? []).some((w) => (w.resources ?? []).some((r) => /welcome/.test(r))));
+  ok("no permission was added for it (tabs.create of an extension page needs none)", perms.every((p) => ALLOWED_PERMISSIONS.has(p)));
+  const bg = fs.readFileSync(path.join(here, "src", "background.mjs"), "utf8");
+  const installed = bg.match(/onInstalled\.addListener\(\(details\) => \{([\s\S]*?)\n\}\);/)?.[1] ?? "";
+  ok("the worker opens the setup page from onInstalled, and only when the reason is \"install\"", /details\?\.reason === "install"/.test(installed) && /chrome\.tabs\.create\(\{ url: chrome\.runtime\.getURL\(WELCOME_PAGE\) \}\)/.test(installed) && /WELCOME_PAGE = "welcome\.html"/.test(bg), installed.trim().split("\n").filter((l) => /reason|tabs\.create/.test(l)).map((l) => l.trim()).join(" | "));
+  ok("…and never from onStartup", !/onStartup\.addListener\([^\n]*WELCOME/.test(bg));
+}
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

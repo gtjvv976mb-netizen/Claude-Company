@@ -1,14 +1,22 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
-<title>CoinMarketCat — the sniper cat, by Cat Intelligence Agency</title>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="CoinMarketCat is a Chrome extension that runs a Solana launch sniper in your own browser and signs every trade with your own Phantom. It hovers ten seconds over every launch, buys only what others followed, and never holds a key. You set the take-profit, the SOL per trade, the daily budget and the stock-paired tokens to focus on.">
-<meta property="og:title" content="CoinMarketCat — the sniper cat, by Cat Intelligence Agency">
-<meta property="og:description" content="Hovers ten seconds over every launch. Buys only what others followed. Signs with your own hand. Never holds a key.">
+<title>Cat Intelligence Agency — trading agents that work inside your limits</title>
+<meta name="description" content="Cat Intelligence Agency builds personal trading agents — cats — that you download and run yourself. Each one trades for you from a wallet you control, inside limits you set, and starts in observe mode. Agent 001 is CoinMarketCat, the sniper cat for new Solana launches.">
+<meta name="theme-color" content="#08050f">
+<link rel="canonical" href="https://gtjvv976mb-netizen.github.io/coinmarketcat/">
 <meta property="og:type" content="website">
-<link rel="icon" href="icons/coinmarketcat-32.png" type="image/png">
+<meta property="og:site_name" content="Cat Intelligence Agency">
+<meta property="og:title" content="Cat Intelligence Agency — trading agents that work inside your limits">
+<meta property="og:description" content="Personal trading agents you download and run yourself. You set the limits; the cat watches, pounces only inside them, and stops when you say. Agent 001: CoinMarketCat, the sniper cat.">
+<meta property="og:url" content="https://gtjvv976mb-netizen.github.io/coinmarketcat/">
+<meta property="og:image" content="https://gtjvv976mb-netizen.github.io/coinmarketcat/icons/coinmarketcat-512.png">
+<meta property="og:image:alt" content="A mint-green cat head whose right eye is a scope reticle">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="icons/coinmarketcat.svg" type="image/svg+xml">
+<link rel="icon" href="icons/coinmarketcat-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="icons/coinmarketcat-128.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,193 +28,245 @@
   document.documentElement.dataset.theme = t === "light" ? "light" : "dark";
 })();
 </script>
-<style>
-/* SOLANA TOWER THEME — the tokens the Claude Company site uses. Night-first; the light
-   shift restates surfaces and inks only. The emitted light (mint, violet) never changes. */
-:root{
-  --cream:#e6ddf5; --teal:#9945ff; --amber:#d1a84f; --terracotta:#bf623c;
-  --sol-green:#14f195; --sol-soft:#5ef0b4; --sol-pale:#a9ffd8; --sol-violet:#9945ff;
-  --ink:#efeaff; --ink-soft:#b0a4cf; --ink-faint:#7a6d9c;
-  --panel:#120c1f; --panel-line:#241a3a; --card:#171029; --card-line:#2e2148;
-  --good:#3ee6a8; --warn:#e0ad3d; --bad:#ff6b5a;
-  --bar:#08050f; --bar-ink:#efeaff; --bg:#08050f; --line:#2e2148;
-}
-:root[data-theme="light"]{
-  --bar:#efecf7; --bar-ink:#1b1430; --panel:#f7f5fc; --panel-line:#ddd6ec; --card:#ffffff; --card-line:#e6e0f2;
-  --ink:#1b1430; --ink-soft:#4e4470; --ink-faint:#6b6390; --good:#0d7a52; --warn:#8a6410; --bad:#b8372a;
-  --teal:#6d28c9; --amber:#8a6410; --bg:#efecf7; --line:#e6e0f2;
-}
-:root[data-theme="light"] nav a.back{color:rgba(27,20,48,.8);border-color:rgba(27,20,48,.3)}
-:root[data-theme="light"] nav a.back:hover{color:#fff;border-color:var(--amber)}
-:root[data-theme="light"] .brand em,:root[data-theme="light"] .hero h1 em{color:var(--teal)}
-*{box-sizing:border-box}
-html{scroll-behavior:smooth}
-body{margin:0;background:var(--bg);color:var(--ink);font-family:Archivo,system-ui,sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased}
-nav{position:sticky;top:0;z-index:5;background:var(--bar);color:var(--bar-ink);padding:13px 0;border-bottom:1px solid var(--sol-green);
-  border-image:linear-gradient(90deg,var(--sol-violet) 0%,var(--sol-green) 100%) 1;
-  box-shadow:0 1px 14px rgba(20,241,149,.22), 0 1px 26px rgba(153,69,255,.18)}
-.wrap{max-width:960px;margin:0 auto;padding:0 24px}
-nav .wrap{display:flex;align-items:center;gap:16px}
-.brand{font-family:"Instrument Serif",Georgia,serif;font-size:24px;text-decoration:none;color:inherit}
-.brand em{font-style:italic;color:var(--sol-soft)}
-nav .links{margin-left:auto;display:flex;gap:8px;align-items:center}
-nav a.back{font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:600;color:rgba(239,234,255,.8);text-decoration:none;
-  border:1px solid rgba(239,234,255,.3);padding:6px 12px;border-radius:5px;white-space:nowrap}
-nav a.back:hover{background:var(--amber);color:#2a2018;border-color:var(--amber)}
-.shift{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.08em;padding:5px 10px;border-radius:3px;
-  border:1px solid var(--panel-line);background:var(--card);color:var(--ink-soft);cursor:pointer;white-space:nowrap}
-.shift:hover{color:var(--ink);border-color:var(--ink-faint)}
-.hero{padding:72px 0 44px}
-.eyebrow{font-family:"JetBrains Mono",monospace;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--amber);font-weight:600}
-.hero h1{font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:clamp(40px,7vw,68px);line-height:1.02;margin:10px 0 14px}
-.hero h1 em{font-style:italic;color:var(--sol-soft)}
-.lead{font-size:19px;color:var(--ink-soft);max-width:720px;margin:0 0 26px}
-.cta{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-.btn{display:inline-block;padding:12px 20px;border-radius:7px;background:var(--teal);color:var(--cream);text-decoration:none;
-  font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;border:0;cursor:pointer}
-.btn:hover{background:var(--sol-green);color:#04160e}
-.btn.ghost{background:transparent;border:1px solid var(--card-line);color:var(--ink-soft)}
-.btn.ghost:hover{border-color:var(--ink-faint);color:var(--ink);background:transparent}
-.strap{margin-top:22px;font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--ink-faint);display:flex;gap:18px;flex-wrap:wrap}
-.strap b{color:var(--amber);font-weight:500}
-section{padding:26px 0}
-h2{font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:32px;margin:0 0 8px}
-.sub{color:var(--ink-soft);margin:0 0 18px;max-width:720px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
-.card{background:var(--card);border:1px solid var(--card-line);border-radius:12px;padding:18px 20px}
-.card h3{margin:0 0 6px;font-size:16px}
-.card p{margin:0;color:var(--ink-soft);font-size:14.5px}
-.card .k{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);font-weight:600;margin-bottom:8px}
-.steps{counter-reset:s;margin:0;padding:0;list-style:none;display:grid;gap:12px}
-.steps li{counter-increment:s;position:relative;padding-left:44px;color:var(--ink-soft);font-size:15px}
-.steps li::before{content:counter(s);position:absolute;left:0;top:1px;width:28px;height:28px;border-radius:50%;
-  background:var(--teal);color:var(--cream);font-size:12px;font-weight:700;display:grid;place-content:center;font-family:"JetBrains Mono",monospace}
-.steps b,p b,li b{color:var(--ink)}
-table{width:100%;border-collapse:collapse;margin:8px 0 4px;font-size:14px}
-th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--card-line)}
-th{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);font-weight:600}
-td.n{font-family:"JetBrains Mono",monospace;color:var(--amber)}
-.notice{background:var(--card);border:1px solid var(--card-line);border-left:4px solid var(--terracotta);border-radius:10px;padding:18px 22px;margin:14px 0}
-.notice p{margin:0 0 10px;color:var(--ink-soft);font-size:14.5px}.notice p:last-child{margin:0}
-.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:10px}
-.flow div{background:var(--panel);border:1px solid var(--panel-line);border-radius:8px;padding:10px 12px;font-size:13px;color:var(--ink-soft)}
-.flow div b{display:block;color:var(--ink);font-size:12px;letter-spacing:.06em;text-transform:uppercase;font-family:"JetBrains Mono",monospace;margin-bottom:3px}
-code{font-family:"JetBrains Mono",monospace;font-size:12.5px;background:var(--panel);border:1px solid var(--panel-line);border-radius:4px;padding:1px 5px}
-pre{background:var(--panel);border:1px solid var(--panel-line);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12.5px;margin:10px 0}
-.fine{margin:40px 0 60px;font-size:13px;color:var(--ink-faint);line-height:1.6}
-p{color:var(--ink-soft)}
-</style>
+<link rel="stylesheet" href="assets/agency.css">
 </head>
 <body>
-<nav><div class="wrap">
-  <a class="brand" href="./">COINMARKET<em>CAT</em></a>
-  <div class="links">
-    <a class="back" href="console/">Console</a>
-    <a class="back" href="https://github.com/gtjvv976mb-netizen/coinmarketcat" rel="noopener">GitHub</a>
-    <button class="shift" id="shiftbtn" type="button" aria-label="Switch between day and night shift">&#9790;</button>
-  </div>
-</div></nav>
+<!-- The agency mark: a cat-eared frame with one watching eye. Drawn here, used by reference. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="markEdge" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9945ff"/><stop offset="1" stop-color="#14f195"/></linearGradient>
+    <linearGradient id="markEye" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a9ffd8"/><stop offset="1" stop-color="#14f195"/></linearGradient>
+  </defs>
+  <symbol id="agencyMark" viewBox="0 0 64 64">
+    <path d="M11 55V24L17 7l11 11h8l11-11 6 17v31a3 3 0 0 1-3 3H14a3 3 0 0 1-3-3z" fill="rgba(153,69,255,.14)" stroke="url(#markEdge)" stroke-width="3.5" stroke-linejoin="round"/>
+    <path d="M17 38q15-16 30 0q-15 16-30 0z" fill="url(#markEye)"/>
+    <ellipse cx="32" cy="38" rx="3" ry="6.4" fill="#0b0716"/>
+  </symbol>
+  <symbol id="catHead" viewBox="0 0 512 512">
+    <path d="M118 250 L130 104 L214 188 Q256 176 298 188 L382 104 L394 250 Q412 322 372 374 Q322 432 256 432 Q190 432 140 374 Q100 322 118 250 Z"/>
+  </symbol>
+</svg>
+<a class="skip" href="#main">Skip to content</a>
 
-<main><div class="wrap">
-  <header class="hero">
-    <div class="eyebrow">A sniper bot for Phantom · Solana</div>
-    <h1>It hovers ten seconds.<br>Then it buys only <em>what others followed.</em></h1>
-    <p class="lead">CoinMarketCat is a Chrome extension that runs a launch sniper in your own browser and signs every buy and every sell with <b>your own Phantom</b>, one approval window per trade. It never holds a key. You set the take-profit, the SOL per trade, the daily budget it will not exceed, and the stock-paired tokens to focus on.</p>
-    <div class="cta">
-      <a class="btn" href="#install">Install it</a>
-      <a class="btn ghost" href="console/">Open the console</a>
-      <a class="btn ghost" href="#record">Read the record first</a>
-    </div>
-    <div class="strap"><span><b>No key</b> in the extension</span><span><b>One window</b> per trade</span><span><b>Same gates</b> as WALL-ST-E</span><span><b>Off</b> by default</span></div>
-  </header>
+<header class="bar"><div class="wrap">
+  <a class="brand" href="./" aria-label="Cat Intelligence Agency, home">
+    <svg aria-hidden="true"><use href="#agencyMark"/></svg>
+    <span class="name">Cat Intelligence <em>Agency</em></span>
+  </a>
+  <nav class="navlinks" aria-label="Site">
+    <a class="opt" href="#how">How it works</a>
+    <a class="opt" href="#agents">Agents</a>
+    <a class="opt" href="#principles">Principles</a>
+    <a class="box" href="coinmarketcat/">Agent 001</a>
+    <a class="narrow-hide" href="https://github.com/gtjvv976mb-netizen/coinmarketcat" rel="noopener">GitHub</a>
+    <button class="shift" id="shiftbtn" type="button" aria-label="Switch between night and day theme">&#9790;</button>
+  </nav>
+</div></header>
 
-  <section id="what">
-    <h2>What it does</h2>
-    <p class="sub">It is the Claude Company launch sniper's lane — HAWK-AI's — with a person's hand on the signature instead of a burner key.</p>
-    <div class="grid">
-      <div class="card"><div class="k">Watch</div><h3>Every launch, through the same gates</h3><p>It listens to pump.fun's own program logs and runs each launch through the executor's entry contract: the curve decoded from its own bytes, the ceiling ladder, the mint audit, the socials filter, the fee rail. What it refuses is decided upstream and vendored, never edited here.</p></div>
-      <div class="card"><div class="k">Hover</div><h3>Ten seconds before the strike</h3><p>A launch that clears opens a would-have position. Only once it is ten seconds old <b>and still marks at or above its own fill</b> does the lane re-read the curve, rebuild the exact instruction it will sign, simulate it, and ask Phantom. A launch nobody followed is never bought.</p></div>
-      <div class="card"><div class="k">Leave</div><h3>In full, on a rule</h3><p>The take at 1.5×, the stop you chose, the creator's exit, a 90-second stall or a three-minute clock. Each is one more Phantom window; the lane asks again while the rule still says sell.</p></div>
-      <div class="card"><div class="k">Limits</div><h3>Yours, checked before every buy</h3><p>SOL per trade, a rolling 24-hour budget, the take, the stop, one live position at a time, and which stock-paired tokens to focus on. Every buy is simulated with a spend ceiling and a delivery floor before Phantom is asked.</p></div>
-      <div class="card"><div class="k">Book</div><h3>A shadow book you can grade</h3><p>Every launch it evaluates becomes a row in the executor's own research schema. Export it and grade the entry rulers with the command the repository ships; the scorecard is live in the popup.</p></div>
-      <div class="card"><div class="k">Honesty</div><h3>The record beside the switch</h3><p>The arming screen shows the sniper's own live record — a losing one — and refuses to call any of this an edge. The lane starts Off; you choose Observe before you can choose Execute.</p></div>
+<main id="main">
+<div class="wrap">
+  <section class="hero" aria-labelledby="hero-title">
+    <div>
+      <div class="eyebrow">Cat Intelligence Agency · personal trading agents</div>
+      <h1 id="hero-title">Trading agents that hunt <em>only inside your limits.</em></h1>
+      <p class="lead">We train cats: personalised trading agents you download and run yourself. A cat trades for you, from a wallet you control, on your own terms — inside the budget and the rules you set. It watches before it acts, and you can call it off at any time.</p>
+      <div class="cta">
+        <a class="btn" href="coinmarketcat/">Meet Agent 001 <span class="arr">→</span></a>
+        <a class="btn ghost" href="#how">How an agent works</a>
+      </div>
+      <div class="strap">
+        <span class="chip"><b>Runs</b> in your browser</span>
+        <span class="chip"><b>Trades</b> from your wallet</span>
+        <span class="chip"><b>Observes</b> before it trades</span>
+        <span class="chip"><b>Promises</b> no returns</span>
+      </div>
     </div>
-  </section>
-
-  <section id="how">
-    <h2>How a buy happens</h2>
-    <p class="sub">Nothing is signed that was not built, checked and simulated first, and nothing is sent that Phantom did not sign exactly as asked.</p>
-    <div class="flow">
-      <div><b>notice</b>pump.fun's create log, parsed by the venue's own decoder</div>
-      <div><b>read</b>one account read: curve, Global, mint</div>
-      <div><b>contract</b>the ordered gate stack, cheapest first</div>
-      <div><b>hover</b>a would-have position, sampled for ten seconds</div>
-      <div><b>re-read</b>fresh curve; the exact buy_v2 it will sign</div>
-      <div><b>simulate</b>spend ceiling, delivery floor, on your RPC</div>
-      <div><b>Phantom</b>one approval window, your hand</div>
-      <div><b>send</b>the same bytes, through your RPC, preflight skipped</div>
-      <div><b>book</b>the fill read from the chain's balances; the day charged</div>
-    </div>
-  </section>
-
-  <section id="record">
-    <h2>What the record says</h2>
-    <p class="sub">The executor's live sniper, read back off mainnet in full on 2026-09-17. This is the record the lane is built on, and it loses.</p>
-    <div class="grid">
-      <div class="card"><div class="k">58 round trips</div><h3>10 up, 48 down, −1.58 SOL</h3><p>Average winner +75%, average loser −22%. Six more under the socials filter and the stall exit: 1 up, 5 down. Eighteen positions ran to the old ten-minute clock; none won.</p></div>
-      <div class="card"><div class="k">Seconds late at entry</div>
-        <table><tr><th>bucket</th><th>n</th><th>won</th><th>mean</th></tr>
-        <tr><td>under 3s</td><td class="n">9</td><td class="n">0%</td><td class="n">−18.5%</td></tr>
-        <tr><td>3–6s</td><td class="n">25</td><td class="n">20%</td><td class="n">−2.6%</td></tr>
-        <tr><td>6–10s</td><td class="n">20</td><td class="n">10%</td><td class="n">−23.4%</td></tr>
-        <tr><td>10s and later</td><td class="n">10</td><td class="n">40%</td><td class="n">+34.0%</td></tr></table>
-        <p>The fastest entries were the worst. That is why this lane waits.</p></div>
-      <div class="card"><div class="k">Reached after the fill</div>
-        <table><tr><th>multiple</th><th>of 64</th></tr>
-        <tr><td>1.5×</td><td class="n">28</td></tr><tr><td>2×</td><td class="n">16</td></tr><tr><td>3×</td><td class="n">4</td></tr></table>
-        <p>The bot took the 1.5× on five of the twenty-eight. That is why the take is 1.5×.</p></div>
-    </div>
-    <div class="notice">
-      <p><b>None of this is evidence of an edge.</b> Nothing measured at entry ordered the outcome (every Spearman ρ under 0.13 at n=64), and every modelled exit ladder over the 64 still loses. What the record supports is a rule that keeps this lane out of the one bucket that never won, and a book that will say — over thousands of unselected rows — whether anything separates a good launch from a bad one. Observe first. Grade the book. Arm a canary.</p>
+    <div class="hero-art" aria-hidden="true">
+      <svg class="ring" viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="94" fill="none" stroke="#9945ff" stroke-opacity=".45" stroke-width="1.2" stroke-dasharray="2 6"/>
+        <circle cx="100" cy="100" r="80" fill="none" stroke="#14f195" stroke-opacity=".28" stroke-width="1"/>
+        <g stroke="#9945ff" stroke-opacity=".7" stroke-width="2" stroke-linecap="round">
+          <line x1="100" y1="2" x2="100" y2="16"/><line x1="100" y1="184" x2="100" y2="198"/>
+          <line x1="2" y1="100" x2="16" y2="100"/><line x1="184" y1="100" x2="198" y2="100"/>
+        </g>
+      </svg>
+      <div class="core">
+        <svg viewBox="0 0 64 64">
+          <path d="M11 55V24L17 7l11 11h8l11-11 6 17v31a3 3 0 0 1-3 3H14a3 3 0 0 1-3-3z" fill="rgba(153,69,255,.14)" stroke="url(#markEdge)" stroke-width="2.2" stroke-linejoin="round"/>
+          <g class="blink">
+            <path d="M17 38q15-16 30 0q-15 16-30 0z" fill="url(#markEye)"/>
+            <ellipse cx="32" cy="38" rx="3" ry="6.4" fill="#0b0716"/>
+          </g>
+        </svg>
+      </div>
     </div>
   </section>
+</div>
 
-  <section id="stocks">
-    <h2>Stock-paired tokens</h2>
-    <p class="sub">Solana now carries tokenized stocks — xStocks by Backed: TSLAx, AAPLx, SPYx, GLDx and more — and launches quoted in them exist on pump.fun today. CoinMarketCat is being extended to them, on pump.fun curves and on new pools across the ecosystem, with the quote token you pick.</p>
-    <div class="notice">
-      <p><b>Read this before you pick one.</b> xStocks are Token-2022 mints with issuer controls: a permanent delegate, a pause switch, a live freeze authority and a transfer-hook slot. The issuer can freeze, pause or claw back the quote asset itself, and Backed's terms restrict who may hold them. A position paid in an xStock carries that risk on top of the launch's own, and the arming screen will say so in these words.</p>
-    </div>
-  </section>
+<hr class="rule">
 
-  <section id="install">
-    <h2>Install</h2>
-    <p class="sub">It is not in a store. You build it from the repository and load it unpacked — two commands and one click.</p>
+<div class="wrap">
+  <section id="how" aria-labelledby="how-title">
+    <div class="sec-head"><span class="label">Standard procedure</span></div>
+    <h2 id="how-title">How an agent <em>works.</em></h2>
+    <p class="sub">Every cat follows the same four steps. The details are CoinMarketCat's, because it is the only agent in the field.</p>
     <ol class="steps">
-      <li>Clone and build:
-        <pre>git clone https://github.com/gtjvv976mb-netizen/coinmarketcat
-cd coinmarketcat &amp;&amp; npm ci &amp;&amp; npm run build</pre></li>
-      <li>Open <code>chrome://extensions</code>, turn on <b>Developer mode</b>, press <b>Load unpacked</b>, choose <code>coinmarketcat/dist</code>.</li>
-      <li>Open the extension's <b>Options</b> and paste an RPC URL — Helius, Triton or QuickNode. The public RPC refuses browsers.</li>
-      <li>Open <a href="console/">the console</a> in a tab, press <b>Connect Phantom</b>, approve the connection. <b>Keep that tab open</b>; the approval windows come from it.</li>
-      <li>In the popup choose <b>Observe</b>. Watch the shadow book fill. Export it and grade it with <code>node vendor/executor/grade-entry-gates.mjs --file &lt;export&gt;</code>.</li>
-      <li>Only then: <b>Execute</b>, at the 0.005 SOL canary, with the sentence the lane prints for your wallet typed into the box.</li>
+      <li class="card">
+        <span class="num" aria-hidden="true"></span>
+        <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg></div>
+        <h3>You set the limits</h3>
+        <p>Before it does anything, you tell it what it may spend per trade, what it may spend per day, when to take profit and what it may hunt. It checks those limits before every trade, not after.</p>
+      </li>
+      <li class="card">
+        <span class="num" aria-hidden="true"></span>
+        <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><ellipse cx="12" cy="12" rx="1.7" ry="4.2" fill="currentColor"/></svg></div>
+        <h3>It watches</h3>
+        <p>A new agent starts in observe mode. It watches the market and writes down what it would have done — the misses as well as the hits — without spending anything, so you can judge it before you trust it.</p>
+      </li>
+      <li class="card">
+        <span class="num" aria-hidden="true"></span>
+        <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="6.5" cy="10" r="2"/><circle cx="10" cy="6" r="2"/><circle cx="14" cy="6" r="2"/><circle cx="17.5" cy="10" r="2"/><path d="M7.5 17.2c0-3.3 2.2-5.7 4.5-5.7s4.5 2.4 4.5 5.7c0 1.6-1.7 2.6-4.5 2.6s-4.5-1-4.5-2.6z"/></svg></div>
+        <h3>It pounces only inside them</h3>
+        <p>It trades only after you arm it, by typing a sentence that names your wallet and your numbers. Even then it pounces only when its rule says so, and a trade that would break one of your limits is refused.</p>
+      </li>
+      <li class="card">
+        <span class="num" aria-hidden="true"></span>
+        <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M8 3h8l5 5v8l-5 5H8l-5-5V8z"/><path d="M8.5 12h7" stroke-linecap="round"/></svg></div>
+        <h3>You can stop it any time</h3>
+        <p>Pause new entries, disarm it, or pull the hard stop — sell everything, buy nothing. Whatever it holds sits in a wallet you control, not with us.</p>
+      </li>
     </ol>
   </section>
+</div>
 
-  <section id="limits">
-    <h2>What it refuses, and what you must know</h2>
-    <div class="grid">
-      <div class="card"><h3>A stop that needs a click is a weaker stop</h3><p>Phantom does not let an extension sign for you. Every exit is one approval window; the lane asks again while the rule still says sell, but it cannot press Approve. Close the console tab and it cannot ask at all.</p></div>
-      <div class="card"><h3>One window at a time</h3><p>One live position by default. A buy window that sits past 25 seconds is abandoned — a launch that old is not the launch that cleared the gates. A declined buy is never re-asked.</p></div>
-      <div class="card"><h3>Curves only, until told otherwise</h3><p>A curve that graduates to a pool cannot be sold by this lane; the row says SELL BY HAND. Pool trading is what the stock-paired work adds.</p></div>
-      <div class="card"><h3>The manifest is the charter</h3><p>Permissions are storage, alarms and notifications; the content script matches the console pages only; the injected script is the only web-accessible resource. Widening any of it fails the test suite.</p></div>
+<hr class="rule">
+
+<div class="wrap">
+  <section id="agents" aria-labelledby="agents-title">
+    <div class="sec-head"><span class="label">Agents in the field</span></div>
+    <h2 id="agents-title">One agent in the field. <em>More in training.</em></h2>
+    <p class="sub">Every agent gets a file. This is the only one open.</p>
+
+    <article class="file" aria-labelledby="file-001">
+      <div class="tab">File 001 · <b>open</b></div>
+      <div class="sheet">
+        <div class="portrait">
+          <img src="icons/coinmarketcat.svg" width="192" height="192" alt="CoinMarketCat: a mint cat head whose right eye is a scope reticle">
+          <span class="corners" aria-hidden="true"></span>
+          <div class="cap">Agent 001 · portrait</div>
+        </div>
+        <div>
+          <span class="stamp"><span class="dot" aria-hidden="true"></span>Field status: active</span>
+          <h3 id="file-001">CoinMarket<em>Cat</em></h3>
+          <p class="alias">the sniper cat</p>
+          <dl class="facts">
+            <dt>Agent</dt><dd>001</dd>
+            <dt>Hunts</dt><dd>New Solana launches on pump.fun — including launches paired with tokenised stocks like GLDx, TSLAx and SPYx — and new stock-paired pools across Solana, through Jupiter.</dd>
+            <dt>Method</dt><dd>Crouches ten seconds, then pounces only if the launch is still at or above its entry price. Takes profit at 1.5× by default; leaves a stalled launch after 90 s and any position after 180 s.</dd>
+            <dt>Your limits</dt><dd>Take-profit, SOL (or stock) per trade, a daily budget, and which stock tokens to focus on.</dd>
+            <dt>Signs with</dt><dd>Your Phantom, one approval per trade — or Autopilot, a separate wallet you fund with your daily budget.</dd>
+            <dt>Starts in</dt><dd>Observe mode first. It trades nothing until you type the sentence that arms it.</dd>
+            <dt>Track record</dt><dd><b>Unmeasured</b> in this lane. The desk lane it learned from lost money, and its file says so.</dd>
+          </dl>
+          <div class="cta">
+            <a class="btn" href="coinmarketcat/">Open the file <span class="arr">→</span></a>
+            <a class="btn ghost" href="console/">Console</a>
+            <a class="btn ghost" href="https://github.com/gtjvv976mb-netizen/coinmarketcat" rel="noopener">Source</a>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <div class="trainees">
+      <div class="trainee">
+        <svg viewBox="0 0 512 512" aria-hidden="true"><use href="#catHead" fill="var(--card-line)" stroke="var(--ink-faint)" stroke-width="6" stroke-dasharray="14 12"/></svg>
+        <div>
+          <div class="who">Agent 002</div>
+          <div><span class="redact">Codename withheld</span></div>
+          <p><span class="stamp dim">In training</span></p>
+        </div>
+      </div>
+      <div class="trainee">
+        <svg viewBox="0 0 512 512" aria-hidden="true"><use href="#catHead" fill="var(--card-line)" stroke="var(--ink-faint)" stroke-width="6" stroke-dasharray="14 12"/></svg>
+        <div>
+          <div class="who">Agent 003</div>
+          <div><span class="redact">Codename withheld</span></div>
+          <p><span class="stamp dim">In training</span></p>
+        </div>
+      </div>
     </div>
   </section>
+</div>
 
-  <p class="fine"><b>What this is.</b> A user-operated tool that runs in your own browser against your own wallet, one approval at a time. No server receives a key, signs, or can reach it. Nothing here is financial advice, nothing here has an edge until you have graded its book over a real sample, and every position it opens can be sold only by a click you make. Tokenized stocks are subject to their issuer's terms and your jurisdiction's rules.
-    <br><br>Built on the Claude Company executor's decision code, vendored from a named commit. An independent project. Not affiliated with, endorsed by, or connected to Anthropic, Phantom, pump.fun or Backed.</p>
-</div></main>
+<hr class="rule">
+
+<div class="wrap">
+  <section id="principles" aria-labelledby="principles-title">
+    <div class="sec-head"><span class="label">The agency's principles</span></div>
+    <h2 id="principles-title">Four rules every cat is <em>trained under.</em></h2>
+    <p class="sub">They are why the agents look the way they do: slow to arm, quick to stop, and plain about what nobody has measured yet.</p>
+    <div class="grid four">
+      <div class="card">
+        <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="2.5"/><path d="M16 13h5" stroke-linecap="round"/><path d="M5 6l10-3 1.5 3"/></svg></div>
+        <h3>Your wallet, your limits</h3>
+        <p>An agent trades from a wallet you control, inside numbers you typed. There is no account with us, no pooled fund and nothing to deposit with the agency. There is no agency server at all.</p>
+      </div>
+      <div class="card">
+        <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h11a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6z"/><path d="M9.5 8h6M9.5 12h6M9.5 16h3.5"/></svg></div>
+        <h3>Observe first</h3>
+        <p>Every agent ships in observe mode and keeps a book of what it would have done. Going live is a deliberate act: a sentence you type, naming your wallet and your numbers.</p>
+      </div>
+      <div class="card">
+        <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 20h18M6 20v-6M11 20V6M16 20v-9"/></svg></div>
+        <h3>Honest numbers</h3>
+        <p>No quoted returns, no win rates nobody measured, no user counts. What is unmeasured is called unmeasured — and the losing record CoinMarketCat learned from is printed beside its arming switch.</p>
+      </div>
+      <div class="card">
+        <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div>
+        <h3>No key ever leaves your browser</h3>
+        <p>Your Phantom key never reaches an agent. Autopilot's separate wallet is created inside your browser, encrypted under your passphrase, and never sent anywhere — there is nowhere to send it.</p>
+      </div>
+    </div>
+  </section>
+</div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <a class="brand" href="./" aria-label="Cat Intelligence Agency, home">
+          <svg aria-hidden="true"><use href="#agencyMark"/></svg>
+          <span class="name">Cat Intelligence <em>Agency</em></span>
+        </a>
+        <p style="margin-top:14px">Personal trading agents that work inside the limits you set. Software you build from source and run yourself.</p>
+      </div>
+      <div>
+        <span class="label">Agents</span>
+        <ul>
+          <li><a href="coinmarketcat/">001 · CoinMarketCat</a></li>
+          <li><a href="console/">CoinMarketCat console</a></li>
+          <li><span class="label" style="margin:0;display:inline">002 · in training</span></li>
+          <li><span class="label" style="margin:0;display:inline">003 · in training</span></li>
+        </ul>
+      </div>
+      <div>
+        <span class="label">Source</span>
+        <ul>
+          <li><a href="https://github.com/gtjvv976mb-netizen/coinmarketcat" rel="noopener">GitHub repository</a></li>
+          <li><a href="https://github.com/gtjvv976mb-netizen/coinmarketcat#readme" rel="noopener">README</a></li>
+          <li><a href="https://github.com/gtjvv976mb-netizen/coinmarketcat/blob/main/docs/session-wallet.md" rel="noopener">Autopilot wallet notes</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="legal">
+      <p><b>Cat Intelligence Agency is a software project, not a government agency.</b> It is not affiliated with, and does not represent, any government, intelligence service or public body.</p>
+      <p><b>CoinMarketCat is not affiliated with CoinMarketCap</b>, and is not endorsed by or connected to it. Nor is it affiliated with Phantom, pump.fun, Jupiter, Backed (xStocks) or Anthropic.</p>
+      <p>Nothing on this site is financial advice. A trading agent can lose all of the money you let it trade. Tokenised stocks are subject to their issuer's terms and your jurisdiction's rules.</p>
+    </div>
+  </div>
+</footer>
+
 <script>
 (function shiftSwitch() {
   const btn = document.getElementById("shiftbtn");

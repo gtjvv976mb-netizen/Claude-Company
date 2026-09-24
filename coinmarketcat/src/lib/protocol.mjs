@@ -1,7 +1,7 @@
 /**
  * THE WIRE BETWEEN THE FOUR PLACES THIS EXTENSION RUNS.
  *
- *   popup / options ──runtime.sendMessage──▶ background (the engine)
+ *   popup / options / welcome ──runtime.sendMessage──▶ background (the engine, the autopilot wallet)
  *   background ──tabs.sendMessage──▶ content script ──window.postMessage──▶ injected (Phantom)
  *
  * Every message carries `type` from one of the tables below. Nothing else is accepted:
@@ -24,9 +24,32 @@ export const UI = Object.freeze({
   PAUSE: "hawk:ui:pause",         // { on: boolean }
   CONNECT: "hawk:ui:connect",     // ask the console tab to connect Phantom
   FORGET_POSITION: "hawk:ui:forget-position", // { mint } — closes a row the user sold by hand
+  CLEAR_STOCK_CANARY: "hawk:ui:clear-stock-canary", // { mint } — the user checked a blocked stock buy; its next buy is a canary again
   OPEN_CONSOLE: "hawk:ui:open-console",
   STATUS_CHANGED: "hawk:ui:status-changed",   // background → popup (broadcast)
 });
+
+/**
+ * popup / options / the setup page → background: THE AUTOPILOT WALLET. A table apart from
+ * UI because three of these carry the passphrase the user typed (create, unlock, export)
+ * and one hands a secret back (export, once, for recovery) — test-hawk-no-key.mjs pins
+ * exactly which. None carries transaction bytes: FUND and SWEEP carry an amount and a
+ * destination the background already knows, and the background builds every byte. The
+ * worker answers these only from the extension's own pages, never from a web page or a
+ * content script.
+ */
+export const AUTOPILOT = Object.freeze({
+  STATUS: "hawk:autopilot:status",                 // → { exists, publicKey, unlocked, expiresAt, balance, tokens, sweepTo, … }
+  CREATE: "hawk:autopilot:create",                 // { passphrase, confirm, replace?, currentPassphrase? }
+  UNLOCK: "hawk:autopilot:unlock",                 // { passphrase, minutes? }
+  LOCK: "hawk:autopilot:lock",
+  FUND: "hawk:autopilot:fund",                     // { amount, asset: "SOL" | a listed stock's mint } — ONE Phantom approval
+  SWEEP: "hawk:autopilot:sweep",                   // { expectTo } — every token and the SOL above the rent floor, back to Phantom
+  EXPORT_SECRET: "hawk:autopilot:export-secret",   // { passphrase } → { secretBase58 }, for recovery
+});
+/** The AUTOPILOT messages whose payload carries a passphrase, and the one that returns a secret. */
+export const AUTOPILOT_CARRIES_PASSPHRASE = Object.freeze([AUTOPILOT.CREATE, AUTOPILOT.UNLOCK, AUTOPILOT.EXPORT_SECRET]);
+export const AUTOPILOT_RETURNS_SECRET = Object.freeze([AUTOPILOT.EXPORT_SECRET]);
 
 /** background → content → injected (requests), and back (replies with the same id) */
 export const BRIDGE = Object.freeze({

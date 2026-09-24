@@ -8,9 +8,15 @@
  * commit of that repository and hashed. A change to what this bot refuses is a change
  * upstream, synced here, and visible in PROVENANCE.json — never a local edit.
  *
- *   node scripts/sync-executor.mjs --from ../Claude-Company     # copy from a checkout, record its HEAD
- *   node scripts/sync-executor.mjs --check                       # clone upstream main shallowly, report drift
+ *   node scripts/sync-executor.mjs --from ../Claude-Company     # copy from a checkout, record its HEAD and branch
+ *   node scripts/sync-executor.mjs --check                       # clone the recorded branch shallowly, report drift
+ *   node scripts/sync-executor.mjs --check --ref main            # …against upstream main instead
  *   node scripts/sync-executor.mjs --check --strict              # …and exit 1 on drift (CI)
+ *
+ * `--check` with no `--ref` compares against the branch the vendored commit was synced
+ * from (PROVENANCE.json's `sourceRef`), because that is the question "has upstream moved
+ * since this was vendored?" asks. A branch not yet merged to main differs from main by
+ * construction; `--ref main` says by how much, and says it as a difference, not a move.
  *
  * test-vendor-integrity.mjs refuses a vendored file whose bytes do not match the manifest,
  * so a hand edit under vendor/ fails the suite by name.
@@ -28,7 +34,8 @@ const VENDOR = path.join(ROOT, "vendor", "executor");
 const PROVENANCE = path.join(VENDOR, "PROVENANCE.json");
 export const UPSTREAM = "https://github.com/gtjvv976mb-netizen/Claude-Company";
 
-/** The closure the bundle needs (from esbuild's metafile), plus the two the tests read. */
+/** The closure the bundle needs (from esbuild's metafile), plus what the tests read. A
+ *  name may sit one folder down (fixtures/…): it is vendored, hashed and checked the same. */
 export const MODULES = Object.freeze([
   "entry-sizing.mjs",
   "network-fee-budget.mjs",
@@ -48,6 +55,8 @@ export const MODULES = Object.freeze([
   "shadow-sink.mjs",            // tests only: reads the exported JSONL back
   "grade-entry-gates.mjs",      // the grader, so `node vendor/executor/grade-entry-gates.mjs --file` works here
   "test-snipe-stall-default.mjs", // the regression that pins the stall-default fix
+  "test-snipe-quote-mint.mjs",  // the regression that pins the stock-quote contract (pump.fun Custom Pairs)
+  "fixtures/pumpfun-xstock-quote.json", // its live bytes (xStock mints, a GLDx-quoted curve); test-hawk-engine.mjs reads them too
 ]);
 
 const sha256 = (file) => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
@@ -91,13 +100,20 @@ export function syncFrom(checkout) {
   const dirty = git(["status", "--porcelain", "--", "executor"], checkout);
   if (dirty) throw new Error(`the checkout at ${checkout} has uncommitted changes under executor/ — sync from a committed tree so the recorded commit is the truth:\n${dirty}`);
   const committedAt = git(["show", "-s", "--format=%cI", "HEAD"], checkout);
+  let branch = null;
+  try { branch = git(["rev-parse", "--abbrev-ref", "HEAD"], checkout); } catch { branch = null; }
+  if (branch === "HEAD" || !branch) branch = null;     // a detached checkout names no branch
   fs.mkdirSync(VENDOR, { recursive: true });
-  for (const name of MODULES) fs.copyFileSync(path.join(src, name), path.join(VENDOR, name));
+  for (const name of MODULES) {
+    fs.mkdirSync(path.dirname(path.join(VENDOR, name)), { recursive: true });   // fixtures/ is made, never assumed
+    fs.copyFileSync(path.join(src, name), path.join(VENDOR, name));
+  }
   writeStandIn();
   const provenance = {
     sourceRepo: UPSTREAM,
     sourceCommit: commit,
     sourceCommittedAt: committedAt,
+    sourceRef: branch,
     modules: manifestOf(VENDOR),
     standIns: Object.keys(STAND_INS),
     note: "Copied verbatim from executor/ at sourceCommit by scripts/sync-executor.mjs. Never edit these files here; change them upstream and sync.",
@@ -135,17 +151,21 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const from = args.includes("--from") ? args[args.indexOf("--from") + 1] : null;
   const check = args.includes("--check");
   const strict = args.includes("--strict");
-  const ref = args.includes("--ref") ? args[args.indexOf("--ref") + 1] : "main";
+  let recordedRef = null;
+  try { recordedRef = readProvenance().sourceRef ?? null; } catch { recordedRef = null; }
+  const ref = args.includes("--ref") ? args[args.indexOf("--ref") + 1] : (recordedRef ?? "main");
   if (from) {
     const p = syncFrom(path.resolve(from));
     console.log(`synced ${MODULES.length} modules from ${p.sourceCommit} (${p.sourceCommittedAt})`);
   } else if (check) {
     const r = checkAgainstUpstream({ ref });
-    console.log(`vendored: ${r.vendoredCommit}\nupstream ${ref}: ${r.upstreamCommit}`);
+    console.log(`vendored: ${r.vendoredCommit}${recordedRef ? ` (from ${recordedRef})` : ""}\nupstream ${ref}: ${r.upstreamCommit}`);
     if (r.localEdits.length) console.log(`LOCAL EDITS under vendor/ (never do this): ${r.localEdits.join(", ")}`);
     if (r.notUpstream.length) console.log(`not on upstream ${ref} yet (the vendored commit is ahead of it): ${r.notUpstream.join(", ")}`);
     const moved = r.drift.filter((name) => !r.notUpstream.includes(name));
-    if (moved.length) console.log(`upstream has moved in: ${moved.join(", ")}\n→ node scripts/sync-executor.mjs --from <checkout at ${r.upstreamCommit}>`);
+    if (moved.length && r.notUpstream.length)
+      console.log(`upstream ${ref} differs in: ${moved.join(", ")} — ${ref} lacks files the vendored commit carries, so it is likely BEHIND it, not ahead`);
+    else if (moved.length) console.log(`upstream ${ref} has moved in: ${moved.join(", ")}\n→ node scripts/sync-executor.mjs --from <checkout at ${r.upstreamCommit}>`);
     if (!r.drift.length) console.log("no drift: the vendored modules match upstream byte for byte");
     if (strict && (r.drift.length || r.localEdits.length)) process.exit(1);
   } else {

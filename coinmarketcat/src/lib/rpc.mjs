@@ -67,6 +67,20 @@ export function createRpc({ url, fetchImpl = globalThis.fetch, timeoutMs = 12_00
         throw error;
       }
     },
+    /** Every token account `owner` holds under `programId`, as the node parses it:
+     *  [{ address, mint, owner, amountRaw (digit string), decimals, programId }]. */
+    async getTokenAccountsByOwner(owner, { programId, commitment = "confirmed" } = {}) {
+      const r = await call("getTokenAccountsByOwner", [String(owner), { programId: String(programId) }, { encoding: "jsonParsed", commitment }]);
+      const out = [];
+      for (const row of Array.isArray(r?.value) ? r.value : []) {
+        const info = row?.account?.data?.parsed?.info;
+        const amount = info?.tokenAmount;
+        if (!info || !amount || typeof info.mint !== "string") continue;
+        out.push({ address: String(row.pubkey), mint: info.mint, owner: info.owner ?? null, amountRaw: String(amount.amount ?? "0"),
+          decimals: Number(amount.decimals), programId: String(row.account.owner ?? programId) });
+      }
+      return out;
+    },
     async getLatestBlockhash({ commitment = "confirmed" } = {}) {
       const r = await call("getLatestBlockhash", [{ commitment }]);
       return { blockhash: r?.value?.blockhash, lastValidBlockHeight: Number(r?.value?.lastValidBlockHeight) };

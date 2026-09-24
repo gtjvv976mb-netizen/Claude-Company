@@ -36,8 +36,12 @@ for (const name of MODULES) {
   const h = sha256(file);
   ok(`${name} matches the manifest`, h === p.modules[name], h.slice(0, 12));
 }
-const stray = fs.readdirSync(VENDOR).filter((f) => f !== "PROVENANCE.json" && !MODULES.includes(f) && !(f in STAND_INS));
-ok("nothing else lives under vendor/executor", stray.length === 0, stray.join(", ") || "clean");
+/* Every FILE, at any depth (fixtures/ sits one folder down), by its path relative to vendor/executor. */
+const vendoredFiles = walk(VENDOR).map((f) => path.relative(VENDOR, f).split(path.sep).join("/"));
+const stray = vendoredFiles.filter((f) => f !== "PROVENANCE.json" && !MODULES.includes(f) && !(f in STAND_INS));
+ok("nothing else lives under vendor/executor, at any depth", stray.length === 0, stray.join(", ") || `clean (${vendoredFiles.length} files)`);
+const nested = MODULES.filter((name) => name.includes("/"));
+ok("a vendored name one folder down is a fixture, never code", nested.every((name) => /^fixtures\/[^/]+\.json$/.test(name)), nested.join(", ") || "none");
 for (const [name, from] of Object.entries(STAND_INS))
   ok(`${name} is the shim, byte for byte — a stand-in, named as one in the provenance`, sha256(path.join(VENDOR, name)) === sha256(from) && (p.standIns ?? []).includes(name), (p.standIns ?? []).join(", "));
 

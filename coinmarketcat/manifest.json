@@ -3,7 +3,7 @@
   "name": "CoinMarketCat — the sniper cat for Phantom",
   "short_name": "COINMARKETCAT",
   "version": "0.1.0",
-  "description": "The Claude Company launch sniper, in your browser. It hovers ten seconds over every pump.fun launch, runs it through the same entry contract as WALL-ST-E, buys only what others followed, and asks your Phantom to sign each buy and each sell. It never holds a key.",
+  "description": "CoinMarketCat, the sniper cat: pump.fun launches inside your limits, signed by Phantom per trade or by an autopilot wallet you fund.",
   "minimum_chrome_version": "116",
   "icons": {
     "32": "icons/coinmarketcat-32.png",

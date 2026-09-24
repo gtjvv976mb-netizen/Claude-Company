@@ -22,6 +22,16 @@
   .bar{position:sticky;bottom:0;background:var(--bg);padding:12px 0;display:flex;gap:10px;align-items:center;border-top:1px solid var(--card-line)}
   .msg{font-size:12px;color:var(--ink-soft)}
   .msg.bad{color:var(--bad)} .msg.good{color:var(--good)}
+  fieldset.bad{border-color:var(--bad)}
+  fieldset > .help{font-size:11.5px;color:var(--ink-soft);margin:4px 0 8px}
+  fieldset .rec{color:var(--amber)}
+  table.stocks{width:100%;border-collapse:collapse;margin:6px 0}
+  table.stocks th{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;text-align:left;padding:4px}
+  table.stocks td{padding:3px 4px}
+  table.stocks input{width:100%;background:var(--panel);color:var(--ink);border:1px solid var(--card-line);border-radius:6px;padding:6px 7px;font:12px "JetBrains Mono",monospace}
+  table.stocks input.mint{min-width:220px}
+  .stockadd{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px}
+  .stockadd .btn,table.stocks .btn{text-transform:none;letter-spacing:.02em}
 </style>
 </head>
 <body>

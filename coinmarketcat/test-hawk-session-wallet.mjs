@@ -22,12 +22,16 @@
  *      session wallet, says wallet_mismatch; the secret never appears in the result;
  *   6. the fund and sweep builders refuse zero, negative and self-transfers, the sweep's
  *      rent floor is the chain's 890,880, and the token sweep is an idempotent ATA create
- *      followed by SPL Transfer under either token program, refused for a transfer hook.
+ *      followed by SPL TransferChecked (never the plain Transfer Token-2022 refuses on an
+ *      xStock's pausable, hooked account) under either token program, refused for a live
+ *      transfer hook or a missing decimals; a sweep may close the emptied source; a stock
+ *      fund is the same transfer the other way; empty accounts close eight at a time.
  */
 import { Keypair, PublicKey, VersionedTransaction } from "@solana/web3.js";
 import bs58 from "bs58";
 import {
   createKeystore, createSessionSigner, buildFundTransaction, buildSweepTransaction, buildTokenSweepTransaction, sweepableLamports,
+  buildTokenFundTransaction, buildCloseTokenAccountsTransaction, MAX_CLOSES_PER_TRANSACTION,
   KEYSTORE_STORAGE_KEY, SYSTEM_ACCOUNT_RENT_EXEMPT_LAMPORTS, PBKDF2_ITERATIONS, MIN_PASSPHRASE_LENGTH, DEFAULT_UNLOCK_TTL_MS, SessionWalletError,
 } from "./src/lib/session-wallet.mjs";
 import { SIGN_ERRORS, BridgeError } from "./src/lib/protocol.mjs";
@@ -279,21 +283,56 @@ section("6. THE BUILDERS: FUND, SWEEP, AND THE TOKEN SWEEP");
   ok("for exactly the amount the caller computed", u64(s.ixs[2].data.subarray(4)) === 1_000_000_000n - 890_880n - 5_000n && sweep.purpose === "sweep", sweep.summary);
 
   const MINT = Keypair.generate().publicKey.toBase58();
+  /* TransferChecked (12), never the plain Transfer (3): Token-2022 refuses a plain Transfer
+     out of an account carrying PausableAccount or TransferHookAccount with
+     MintRequiredForTransfer, and the live xStock account in the fixture carries both (read
+     below), so a plain-Transfer sweep of GLDx would fail on chain. */
   for (const tokenProgram of [TOKEN_PROGRAM, TOKEN_2022_PROGRAM]) {
     const label = tokenProgram === TOKEN_PROGRAM ? "classic" : "Token-2022";
-    const sweepTok = buildTokenSweepTransaction({ from: publicKey, to: PHANTOM, mint: MINT, amountRaw: "123456789012", tokenProgram, blockhash: BLOCKHASH });
+    const sweepTok = buildTokenSweepTransaction({ from: publicKey, to: PHANTOM, mint: MINT, amountRaw: "123456789012", tokenProgram, decimals: 8, blockhash: BLOCKHASH });
     const t = compiled(sweepTok.txBase64);
     const src = associatedTokenAddress(publicKey, MINT, tokenProgram), dst = associatedTokenAddress(PHANTOM, MINT, tokenProgram);
     ok(`${label}: budget, price, ATA create, transfer`, t.ixs.length === 4 && t.ixs[2].program === ATA_PROGRAM && t.ixs[3].program === tokenProgram, t.ixs.map((i) => i.program).join(" "));
     ok(`${label}: the create is idempotent (data [1]) for Phantom's ATA under this token program`, t.ixs[2].data.equals(Buffer.from([1])) && t.ixs[2].accounts[1].key === dst && t.ixs[2].accounts[2].key === PHANTOM && t.ixs[2].accounts[3].key === MINT && t.ixs[2].accounts[5].key === tokenProgram && t.ixs[2].accounts[0].key === publicKey && t.ixs[2].accounts[0].signer);
-    ok(`${label}: the transfer is SPL instruction 3 with the u64 amount LE`, t.ixs[3].data.length === 9 && t.ixs[3].data[0] === 3 && u64(t.ixs[3].data.subarray(1)) === 123_456_789_012n, Array.from(t.ixs[3].data).join(","));
-    ok(`${label}: source ATA writable, destination ATA writable, owner signer`, t.ixs[3].accounts.length === 3 && t.ixs[3].accounts[0].key === src && t.ixs[3].accounts[0].writable && !t.ixs[3].accounts[0].signer && t.ixs[3].accounts[1].key === dst && t.ixs[3].accounts[1].writable && t.ixs[3].accounts[2].key === publicKey && t.ixs[3].accounts[2].signer);
-    ok(`${label}: the result names both ATAs and the program`, sweepTok.sourceAta === src && sweepTok.destinationAta === dst && sweepTok.tokenProgram === tokenProgram && sweepTok.purpose === "sweep_token");
+    ok(`${label}: the transfer is SPL TransferChecked (12) with the u64 amount LE and the mint's decimals`, t.ixs[3].data.length === 10 && t.ixs[3].data[0] === 12 && u64(t.ixs[3].data.subarray(1, 9)) === 123_456_789_012n && t.ixs[3].data[9] === 8, Array.from(t.ixs[3].data).join(","));
+    ok(`${label}: never the plain Transfer (3) that Token-2022 refuses on a pausable or hooked account`, !t.ixs.some((ix) => ix.program === tokenProgram && ix.data[0] === 3));
+    ok(`${label}: source ATA writable, the mint read-only, destination ATA writable, owner signer`, t.ixs[3].accounts.length === 4 && t.ixs[3].accounts[0].key === src && t.ixs[3].accounts[0].writable && !t.ixs[3].accounts[0].signer && t.ixs[3].accounts[1].key === MINT && !t.ixs[3].accounts[1].writable && !t.ixs[3].accounts[1].signer && t.ixs[3].accounts[2].key === dst && t.ixs[3].accounts[2].writable && t.ixs[3].accounts[3].key === publicKey && t.ixs[3].accounts[3].signer);
+    ok(`${label}: the result names both ATAs and the program`, sweepTok.sourceAta === src && sweepTok.destinationAta === dst && sweepTok.tokenProgram === tokenProgram && sweepTok.purpose === "sweep_token" && sweepTok.decimals === 8);
   }
-  await refuse("a transfer-hook mint is refused", () => buildTokenSweepTransaction({ from: publicKey, to: PHANTOM, mint: MINT, amountRaw: 1, tokenProgram: TOKEN_2022_PROGRAM, blockhash: BLOCKHASH, transferHook: true }), "transfer_hook", /extra accounts/);
-  await refuse("a token program that is neither is refused", () => buildTokenSweepTransaction({ from: publicKey, to: PHANTOM, mint: MINT, amountRaw: 1, tokenProgram: ATA_PROGRAM, blockhash: BLOCKHASH }), "bad_token_program");
-  await refuse("a zero token amount is refused", () => buildTokenSweepTransaction({ from: publicKey, to: PHANTOM, mint: MINT, amountRaw: 0, tokenProgram: TOKEN_PROGRAM, blockhash: BLOCKHASH }), "bad_amount");
-  await refuse("a token sweep to oneself is refused", () => buildTokenSweepTransaction({ from: publicKey, to: publicKey, mint: MINT, amountRaw: 1, tokenProgram: TOKEN_PROGRAM, blockhash: BLOCKHASH }), "same_account");
+  await refuse("a transfer-hook mint is refused", () => buildTokenSweepTransaction({ from: publicKey, to: PHANTOM, mint: MINT, amountRaw: 1, tokenProgram: TOKEN_2022_PROGRAM, decimals: 8, blockhash: BLOCKHASH, transferHook: true }), "transfer_hook", /extra accounts/);
+  await refuse("a token program that is neither is refused", () => buildTokenSweepTransaction({ from: publicKey, to: PHANTOM, mint: MINT, amountRaw: 1, tokenProgram: ATA_PROGRAM, decimals: 8, blockhash: BLOCKHASH }), "bad_token_program");
+  await refuse("a zero token amount is refused", () => buildTokenSweepTransaction({ from: publicKey, to: PHANTOM, mint: MINT, amountRaw: 0, tokenProgram: TOKEN_PROGRAM, decimals: 6, blockhash: BLOCKHASH }), "bad_amount");
+  await refuse("a token sweep to oneself is refused", () => buildTokenSweepTransaction({ from: publicKey, to: publicKey, mint: MINT, amountRaw: 1, tokenProgram: TOKEN_PROGRAM, decimals: 6, blockhash: BLOCKHASH }), "same_account");
+  await refuse("a token sweep without the mint's decimals is refused (TransferChecked needs them)", () => buildTokenSweepTransaction({ from: publicKey, to: PHANTOM, mint: MINT, amountRaw: 1, tokenProgram: TOKEN_2022_PROGRAM, blockhash: BLOCKHASH }), "bad_decimals");
+
+  // The fixture's live GLDx account: the extensions that make a plain Transfer fail.
+  const XFIX = JSON.parse((await import("node:fs")).readFileSync(new URL("./vendor/executor/fixtures/pumpfun-xstock-quote.json", import.meta.url), "utf8"));
+  const vault = Buffer.from(XFIX.accounts.find((a) => a.address === "4oYp7TZ1tBrvHHfMTA8oVYATbVVfiE19vRTfbRvPd5EL").data[0], "base64");
+  const exts = [];
+  for (let o = 166; o + 4 <= vault.length;) { const type = vault.readUInt16LE(o), len = vault.readUInt16LE(o + 2); exts.push(type); o += 4 + len; }
+  ok("the live xStock account carries PausableAccount (27) and TransferHookAccount (15): a plain Transfer out of it is refused", vault.length === 179 && vault[165] === 2 && exts.includes(27) && exts.includes(15), `179 bytes, extensions ${exts.join(",")}`);
+
+  // closeSource: CloseAccount on the emptied source, rent back to the autopilot wallet.
+  const GLDX = "Xsv9hRk1z5ystj9MhnA7Lq4vjSsLwzL2nxrwmwtD3re";
+  const closing = buildTokenSweepTransaction({ from: publicKey, to: PHANTOM, mint: GLDX, amountRaw: 5_000_000n, tokenProgram: TOKEN_2022_PROGRAM, decimals: 8, blockhash: BLOCKHASH, closeSource: true, symbol: "GLDx" });
+  const c = compiled(closing.txBase64);
+  const gsrc = associatedTokenAddress(publicKey, GLDX, TOKEN_2022_PROGRAM);
+  ok("closeSource appends CloseAccount (9) on the emptied source, its rent to the autopilot wallet", c.ixs.length === 5 && c.ixs[4].program === TOKEN_2022_PROGRAM && c.ixs[4].data.equals(Buffer.from([9])) && c.ixs[4].accounts[0].key === gsrc && c.ixs[4].accounts[1].key === publicKey && c.ixs[4].accounts[2].key === publicKey && c.ixs[4].accounts[2].signer && closing.closesSource === true, closing.summary);
+  ok("the summary names the amount in the stock's own units", /SWEEP 0\.05 GLDx from the autopilot wallet/.test(closing.summary), closing.summary);
+
+  // Phantom → autopilot wallet, for a stock: TransferChecked, Phantom pays the create.
+  const fundTok = buildTokenFundTransaction({ from: PHANTOM, to: publicKey, mint: GLDX, amountRaw: 1_000_000n, tokenProgram: TOKEN_2022_PROGRAM, decimals: 8, blockhash: BLOCKHASH, symbol: "GLDx" });
+  const ft = compiled(fundTok.txBase64);
+  ok("a stock fund is Phantom paying, creating the autopilot wallet's Token-2022 account, TransferChecked in", ft.keys[0] === PHANTOM && ft.ixs[2].program === ATA_PROGRAM && ft.ixs[2].accounts[0].key === PHANTOM && ft.ixs[2].accounts[2].key === publicKey && ft.ixs[3].program === TOKEN_2022_PROGRAM && ft.ixs[3].data[0] === 12 && ft.ixs[3].accounts[0].key === associatedTokenAddress(PHANTOM, GLDX, TOKEN_2022_PROGRAM) && ft.ixs[3].accounts[2].key === associatedTokenAddress(publicKey, GLDX, TOKEN_2022_PROGRAM) && ft.ixs[3].accounts[3].key === PHANTOM && ft.ixs.length === 4, fundTok.summary);
+  ok("…with purpose fund_token and a summary in GLDx", fundTok.purpose === "fund_token" && /FUND the autopilot wallet .* with 0\.01 GLDx/.test(fundTok.summary), fundTok.summary);
+
+  // Closing the empty accounts every buy leaves behind.
+  const empties = [0, 1, 2].map(() => ({ address: Keypair.generate().publicKey.toBase58(), tokenProgram: TOKEN_PROGRAM }));
+  const close = buildCloseTokenAccountsTransaction({ owner: publicKey, accounts: empties, blockhash: BLOCKHASH });
+  const cl = compiled(close.txBase64);
+  ok("empty accounts close in one transaction, each CloseAccount's rent to the autopilot wallet", cl.keys[0] === publicKey && cl.ixs.length === 5 && cl.ixs.slice(2).every((ix, i) => ix.program === TOKEN_PROGRAM && ix.data.equals(Buffer.from([9])) && ix.accounts[0].key === empties[i].address && ix.accounts[1].key === publicKey && ix.accounts[2].signer), close.summary);
+  await refuse("closing nothing is refused", () => buildCloseTokenAccountsTransaction({ owner: publicKey, accounts: [], blockhash: BLOCKHASH }), "nothing_to_close");
+  await refuse(`more than ${MAX_CLOSES_PER_TRANSACTION} closes in one transaction is refused`, () => buildCloseTokenAccountsTransaction({ owner: publicKey, accounts: Array.from({ length: MAX_CLOSES_PER_TRANSACTION + 1 }, () => empties[0]), blockhash: BLOCKHASH }), "too_many");
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

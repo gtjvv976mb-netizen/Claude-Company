@@ -2,8 +2,9 @@
 /**
  * BUILD THE EXTENSION.
  *
- * Five bundles, one manifest, three icons, into ./dist — the folder Chrome loads
- * unpacked. The point of this file is the plugin, not the entry list:
+ * Six bundles (the worker, the console relay, the injected Phantom bridge, the popup,
+ * the options page and the first-run setup page), one manifest, three icons, into ./dist —
+ * the folder Chrome loads unpacked. The point of this file is the plugin, not the entry list:
  *
  *   · the engine imports the executor's snipe modules from vendor/executor/, copied
  *     verbatim from a named commit of Claude-Company by scripts/sync-executor.mjs and
@@ -86,13 +87,16 @@ export const ENTRIES = Object.freeze({
   "injected.js": "injected.mjs",
   "popup.js": "popup/popup.mjs",
   "options.js": "options/options.mjs",
+  "welcome.js": "welcome/welcome.mjs",     // the first-run setup page the worker opens on install
 });
 
-const STATIC = Object.freeze([
+export const STATIC = Object.freeze([
   ["manifest.json", "manifest.json"],
   ["src/popup/popup.html", "popup.html"],
   ["src/popup/popup.css", "popup.css"],
   ["src/options/options.html", "options.html"],
+  ["src/welcome/welcome.html", "welcome.html"],
+  ["src/welcome/welcome.css", "welcome.css"],
 ]);
 
 /* The icons are the building's own marks, carried here under the bot's name. */

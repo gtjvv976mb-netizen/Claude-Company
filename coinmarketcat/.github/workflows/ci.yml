@@ -28,14 +28,19 @@ jobs:
         run: npm test
       - name: Build the extension
         run: npm run build
-      - name: Vendored executor against upstream main
-        # Informational for now, and continue-on-error says so in the only way CI reads:
-        # the vendored commit is Claude-Company PR #44's head, which carries the stall-default
-        # fix and its test, neither yet on upstream main, so this step reports drift today.
-        # Once #44 merges: drop continue-on-error and add --strict on push, so a drift
-        # upstream goes red here and is synced, not ignored.
+      - name: Vendored executor against the upstream branch it was synced from
+        # PROVENANCE.json records the branch (sourceRef); --check with no --ref compares
+        # against it, which is the question "has upstream moved since this was vendored?".
+        # Informational until the vendored commit is on upstream main: then add --strict.
         continue-on-error: true
         run: node scripts/sync-executor.mjs --check
+      - name: Vendored executor against upstream main
+        # The vendored commit (the stall-default fix, then the stock-quote contract) is on a
+        # Claude-Company branch not yet merged to main, so this step reports a difference
+        # today, and says main is behind rather than moved. Once merged: drop
+        # continue-on-error and add --strict on push, so drift goes red here and is synced.
+        continue-on-error: true
+        run: node scripts/sync-executor.mjs --check --ref main
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: extension-dist

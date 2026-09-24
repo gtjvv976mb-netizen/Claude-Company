@@ -1,5 +1,5 @@
 /**
- * THE ONE FILE THAT MAY HOLD A KEY: THE SESSION WALLET.
+ * THE ONE FILE THAT MAY HOLD A KEY: THE SESSION WALLET (the popup calls it the AUTOPILOT WALLET).
  *
  * Phantom cannot sign for a bot. Every trade the lane makes through it is one approval
  * window, and a stop that needs a click is a weaker stop than a key's — the README says
@@ -64,6 +64,7 @@ import { Keypair, PublicKey, SystemProgram, TransactionInstruction, VersionedTra
 import { TOKEN_PROGRAM, TOKEN_2022_PROGRAM } from "../../vendor/executor/token2022.mjs";
 import {
   ATA_PROGRAM, associatedTokenAddress, buildUnsignedTransaction, createAtaIdempotentIx, toBase64, fromBase64, bs58encode,
+  RENT_EXEMPT_EMPTY_ACCOUNT_LAMPORTS, rawToUnits,
 } from "./tx.mjs";
 import { BridgeError, SIGN_ERRORS } from "./protocol.mjs";
 
@@ -76,12 +77,19 @@ export const DEFAULT_UNLOCK_TTL_MS = 8 * 60 * 60 * 1000;
  *  (3,480 lamports per byte-year, two years, over 0 + 128 overhead bytes = 890,880), as
  *  `getMinimumBalanceForRentExemption(0)` returns it on mainnet. A sweep must leave this
  *  behind or the transfer fails with InsufficientFundsForRent. If the rate ever changes,
- *  the caller's live read of getMinimumBalanceForRentExemption(0) wins over this constant. */
-export const SYSTEM_ACCOUNT_RENT_EXEMPT_LAMPORTS = 890_880;
+ *  the caller's live read of getMinimumBalanceForRentExemption(0) wins over this constant.
+ *  One number, kept in tx.mjs, so the lane's balance check and the sweep agree on it. */
+export const SYSTEM_ACCOUNT_RENT_EXEMPT_LAMPORTS = RENT_EXEMPT_EMPTY_ACCOUNT_LAMPORTS;
 const SALT_BYTES = 16;
 const IV_BYTES = 12;
 const SECRET_BYTES = 64;
-const SPL_TRANSFER_INSTRUCTION = 3;   // spl-token TokenInstruction::Transfer, both programs
+/* spl-token TokenInstruction::TransferChecked, both programs: [12, u64 amount LE, u8 decimals];
+   source, mint, destination, owner. NOT the plain Transfer (3): Token-2022 refuses a plain
+   Transfer out of any account carrying PausableAccount or TransferHookAccount with
+   MintRequiredForTransfer, and every xStock account carries both (the live 179-byte
+   Token-2022 GLDx account in vendor/executor/fixtures/pumpfun-xstock-quote.json does). */
+const SPL_TRANSFER_CHECKED_INSTRUCTION = 12;
+const SPL_CLOSE_ACCOUNT_INSTRUCTION = 9;   // [9]; account, destination, owner — a zero-balance account only
 const LAMPORTS_PER_SOL = 1_000_000_000n;
 
 export class SessionWalletError extends Error {
@@ -349,7 +357,7 @@ export function buildFundTransaction({ from, to, lamports, blockhash, computeUni
   });
   return Object.freeze({
     purpose: "fund", txBase64: toBase64(tx.serialize()), from: fromKey.toBase58(), to: toKey.toBase58(), lamports: amount.toString(),
-    summary: `FUND session wallet ${short(toKey.toBase58())} with ${sol(amount)} SOL`,
+    summary: `FUND the autopilot wallet ${short(toKey.toBase58())} with ${sol(amount)} SOL`,
   });
 }
 
@@ -372,23 +380,22 @@ export function buildSweepTransaction({ from, to, lamports, blockhash, computeUn
   });
   return Object.freeze({
     purpose: "sweep", txBase64: toBase64(tx.serialize()), from: fromKey.toBase58(), to: toKey.toBase58(), lamports: amount.toString(),
-    summary: `SWEEP ${sol(amount)} SOL from session wallet ${short(fromKey.toBase58())} to ${short(toKey.toBase58())}`,
+    summary: `SWEEP ${sol(amount)} SOL from the autopilot wallet ${short(fromKey.toBase58())} to ${short(toKey.toBase58())}`,
   });
 }
 
-/** Session wallet → Phantom, for a token the lane still holds (a curve that graduated,
- *  a sell that never landed): an idempotent create of the destination's ATA, then the
- *  plain SPL Transfer (instruction 3: [3, u64 amount LE]; source ATA, destination ATA,
- *  owner as signer), which both the classic token program and Token-2022 accept.
- *  A Token-2022 mint with a transfer hook needs the hook program's extra accounts
- *  resolved and appended, which this builder does not do: it refuses when `transferHook`
- *  is set. Sell such a token by hand from the exported key. */
-export function buildTokenSweepTransaction({
-  from, to, mint, amountRaw, tokenProgram, blockhash, computeUnitLimit = 60_000, priorityFeeLamports = 0, transferHook = false,
-} = {}) {
+/** The token transfer both directions share: an idempotent create of the destination's
+ *  associated account (paid by the sender), then TransferChecked for the whole amount,
+ *  and — for a sweep that asks — CloseAccount on the emptied source, its rent to the sender. */
+function buildTokenTransfer({
+  purpose, from, to, mint, amountRaw, tokenProgram, decimals, blockhash, computeUnitLimit, priorityFeeLamports,
+  transferHook, closeSource = false, symbol = null,
+}) {
   if (transferHook) throw new SessionWalletError("transfer_hook", "a Token-2022 mint with a transfer hook needs the hook's extra accounts; this builder does not resolve them");
   if (tokenProgram !== TOKEN_PROGRAM && tokenProgram !== TOKEN_2022_PROGRAM)
     throw new SessionWalletError("bad_token_program", `"${tokenProgram}" is neither the token program nor Token-2022`);
+  if (!(Number.isInteger(decimals) && decimals >= 0 && decimals <= 18))
+    throw new SessionWalletError("bad_decimals", `TransferChecked needs the mint's decimals (0..18), got ${JSON.stringify(decimals)}`);
   const { fromKey, toKey } = accountsOf(from, to);
   let mintKey;
   try { mintKey = new PublicKey(mint); } catch { throw new SessionWalletError("bad_account", `"${mint}" is not a mint address`); }
@@ -401,22 +408,85 @@ export function buildTokenSweepTransaction({
     programId: new PublicKey(tokenProgram),
     keys: [
       { pubkey: new PublicKey(sourceAta), isSigner: false, isWritable: true },
+      { pubkey: mintKey, isSigner: false, isWritable: false },
       { pubkey: new PublicKey(destinationAta), isSigner: false, isWritable: true },
       { pubkey: fromKey, isSigner: true, isWritable: false },
     ],
-    data: Buffer.from([SPL_TRANSFER_INSTRUCTION, ...u64le(amount)]),
+    data: Buffer.from([SPL_TRANSFER_CHECKED_INSTRUCTION, ...u64le(amount), decimals]),
   });
-  const tx = buildUnsignedTransaction({
-    payer: owner, blockhash: requireBlockhash(blockhash), computeUnitLimit, priorityFeeLamports,
-    instructions: [
-      createAtaIdempotentIx({ payer: owner, ata: destinationAta, owner: recipient, mint: mintAddress, tokenProgram }),
-      transfer,
-    ],
-  });
+  const instructions = [
+    createAtaIdempotentIx({ payer: owner, ata: destinationAta, owner: recipient, mint: mintAddress, tokenProgram }),
+    transfer,
+  ];
+  if (closeSource) instructions.push(closeAccountIx({ account: sourceAta, destination: owner, owner, tokenProgram }));
+  const tx = buildUnsignedTransaction({ payer: owner, blockhash: requireBlockhash(blockhash), computeUnitLimit, priorityFeeLamports, instructions });
+  const shown = `${rawToUnits(amount, decimals)} ${symbol ?? short(mintAddress)}`;
   return Object.freeze({
-    purpose: "sweep_token", txBase64: toBase64(tx.serialize()), from: owner, to: recipient, mint: mintAddress, amountRaw: amount.toString(),
-    tokenProgram, sourceAta, destinationAta, ataProgram: ATA_PROGRAM,
-    summary: `SWEEP ${amount} raw of ${short(mintAddress)} from session wallet ${short(owner)} to ${short(recipient)}`,
+    purpose, txBase64: toBase64(tx.serialize()), from: owner, to: recipient, mint: mintAddress, amountRaw: amount.toString(), decimals,
+    tokenProgram, sourceAta, destinationAta, ataProgram: ATA_PROGRAM, closesSource: closeSource === true,
+    summary: purpose === "fund_token"
+      ? `FUND the autopilot wallet ${short(recipient)} with ${shown}`
+      : `SWEEP ${shown} from the autopilot wallet ${short(owner)} to ${short(recipient)}${closeSource ? ", closing the emptied account" : ""}`,
+  });
+}
+
+function closeAccountIx({ account, destination, owner, tokenProgram }) {
+  return new TransactionInstruction({
+    programId: new PublicKey(tokenProgram),
+    keys: [
+      { pubkey: new PublicKey(account), isSigner: false, isWritable: true },
+      { pubkey: new PublicKey(destination), isSigner: false, isWritable: true },
+      { pubkey: new PublicKey(owner), isSigner: true, isWritable: false },
+    ],
+    data: Buffer.from([SPL_CLOSE_ACCOUNT_INSTRUCTION]),
+  });
+}
+
+/** Session wallet → Phantom, for a token the lane still holds (a curve that graduated,
+ *  a sell that never landed, a stock it was funded with): an idempotent create of the
+ *  destination's ATA, then TransferChecked (instruction 12: [12, u64 amount LE, u8
+ *  decimals]; source ATA, mint, destination ATA, owner as signer), which both the classic
+ *  token program and Token-2022 accept for every account — including the xStock accounts
+ *  a plain Transfer is refused on. `closeSource` appends CloseAccount on the emptied
+ *  source so its rent comes back to the session wallet and leaves with the SOL sweep.
+ *  A Token-2022 mint with a LIVE transfer hook needs the hook program's extra accounts
+ *  resolved and appended, which this builder does not do: it refuses when `transferHook`
+ *  is set. Sell such a token by hand from the exported key. */
+export function buildTokenSweepTransaction({
+  from, to, mint, amountRaw, tokenProgram, decimals, blockhash, computeUnitLimit = 60_000, priorityFeeLamports = 0, transferHook = false,
+  closeSource = false, symbol = null,
+} = {}) {
+  return buildTokenTransfer({ purpose: "sweep_token", from, to, mint, amountRaw, tokenProgram, decimals, blockhash, computeUnitLimit, priorityFeeLamports, transferHook, closeSource, symbol });
+}
+
+/** Phantom → session wallet, for a stock the lane may pay in: the same TransferChecked,
+ *  the session wallet's account created by Phantom if missing. One Phantom approval. */
+export function buildTokenFundTransaction({
+  from, to, mint, amountRaw, tokenProgram, decimals, blockhash, computeUnitLimit = 60_000, priorityFeeLamports = 0, transferHook = false, symbol = null,
+} = {}) {
+  return buildTokenTransfer({ purpose: "fund_token", from, to, mint, amountRaw, tokenProgram, decimals, blockhash, computeUnitLimit, priorityFeeLamports, transferHook, closeSource: false, symbol });
+}
+
+/** Close token accounts the session wallet holds at zero balance — the launch-token
+ *  accounts every buy creates and every sell leaves empty — so their rent (about 0.002
+ *  SOL each) comes back to it before the SOL sweep. At most eight per transaction. */
+export const MAX_CLOSES_PER_TRANSACTION = 8;
+export function buildCloseTokenAccountsTransaction({ owner, accounts, blockhash, computeUnitLimit = 40_000, priorityFeeLamports = 0 } = {}) {
+  let ownerKey;
+  try { ownerKey = new PublicKey(owner); } catch { throw new SessionWalletError("bad_account", `"${owner}" is not a public key`); }
+  if (!Array.isArray(accounts) || accounts.length === 0) throw new SessionWalletError("nothing_to_close", "no empty token accounts to close");
+  if (accounts.length > MAX_CLOSES_PER_TRANSACTION)
+    throw new SessionWalletError("too_many", `at most ${MAX_CLOSES_PER_TRANSACTION} accounts per transaction, got ${accounts.length}`);
+  const instructions = accounts.map(({ address, tokenProgram }) => {
+    if (tokenProgram !== TOKEN_PROGRAM && tokenProgram !== TOKEN_2022_PROGRAM)
+      throw new SessionWalletError("bad_token_program", `"${tokenProgram}" is neither the token program nor Token-2022`);
+    try { new PublicKey(address); } catch { throw new SessionWalletError("bad_account", `"${address}" is not a token account address`); }
+    return closeAccountIx({ account: address, destination: ownerKey.toBase58(), owner: ownerKey.toBase58(), tokenProgram });
+  });
+  const tx = buildUnsignedTransaction({ payer: ownerKey.toBase58(), blockhash: requireBlockhash(blockhash), computeUnitLimit, priorityFeeLamports, instructions });
+  return Object.freeze({
+    purpose: "close_empty", txBase64: toBase64(tx.serialize()), owner: ownerKey.toBase58(), accounts: accounts.map((a) => a.address),
+    summary: `CLOSE ${accounts.length} empty token account${accounts.length === 1 ? "" : "s"} of the autopilot wallet ${short(ownerKey.toBase58())}; their rent returns to it`,
   });
 }
 

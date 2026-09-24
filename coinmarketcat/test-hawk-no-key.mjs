@@ -23,6 +23,14 @@
  * mnemonic derivation, nacl, signMessage, signAllTransactions and signAndSendTransaction
  * stay banned. The built bundles for the page-facing scripts and the UI must not carry
  * the secret's storage key at all.
+ *
+ * What is pinned about the autopilot wallet's wiring: the AUTOPILOT message table is
+ * exactly seven messages; only create, unlock and export carry a passphrase, and the
+ * worker reads one in those three handlers and nowhere else; only the export returns the
+ * key; no message carries transaction bytes; fund asks Phantom and sweep asks only the
+ * autopilot wallet; no worker log line names a passphrase or the key; the pages that take
+ * a passphrase use password fields, clear them, store nothing and log nothing; and the
+ * exported key is shown as text and cleared.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -83,6 +91,129 @@ for (const file of files) {
 ok("engine.mjs imports no signing helper from the executor", !/snipe-execute\.mjs|createSnipeExecutor|keypair/i.test(fs.readFileSync(path.join(here, "src", "lib", "engine.mjs"), "utf8")));
 ok("nothing under src/ imports the executor's journal (the money record stays on the owner's machine)", files.every((f) => !/journal\.mjs/.test(fs.readFileSync(f, "utf8"))));
 
+console.log("\nTHE UI MESSAGES\n───────────────");
+{
+  /* The popup and the options page talk to the worker through the UI table only. Every
+     entry is a switch, a read or a bookkeeping act (the stock list's "clear the block"
+     among them); none may name a signature or a secret, so no page of this extension can
+     ask the worker to sign or to hand anything key-shaped back. */
+  const { UI } = await import("./src/lib/protocol.mjs");
+  const names = Object.values(UI);
+  const bad = names.filter((t) => /sign|secret|seed|mnemonic|private|keypair|passphrase/i.test(t));
+  ok("no popup or options message asks for a signature or a secret", bad.length === 0, bad.join(", ") || `${names.length} message types`);
+  ok("the stock list's one new message is a bookkeeping act", names.includes("hawk:ui:clear-stock-canary"));
+  const options = fs.readFileSync(path.join(here, "src", "options", "options.mjs"), "utf8");
+  ok("the options page's stock editor stores nothing itself (the worker's normalizeConfig is the only writer)", !/chrome\.storage|localStorage|sessionStorage/.test(options));
+}
+
+console.log("\nTHE AUTOPILOT MESSAGES\n──────────────────────");
+{
+  /* The autopilot wallet is driven from the extension's own pages through a table apart
+     from UI, because three of its messages carry a passphrase and one hands the key back
+     for recovery. What is pinned: exactly which; that the worker reads a passphrase in
+     those three handlers and nowhere else; that the key leaves only through the export;
+     that no message carries transaction bytes from a page; that nothing logs either;
+     and that only the extension's own pages are answered. */
+  const P = await import("./src/lib/protocol.mjs");
+  const types = Object.values(P.AUTOPILOT ?? {});
+  ok("the AUTOPILOT table is exactly status, create, unlock, lock, fund, sweep and the recovery export", JSON.stringify([...types].sort()) === JSON.stringify([
+    "hawk:autopilot:create", "hawk:autopilot:export-secret", "hawk:autopilot:fund", "hawk:autopilot:lock", "hawk:autopilot:status", "hawk:autopilot:sweep", "hawk:autopilot:unlock",
+  ]), types.join(", "));
+  ok("exactly three carry a passphrase: create, unlock, export", JSON.stringify([...P.AUTOPILOT_CARRIES_PASSPHRASE].sort()) === JSON.stringify([P.AUTOPILOT.CREATE, P.AUTOPILOT.EXPORT_SECRET, P.AUTOPILOT.UNLOCK].sort()));
+  ok("exactly one returns a secret: the recovery export", P.AUTOPILOT_RETURNS_SECRET.length === 1 && P.AUTOPILOT_RETURNS_SECRET[0] === P.AUTOPILOT.EXPORT_SECRET);
+  ok("no autopilot message names a signature request", types.every((t) => !/sign(?!ed)|tx|transaction/i.test(t.replace("hawk:autopilot:", ""))), types.join(", "));
+  ok("no web page can send one: the page-to-extension relay carries none", [...P.HAWK_FROM_PAGE].every((t) => !t.startsWith("hawk:autopilot:")) && [...P.HAWK_TO_PAGE].every((t) => !t.startsWith("hawk:autopilot:")));
+  for (const rel of [path.join("src", "content.mjs"), path.join("src", "injected.mjs")]) {
+    const t = fs.readFileSync(path.join(here, rel), "utf8");
+    ok(`${rel}: never names an autopilot message`, !/hawk:autopilot|AUTOPILOT/.test(t));
+  }
+
+  const bg = fs.readFileSync(path.join(here, KEY_HOST), "utf8");
+  /* Each autopilot handler is an `async function autopilotX(msg) {…}` ending at a line "}". */
+  const fn = (name) => { const m = bg.match(new RegExp(`async function ${name}\\((?:msg)?\\) \\{[\\s\\S]*?\\n\\}\\n`)); return m ? { start: m.index, end: m.index + m[0].length, text: m[0] } : null; };
+  const handlers = Object.fromEntries(["autopilotStatus", "autopilotCreate", "autopilotUnlock", "autopilotLock", "autopilotExport", "autopilotFund", "autopilotSweep"].map((n) => [n, fn(n)]));
+  ok("the worker has one handler per autopilot message", Object.values(handlers).every(Boolean), Object.entries(handlers).filter(([, v]) => !v).map(([k]) => k).join(", ") || "all seven");
+  const within = (index, names) => names.some((n) => handlers[n] && index >= handlers[n].start && index < handlers[n].end);
+  const reads = [...bg.matchAll(/msg\.(passphrase|confirm|currentPassphrase)\b/g)];
+  ok("the worker reads a passphrase in the create, unlock and export handlers, and nowhere else", reads.length >= 4 && reads.every((m) => within(m.index, ["autopilotCreate", "autopilotUnlock", "autopilotExport"])), `${reads.length} reads`);
+  const secretUses = [...bg.matchAll(/secretBase58/g)];
+  ok("the key leaves the worker only through the recovery export", secretUses.length >= 1 && secretUses.every((m) => within(m.index, ["autopilotExport"])), `${secretUses.length} uses`);
+  ok("the export asks the keystore, which asks for the passphrase", /keystore\.exportSecret\(\{ passphrase: msg\.passphrase \}\)/.test(handlers.autopilotExport?.text ?? ""));
+  ok("no autopilot handler reads transaction bytes from a message (the worker builds every byte)", !/msg\.(txBase64|tx|transaction|signed|signedBase64|instructions?)\b/.test(bg));
+  ok("the fund is the one Phantom approval, through the bridge", /bridge\.signTransaction\(/.test(handlers.autopilotFund?.text ?? "") && !/sessionSigner/.test(handlers.autopilotFund?.text ?? ""));
+  ok("the sweep is signed by the autopilot wallet and never asks Phantom", /sessionSigner\.signTransaction\(/.test(handlers.autopilotSweep?.text ?? "") && !/bridge\.signTransaction/.test(handlers.autopilotSweep?.text ?? ""));
+  ok("the sweep goes only to the destination the user confirmed", /msg\.expectTo !== to/.test(handlers.autopilotSweep?.text ?? ""));
+  const logLines = bg.split("\n").filter((l) => /\blog\(|console\.\w+\(/.test(l));
+  const leaky = logLines.filter((l) => /passphrase|secretBase58|currentPassphrase|msg\.confirm/i.test(l));
+  ok("no log or console line in the worker mentions a passphrase or the exported key", leaky.length === 0, leaky.join(" | ") || `${logLines.length} log lines`);
+  ok("the autopilot messages are answered for the extension's own pages only", /if \(!fromExtensionPage\(sender\)\) return \{ ok: false/.test(bg) && /sender\.id !== chrome\.runtime\.id/.test(bg) && /sender\.url\.startsWith\(base\)/.test(bg));
+  ok("the unlocked key's area is pinned to trusted contexts", /setAccessLevel\?\.\(\{ accessLevel: "TRUSTED_CONTEXTS" \}\)/.test(bg));
+  ok("the keystore's unlocked secret goes to chrome.storage.session, its blob to chrome.storage.local", /createKeystore\(\{ storage: chromeArea\(chrome\.storage\.local\), session: chromeArea\(chrome\.storage\.session\) \}\)/.test(bg));
+
+  /* The pages that take a passphrase: password fields, cleared after use, never stored,
+     never logged; the exported key shown as text, in one box, and cleared. */
+  const PAGES = [
+    [path.join("src", "popup", "popup.html"), path.join("src", "popup", "popup.mjs"), ["apPass1", "apPass2", "apPassUnlock", "apPassExport", "apPassCurrent", "apPassNew1", "apPassNew2"]],
+    [path.join("src", "welcome", "welcome.html"), path.join("src", "welcome", "welcome.mjs"), ["pass1", "pass2"]],
+  ];
+  for (const [htmlRel, jsRel, ids] of PAGES) {
+    const html = fs.readFileSync(path.join(here, htmlRel), "utf8");
+    const js = fs.readFileSync(path.join(here, jsRel), "utf8");
+    for (const id of ids) {
+      ok(`${htmlRel}: #${id} is a password field`, new RegExp(`<input id="${id}" type="password"`).test(html));
+      /* Either `$("id").value = ""` directly, or `x = $("id")` then `x.value = ""`. */
+      const direct = new RegExp(`\\$\\("${id}"\\)\\.value = ""`).test(js);
+      const bound = js.match(new RegExp(`\\b(\\w+) = \\$\\("${id}"\\)`));
+      const viaName = bound ? new RegExp(`\\b${bound[1]}\\.value = ""`).test(js.slice(bound.index)) : false;
+      ok(`${jsRel}: #${id} is cleared after it is read`, direct || viaName, bound ? `as ${bound[1]}` : "directly");
+    }
+    ok(`${jsRel}: logs nothing`, !/console\./.test(js));
+    ok(`${jsRel}: stores nothing itself (no chrome.storage, localStorage or sessionStorage)`, !/chrome\.storage|localStorage|sessionStorage/.test(js));
+  }
+  const popup = fs.readFileSync(path.join(here, "src", "popup", "popup.mjs"), "utf8");
+  ok("the popup shows the exported key as text, never as HTML", /\$\("apSecret"\)\.textContent = res\.secretBase58/.test(popup) && !/innerHTML[^;\n]*secretBase58/.test(popup));
+  ok("…and clears it: on hide, when its section closes, and after two minutes", /function clearSecret\(\) \{\s*\$\("apSecret"\)\.textContent = "";/.test(popup) && /btnApSecretHide"\)\.addEventListener\("click", clearSecret\)/.test(popup) && /setTimeout\(clearSecret, 120_000\)/.test(popup) && /apExportBox"\)\.addEventListener\("toggle"/.test(popup));
+  const stripComments = (t) => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/[^\n]*/g, "$1");
+  const holders = files.filter((f) => /secretBase58/.test(stripComments(fs.readFileSync(f, "utf8")))).map((f) => path.relative(here, f)).sort();
+  ok("only the worker and the popup ever name the exported key", JSON.stringify(holders) === JSON.stringify([KEY_HOST, path.join("src", "popup", "popup.mjs")].sort()), holders.join(", "));
+}
+
+console.log("\nTHE xSTOCK VENUE'S NETWORK\n──────────────────────────");
+{
+  /* The second venue is the extension's first code that talks to hosts other than the RPC
+     the user pasted: public new-pool feeds and Jupiter. What is pinned: those files name
+     only the four hosts the venue needs; nothing in them can read, name or send a key or a
+     passphrase; the one request body that carries a wallet carries its PUBLIC key; and the
+     venue reaches a signature only through the engine's signSendConfirm (which refuses a
+     signed message that is not the one asked for), each call after the pre-sign check. */
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/[^\n]*/g, "$1");
+  const NET = [path.join("src", "lib", "xstock-discovery.mjs"), path.join("src", "lib", "jupiter-swap.mjs")];
+  const LANE = path.join("src", "lib", "xstock-lane.mjs");
+  const ALLOWED_HOSTS = new Set(["api.geckoterminal.com", "api.dexscreener.com", "datapi.jup.ag", "api.jup.ag"]);
+  for (const rel of [...NET, LANE]) {
+    const code = strip(fs.readFileSync(path.join(here, rel), "utf8"));
+    const hosts = [...code.matchAll(/https?:\/\/([a-z0-9.-]+)/gi)].map((m) => m[1].toLowerCase());
+    ok(`${rel}: names only the venue's hosts`, hosts.every((h) => ALLOWED_HOSTS.has(h)), [...new Set(hosts)].join(", ") || "none");
+    ok(`${rel}: no plain-http URL`, !/http:\/\//i.test(code));
+    ok(`${rel}: nothing key-shaped or passphrase-shaped in its code`, !/secret|passphrase|privateKey|mnemonic|seed\b/i.test(code));
+    ok(`${rel}: touches no storage and no chrome API`, !/chrome\.|localStorage|sessionStorage|indexedDB/.test(code));
+    ok(`${rel}: signs nothing itself`, !/\.sign\(|signTransaction|partialSign/.test(code));
+  }
+  const jup = strip(fs.readFileSync(path.join(here, NET[1]), "utf8"));
+  const swapBody = jup.match(/request\("\/swap", \{ priority, body: \{([\s\S]*?)\} \}\);/)?.[1] ?? "";
+  const keys = [...swapBody.matchAll(/(\w+):/g)].map((m) => m[1]).filter((k) => !["priorityLevelWithMaxLamports", "maxLamports", "priorityLevel", "global"].includes(k));
+  ok("the one body that names the wallet sends Jupiter its public key and nothing else of it", JSON.stringify(keys) === JSON.stringify(["quoteResponse", "userPublicKey", "wrapAndUnwrapSol", "dynamicComputeUnitLimit", "prioritizationFeeLamports"]), keys.join(", "));
+  ok("…and it asks Jupiter never to wrap SOL: this venue pays in the stock", /wrapAndUnwrapSol: false/.test(swapBody));
+  const lane = strip(fs.readFileSync(path.join(here, LANE), "utf8"));
+  const signs = [...lane.matchAll(/host\.signSendConfirm\(\{ txBase64: swap\.swapTransaction/g)].map((m) => m.index);
+  const checks = [...lane.matchAll(/checkBeforeSigning\(\{ txBase64: swap\.swapTransaction/g)].map((m) => m.index);
+  ok("the venue asks for a signature only through the engine's signSendConfirm, for the buy and the sell", signs.length === 2 && (lane.match(/signSendConfirm/g) ?? []).length === 2);
+  ok("…each after its own pre-sign check of the same bytes (check, sign, check, sign)", signs.length === 2 && checks.length === 2 && checks[0] < signs[0] && signs[0] < checks[1] && checks[1] < signs[1], `checks at ${checks.join(",")}, signs at ${signs.join(",")}`);
+  ok("…whose check resolves the lookup tables on the lane's own RPC", /loadLookupTables\(rpc, lookupTableKeysOf\(txBase64\)\)/.test(lane));
+  const engine = fs.readFileSync(path.join(here, "src", "lib", "engine.mjs"), "utf8");
+  ok("the engine hands the venue its own simulateGuard and signSendConfirm, not a signer's raw call", /simulateGuard, signSendConfirm, recordClose,/.test(engine) && !/createXstockLane\(\{[\s\S]*?signTransaction[\s\S]*?\}\);/.test(engine));
+}
+
 console.log("\nTHE KEY FILE\n────────────");
 {
   const text = fs.readFileSync(path.join(here, KEY_FILE), "utf8");
@@ -109,14 +240,22 @@ console.log("\nTHE KEY FILE\n────────────");
 console.log("\nTHE BUNDLE\n──────────");
 const dist = path.join(here, "dist");
 if (fs.existsSync(dist)) {
-  for (const name of ["background.js", "content.js", "injected.js", "popup.js", "options.js"]) {
+  for (const name of ["background.js", "content.js", "injected.js", "popup.js", "options.js", "welcome.js"]) {
     const file = path.join(dist, name);
     if (!fs.existsSync(file)) { ok(`${name} was built`, false); continue; }
     const text = fs.readFileSync(file, "utf8");
     /* @solana/web3.js defines Keypair inside every bundle that imports it; what is banned is
        our code USING one. So the bundle check is for the executor's signing port and for
        secret-key construction at our call sites, which the source scan above already pins. */
-    ok(`${name}: the executor's signing port is not in the bundle`, !/createSnipeExecutor|snipe-execute\.mjs/.test(text));
+    /* Two proofs the signing port is absent. esbuild heads every module it bundles with a
+       `// <path>` line, so a bundled snipe-execute.mjs would carry that header. And the
+       CODE, comments stripped, names neither the port nor its file. A vendored comment
+       that only MENTIONS the file (snipe-lane.mjs's note on why the Node lane stays
+       SOL-only rides inside SNIPE_LANE_DEFAULTS, and esbuild keeps it) is prose, not the port. */
+    ok(`${name}: esbuild bundled no module named snipe-execute.mjs`, !/^\/\/ [^\n]*snipe-execute\.mjs\s*$/m.test(text));
+    const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/[^\n]*/g, "$1");
+    ok(`${name}: the executor's signing port is not in the bundle's code`, !/createSnipeExecutor|snipe-execute\.mjs/.test(code));
+    ok(`${name}: the comment strip left the code to scan`, code.length > text.length / 3 && /chrome\.|postMessage|PublicKey/.test(code), `${(code.length / 1024).toFixed(0)} of ${(text.length / 1024).toFixed(0)} KB`);
     ok(`${name}: no node: import survived`, !/from\s+"node:|require\("node:/.test(text));
     if (name !== "background.js") ok(`${name}: the session secret's key is not in the bundle`, !text.includes(SECRET_ENTRY_KEY));
   }

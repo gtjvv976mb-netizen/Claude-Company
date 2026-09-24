@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "version": "0.1.0",
-  "description": "COINMARKETCAT — the Claude Company launch sniper for Phantom. It hovers ten seconds over every pump.fun launch, buys only what others followed, and signs every trade with your own hand. It never holds a key.",
+  "description": "COINMARKETCAT — the sniper cat, by Cat Intelligence Agency. It hovers ten seconds over every pump.fun launch and buys only what others followed, inside limits you set. Phantom mode: every trade is one Phantom approval and the extension holds no key. Autopilot mode: an autopilot wallet the extension makes, encrypted under your passphrase and funded from Phantom, signs without asking; your exposure is what you fund it with. Off by default: a second venue that watches new pools pairing a token with an xStock and trades them through Jupiter, paid in that stock, inside its limits.",
   "engines": {
     "node": ">=22.13 <25"
   },

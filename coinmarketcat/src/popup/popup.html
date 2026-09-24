@@ -7,9 +7,16 @@
 </head>
 <body>
 <header class="top">
-  <div class="brand">COINMARKET<em>CAT</em> <span class="sub">for Phantom</span></div>
+  <div class="brand">COINMARKET<em>CAT</em> <span class="sub">sniper cat</span></div>
   <span id="lanePill" class="pill">off</span>
 </header>
+
+<section class="card setup hidden" id="setupCard">
+  <div class="row">
+    <div><div class="k">First run</div><div class="v">Set your limits, stocks and signer before anything else.</div></div>
+    <button id="btnSetup" class="btn">Set up</button>
+  </div>
+</section>
 
 <section class="card" id="walletCard">
   <div class="row">
@@ -26,6 +33,72 @@
     <span class="k">Feed</span> <span id="feedLine" class="v">stopped</span>
     <span class="k">RPC</span> <span id="rpcLine" class="v mono">—</span>
   </div>
+</section>
+
+<section class="card" id="autopilotCard">
+  <div class="k">Who signs</div>
+  <div class="seg two" id="signerSeg">
+    <button data-signer="phantom" title="One Phantom approval window per trade. The extension holds no key.">Phantom per trade</button>
+    <button data-signer="autopilot" title="The autopilot wallet signs each trade without a window.">Autopilot</button>
+  </div>
+  <p class="hint" id="signerHint"></p>
+
+  <div id="apNone" class="hidden">
+    <p class="hint">Autopilot trades from a wallet this extension makes: you fund it from Phantom with one approval, and it signs the cat's buys and sells without asking. It needs a passphrase of 12 characters or more; there is no reset, so write it down outside this browser.</p>
+    <details id="apCreateBox">
+      <summary class="k">Create the autopilot wallet</summary>
+      <input id="apPass1" type="password" autocomplete="new-password" minlength="12" placeholder="passphrase (12+ characters)">
+      <input id="apPass2" type="password" autocomplete="new-password" minlength="12" placeholder="the same passphrase again">
+      <button id="btnApCreate" class="btn wide">Create</button>
+    </details>
+  </div>
+
+  <div id="apSome" class="hidden">
+    <div class="row">
+      <div><div class="k">Autopilot wallet</div><div class="v mono" id="apAddress">—</div></div>
+      <span id="apLockPill" class="pill">locked</span>
+    </div>
+    <div class="row small">
+      <span class="k">Balance</span> <span id="apBalance" class="v mono">—</span>
+      <span id="apTokens" class="v mono small"></span>
+    </div>
+    <div id="apUnlockRow" class="ackrow">
+      <input id="apPassUnlock" type="password" autocomplete="current-password" placeholder="passphrase">
+      <select id="apMinutes" title="How long the unlock lasts"></select>
+      <button id="btnApUnlock" class="btn">Unlock</button>
+    </div>
+    <button id="btnApLock" class="btn ghost wide hidden" title="Clears the unlocked key from memory. The wallet signs nothing until unlocked again.">Lock — clear the unlocked key</button>
+    <div class="k" style="margin-top:10px">Fund from Phantom</div>
+    <div class="ackrow">
+      <input id="apFundAmount" type="number" step="any" min="0">
+      <select id="apFundAsset"></select>
+      <button id="btnApFund" class="btn" title="Built here, approved once in Phantom on the console tab">Fund</button>
+    </div>
+    <p class="hint" id="apFundHint"></p>
+    <button id="btnApSweep" class="btn ghost wide">Sweep back to Phantom</button>
+    <p class="hint" id="apSweepHint"></p>
+    <details id="apExportBox">
+      <summary class="k">Export the key (recovery)</summary>
+      <p class="hint warnline">This shows the autopilot wallet's private key once, in the form Phantom and Solflare import. Anyone who sees it can spend everything in the wallet. Use it to recover funds, then treat the wallet as exposed: sweep it and replace it.</p>
+      <div class="ackrow">
+        <input id="apPassExport" type="password" autocomplete="current-password" placeholder="passphrase">
+        <button id="btnApExport" class="btn danger-inline">Show once</button>
+      </div>
+      <div id="apSecretBox" class="secret hidden">
+        <div class="mono" id="apSecret"></div>
+        <button id="btnApSecretHide" class="btn ghost wide">I have saved it — hide it</button>
+      </div>
+    </details>
+    <details id="apReplaceBox">
+      <summary class="k">Replace the autopilot wallet</summary>
+      <p class="hint">For a wallet you exported or no longer trust. Sweep it back first: a wallet that still holds SOL above the rent floor, any token, or a live position is not replaced. The old key is discarded; the new wallet starts locked and empty.</p>
+      <input id="apPassCurrent" type="password" autocomplete="current-password" placeholder="the current passphrase">
+      <input id="apPassNew1" type="password" autocomplete="new-password" minlength="12" placeholder="a new passphrase (12+ characters)">
+      <input id="apPassNew2" type="password" autocomplete="new-password" minlength="12" placeholder="the new passphrase again">
+      <button id="btnApReplace" class="btn ghost wide">Replace</button>
+    </details>
+  </div>
+  <p class="hint posture">A key in a browser is a bigger attack surface than Phantom: while the autopilot wallet is unlocked, malware on this machine or a hostile extension could read it. Your exposure is what you fund it with. Lock clears the unlocked key. Sweep back when you are done.</p>
 </section>
 
 <section class="card">
@@ -50,11 +123,33 @@
   <ul id="warnings" class="warnings"></ul>
 </section>
 
+<section class="card" id="venueCard">
+  <div class="k">Venues</div>
+  <div class="row small"><span class="v">pump.fun launches, from the program's own logs</span><span class="pill observe">always</span></div>
+  <label class="venue"><input type="checkbox" id="chkXstock"> New pools paired with an xStock, through Jupiter <span id="xstockPill" class="pill">off</span></label>
+  <p class="hint" id="xstockHint">Off. When on, it polls public new-pool feeds for pools anywhere on Solana that pair a token with a stock you watch, and follows the lane: Observe keeps would-have positions, Execute (armed) trades them through Jupiter, paid in that stock, inside that stock's limits.</p>
+  <div id="xstockBody" class="hidden">
+    <div class="row small"><span class="k">Feeds</span> <span id="xstockFeeds" class="v mono small"></span></div>
+    <div class="row small"><span class="k">Watching</span> <span id="xstockFocus" class="v small"></span></div>
+    <div class="row small"><span class="k">Jupiter</span> <span id="xstockJupiter" class="v mono small"></span></div>
+    <div id="xstockBlocks" class="list small stocks"></div>
+    <div class="k" style="margin-top:8px">Pools found, newest first</div>
+    <div id="xstockCandidates" class="list small"><div class="empty">none yet</div></div>
+    <p class="hint" id="xstockRule"></p>
+    <p class="hint warnline" id="xstockUnmeasured"></p>
+  </div>
+</section>
+
 <section class="card">
   <div class="row">
     <div><div class="k">Today</div><div class="v" id="dayLine">0 / 0 SOL</div></div>
     <div><div class="k">Ticket</div><div class="v" id="ticketLine">—</div></div>
     <div><div class="k">Wait</div><div class="v" id="waitLine">—</div></div>
+  </div>
+  <div id="stockBox" class="stocks hidden">
+    <div class="k" style="margin-top:10px">Stock quotes (pump.fun Custom Pairs)</div>
+    <div id="stocks" class="list small"></div>
+    <p class="hint" id="canaryRule"></p>
   </div>
   <div class="k" style="margin-top:10px">Positions</div>
   <div id="positions" class="list"><div class="empty">nothing open</div></div>
@@ -67,7 +162,7 @@
 <section class="card">
   <div class="row">
     <div><div class="k">Book</div><div class="v" id="bookLine">no live trades</div></div>
-    <div><div class="k">Realized</div><div class="v mono" id="realizedLine">—</div></div>
+    <div><div class="k">Realized</div><div class="v mono" id="realizedLine">—</div><div class="v mono small" id="realizedQuoteLine"></div></div>
   </div>
   <div id="closes" class="list"></div>
 </section>
@@ -78,6 +173,7 @@
     <button id="btnExport" class="btn ghost" title="One JSON row per line — the file vendor/executor/grade-entry-gates.mjs --file reads">Export</button>
   </div>
   <div id="scorecard" class="scorecard"></div>
+  <div id="quoteCards" class="list small"></div>
   <div class="k" style="margin-top:8px">Last refusals</div>
   <div id="refusals" class="list small"></div>
 </section>
@@ -95,7 +191,7 @@
 </section>
 
 <footer class="foot">
-  <a href="#" id="lnkOptions">Options</a> · <span id="versionLine" class="mono"></span> · not advice; nothing here has an edge until you have graded it
+  <a href="#" id="lnkOptions">Options</a> · <a href="#" id="lnkSetup">Setup</a> · <span id="versionLine" class="mono"></span> · not advice; nothing here has an edge until you have graded it
 </footer>
 <script type="module" src="popup.js"></script>
 </body>

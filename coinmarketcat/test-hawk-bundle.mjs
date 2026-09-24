@@ -74,7 +74,7 @@ if (built) {
     ok(`${out}: no node: specifier survived`, !/["']node:[a-z_]+["']/.test(text));
     ok(`${out}: no require() of a package survived`, !/\brequire\(["'][^"']+["']\)/.test(text.replace(/\/\*[\s\S]*?\*\//g, "")));
   }
-  for (const stat of ["manifest.json", "popup.html", "popup.css", "options.html", "icons/coinmarketcat-32.png", "icons/coinmarketcat-128.png", "icons/coinmarketcat-512.png"])
+  for (const stat of ["manifest.json", "popup.html", "popup.css", "options.html", "welcome.html", "welcome.css", "icons/coinmarketcat-32.png", "icons/coinmarketcat-128.png", "icons/coinmarketcat-512.png"])
     ok(`${stat} was copied`, fs.existsSync(path.join(outdir, stat)));
 
   /* The manifest names files the build produced — a renamed entry would load as a blank
@@ -86,6 +86,9 @@ if (built) {
   ok("popup.html loads popup.js and popup.css by the built names", /src="popup\.js"/.test(popupHtml) && /href="popup\.css"/.test(popupHtml));
   const optionsHtml = fs.readFileSync(path.join(outdir, "options.html"), "utf8");
   ok("options.html loads options.js", /src="options\.js"/.test(optionsHtml));
+  const welcomeHtml = fs.readFileSync(path.join(outdir, "welcome.html"), "utf8");
+  ok("welcome.html, the first-run setup page, loads welcome.js and welcome.css by the built names", /src="welcome\.js"/.test(welcomeHtml) && /href="welcome\.css"/.test(welcomeHtml));
+  ok("…and the icon it shows was copied beside it", /src="icons\/coinmarketcat-128\.png"/.test(welcomeHtml) && fs.existsSync(path.join(outdir, "icons", "coinmarketcat-128.png")));
 
   console.log("\nTHE BUNDLE EVALUATES, AND DECIDES LIKE THE EXECUTOR\n──────────────────────────────────────────────────");
   /* A library bundle from the engine entry, built with the same options, so the decision
@@ -109,6 +112,9 @@ if (built) {
     const st = engine.status();
     ok("the bundled engine reports the record beside the switch", st.record?.first58?.trades === 58 && Array.isArray(st.armability?.warnings), `record ${st.record?.first58?.trades} trades; ${st.armability?.warnings?.length} warnings`);
     ok("the bundled policy carries the record's 1.5x take and the 90s stall", st.policy?.takeAtEntryX === 1.5 && st.policy?.stallMs === 90_000, JSON.stringify(st.policy));
+    ok("the bundled engine carries the xStock venue, off by default, watching the built-in list", st.xstock?.venue === "jupiter-xstock" && st.xstock.enabled === false && st.xstock.focus?.length === 15 && Array.isArray(st.xstock.candidates), JSON.stringify({ venue: st.xstock?.venue, enabled: st.xstock?.enabled }));
+    const xticked = await engine.xstockTick();
+    ok("…and its tick is a no-op while it is off", Array.isArray(xticked) && xticked.length === 0);
     /* The same launch, refused at the same gate by both the source contract and the bundled one. */
     const stale = { mint: "FgJReZeYfmKZeWrCaGYL8gLnUixwBhjdHuRknC6ypump", creator: null, slot: 1, noticeAt: Date.now() - 600_000, source: "logsSubscribe", raw: {} };
     engine.setRpc({ url: "https://x", async getMultipleAccounts() { return { slot: 1, accounts: [null, null, null] }; } });
@@ -118,6 +124,22 @@ if (built) {
     const { laneConfigFor, normalizeConfig, CONFIG_DEFAULTS } = await import("./src/lib/config.mjs");
     const v = snipeContract({ notice: { mint: stale.mint, noticeAt: stale.noticeAt }, curve: null, adapter: (await import("./vendor/executor/snipe-venue-pumpfun.mjs")).PUMPFUN_VENUE, cfg: laneConfigFor(normalizeConfig({ ...CONFIG_DEFAULTS, lane: "observe" })), book: { snipes: {}, positions: {}, attempts: {}, deployedTodaySol: 0 }, nowMs: Date.now(), control: { hardStop: false, pauseEntries: false }, fees: { signatureFeeLamports: 5000, prioritizationFeeLamports: 0, rentFeeLamports: 0 } });
     ok("…and the executor's own contract agrees on the gate", v.gate === res?.verdict?.gate, `executor ${v.gate}, bundle ${res?.verdict?.gate}`);
+
+    /* A STOCK QUOTE THROUGH THE BUNDLE: the bundled describeMint (token2022.mjs behind the
+       node:crypto shim) must read the live GLDx mint bytes exactly as Node does, off the
+       same read as a live GLDx-quoted curve. */
+    const fixture = JSON.parse(fs.readFileSync(path.join(here, "vendor", "executor", "fixtures", "pumpfun-xstock-quote.json"), "utf8"));
+    const acct = (address) => { const a = fixture.accounts.find((x) => x.address === address); return { owner: a.owner, lamports: a.lamports, data: a.data }; };
+    const GLDX = "Xsv9hRk1z5ystj9MhnA7Lq4vjSsLwzL2nxrwmwtD3re";
+    const stockEngine = bundled.createHawkEngine({ bridge, store: bundled.memoryStore(), config: { lane: "observe", quoteMints: [{ mint: GLDX, symbol: "GLDx", maxPerTrade: 0.05, minPerTrade: 0.01, dailyCap: 0.5 }] } });
+    await stockEngine.load();
+    const reads = [];
+    stockEngine.setRpc({ url: "https://x", async getMultipleAccounts(addresses) { reads.push(addresses.map(String)); return { slot: 449_986_225, accounts: addresses.map((a, i) => (String(a) === GLDX ? acct(GLDX) : i === 0 ? acct("JXJC7sJa235q7GbFjsQ9oorm6wHForQ8MZJoF1MedDP") : null)) }; } });
+    const stockRes = await stockEngine.handleNotice({ mint: "DRA4qXNRw5XBd5aVBjFdKJWMc1yiBpqrp8gTWYsmpump", creator: null, slot: 449_986_220, noticeAt: Date.now(), source: "logsSubscribe", raw: {} });
+    const sq = stockEngine.status().quoteMints?.[0];
+    ok("the bundled engine reads a listed stock's mint on the curve's own read", reads.length === 1 && reads[0].length === 4 && reads[0][3] === GLDX, JSON.stringify(reads.map((r) => r.length)));
+    ok("…and the bundled describeMint reads the live GLDx bytes: Token-2022, 8 decimals, unpaused, symbol GLDx", sq?.decimals === 8 && sq.program === "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" && sq.paused === false && sq.metadataSymbol === "GLDx", JSON.stringify({ d: sq?.decimals, p: sq?.paused, s: sq?.metadataSymbol }));
+    ok("…and the launch gets past quote_not_sol, sized in GLDx (refused later, for the base mint the probe did not serve)", stockRes?.verdict?.gate !== "quote_not_sol" && stockRes?.verdict?.detail?.quote?.isSol === false, `${stockRes?.verdict?.gate}: ${stockRes?.verdict?.detail?.message?.slice(0, 80)}`);
   }
 }
 fs.rmSync(outdir, { recursive: true, force: true });
