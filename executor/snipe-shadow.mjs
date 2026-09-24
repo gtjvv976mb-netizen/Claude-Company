@@ -83,7 +83,7 @@
  * `sink` if the caller supplied one; this file never opens a file or a database, so a
  * replay run and an observe run go through identical code.
  */
-import { SNIPE_GATES, SNIPE_GATE_COST, SNIPE_PROXY_GATES } from "./snipe-entry.mjs";
+import { SNIPE_GATES, SNIPE_GATE_COST, SNIPE_PROXY_GATES, SOL_QUOTE_MINT } from "./snipe-entry.mjs";
 
 export const SNIPE_SHADOW_VERSION = "snipe-shadow-v1";
 
@@ -380,6 +380,14 @@ export function openShadowRow({
          so: the positive class is read off this field. */
       reserveKnown: curve.reserveKnown === true
         || (curve.realQuoteRaw !== null && curve.realQuoteRaw !== undefined),
+      /* THE TOKEN THE CURVE IS QUOTED IN. A GLDx-quoted launch and a SOL-quoted one are
+         different populations — different reserves, different buyers, different
+         follow-through — and a precision over their union grades nothing, so every card
+         below is cut by this field. Null on a row that did not carry it, which
+         rowQuoteMint reads as SOL: true by construction, since quote_not_sol refused
+         every other curve before this field existed. */
+      quoteMint: isStr(curve.quoteMint) ? curve.quoteMint : null,
+      quoteDecimals: Number.isInteger(curve.quoteDecimals) ? curve.quoteDecimals : null,
     }),
 
     /* THE EXACT THING IT WOULD HAVE SIGNED. Not a quote, not an estimate with a slippage
@@ -395,6 +403,8 @@ export function openShadowRow({
          position must reach to return what it cost. At the live cap it is ~1.20x, and no
          exit logic can improve it — it is a fact about position size. */
       frictionX: finite(frictionX) ? Number(frictionX) : null,
+      /* The quote the ticket was sized in, from the contract's own verdict; null is SOL. */
+      quoteMint: isStr(detail.quote?.mint) ? detail.quote.mint : null,
     }),
 
     /* THE FULL ORDERED TRACE, with the first refusal named. */
@@ -554,10 +564,26 @@ export const SNIPE_PROXIES = Object.freeze({
  * where the proxy was ACTUALLY measured and the outcome ACTUALLY known. Pure reporting,
  * and it promotes nothing: `promotable` is a sentence for the owner to read.
  */
+/** The quote a row was evaluated in: the curve's own field, else SOL (see openShadowRow). */
+export const rowQuoteMint = (row) => (isStr(row?.curve?.quoteMint) ? row.curve.quoteMint : SOL_QUOTE_MINT);
+
+/** Every quote mint present in a book, SOL first, so a report has an order to print in. */
+export function quoteMintsOf(rows) {
+  const seen = new Set((Array.isArray(rows) ? rows : []).map(rowQuoteMint));
+  return Object.freeze([SOL_QUOTE_MINT, ...[...seen].filter((m) => m !== SOL_QUOTE_MINT).sort()]
+    .filter((m) => m === SOL_QUOTE_MINT || seen.has(m)));
+}
+
 export function snipeScorecard(rows, {
   bar = PROMOTION_PRECISION_BAR, minRows = PROMOTION_MIN_ROWS, minFlagged = PROMOTION_MIN_FLAGGED,
+  /* ONE POPULATION PER CARD. Defaults to SOL, which is every row a book held before the
+     quote field existed, so every existing caller reads the same card it always did. */
+  quoteMint = SOL_QUOTE_MINT,
 } = {}) {
-  const judged = (Array.isArray(rows) ? rows : []).filter(outcomeKnown);
+  const known = (Array.isArray(rows) ? rows : []).filter(outcomeKnown);
+  const excludedByQuote = {};
+  for (const r of known) { const q = rowQuoteMint(r); if (q !== quoteMint) excludedByQuote[q] = (excludedByQuote[q] ?? 0) + 1; }
+  const judged = known.filter((r) => rowQuoteMint(r) === quoteMint);
   const positives = judged.filter(positiveOutcome).length;
   const proxies = {};
   for (const [name, p] of Object.entries(SNIPE_PROXIES)) {
@@ -594,6 +620,8 @@ export function snipeScorecard(rows, {
     positiveClass: "the curve's real quote reserve never advanced past the would-have-fill "
       + "within the forward window — a launch nobody followed",
     bar, minRows, minFlagged,
+    quoteMint,
+    excludedByQuote: Object.freeze(excludedByQuote),
     proxies: Object.freeze(proxies),
     promotes: "nothing — this scorecard reports; wiring a proxy as a kill is a separate registered "
       + "change to GATE_CLASS",
@@ -722,6 +750,10 @@ export function shadowReport(rows, {
     queueDepthSlots: slotDeltaTable(list),
     latency: latencyTable(list),
     scorecard: snipeScorecard(list, { bar, minRows, minFlagged }),
+    /* One card per quote mint the book holds, SOL first — the SOL card above is the same
+       object a reader of `scorecard` has always read. */
+    scorecardByQuote: Object.freeze(Object.fromEntries(quoteMintsOf(list).map((q) =>
+      [q, snipeScorecard(list, { bar, minRows, minFlagged, quoteMint: q })]))),
     sample: Object.freeze({
       minRows, minCleared: minFlagged,
       rowsShort: Math.max(0, minRows - judged.length),
@@ -816,10 +848,13 @@ export function renderShadowReport(report) {
   L.push("");
 
   L.push(`PROXY SCORECARD — positive class: ${report.scorecard.positiveClass}`);
-  L.push(`  judged ${report.scorecard.judged}   positives ${report.scorecard.positives}`);
-  for (const [name, p] of Object.entries(report.scorecard.proxies))
-    L.push(`  ${pad(name, 18)} n ${pad(p.n, 5)} flagged ${pad(p.flagged, 5)} tp ${pad(p.tp, 4)} fp ${pad(p.fp, 4)} `
-      + `fn ${pad(p.fn, 4)} — ${p.why}`);
+  const cards = report.scorecardByQuote ?? { [report.scorecard.quoteMint ?? SOL_QUOTE_MINT]: report.scorecard };
+  for (const [quote, card] of Object.entries(cards)) {
+    L.push(`  quote ${quote === SOL_QUOTE_MINT ? "SOL" : quote}   judged ${card.judged}   positives ${card.positives}`);
+    for (const [name, p] of Object.entries(card.proxies))
+      L.push(`    ${pad(name, 18)} n ${pad(p.n, 5)} flagged ${pad(p.flagged, 5)} tp ${pad(p.tp, 4)} fp ${pad(p.fp, 4)} `
+        + `fn ${pad(p.fn, 4)} — ${p.why}`);
+  }
   L.push(`  this scorecard promotes ${report.scorecard.promotes}`);
   L.push("");
 

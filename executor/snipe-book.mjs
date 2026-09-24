@@ -112,6 +112,9 @@ export const REQUIRED_SNIPE_PRICING = Object.freeze(["qtyRaw", "entryInputLampor
 export const IMMUTABLE_SNIPE_FIELDS = Object.freeze([
   "mint", "lane", "venue", "entry", "openedAt", "sizeSol", "feeSolPerLeg",
   "entryInputLamports", "entryFeeLamports", "creator",
+  /* The quote a position was paid in is a fact about the fill: a row cannot change the
+     token its size is denominated in. Absent on both sides for every SOL row. */
+  "quoteMint", "quoteDecimals",
 ]);
 
 /** Every refusal this file can produce, in one frozen ordered list so a caller can branch
@@ -142,6 +145,7 @@ export const LANE_INVARIANT_CLAUSES = Object.freeze([
   "immutable_field_changed",
   "quantity_increased",
   "close_invalid",
+  "quote_invalid",
 ]);
 
 const CLAUSE_SET = new Set(LANE_INVARIANT_CLAUSES);
@@ -220,6 +224,15 @@ function storedRaw(value, field, clause, mint, { positive = true } = {}) {
 }
 
 const solToLamports = (sol) => BigInt(Math.round(Number(sol) * LAMPORTS));
+/* Units to raw at the row's own decimals: nine for SOL, whatever the quote mint's account
+   says otherwise. A GLDx row (eight decimals) has sizeSol 0.05 and entryInputLamports
+   5,000,000; under a fixed 1e9 that pair reads as two different fills and the book
+   refuses a true one. The field names keep their SOL spelling — `sizeSol`,
+   `entryInputLamports` — because renaming every consumer for the browser lane's stock
+   rows would touch the desk path, and the row says its decimals out loud instead. */
+const toRaw = (units, decimals) => BigInt(Math.round(Number(units) * 10 ** decimals));
+const decimalsOf = (record) => (Number.isInteger(record.quoteDecimals) ? record.quoteDecimals : 9);
+const WSOL_MINT = "So11111111111111111111111111111111111111112";
 
 /**
  * THE PRICEABILITY TEST, and the reason it is two tests rather than one.
@@ -245,7 +258,7 @@ function assertPriceable(record, mint) {
     refuse("economics_unpriceable",
       `no breakeven multiple exists: feeSolPerLeg ${fee} is not below sizeSol ${size}, so proceeds never reach outlay ` +
       "at any mark", { mint, sizeSol: size, feeSolPerLeg: fee });
-  const feeLamports = solToLamports(fee);
+  const feeLamports = toRaw(fee, decimalsOf(record));
   let friction;
   try {
     friction = frictionXFor({
@@ -280,8 +293,8 @@ function assertPriceable(record, mint) {
  * stop below cost.
  */
 function assertEconomicsAgree(record, mint) {
-  const sizeLamports = solToLamports(record.sizeSol);
-  const feeLamports = solToLamports(record.feeSolPerLeg);
+  const sizeLamports = toRaw(record.sizeSol, decimalsOf(record));
+  const feeLamports = toRaw(record.feeSolPerLeg, decimalsOf(record));
   const input = BigInt(record.entryInputLamports);
   const hi = sizeLamports + 1n;
   const lo = sizeLamports - feeLamports - 1n;
@@ -392,9 +405,47 @@ function assertSnipeRecord(record, { key = null } = {}) {
       `creator must be a base58 32-byte key or null, got ${JSON.stringify(record.creator)} — the CREATOR-SOLD ` +
       "trigger compares against it", { mint, creator: record.creator });
 
+  assertQuoteFields(record, mint);
   assertEconomicsAgree(record, mint);
   assertPriceable(record, mint);
   return mint;
+}
+
+/**
+ * A ROW PAID IN SOMETHING OTHER THAN SOL SAYS SO, AND CARRIES ITS FEES BESIDE ITS SIZE.
+ *
+ * `quoteMint` names the token the fill was paid in; `quoteDecimals` is that mint's own
+ * decimals, read from its account, never configured. On such a row the network fee is
+ * still paid in lamports, and lamports cannot be folded into a size in GLDx: so
+ * `feeSolPerLeg` must be exactly 0, `entryFeeLamports` (if present) "0", and the real
+ * fee travels as `networkFeeLamports`, a digit string the book stores and never nets
+ * against the quote-denominated size. The price of that honesty is a frictionX of 1.0:
+ * breakeven and the trail arm net of the venue's own fee only, and the operator's
+ * explicit stop is the only stop — a fact the lane states on the row rather than hides.
+ */
+function assertQuoteFields(record, mint) {
+  const hasMint = record.quoteMint !== undefined && record.quoteMint !== null;
+  const hasDecimals = record.quoteDecimals !== undefined && record.quoteDecimals !== null;
+  if (hasMint && !isAccountKey(record.quoteMint))
+    refuse("quote_invalid", `quoteMint must be a base58 32-byte key or absent, got ${JSON.stringify(record.quoteMint)}`,
+      { mint, quoteMint: record.quoteMint });
+  if (hasDecimals && !(Number.isInteger(record.quoteDecimals) && record.quoteDecimals >= 0 && record.quoteDecimals <= 18))
+    refuse("quote_invalid", `quoteDecimals must be a whole number 0..18 or absent, got ${show(record.quoteDecimals)}`,
+      { mint, quoteDecimals: record.quoteDecimals });
+  if (hasMint && record.quoteMint !== WSOL_MINT) {
+    if (!hasDecimals)
+      refuse("quote_invalid", `a row quoted in ${record.quoteMint} must carry quoteDecimals — its size is meaningless without them`,
+        { mint, quoteMint: record.quoteMint });
+    if (Number(record.feeSolPerLeg) !== 0)
+      refuse("quote_invalid", `a row quoted in ${record.quoteMint} must carry feeSolPerLeg 0: the network fee is lamports and ` +
+        `cannot be folded into a size in another token (it travels as networkFeeLamports), got ${show(record.feeSolPerLeg)}`,
+        { mint, quoteMint: record.quoteMint, feeSolPerLeg: record.feeSolPerLeg });
+    if (record.entryFeeLamports != null && BigInt(record.entryFeeLamports) !== 0n)
+      refuse("quote_invalid", `a row quoted in ${record.quoteMint} must carry entryFeeLamports "0" for the same reason, got ${show(record.entryFeeLamports)}`,
+        { mint, quoteMint: record.quoteMint });
+  }
+  if (record.networkFeeLamports != null)
+    storedRaw(record.networkFeeLamports, "networkFeeLamports", "quote_invalid", mint, { positive: false });
 }
 
 /** `S.snipes ||= {}`, mirroring `poller.mjs:581` for `S.positions`. A null-prototype

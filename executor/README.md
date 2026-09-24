@@ -1041,6 +1041,33 @@ AnchorError caused by account: bonding_curve. Error Code: MintDoesNotMatchBondin
 An opaque on-chain failure, on a coin that was never buyable. The gate makes the reason
 readable and costs nothing.
 
+**Coins quoted in a stock.** pump.fun "Custom Pairs" (announced 2026-09-09) let a curve be
+quoted in one of ~93 assets, and the ones this desk cares about are the xStocks — GLDx,
+TSLAx, SPYx, measured 2026-09-24 in `fixtures/pumpfun-xstock-quote.json` beside a live
+curve quoted in GLDx. They are Token-2022 mints at 8 decimals with a permanent delegate, a
+live freeze authority, a Pausable extension and a transfer hook whose program is the zero
+key: every one of those is a kill in the BASE-mint audit, and rightly so, but the wallet
+never *holds* the quote — it pays with it. So the quote is **described** (`describeMint`),
+never **judged** (`auditMintAccount`), and the contract takes those facts as `args.quote`.
+
+The same `quote_not_sol` gate now admits a curve quoted in a mint on the lane's
+`quoteMintAllowlist` when — and only when — the caller supplied that mint's facts and they
+validate (`quoteTicketFor`), the mint is the one the curve actually names, and the mint is
+not paused. Then the ticket is re-denominated in the quote's raw units and every gate
+under it judges in that unit: the day cap in the quote, the minimum ticket as the quote's
+own `minTicketRaw`, the stop floor traced as unmeasured (there is no SOL fee rail to
+invert), and the network-fee budget on absolute lamport caps only (a percentage of GLDx
+expressed in lamports is not a number — see `network-fee-budget.mjs`'s null basis). The
+book row says what it was paid in (`quoteMint`, `quoteDecimals`, `feeSolPerLeg` 0, the
+real fee as `networkFeeLamports`), and the shadow scorecard judges one population per
+quote — a GLDx card is never pooled with the SOL card.
+
+**WALL-ST-E's own allowlist is empty and has no environment variable**, so this executor
+still refuses every non-SOL curve exactly as above. The allowlist exists for the browser
+lane, whose user lists the stocks they want and whose wallet holds them.
+`test-snipe-quote-mint.mjs` drives the live GLDx curve through every refusal and the
+clean pass.
+
 ### Only launches that name a social
 
 `SNIPE_REQUIRE_SOCIALS` (**on by default**) refuses any launch whose metadata names no
