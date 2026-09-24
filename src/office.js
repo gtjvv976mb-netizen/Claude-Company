@@ -2725,6 +2725,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
     else if (url.pathname === "/tower") page = "tower.html";
     else if (/^\/floor\/\d+$/.test(url.pathname)) page = "office3d.html";
     else if (url.pathname === "/buy") page = "buy.html";
+    else if (url.pathname === "/hawk") page = "hawk.html";     // the browser sniper's console: where the extension meets Phantom
     // The executor's own files, served read-only. The floor page imports
     // strategy.mjs directly so its paper test runs the REAL risk engine, and the
     // one-command installer curls poller.mjs — both resolve from the built site

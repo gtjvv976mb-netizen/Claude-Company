@@ -16,7 +16,14 @@ const executorTests = fs.readdirSync(path.join(root, "executor"))
   .filter((name) => /^test-.*\.mjs$/.test(name))
   .sort()
   .map((name) => path.join("executor", name));
-const tests = [...rootTests, ...executorTests];
+/* The browser sniper's tests live beside its source. They import the executor's snipe
+   modules by relative path and @solana/web3.js from extension/node_modules, so the same
+   `npm ci --prefix extension --ignore-scripts` the deploy runs is what they need. */
+const extensionTests = fs.readdirSync(path.join(root, "extension"))
+  .filter((name) => /^test-.*\.mjs$/.test(name))
+  .sort()
+  .map((name) => path.join("extension", name));
+const tests = [...rootTests, ...executorTests, ...extensionTests];
 
 let failed = 0;
 const started = Date.now();

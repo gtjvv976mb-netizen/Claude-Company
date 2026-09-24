@@ -11,7 +11,10 @@ services:
     region: oregon
     branch: main
     # A revision that cannot pass the isolated root suite never reaches the live process.
-    buildCommand: npm ci && npm ci --prefix executor --ignore-scripts && npm test
+    # extension/ is installed so the browser sniper's tests (extension/test-*.mjs, run by
+    # the same root suite) can resolve web3.js and esbuild; nothing from it runs in the
+    # live process, which still holds no key and signs nothing.
+    buildCommand: npm ci && npm ci --prefix executor --ignore-scripts && npm ci --prefix extension --ignore-scripts && npm test
     startCommand: node src/index.js office
     healthCheckPath: /api/lease/config
     disk:

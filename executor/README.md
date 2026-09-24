@@ -1102,6 +1102,15 @@ seconds has falsified that while it is still cheap to say so.
 | `SNIPE_STALL_AT_X` | `1.0` | the multiple of entry it has to clear |
 | `SNIPE_TIME_STOP_MS` | `180000` | the backstop for a position that is alive but drifting |
 
+**A correction, 2026-09-24.** Until this date the stall exit was not running on any lane
+that had not typed `SNIPE_STALL_MS`. `effectiveLaneConfig()` read the unset dial through
+`Number(null)`, which is `0`, and `0` is how an operator turns the stall *off* — so the
+default this table states was printed here and read as zero by the determiner. The table
+in the next section was measured under that bug: its 120–300s losers are what the 180s
+time stop does to a position the 90s stall never saw. Found while wiring the browser lane
+(`extension/`), whose config carries the same nulls; fixed in `effectiveLaneConfig`, and
+`test-snipe-stall-default.mjs` prints what the determiner sees on every run.
+
 The second fact is **size**, and it is deliberately not code:
 
 | entry size | n | won | net SOL |

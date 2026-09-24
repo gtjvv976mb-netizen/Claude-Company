@@ -31,10 +31,15 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             executor/package-lock.json
-      - name: Install site and isolated executor dependencies
+            extension/package-lock.json
+      - name: Install site, isolated executor and browser-sniper dependencies
+        # extension/ holds esbuild (its build tool) and the executor's own web3.js pin, so
+        # test-hawk-bundle.mjs can build the extension and prove the bundle carries the
+        # executor's decision code. The bundle itself is never committed or published.
         run: |
           npm ci
           npm ci --prefix executor --ignore-scripts
+          npm ci --prefix extension --ignore-scripts
       - name: Run isolated regression suite
         run: npm test
       - name: Build static site

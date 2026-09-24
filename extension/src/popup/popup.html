@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>HAWK-AI</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">HAWK<em>-AI</em> <span class="sub">for Phantom</span></div>
+  <span id="lanePill" class="pill">off</span>
+</header>
+
+<section class="card" id="walletCard">
+  <div class="row">
+    <div>
+      <div class="k">Phantom</div>
+      <div class="v mono" id="walletLine">not connected</div>
+    </div>
+    <div class="btns">
+      <button id="btnConsole" class="btn ghost" title="The page Phantom lives on. Keep it open.">Console</button>
+      <button id="btnConnect" class="btn">Connect</button>
+    </div>
+  </div>
+  <div class="row small">
+    <span class="k">Feed</span> <span id="feedLine" class="v">stopped</span>
+    <span class="k">RPC</span> <span id="rpcLine" class="v mono">—</span>
+  </div>
+</section>
+
+<section class="card">
+  <div class="k">Lane</div>
+  <div class="seg" id="laneSeg">
+    <button data-lane="off">Off</button>
+    <button data-lane="observe">Observe</button>
+    <button data-lane="execute">Execute</button>
+  </div>
+  <p class="hint" id="laneHint">Off constructs nothing. Observe watches every launch, runs the same gates WALL-ST-E runs, and keeps a shadow book. Execute asks Phantom to sign — one window per buy, one per sell.</p>
+  <div id="armBox" class="armbox hidden">
+    <div class="k">Before this lane may spend money</div>
+    <ul id="checklist" class="checklist"></ul>
+    <div class="k">Type the sentence for the connected wallet</div>
+    <div class="mono expected" id="expectedAck">—</div>
+    <div class="ackrow">
+      <textarea id="ackInput" rows="2" spellcheck="false" placeholder="I arm HAWK-AI v1 for …"></textarea>
+      <button id="btnCopyAck" class="btn ghost" title="Copy the sentence exactly as the lane prints it">Copy</button>
+    </div>
+    <button id="btnArm" class="btn danger">Arm — Phantom will be asked to sign</button>
+  </div>
+  <ul id="warnings" class="warnings"></ul>
+</section>
+
+<section class="card">
+  <div class="row">
+    <div><div class="k">Today</div><div class="v" id="dayLine">0 / 0 SOL</div></div>
+    <div><div class="k">Ticket</div><div class="v" id="ticketLine">—</div></div>
+    <div><div class="k">Wait</div><div class="v" id="waitLine">—</div></div>
+  </div>
+  <div class="k" style="margin-top:10px">Positions</div>
+  <div id="positions" class="list"><div class="empty">nothing open</div></div>
+  <div class="row small controls">
+    <label><input type="checkbox" id="chkPause"> pause entries</label>
+    <label class="danger"><input type="checkbox" id="chkHardStop"> HARD STOP — sell everything, buy nothing</label>
+  </div>
+</section>
+
+<section class="card">
+  <div class="row">
+    <div><div class="k">Book</div><div class="v" id="bookLine">no live trades</div></div>
+    <div><div class="k">Realized</div><div class="v mono" id="realizedLine">—</div></div>
+  </div>
+  <div id="closes" class="list"></div>
+</section>
+
+<section class="card">
+  <div class="row">
+    <div><div class="k">Shadow book</div><div class="v" id="shadowLine">0 rows</div></div>
+    <button id="btnExport" class="btn ghost" title="One JSON row per line — the file executor/grade-entry-gates.mjs --file reads">Export</button>
+  </div>
+  <div id="scorecard" class="scorecard"></div>
+  <div class="k" style="margin-top:8px">Last refusals</div>
+  <div id="refusals" class="list small"></div>
+</section>
+
+<section class="card">
+  <details>
+    <summary class="k">What the record says</summary>
+    <div id="record" class="record"></div>
+  </details>
+</section>
+
+<section class="card">
+  <div class="k">Log</div>
+  <div id="log" class="log mono"></div>
+</section>
+
+<footer class="foot">
+  <a href="#" id="lnkOptions">Options</a> · <span id="versionLine" class="mono"></span> · not advice; nothing here has an edge until you have graded it
+</footer>
+<script type="module" src="popup.js"></script>
+</body>
+</html>
