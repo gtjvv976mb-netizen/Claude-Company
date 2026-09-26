@@ -666,24 +666,35 @@ export function prefilterListingRow(row, floor = {}, { nowMs = Date.now() } = {}
  * did not — and a poll where NOTHING survived still reports the arrivals, so "the filter is
  * working" and "the endpoint is empty" can never be confused.
  */
-export function momentumFetcher({ fetchRows, floor = {}, now = () => Date.now(), keep = 24 } = {}) {
+export function momentumFetcher({ fetchRows, floor = {}, now = () => Date.now(), keep = 24, active = null } = {}) {
   if (typeof fetchRows !== "function")
     throw new MarketFloorError("config_invalid", "momentumFetcher needs fetchRows(): the listing fetch is injected, never built here");
   if (!Number.isInteger(keep) || keep < 1)
     throw new MarketFloorError("config_invalid", `momentumFetcher keep must be a positive integer, got ${keep}`);
   const dropped = {};
   for (const c of PREFILTER_CLAUSES) dropped[c] = 0;
-  const counters = { polls: 0, arrived: 0, survived: 0, capped: 0, dropped };
+  const counters = { polls: 0, arrived: 0, survived: 0, capped: 0, idle: 0, dropped };
+  /* THE FLOOR MAY BE A FUNCTION, read on every poll, because the desk can change a running
+     lane's filters (snipe-lane.mjs, LIVE_FILTER_ENV) and a pre-filter still judging the floor
+     it started with would keep the two quietly disagreeing. And `active()` lets the source sit
+     idle — polling nothing, costing nothing — while no filter that wants these candidates is
+     armed, so mounting it for a floor that might be switched on later changes nothing until then. */
+  const floorNow = () => {
+    const f = typeof floor === "function" ? floor() : floor;
+    return isPlainObject(f) ? f : {};
+  };
 
   const fn = async function fetchMomentumRows() {
+    if (typeof active === "function" && active() !== true) { counters.idle++; return []; }
     const rows = await fetchRows();
     if (!Array.isArray(rows)) throw new Error(`momentumFetcher: fetchRows() returned ${rows === null ? "null" : typeof rows}, not an array`);
     counters.polls++;
     counters.arrived += rows.length;
     const nowMs = now();
     const out = [];
+    const current = floorNow();
     for (const row of rows) {
-      const verdict = prefilterListingRow(row, floor, { nowMs });
+      const verdict = prefilterListingRow(row, current, { nowMs });
       if (verdict === null) out.push(row);
       else dropped[verdict.clause] = (dropped[verdict.clause] ?? 0) + 1;
     }

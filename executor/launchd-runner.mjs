@@ -120,6 +120,9 @@ const ALLOWED_ENV = new Set([
   "SNIPE_MARKET_FLOOR", "SNIPE_MIN_AGE_HOURS", "SNIPE_MIN_LIQUIDITY_USD",
   "SNIPE_MIN_VOLUME_24H_USD", "SNIPE_MIN_MCAP_USD", "SNIPE_MAX_VOLUME_TO_LIQUIDITY",
   "SNIPE_MIN_TXNS_24H", "SNIPE_MAX_SELL_SHARE", "SNIPE_MAX_PRICE_CHANGE_24H_PCT", "SNIPE_MIN_TOP_POOL_LIQUIDITY_USD",
+  /* The owner's opt-in to the desk's filter panel (snipe-lane.mjs, LIVE_FILTER_ENV): entry
+     filters only, never money, exits or mode. Allowlisting it enables nothing on its own. */
+  "SNIPE_REMOTE_FILTERS",
   /* THE FEE LANE (2026-09-26) — the desk's only revenue that does not depend on winning a
      trade. FEE_CLAIM is off | dry | live; "dry" reads the vaults and records what it would
      have claimed without signing anything, which is what it ships as the moment a creator

@@ -206,8 +206,16 @@ console.log("\nthe page itself");
     && !/Total|Combined|PnL/.test(html));
   ok("it says an incomplete fee figure is a floor rather than a total",
     /a floor, not a total/.test(html));
-  ok("it says plainly that a saved strategy has not reached the operator's laptop",
-    /has not reached a laptop/.test(html));
+  ok("it says plainly which settings stay on the Mac and are never sent",
+    /The page never sends these to the bot/.test(html));
+  /* THE FILTER PANEL: offered only to whoever the server will accept a save from, and the status
+     line reads the BOT's report of which version it runs — "saved" is never shown as "running". */
+  ok("the panel is offered only when the route says canEdit", /if \(!a\.canEdit\)/.test(html));
+  ok("the save is sent with the session", /\/strategy`, \{\s*method: "POST", headers: \{ "content-type": "application\/json", accept: "application\/json", \.\.\.authHeaders \}/.test(html));
+  ok("'running' is claimed only when the bot reports the saved version",
+    /r\.version === a\.updatedAtMs/.test(html) && /Running on your bot since/.test(html) && /waiting for your bot to pick it up/.test(html));
+  ok("a bot that has not opted in is told exactly what line to add", /SNIPE_REMOTE_FILTERS="1"/.test(html));
+  ok("what the owner is typing survives the 30-second refresh", /if \(dirty\) return;/.test(html));
   ok("it listens to the named kinds AND the unnamed default",
     /es\.onmessage/.test(html) && /for \(const kind of \["fees", "levelup", "reward"\]\)/.test(html));
   ok("a private floor is told so rather than shown an empty tape", /private to its tenant/.test(html));

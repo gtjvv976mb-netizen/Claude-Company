@@ -250,6 +250,11 @@ export const SNIPE_LANE_DEFAULTS = Object.freeze({
      dial set on its own arms a floor of EXACTLY what was asked for and nothing else. See
      snipe-market.mjs for where each fact comes from and why this desk adds five more. */
   marketFloorPreset: "off",
+  /* WHETHER THE DESK MAY CHANGE THE ENTRY FILTERS OF A RUNNING LANE (owner, 2026-09-26: "can I
+     change the filters on the spot, like the BAGWORK agents can"). Off unless the owner opts in
+     on this machine, because the desk is a server this machine does not control — see
+     LIVE_FILTER_ENV for exactly what it may and may not touch. */
+  remoteFilters: false,
   minAgeHours: undefined,
   minLiquidityUsd: undefined,
   minVolume24hUsd: undefined,
@@ -379,6 +384,7 @@ export const SNIPE_ENV = Object.freeze({
   SNIPE_MAX_LAUNCH_SHARE_PCT: Object.freeze({ key: "maxLaunchSharePct", parse: "number" }),
   SNIPE_MIN_VOLUME_SPIKE: Object.freeze({ key: "minVolumeSpike", parse: "number" }),
   SNIPE_MARKET_FLOOR: Object.freeze({ key: "marketFloorPreset", parse: "preset" }),
+  SNIPE_REMOTE_FILTERS: Object.freeze({ key: "remoteFilters", parse: "flag" }),
   SNIPE_MIN_AGE_HOURS: Object.freeze({ key: "minAgeHours", parse: "number" }),
   SNIPE_MIN_LIQUIDITY_USD: Object.freeze({ key: "minLiquidityUsd", parse: "number" }),
   SNIPE_MIN_VOLUME_24H_USD: Object.freeze({ key: "minVolume24hUsd", parse: "number" }),
@@ -496,6 +502,78 @@ export function snipeLaneConfig(env = {}) {
   } else out.marketFloor = null;
 
   return Object.freeze(out);
+}
+
+/**
+ * THE FILTERS THE DESK MAY CHANGE ON A RUNNING LANE — and, by omission, everything it may not.
+ *
+ * bagworkagent.fun lets an owner retune an agent from its page and the agent picks it up. This
+ * desk can do the same for one class of setting only: WHAT TO BUY. Every entry here can only
+ * make the lane more or less selective about which coin it enters; none of them changes how
+ * much it spends, how much it may lose, how it exits, or whether it signs at all.
+ *
+ * NOT here, deliberately, and they stay env-only behind the owner's typed sentence:
+ *   SNIPE_MAX_SOL_PER_TRADE, SNIPE_DAILY_SOL_CAP  — money, bound into SNIPE_LIVE_ACK
+ *   SNIPE_STOP_FRAC, SNIPE_TAKE_AT_ENTRY_X, SNIPE_HOLD_MAX_MS, ...  — exits, checked by the
+ *     arming checklist at construction; a stop the desk could move is a stop a stolen session
+ *     could move
+ *   SNIPE_MAX_PRICE_IMPACT_PCT and the fee dials — how a fill is priced, not what is bought
+ *   SNIPE_LANE, SNIPE_REMOTE_FILTERS itself — a server cannot arm the lane or grant itself this
+ *
+ * So the worst a stolen desk session can do is make the bot pickier, or less picky, within the
+ * money caps the owner typed on this machine.
+ */
+export const LIVE_FILTER_ENV = Object.freeze([
+  "SNIPE_MARKET_FLOOR", "SNIPE_MIN_AGE_HOURS", "SNIPE_MIN_LIQUIDITY_USD", "SNIPE_MIN_VOLUME_24H_USD",
+  "SNIPE_MIN_MCAP_USD", "SNIPE_MAX_VOLUME_TO_LIQUIDITY", "SNIPE_MIN_TXNS_24H", "SNIPE_MAX_SELL_SHARE",
+  "SNIPE_MAX_PRICE_CHANGE_24H_PCT", "SNIPE_MIN_TOP_POOL_LIQUIDITY_USD",
+  "SNIPE_MIN_VOLUME_SPIKE", "SNIPE_REQUIRE_SOCIALS",
+  "SNIPE_MAX_CREATOR_SHARE_PCT", "SNIPE_MAX_LAUNCH_SHARE_PCT",
+]);
+/** The config keys those names resolve to, plus the floor object they assemble into. */
+export const LIVE_FILTER_KEYS = Object.freeze([
+  ...LIVE_FILTER_ENV.map((name) => SNIPE_ENV[name].key), "marketFloor",
+]);
+
+/**
+ * The lane configuration a desk-sent filter set asks for, validated exactly as the env file is.
+ *
+ * `baseEnv` is what the owner put on this machine; `remote` is `{ SNIPE_NAME: value }` from the
+ * desk. A remote value OVERRIDES the base for that name; a name the desk leaves out, or sends as
+ * null, falls back to the base — so clearing a filter on the page reverts to the env file, never
+ * to "no filter at all" behind the owner's back.
+ *
+ * Every remote entry is judged ON ITS OWN first, so one bad value is named and refused while the
+ * rest still apply — a whole panel refused over one typo would read on the page as "the bot
+ * ignored me". A name outside LIVE_FILTER_ENV is refused by name, whatever it is.
+ */
+export function remoteFilterConfig({ baseEnv = {}, remote = {} } = {}) {
+  const rejected = [];
+  const accepted = {};
+  const entries = remote && typeof remote === "object" && !Array.isArray(remote) ? Object.entries(remote) : [];
+  for (const [name, value] of entries) {
+    if (!LIVE_FILTER_ENV.includes(name)) {
+      rejected.push(Object.freeze({ name, reason: "not a filter the desk may change — set it in the env file on the Mac" }));
+      continue;
+    }
+    if (value === null || value === undefined || String(value).trim() === "") continue;   // revert to base
+    const text = typeof value === "boolean" ? (value ? "1" : "0") : String(value).trim();
+    try { snipeLaneConfig({ [name]: text }); accepted[name] = text; }
+    catch (error) { rejected.push(Object.freeze({ name, reason: String(error?.message ?? error).slice(0, 200) })); }
+  }
+  const merged = { ...baseEnv };
+  for (const name of LIVE_FILTER_ENV) delete merged[name];
+  for (const name of LIVE_FILTER_ENV) {
+    if (accepted[name] !== undefined) merged[name] = accepted[name];
+    else if (baseEnv[name] !== undefined) merged[name] = baseEnv[name];
+  }
+  let cfg = null;
+  try { cfg = snipeLaneConfig(merged); }
+  catch (error) {
+    return Object.freeze({ ok: false, cfg: null, accepted: Object.freeze({}), rejected: Object.freeze([...rejected,
+      Object.freeze({ name: "(combined)", reason: String(error?.message ?? error).slice(0, 200) })]) });
+  }
+  return Object.freeze({ ok: true, cfg, accepted: Object.freeze(accepted), rejected: Object.freeze(rejected) });
 }
 
 /**
@@ -924,7 +1002,10 @@ export function createSnipeLane({
      on the facts, because a liquidity figure is only as good as its denominator. */
   solUsdReader = null,
 } = {}) {
-  const conf = Object.freeze({ ...SNIPE_LANE_DEFAULTS, ...cfg });
+  /* `let`, and only for applyFilters() below: the entry filters are the one part of this
+     configuration a running lane may have replaced. Everything else is read from the same
+     object and never changes after construction. */
+  let conf = Object.freeze({ ...SNIPE_LANE_DEFAULTS, ...cfg });
   if (!SNIPE_LANE_MODES.includes(conf.lane))
     throw new SnipeLaneError("mode_invalid", `lane ${JSON.stringify(conf.lane)} is not one of ${SNIPE_LANE_MODES.join(", ")}`);
   const executing = conf.lane === "execute";
@@ -1715,7 +1796,9 @@ export function createSnipeLane({
 
   return {
     laneVersion: SNIPE_LANE_VERSION,
-    cfg: conf,
+    /* A getter, not a snapshot: applyFilters() replaces the entry filters, and a caller reading
+       `lane.cfg` must see the ones the gates are judging on now. */
+    get cfg() { return conf; },
     /* What the lane actually runs on: the stated config with the mode's overrides and the
        owner's dials folded into policy. Exposed so a test can prove a typed dial arrived. */
     effective,
@@ -1771,6 +1854,42 @@ export function createSnipeLane({
 
     handleNotice,
     tick,
+
+    /**
+     * REPLACE THE ENTRY FILTERS OF A RUNNING LANE — nothing else. `next` is a full lane config
+     * (from remoteFilterConfig); only LIVE_FILTER_KEYS are taken from it, so a money dial, an
+     * exit dial or the lane mode in it is ignored rather than applied.
+     *
+     * The same two port checks construction makes are made here, because a floor with no
+     * reader or a spike floor with no tape refuses every candidate and reads in a log like an
+     * empty market. A refused change leaves the running filters exactly as they were.
+     * Never throws: it is called from the heartbeat path.
+     */
+    applyFilters(next) {
+      if (!isPlainObject(next)) return Object.freeze({ ok: false, reason: "no configuration" });
+      const picked = {};
+      for (const key of LIVE_FILTER_KEYS) if (Object.prototype.hasOwnProperty.call(next, key)) picked[key] = next[key];
+      if (floorIsArmed(picked.marketFloor) && typeof marketReader !== "function")
+        return Object.freeze({ ok: false, reason: "a market floor was asked for but this lane has no market reader wired" });
+      if (picked.minVolumeSpike !== undefined && picked.minVolumeSpike !== null && !flowTape)
+        return Object.freeze({ ok: false, reason: "a volume-spike floor was asked for but no trade tape feeds this lane" });
+      const changed = LIVE_FILTER_KEYS.filter((k) => JSON.stringify(conf[k] ?? null) !== JSON.stringify(picked[k] ?? null));
+      if (!changed.length) return Object.freeze({ ok: true, changed: Object.freeze([]) });
+      conf = Object.freeze({ ...conf, ...picked });
+      const floorText = floorIsArmed(conf.marketFloor)
+        ? MARKET_FLOOR_KEYS.filter((k) => conf.marketFloor[k] !== null).map((k) => `${k}=${conf.marketFloor[k]}`).join(", ")
+        : "off";
+      log(`snipe filters CHANGED from the desk (${changed.join(", ")}): floor ${floorText}; `
+        + `volume spike ${conf.minVolumeSpike ?? "measure only"}; socials ${conf.requireSocials === true ? "required" : "not required"}`);
+      for (const w of curveReachability(conf.marketFloor)) log(`snipe market floor WARNING: ${w.message}`);
+      return Object.freeze({ ok: true, changed: Object.freeze(changed) });
+    },
+    /** The entry filters this lane is judging on right now. */
+    filters() {
+      const out = {};
+      for (const key of LIVE_FILTER_KEYS) out[key] = conf[key] ?? null;
+      return Object.freeze(out);
+    },
     /* The tape, exposed so the process that MOUNTS the trade tap and the lane that reads
        the tape are provably the same one. A second tape filled by the tap and never
        measured would look identical in every log line either of them prints. */

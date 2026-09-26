@@ -53,7 +53,7 @@ for (const floor of [50, 7]) db.prepare("INSERT OR IGNORE INTO copy_settings (fl
 db.prepare("UPDATE copy_settings SET executor_secret='secret-hq' WHERE floor_no=50").run();
 db.prepare("UPDATE copy_settings SET executor_secret='secret-7' WHERE floor_no=7").run();
 db.prepare("INSERT INTO leases (floor_no, wallet, base_units, name, created_at) VALUES (?,?,?,?,?)").run(7, TENANT, "0", "Seven", now);
-for (const [token, wallet] of [["tok-tenant", TENANT], ["tok-guest", GUEST]])
+for (const [token, wallet] of [["tok-tenant", TENANT], ["tok-guest", GUEST], ["tok-hq", HQ_OWNER]])
   db.prepare("INSERT INTO sessions (token, wallet, created_at, expires_at) VALUES (?,?,?,?)").run(token, wallet, now, now + 1e9);
 db.prepare(`INSERT INTO floor_passes (floor_no, viewer, owner, signature, base_units, granted_at, expires_at)
   VALUES (?,?,?,?,?,?,?)`).run(7, GUEST, TENANT, "sig".padEnd(88, "x"), "0", now, now + 1e9);
@@ -157,6 +157,45 @@ console.log("\na real claim, after a restart, is still announced");
   ok("the claim after the restart is announced, measured from zero",
     fees.some((e) => /claimed 0\.020000 SOL/.test(e)), fees.join(" | ").slice(0, 240));
   ok("the restart itself announced nothing", !fees.some((e) => /claimed 0\.000000/.test(e)));
+}
+
+console.log("\nthe filter panel: saved by the owner, sent live-only, confirmed by the bot");
+{
+  ok("the HQ owner is offered the panel", (await req("GET", "/api/agent/50", { token: "tok-hq" })).body.canEdit === true);
+  ok("a signed-out visitor is not", (await req("GET", "/api/agent/50")).body.canEdit === false);
+  ok("a stranger cannot save one", (await req("POST", "/api/agent/50/strategy", { token: "tok-guest",
+    body: { strategy: { minVolume24hUsd: 1 } } })).status === 403);
+  const saved = await req("POST", "/api/agent/50/strategy", { token: "tok-hq",
+    body: { strategy: { marketFloor: "curve", minVolume24hUsd: 25000, requireSocials: false, maxSolPerTrade: 0.5, stopFrac: 0.2 } } });
+  ok("the owner saves filters and a Mac-only dial together", saved.status === 200, JSON.stringify(saved.body).slice(0, 160));
+  ok("...and is told which half travels and which stays on the Mac",
+    saved.body.live?.SNIPE_MIN_VOLUME_24H_USD === "25000" && saved.body.live?.SNIPE_REQUIRE_SOCIALS === "0"
+    && !("SNIPE_MAX_SOL_PER_TRADE" in (saved.body.live ?? {}))
+    && (saved.body.env ?? []).includes("SNIPE_MAX_SOL_PER_TRADE=0.5") && !(saved.body.env ?? []).some((l) => /VOLUME_24H/.test(l)));
+
+  /* THE ONLY CHANNEL TO THE BOT: the heartbeat reply. It must carry the live filters and never
+     a money or exit dial, whatever was saved. */
+  const beat = (remote) => req("POST", "/api/floor/50/executor/heartbeat", { token: "secret-hq",
+    body: { mode: "live", ts: Date.now(), snipe: { mode: "execute", state: "up", remote } } });
+  const reply = await beat({ enabled: true, version: null, appliedAt: null, accepted: [], rejected: [], error: null });
+  const env = reply.body.strategy?.env ?? {};
+  ok("the heartbeat reply carries the saved live filters, versioned by save time",
+    reply.body.strategy?.version === saved.body.updatedAtMs && env.SNIPE_MARKET_FLOOR === "curve"
+    && env.SNIPE_MIN_VOLUME_24H_USD === "25000" && env.SNIPE_REQUIRE_SOCIALS === "0", JSON.stringify(reply.body.strategy));
+  ok("...and NO money, exit or pricing dial", !Object.keys(env).some((k) => /SOL_PER_TRADE|DAILY_SOL|STOP_FRAC|TAKE_AT|HOLD|STALL|IMPACT/.test(k)));
+
+  let page = await req("GET", "/api/agent/50", { token: "tok-hq" });
+  ok("until the bot reports that version, the page cannot claim it is running", page.body.remote?.version !== page.body.updatedAtMs);
+  await beat({ enabled: true, version: saved.body.updatedAtMs, appliedAt: Date.now(), accepted: ["SNIPE_MARKET_FLOOR"],
+    rejected: [{ name: "SNIPE_MIN_VOLUME_SPIKE", reason: "no trade tap" }, { name: "<script>", reason: "x".repeat(900) }], error: null });
+  page = await req("GET", "/api/agent/50", { token: "tok-hq" });
+  ok("once the bot reports it, the page sees the running version", page.body.remote?.version === page.body.updatedAtMs);
+  ok("...with what it refused, names checked and reasons capped",
+    page.body.remote?.rejected?.[0]?.name === "SNIPE_MIN_VOLUME_SPIKE" && page.body.remote?.rejected?.[1]?.name === "?"
+    && page.body.remote?.rejected?.[1]?.reason.length <= 200);
+  const off = await beat({ enabled: false });
+  page = await req("GET", "/api/agent/50", { token: "tok-hq" });
+  ok("a bot that has not opted in says so, and the page can tell the owner", page.body.remote?.enabled === false && off.status === 200);
 }
 
 sse.destroy();

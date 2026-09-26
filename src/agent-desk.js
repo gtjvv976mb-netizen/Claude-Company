@@ -189,25 +189,38 @@ export function rewardsOwed({ level = 1, paidRows = [] } = {}) {
  *  lane genuinely reads — test-agent-desk.js asserts that mapping against the lane's own table,
  *  so a dial cannot be offered here and ignored there. */
 export const STRATEGY_DIALS = Object.freeze({
-  maxSolPerTrade: Object.freeze({ env: "SNIPE_MAX_SOL_PER_TRADE", min: 0.001, max: 1, unit: "SOL" }),
-  dailySolCap: Object.freeze({ env: "SNIPE_DAILY_SOL_CAP", min: 0.001, max: 10, unit: "SOL" }),
-  takeAtEntryX: Object.freeze({ env: "SNIPE_TAKE_AT_ENTRY_X", min: 1.05, max: 100, unit: "x entry" }),
-  stopFrac: Object.freeze({ env: "SNIPE_STOP_FRAC", min: 0.01, max: 0.95, unit: "fraction of entry" }),
-  holdMaxMs: Object.freeze({ env: "SNIPE_HOLD_MAX_MS", min: 10_000, max: 24 * 3_600_000, unit: "ms" }),
-  stallMs: Object.freeze({ env: "SNIPE_STALL_MS", min: 0, max: 3_600_000, unit: "ms" }),
-  maxPriceImpactPct: Object.freeze({ env: "SNIPE_MAX_PRICE_IMPACT_PCT", min: 0.1, max: 50, unit: "%" }),
-  /* The market floor — the dials that decide what the bot will look at, which is the part of a
-     strategy that actually distinguishes one desk from another. */
-  minAgeHours: Object.freeze({ env: "SNIPE_MIN_AGE_HOURS", min: 0, max: 720, unit: "hours" }),
-  minLiquidityUsd: Object.freeze({ env: "SNIPE_MIN_LIQUIDITY_USD", min: 0, max: 10_000_000, unit: "USD" }),
-  minVolume24hUsd: Object.freeze({ env: "SNIPE_MIN_VOLUME_24H_USD", min: 0, max: 100_000_000, unit: "USD" }),
-  minMcapUsd: Object.freeze({ env: "SNIPE_MIN_MCAP_USD", min: 0, max: 100_000_000, unit: "USD" }),
-  minVolumeSpike: Object.freeze({ env: "SNIPE_MIN_VOLUME_SPIKE", min: 0, max: 1_000, unit: "x baseline" }),
-  maxSellShare: Object.freeze({ env: "SNIPE_MAX_SELL_SHARE", min: 0.01, max: 1, unit: "fraction" }),
-  maxVolumeToLiquidity: Object.freeze({ env: "SNIPE_MAX_VOLUME_TO_LIQUIDITY", min: 0.1, max: 10_000, unit: "x depth" }),
+  /* MAC-ONLY (`live: false`). Money, exits and fill pricing: the bot will not take these from
+     the desk — see executor/snipe-lane.mjs LIVE_FILTER_ENV — so the page shows them as lines to
+     put in the env file, and the size and daily cap also need the owner's typed sentence. */
+  maxSolPerTrade: Object.freeze({ env: "SNIPE_MAX_SOL_PER_TRADE", min: 0.001, max: 1, unit: "SOL", live: false }),
+  dailySolCap: Object.freeze({ env: "SNIPE_DAILY_SOL_CAP", min: 0.001, max: 10, unit: "SOL", live: false }),
+  takeAtEntryX: Object.freeze({ env: "SNIPE_TAKE_AT_ENTRY_X", min: 1.05, max: 100, unit: "x entry", live: false }),
+  stopFrac: Object.freeze({ env: "SNIPE_STOP_FRAC", min: 0.01, max: 0.95, unit: "fraction of entry", live: false }),
+  holdMaxMs: Object.freeze({ env: "SNIPE_HOLD_MAX_MS", min: 10_000, max: 24 * 3_600_000, unit: "ms", live: false }),
+  stallMs: Object.freeze({ env: "SNIPE_STALL_MS", min: 0, max: 3_600_000, unit: "ms", live: false }),
+  maxPriceImpactPct: Object.freeze({ env: "SNIPE_MAX_PRICE_IMPACT_PCT", min: 0.1, max: 50, unit: "%", live: false }),
+  /* LIVE (`live: true`): WHAT TO BUY. A bot whose owner set SNIPE_REMOTE_FILTERS=1 applies these
+     from the page within a heartbeat, without a restart — bagworkagent.fun's "edit the agent and
+     it picks it up", limited to the part of a strategy that cannot spend more money. */
+  marketFloor: Object.freeze({ env: "SNIPE_MARKET_FLOOR", type: "preset", values: Object.freeze(["off", "curve", "bagwork"]),
+    unit: "preset", live: true }),
+  minAgeHours: Object.freeze({ env: "SNIPE_MIN_AGE_HOURS", min: 0, max: 720, unit: "hours", live: true }),
+  minVolume24hUsd: Object.freeze({ env: "SNIPE_MIN_VOLUME_24H_USD", min: 0, max: 100_000_000, unit: "USD", live: true }),
+  minMcapUsd: Object.freeze({ env: "SNIPE_MIN_MCAP_USD", min: 0, max: 100_000_000, unit: "USD", live: true }),
+  minLiquidityUsd: Object.freeze({ env: "SNIPE_MIN_LIQUIDITY_USD", min: 0, max: 10_000_000, unit: "USD", live: true }),
+  minTopPoolLiquidityUsd: Object.freeze({ env: "SNIPE_MIN_TOP_POOL_LIQUIDITY_USD", min: 0, max: 10_000_000, unit: "USD", live: true }),
+  minTxns24h: Object.freeze({ env: "SNIPE_MIN_TXNS_24H", min: 0, max: 10_000_000, unit: "trades", live: true }),
+  maxSellShare: Object.freeze({ env: "SNIPE_MAX_SELL_SHARE", min: 0.01, max: 1, unit: "fraction", live: true }),
+  maxPriceChange24hPct: Object.freeze({ env: "SNIPE_MAX_PRICE_CHANGE_24H_PCT", min: 0, max: 100_000, unit: "%", live: true }),
+  maxVolumeToLiquidity: Object.freeze({ env: "SNIPE_MAX_VOLUME_TO_LIQUIDITY", min: 0.1, max: 10_000, unit: "x depth", live: true }),
+  minVolumeSpike: Object.freeze({ env: "SNIPE_MIN_VOLUME_SPIKE", min: 0, max: 1_000, unit: "x baseline", live: true }),
+  requireSocials: Object.freeze({ env: "SNIPE_REQUIRE_SOCIALS", type: "flag", unit: "on/off", live: true }),
 });
 
 export const STRATEGY_KEYS = Object.freeze(Object.keys(STRATEGY_DIALS));
+/** The dials a running bot takes from the page. The executor's own list is the authority
+ *  (snipe-lane.mjs LIVE_FILTER_ENV); test-agent-desk.mjs asserts these are a subset of it. */
+export const LIVE_STRATEGY_KEYS = Object.freeze(STRATEGY_KEYS.filter((k) => STRATEGY_DIALS[k].live === true));
 
 /**
  * Validate a saved strategy. Returns `{ ok, strategy, errors }` — never throws, because this is
@@ -231,6 +244,20 @@ export function validateStrategy(input) {
     /* Null is how a dial is CLEARED, and it is not the same as zero: several of these are
        thresholds where zero means "refuse everything" and absent means "do not judge this". */
     if (raw === null) { out[key] = null; continue; }
+    if (dial.type === "preset") {
+      const v = String(raw).trim().toLowerCase();
+      if (!dial.values.includes(v)) { errors.push(`${key} must be one of ${dial.values.join(", ")}, got ${JSON.stringify(raw)}`); continue; }
+      out[key] = v;
+      continue;
+    }
+    if (dial.type === "flag") {
+      if (raw === true || raw === false) { out[key] = raw; continue; }
+      const t = String(raw).trim().toLowerCase();
+      if (["1", "true", "yes", "on"].includes(t)) out[key] = true;
+      else if (["0", "false", "no", "off"].includes(t)) out[key] = false;
+      else errors.push(`${key} must be on or off, got ${JSON.stringify(raw)}`);
+      continue;
+    }
     const n = num(raw);
     if (n === null) { errors.push(`${key} must be a number or null, got ${JSON.stringify(raw)}`); continue; }
     if (n < dial.min || n > dial.max) {
@@ -246,6 +273,25 @@ export function validateStrategy(input) {
   });
 }
 
+/** One dial's value as the env file spells it. */
+const envValue = (dial, v) => (dial.type === "flag" ? (v ? "1" : "0") : String(v));
+
+/**
+ * The live half of a saved strategy, as `{ SNIPE_NAME: value }` — exactly what the desk hands
+ * the bot with each heartbeat. Mac-only dials are never in it, whatever was saved, so a money
+ * dial cannot travel to the bot by this route even if the page were changed to send one.
+ */
+export function liveFilterEnv(strategy) {
+  const out = {};
+  if (!isPlainObject(strategy)) return Object.freeze(out);
+  for (const key of LIVE_STRATEGY_KEYS) {
+    const v = strategy[key];
+    if (v === undefined || v === null) continue;
+    out[STRATEGY_DIALS[key].env] = envValue(STRATEGY_DIALS[key], v);
+  }
+  return Object.freeze(out);
+}
+
 /** A validated strategy as the environment the executor would run it under. Exists so the page
  *  can SHOW the operator the exact lines to put in their env file, rather than asking them to
  *  trust that a saved form reached a bot on their own laptop. */
@@ -255,7 +301,7 @@ export function strategyAsEnv(strategy) {
   for (const key of STRATEGY_KEYS) {
     const v = strategy[key];
     if (v === undefined || v === null) continue;
-    lines.push(`${STRATEGY_DIALS[key].env}=${v}`);
+    lines.push(`${STRATEGY_DIALS[key].env}=${envValue(STRATEGY_DIALS[key], v)}`);
   }
   return Object.freeze(lines);
 }

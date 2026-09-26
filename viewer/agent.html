@@ -54,6 +54,23 @@ th{color:var(--dim);font-weight:500;font-size:11px;letter-spacing:.06em;text-tra
 td.num{text-align:right;font-variant-numeric:tabular-nums}
 .dash{color:var(--dim)}
 
+/* THE FILTER PANEL. Live dials first, because those are the ones that change the bot from here. */
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-top:10px}
+.panel h3{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);
+  font-weight:500;margin:4px 0 10px}
+.dial{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:10px;align-items:center;padding:6px 0;
+  border-bottom:1px solid rgba(255,255,255,.05)}
+.dial label{font-size:14px}
+.dial .u{display:block;font-family:var(--mono);font-size:11px;color:var(--dim)}
+.dial input,.dial select{font-family:var(--mono);font-size:13px;padding:7px 8px;border-radius:6px;width:100%;
+  border:1px solid var(--line);background:#0d0818;color:var(--cream)}
+.btn{font-family:var(--sans);font-size:15px;font-weight:600;padding:10px 18px;border-radius:8px;margin-top:12px;
+  border:1px solid var(--glass);background:transparent;color:var(--glass);cursor:pointer}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.sstat{font-family:var(--mono);font-size:12.5px;margin-top:10px;color:var(--dim)}
+.sstat.ok{color:var(--win)} .sstat.err{color:var(--loss)} .sstat.wait{color:var(--amber)}
+@media (max-width:520px){.dial{grid-template-columns:1fr}}
+
 .level{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
 .level .lv{font-family:var(--serif);font-size:30px}
 .level .blocked{color:var(--amber);font-size:14px;margin-top:8px}
@@ -109,10 +126,13 @@ footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);color:v
   </div>
 
   <h2>Strategy</h2>
-  <p class="lede" id="s-lede">The dials this desk's bot is configured with.</p>
+  <p class="lede" id="s-lede">What this desk's bot buys. Filters marked <b>live</b> change the running bot
+    within about a minute of saving; the rest are set on the operator's Mac.</p>
+  <div id="s-panel"></div>
+  <div class="sstat" id="s-status"></div>
   <table id="s-table"></table>
-  <p class="lede" style="margin-top:16px">The bot runs on its operator's own machine, so these are
-    the exact lines to put in its environment file. A saved form has not reached a laptop.</p>
+  <p class="lede" style="margin-top:16px">Settings that stay on the Mac — money, exits and fill pricing — as
+    the exact lines for its environment file. The page never sends these to the bot.</p>
   <pre class="env" id="s-env">—</pre>
 
   <h2>Live</h2>
@@ -214,16 +234,24 @@ async function load() {
   $("l-rungs").replaceChildren(...(a.ladder || []).map((r) =>
     el("span", `${r.level} ${r.name}`, `rung${r.level <= (a.level || 0) ? " on" : ""}`)));
 
+  const DIALS = a.strategyDials || {};
   const dials = a.strategy ? Object.entries(a.strategy).filter(([, v]) => v !== null) : [];
   const rows = [];
   if (dials.length) {
-    const head = el("tr"); head.append(el("th", "Dial"), el("th", "Value")); rows.push(head);
-    for (const [k, v] of dials) { const tr = el("tr"); tr.append(el("td", String(k)), el("td", String(v), "num")); rows.push(tr); }
+    const head = el("tr"); head.append(el("th", "Filter"), el("th", "Value"), el("th", "Where")); rows.push(head);
+    for (const [k, v] of dials) {
+      const tr = el("tr");
+      tr.append(el("td", LABELS[k] || String(k)), el("td", String(v), "num"), el("td", DIALS[k]?.live ? "live" : "Mac"));
+      rows.push(tr);
+    }
   } else {
-    const tr = el("tr"); tr.append(el("td", "no strategy saved — this desk runs the shipped defaults", "dash")); rows.push(tr);
+    const tr = el("tr"); tr.append(el("td", "nothing saved from this page — the bot runs its env file", "dash")); rows.push(tr);
   }
   $("s-table").replaceChildren(...rows);
-  $("s-env").textContent = (a.strategyEnv || []).join("\n") || "—";
+  $("s-env").textContent = dials.filter(([k]) => DIALS[k] && DIALS[k].live === false)
+    .map(([k, v]) => `${DIALS[k].env}=${DIALS[k].type === "flag" ? (v ? 1 : 0) : v}`).join("\n") || "—";
+  renderPanel(a, el);
+  renderStatus(a);
   if (a.strategyStale) {
     $("s-lede").replaceChildren(el("span", `the saved strategy names dials this bot no longer reads: ${a.strategyStale.join("; ")}`, "err"));
   }
@@ -232,6 +260,110 @@ async function load() {
     ? `strategy last saved ${new Date(a.updatedAtMs).toISOString()}`
     : "";
   return a;
+}
+
+/* ── THE FILTER PANEL ───────────────────────────────────────────────────────────────────
+   bagworkagent.fun lets an owner retune an agent from its page. This does the same for WHAT
+   TO BUY: the live filters travel to the bot with its next heartbeat and it applies them
+   without a restart — if its owner opted in on the Mac (SNIPE_REMOTE_FILTERS=1). Money, exits
+   and fill pricing are never sent; the page shows them as env lines instead. And the status
+   line reads the bot's OWN report of which saved version it is running, so "saved" and
+   "running" are never confused. */
+const LABELS = {
+  marketFloor: "Market floor preset", minAgeHours: "Minimum coin age", minVolume24hUsd: "Minimum 24h volume",
+  minMcapUsd: "Minimum market cap", minLiquidityUsd: "Minimum liquidity", minTopPoolLiquidityUsd: "Minimum deepest pool",
+  minTxns24h: "Minimum trades in 24h", maxSellShare: "Maximum share of sells", maxPriceChange24hPct: "Maximum 24h run-up",
+  maxVolumeToLiquidity: "Maximum volume ÷ liquidity", minVolumeSpike: "Volume spike (ride the wave)",
+  requireSocials: "Require a social link", maxSolPerTrade: "Size per trade", dailySolCap: "Daily cap",
+  takeAtEntryX: "Take profit at", stopFrac: "Stop loss at", holdMaxMs: "Maximum hold", stallMs: "Stall exit after",
+  maxPriceImpactPct: "Maximum price impact",
+};
+let dirty = false;
+function renderPanel(a, el) {
+  const box = $("s-panel");
+  if (!a.canEdit) {
+    box.replaceChildren(el("p", "Only this floor's owner can change these. If that is you, sign in on claudedotcompany.com/tower.html "
+      + "in this browser and reload.", "lede"));
+    return;
+  }
+  if (dirty) return;              // keep what the owner is typing across the 30-second refresh
+  const DIALS = a.strategyDials || {};
+  const saved = a.strategy || {};
+  const panel = el("div", undefined, "panel");
+  for (const [title, live] of [["Live — changes the running bot", true], ["Mac only — shown as env lines, never sent", false]]) {
+    panel.appendChild(el("h3", title));
+    for (const [key, d] of Object.entries(DIALS)) {
+      if ((d.live === true) !== live) continue;
+      const row = el("div", undefined, "dial");
+      const lab = el("label", LABELS[key] || key);
+      lab.appendChild(el("span", `${d.env} · ${d.unit}`, "u"));
+      let input;
+      if (d.type === "preset" || d.type === "flag") {
+        input = document.createElement("select");
+        const opts = [["", "(env file)"], ...(d.type === "flag" ? [["on", "on"], ["off", "off"]] : d.values.map((v) => [v, v]))];
+        for (const [v, t] of opts) { const o = el("option", t); o.value = v; input.appendChild(o); }
+        const cur = saved[key];
+        input.value = cur === undefined || cur === null ? "" : (d.type === "flag" ? (cur ? "on" : "off") : String(cur));
+      } else {
+        input = document.createElement("input");
+        input.type = "number"; input.step = "any"; input.min = String(d.min); input.max = String(d.max);
+        input.placeholder = "(env file)";
+        input.value = saved[key] === undefined || saved[key] === null ? "" : String(saved[key]);
+      }
+      input.dataset.key = key;
+      input.addEventListener("input", () => { dirty = true; });
+      input.addEventListener("change", () => { dirty = true; });
+      row.append(lab, input);
+      panel.appendChild(row);
+    }
+  }
+  const save = el("button", "Save filters", "btn");
+  save.type = "button";
+  save.addEventListener("click", () => saveStrategy(panel, save));
+  panel.appendChild(save);
+  box.replaceChildren(panel);
+}
+async function saveStrategy(panel, btn) {
+  const strategy = {};
+  for (const input of panel.querySelectorAll("[data-key]")) {
+    const v = String(input.value ?? "").trim();
+    strategy[input.dataset.key] = v === "" ? null : (input.tagName === "SELECT" ? v : Number(v));
+  }
+  btn.disabled = true;
+  const st = $("s-status");
+  st.className = "sstat wait"; st.textContent = "saving…";
+  try {
+    const r = await fetch(`${API}/api/agent/${FLOOR}/strategy`, {
+      method: "POST", headers: { "content-type": "application/json", accept: "application/json", ...authHeaders },
+      body: JSON.stringify({ strategy }),
+    });
+    const b = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error((b.errors && b.errors.join(" · ")) || b.error || `HTTP ${r.status}`);
+    dirty = false;
+    await load();
+  } catch (e) {
+    st.className = "sstat err"; st.textContent = String(e.message);
+  } finally { btn.disabled = false; }
+}
+function renderStatus(a) {
+  const st = $("s-status");
+  if (!a.canEdit) { st.textContent = ""; return; }
+  const r = a.remote;
+  const at = (ms) => new Date(ms).toISOString().slice(11, 16) + " UTC";
+  let text, cls = "";
+  if (!a.updatedAtMs) { text = "Nothing saved from this page yet — the bot runs its env file."; }
+  else if (!r) { text = "Saved. Your bot has not reported how it takes page changes — it may need the latest upgrade."; cls = "wait"; }
+  else if (!r.enabled) {
+    text = 'Saved, but your bot is not taking changes from this page. Add SNIPE_REMOTE_FILTERS="1" to its env file on the Mac and restart it once.';
+    cls = "err";
+  } else if (r.version === a.updatedAtMs && r.error) { text = `Your bot refused this version: ${r.error}`; cls = "err"; }
+  else if (r.version === a.updatedAtMs) {
+    text = `Running on your bot since ${r.appliedAt ? at(r.appliedAt) : "its last report"}.`
+      + (r.rejected && r.rejected.length ? ` Refused: ${r.rejected.map((x) => `${x.name} (${x.reason})`).join("; ")}` : "");
+    cls = r.rejected && r.rejected.length ? "wait" : "ok";
+  } else { text = "Saved — waiting for your bot to pick it up (about a minute)."; cls = "wait"; }
+  st.className = "sstat " + cls;
+  st.textContent = text;
 }
 
 /* THE LIVE HALF. Attached to the named kinds AND to the unnamed default, because the desk's own

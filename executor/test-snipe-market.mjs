@@ -455,6 +455,27 @@ console.log("\nthe momentum source: cheap facts first, and it counts what it dro
   ok("momentumFetcher needs a fetcher", threw(() => momentumFetcher({})) !== null);
 }
 
+console.log("\nthe momentum source follows filters changed on a running lane");
+{
+  /* The desk can change a running lane's floor (snipe-lane.mjs LIVE_FILTER_ENV), so the
+     pre-filter reads the floor on every poll, and sits idle — fetching nothing — while no filter
+     that wants these candidates is armed. */
+  let floorNow = {};
+  let wanted = false;
+  let fetched = 0;
+  const young = goodListing({ mint: "Young111111111111111111111111111111111111111", created_timestamp: NOW - 600_000 });
+  const fetch = momentumFetcher({ now: () => NOW, floor: () => floorNow, active: () => wanted,
+    fetchRows: async () => { fetched++; return [goodListing(), young]; } });
+  const idle = await fetch();
+  ok("while nothing wants candidates the source is idle and fetches nothing", idle.length === 0 && fetched === 0 && fetch.stats().idle === 1);
+  wanted = true;
+  ok("armed with no age floor, both rows pass the pre-filter", (await fetch()).length === 2 && fetched === 1);
+  floorNow = { minAgeHours: 1 };
+  const aged = await fetch();
+  ok("the floor is read on every poll, so a change applies to the very next one",
+    aged.length === 1 && aged[0].mint === goodListing().mint && fetch.stats().dropped.too_young === 1);
+}
+
 console.log("\nthe floor and the feed must not silently cancel each other out");
 {
   /* THE DEFAULT PAIRING WORKS BY COINCIDENCE: a 1-hour age floor against a 30-minute dedupe

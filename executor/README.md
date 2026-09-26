@@ -1603,6 +1603,34 @@ narrower than theirs, and closing the gap means proving a pump-amm buy layout ag
 transactions the way `pumpfun-fees.mjs` proved the fee claim. That is the next piece of
 execution work, not a config change.
 
+### Changing the filters from the agent page
+
+Like a bagworkagent.fun agent, the bot can be retuned from its page while it runs. Opt in once,
+on the Mac, and restart:
+
+```bash
+SNIPE_REMOTE_FILTERS="1"
+```
+
+From then on, the floor owner signed in at `claudedotcompany.com/agent.html?floor=<N>` sees a filter
+panel. Saving it sends the **live** filters to the bot with its next heartbeat (about a minute), and
+the bot applies them to the running lane **without a restart**. The page's status line reads the
+bot's own report — "Running on your bot since 18:42" appears only once the bot says it is running
+that saved version, and anything it refused is named with the reason.
+
+**What the page can change** — only *what to buy*: the market-floor preset and its nine thresholds,
+the volume spike, the socials requirement, and the creator/launch share caps (`LIVE_FILTER_ENV` in
+`snipe-lane.mjs` is the list, and the bot enforces it; the desk cannot widen it).
+
+**What it can never change** — trade size, daily cap, stop, take-profit, hold, price impact, fees,
+the lane mode, or this opt-in itself. Those stay in the env file, and the size and daily cap still
+need the typed sentence. The page shows them as env lines to copy. So the most a stolen website
+session can do is make the bot more or less picky, inside the money caps you typed on the Mac.
+
+The env file stays the base: a filter cleared on the page falls back to the env value, never to
+"no filter". Every value the desk sends is re-validated on the bot exactly as the env file is, and
+a bad one is refused on its own while the rest apply.
+
 ### The volume spike
 
 > *"When volume spikes on a token, that's a sign to get in and ride the wave."* — the owner,
