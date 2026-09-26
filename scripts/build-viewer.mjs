@@ -195,6 +195,9 @@ const EXECUTOR_FILES = [
   "snipe-book.mjs",
   "snipe-shadow.mjs",
   "snipe-policy.mjs",
+  /* The volume tape (2026-09-26): imported at module scope by snipe-lane.mjs, so an
+     install that fetches this list without it dies at boot the moment the lane is built. */
+  "snipe-volume.mjs",
   /* The lane's signing path (2026-09-12): imported dynamically by poller.mjs only under
      SNIPE_LANE=execute, and a 404 there is a bot that armed and cannot buy. Published. */
   "snipe-execute.mjs",

@@ -1318,6 +1318,65 @@ signal ordered the outcome at all. What this source buys is the *ability to test
 latency hypothesis against the cheap sources it races. It does not buy an edge, and nothing
 here should be read as claiming it does.
 
+### The volume spike
+
+> *"When volume spikes on a token, that's a sign to get in and ride the wave."* — the owner,
+> 2026-09-26.
+
+It is a real signal, and this desk can measure it without a single new data source. A
+pump.fun bonding curve holds its SOL in `realQuoteRaw`; the **change** in that number over
+time is money moving. `snipe-volume.mjs` keeps a bounded per-mint tape of those readings and
+measures net inflow over the last 30 seconds against the five minutes before it, as a ratio.
+
+Where the samples come from matters, because the lane's own curve reads cannot supply them:
+it reads a curve once per notice, so at the moment the gate runs there is exactly one point
+and no ratio. The stream already has the answer. The Geyser subscription filters on the
+pump.fun **program**, not on creates, so every buy and sell on every curve is already
+arriving — `snipe-feed.mjs` was counting them as `unparsed` and dropping them. Each carries a
+`TradeEvent` whose decoder is already pinned against real mainnet bytes. So the tape is fed
+from traffic this process was already receiving and throwing away: no new subscription, no
+new request, no new key, and nothing added to the path that buys. Without `SNIPE_GRPC_*` the
+tape still exists but has too few points to form a ratio, and says so.
+
+One sample on that tape is a two-second **bucket**, not a trade, and that detail is load
+bearing: a coin doing five trades a second would otherwise fill a bounded tape with 48
+seconds of history, evict its own baseline, and be refused for being unmeasurable — a
+volume gate blind in proportion to volume. Within a bucket the newest reading replaces the
+previous one, which loses nothing, because every number here is a difference between two
+reserve levels.
+
+| Variable | Default | Purpose |
+|---|---:|---|
+| `SNIPE_MIN_VOLUME_SPIKE` | unset | Net inflow must be at least this multiple of the coin's own baseline. Unset means **measure only** |
+
+**A brand-new curve has no baseline, and that is the whole trap.** Divide by it and every
+fresh launch reads as an infinite spike — so a naive version of this gate fires on every new
+launch while calling itself a volume signal. On this burner's own 64 trades that is the
+losing book: entries under 3 seconds won 0% of the time for −18.5%, entries at 10 seconds and
+later won 40% for +34.0%. So an absent or flat baseline reports `null`, never Infinity and
+never a large stand-in, and with a threshold configured an unmeasurable spike **refuses** —
+unverified is not safe, the same rule the other two proxy gates follow.
+
+Two more things it is honest about rather than papering over. It measures **net** inflow, not
+gross volume: a coin churned a thousand SOL each way has enormous volume and near-zero net
+flow, and reads quiet here. And a falling reserve reports a **negative** number rather than
+being clamped to zero, because "everyone is leaving" and "nothing is happening" are the two
+facts a holder most needs to tell apart.
+
+Like `creator_profile` and `launch_share`, it ships **unset**: measured on every launch,
+recorded in the shadow book, scored by `grade-entry-gates.mjs` against launches whose outcome
+is already known. Arm it only once a scorecard has justified a number:
+
+```bash
+SNIPE_MIN_VOLUME_SPIKE=2     # demand twice the coin's own baseline
+```
+
+Worth knowing while choosing that number: bagworkagent.fun's agents encode the *opposite*
+half of the same idea — `maxChange5m: 0.12`, `maxSpike5m: 0.2`. They require some momentum
+and then refuse anything already extended, because buying after the wave has broken is how
+you become the exit liquidity for whoever caught it. `SNIPE_MAX_LAUNCH_SHARE_PCT` is this
+desk's cap of that shape and it sits beside this floor.
+
 ### What has and has not been proved
 
 The instruction encoders are re-encoded byte for byte against 30 mainnet transactions on

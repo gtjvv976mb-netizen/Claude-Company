@@ -341,6 +341,34 @@ section("2. THE CONFIG IS ITS OWN OBJECT, AND THE LEGACY EXECUTE FLAG IS REFUSED
     Object.keys(SNIPE_ENV).every((n) => n.startsWith("SNIPE_")),
     `${Object.keys(SNIPE_ENV).length} names, e.g. ${Object.keys(SNIPE_ENV).slice(0, 3).join(", ")}`);
 
+  /* EVERY DIAL MUST BE ABLE TO REACH THE PROCESS — checked against the two lists that decide
+     whether it can, and derived from this table rather than typed out beside it.
+
+     2026-09-26: nineteen of these were in NEITHER list. They parsed, they were bounded, they
+     were printed by the arming banner and documented in the README, and on a real install
+     launchd simply never passed them — among them SNIPE_MAX_CREATOR_SHARE_PCT and
+     SNIPE_MAX_LAUNCH_SHARE_PCT, the two thresholds grade-entry-gates.mjs exists to justify,
+     so the whole measure-then-arm discipline ended at a variable the bot could not see.
+     test-launchd.mjs's allowlist check could not catch it: it scans the runtime for
+     `process.env.NAME` literals and the lane reads its settings through this TABLE instead.
+     So the check has to start where the names actually live. */
+  const laneEnv = Object.keys(SNIPE_ENV);
+  const runnerSrc = fs.readFileSync(path.join(HERE, "launchd-runner.mjs"), "utf8");
+  const allowlist = runnerSrc.slice(runnerSrc.indexOf("const ALLOWED_ENV"), runnerSrc.indexOf("const SAFE_INHERITED_ENV"));
+  ok("the allowlist slice is real, not an empty one", allowlist.length > 400, `${allowlist.length} chars`);
+  const missingAllow = laneEnv.filter((n) => !allowlist.includes(`"${n}"`));
+  ok("launchd's exact environment allowlist names every dial this table parses",
+    missingAllow.length === 0, missingAllow.join(", ") || `all ${laneEnv.length} allowed`);
+
+  const installSrc = fs.readFileSync(path.join(HERE, "install.sh"), "utf8");
+  const carryFrom = installSrc.indexOf("for dial in ENTRY_MODE");
+  const carry = installSrc.slice(carryFrom, installSrc.indexOf("; do", carryFrom));
+  ok("install.sh's upgrade carry loop is a real slice, not an empty one",
+    carryFrom > 0 && carry.length > 400, `${carry.length} chars`);
+  const missingCarry = laneEnv.filter((n) => !carry.includes(n));
+  ok("the upgrade carry loop names every dial too, so an upgrade cannot silently drop one",
+    missingCarry.length === 0, missingCarry.join(", ") || `all ${laneEnv.length} carried`);
+
   const observe = snipeLaneConfig({ SNIPE_LANE: "observe", SNIPE_NOTICE_MAX_MS: "1500" });
   ok("SNIPE_LANE=observe arms the observe lane", observe.lane === "observe", `lane ${observe.lane}`);
   ok("a SNIPE_ number reaches the config", observe.noticeMaxMs === 1500, `noticeMaxMs ${observe.noticeMaxMs}`);
@@ -826,8 +854,8 @@ section("8. THE SCORECARD, AGAINST A CASE WHOSE ANSWER IS KNOWN");
     excluded.judged === 4 && excluded.proxies.creator_profile.n === 4,
     `judged ${excluded.judged} of ${rows.length + 1} rows supplied`);
 
-  ok("the proxy set matches the two gates the lane deliberately does not kill on",
-    Object.keys(SNIPE_PROXIES).sort().join(",") === "creator_profile,launch_share",
+  ok("the proxy set matches the three gates the lane deliberately does not kill on",
+    Object.keys(SNIPE_PROXIES).sort().join(",") === "creator_profile,launch_share,volume_spike",
     Object.keys(SNIPE_PROXIES).join(", "));
 }
 

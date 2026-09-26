@@ -151,6 +151,7 @@ export const SNIPE_GATES = Object.freeze([
   // ── COST 3: the statistical layer, measured before it is ever a kill ─────────────
   "creator_profile",
   "launch_share",
+  "volume_spike",
   // ── COST 4: pre-signature, no network ────────────────────────────────────────────
   "network_fee_over_cap",
   "rent_over_cap",
@@ -166,7 +167,7 @@ export const SNIPE_GATE_COST = Object.freeze({
   curve_unreadable: 1, curve_type_unsupported: 1, quote_not_sol: 1, curve_already_complete: 1,
   exit_route_unimplemented: 1, mint_refused: 1, no_socials: 1,
   impact_over_cap: 2, round_trip_over_cap: 2, stop_floor: 2, size_under_minimum: 2,
-  creator_profile: 3, launch_share: 3,
+  creator_profile: 3, launch_share: 3, volume_spike: 3,
   network_fee_over_cap: 4, rent_over_cap: 4, instruction_mismatch: 4,
 });
 
@@ -177,7 +178,7 @@ export const SNIPE_GATE_COST = Object.freeze({
  *  answer is already known" — and wiring a proxy as a kill before its scorecard exists is
  *  exactly the move that discipline forbids. When a threshold IS set they refuse, and a
  *  threshold set with no measurement available refuses too: unverified is not safe. */
-export const SNIPE_PROXY_GATES = Object.freeze(["creator_profile", "launch_share"]);
+export const SNIPE_PROXY_GATES = Object.freeze(["creator_profile", "launch_share", "volume_spike"]);
 
 /** The mint allowlist, in the desk's camelCase spelling, DERIVED from the executor's own
  *  `ALLOWED_MINT_EXTENSIONS` so there is exactly one authority for it in this process.
@@ -784,6 +785,36 @@ const GATE_IMPLS = Object.freeze({
     describe: (m, t) => `${m?.toFixed(4)}% of the curve's opening quote has already been bought, against a ${t}% bar`,
   }),
 
+  /* THE OWNER'S SIGNAL, 2026-09-26: "when volume spikes on a token, that's a sign to get in
+     and ride the wave." Measured from the curve's own real quote reserve — see
+     snipe-volume.mjs — so it costs no extra network call and no new key.
+
+     A FLOOR, not a ceiling, which is why it cannot use proxyGate: every other proxy refuses
+     when the measurement is too HIGH, this one refuses when it is too LOW. The discipline is
+     the same — an unset threshold measures and never kills, and a threshold set with no
+     measurement available refuses, because unverified is not safe.
+
+     `spike === null` is the case that decides whether this gate helps or hurts. A curve too
+     young to have a baseline cannot produce a ratio, and treating that as a pass would make
+     this gate fire hardest on the very youngest launches — the ones this desk's own 64
+     trades show losing 18.5% at a 0% win rate. No baseline is NOT a spike. */
+  volume_spike: (c) => {
+    const flow = c.flow ?? null;
+    const measured = Number.isFinite(flow?.spike) ? flow.spike : null;
+    c.trace.measured.volume_spike = measured;
+    const threshold = Number(c.cfg.minVolumeSpike);
+    if (!Number.isFinite(threshold)) return null;          // measure only — the shipped default
+    if (measured === null)
+      return { message: `a minVolumeSpike of ${threshold} is configured but no spike could be measured ` +
+        `for this launch (${flow?.reason ?? "no flow tape"}) — unverified is not safe`,
+        measured: null, threshold, reason: flow?.reason ?? null };
+    if (measured < threshold)
+      return { message: `net inflow is ${measured.toFixed(2)}x its baseline, under the ${threshold}x bar ` +
+        `(${Math.round(flow.recentLamportsPerSec ?? 0)} against ${Math.round(flow.baselineLamportsPerSec ?? 0)} lamports/sec)`,
+        measured, threshold };
+    return null;
+  },
+
   /* The lifted fee budget, run TWICE so the two refusals keep their own names: once with
      rent zeroed (non-rent fees against maxNetworkFeeLamports and maxNetworkFeePct), once
      whole (rent against maxRentLamports). At the live size the PCT limb binds first —
@@ -907,6 +938,11 @@ export function snipeContract({
   notice = {}, curve = null, adapter = null, cfg = {}, book = {}, nowMs = null,
   control = {}, mint: mintAccount = null, creator = {}, fees = {}, instruction = null,
   socials = null,
+  /* The volume-spike reading for this mint, measured by the lane from its own flow tape
+     (snipe-volume.mjs) before the contract runs. Passed in rather than computed here for
+     the same reason the curve is: this function is pure, and a replay of a captured
+     notice must produce the identical verdict. */
+  flow = null,
 } = {}) {
   const lane = isStr(cfg.lane) ? cfg.lane.trim() : "off";
   const mint = isStr(notice.mint) ? notice.mint.trim() : null;
@@ -944,6 +980,10 @@ export function snipeContract({
     creator: isPlainObject(creator) ? creator : {},
     launchSharePct: state && state.vQuote0Raw !== null && state.realQuoteRaw !== null
       ? pctOf(state.realQuoteRaw, state.vQuote0Raw) : null,
+    /* The volume-spike measurement for this mint, taken by the lane from its own tape
+       before the gates run. Null when the lane has no tape — which the gate treats as
+       "not a spike", never as a pass. */
+    flow: isPlainObject(flow) ? flow : null,
     mintVerdict: judgeMint(mintAccount, mint),
     holds: holderFor(mint),
     trace: { measured: {}, instruction: null, feeBudget: null },

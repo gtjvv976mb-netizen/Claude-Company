@@ -31,7 +31,7 @@
  * THE POSITIVE CLASS IS A BAD LAUNCH, NOT A GOOD ONE
  *
  * `positiveOutcome` is "the curve's real quote reserve never advanced past the would-have-
- * fill within the forward window" — a launch nobody followed us into. These two rulers are
+ * fill within the forward window" — a launch nobody followed us into. These rulers are
  * REFUSALS: a high precision means "when this ruler flags a launch, that launch really was
  * one nobody followed". That is what makes it safe to promote to a kill, and it is why the
  * bar is precision rather than accuracy: the cost of a false flag is a missed winner.
@@ -86,7 +86,7 @@ const pct = (v) => (v == null ? "  —  " : `${(v * 100).toFixed(1)}%`);
 export function formatReport({ scorecard, read, bookPath }) {
   const L = [];
   L.push("");
-  L.push("HAWK-AI — grading the two entry rulers against the shadow book");
+  L.push(`HAWK-AI — grading the ${Object.keys(scorecard.proxies).length} entry rulers against the shadow book`);
   L.push("=".repeat(66));
   L.push(`book        ${bookPath}`);
   L.push(`rows        ${read.total} retained across ${read.files} file(s)` +
@@ -135,9 +135,9 @@ export function formatReport({ scorecard, read, bookPath }) {
     L.push("READ THIS AS: not enough judged rows yet. Come back when every ruler shows");
     L.push(`n >= ${scorecard.minRows}.`);
   } else {
-    L.push("READ THIS AS: with a full sample, neither ruler separates the launches nobody");
+    L.push("READ THIS AS: with a full sample, no ruler separates the launches nobody");
     L.push("followed from the ones people did. That is a real result. It means this strategy");
-    L.push("has no entry edge that these two measurements can find, and the honest options are");
+    L.push("has no entry edge that these measurements can find, and the honest options are");
     L.push("a different signal entirely or not trading this book at all — not a faster feed,");
     L.push("and not another exit ladder.");
   }

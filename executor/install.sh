@@ -940,7 +940,7 @@ if [ "$MODE" = "live" ]; then
     echo "live --expected-commit must exactly match the published commit $SOURCE_COMMIT" >&2
     exit 1
   fi
-  for source_file in poller.mjs burner-backup.mjs journal.mjs jupiter.mjs token2022.mjs balance-verification.mjs entry-quote-guard.mjs exit-trigger.mjs feed-drain.mjs sol-usd-oracle.mjs heartbeat-health.mjs sleep-assertion.mjs monitor.mjs reclaim-rent.mjs strategy.mjs trade-policy.mjs entry-contract.mjs entry-sizing.mjs network-fee-budget.mjs snipe-lane.mjs snipe-venue-pumpfun.mjs snipe-venue.mjs snipe-curve.mjs snipe-entry.mjs snipe-feed.mjs snipe-book.mjs snipe-shadow.mjs snipe-policy.mjs snipe-socials.mjs snipe-relay.mjs grpc-wire.mjs snipe-grpc.mjs shadow-sink.mjs grade-entry-gates.mjs snipe-execute.mjs dexscreener-consensus.mjs desk-mirror.mjs package.json package-lock.json; do
+  for source_file in poller.mjs burner-backup.mjs journal.mjs jupiter.mjs token2022.mjs balance-verification.mjs entry-quote-guard.mjs exit-trigger.mjs feed-drain.mjs sol-usd-oracle.mjs heartbeat-health.mjs sleep-assertion.mjs monitor.mjs reclaim-rent.mjs strategy.mjs trade-policy.mjs entry-contract.mjs entry-sizing.mjs network-fee-budget.mjs snipe-lane.mjs snipe-venue-pumpfun.mjs snipe-venue.mjs snipe-curve.mjs snipe-entry.mjs snipe-feed.mjs snipe-book.mjs snipe-shadow.mjs snipe-policy.mjs snipe-volume.mjs snipe-socials.mjs snipe-relay.mjs grpc-wire.mjs snipe-grpc.mjs shadow-sink.mjs grade-entry-gates.mjs snipe-execute.mjs dexscreener-consensus.mjs desk-mirror.mjs package.json package-lock.json; do
     if [ -n "$(git -C "$source_root" status --porcelain -- "executor/$source_file")" ]; then
       echo "live source file executor/$source_file differs from commit $SOURCE_COMMIT" >&2
       exit 1
@@ -1697,7 +1697,7 @@ rollback_install() {
 trap rollback_install EXIT
 
 echo "▶ fetching the executor and shared policy…"
-RUNTIME_FILES=(poller.mjs burner-backup.mjs journal.mjs jupiter.mjs token2022.mjs balance-verification.mjs entry-quote-guard.mjs exit-trigger.mjs feed-drain.mjs sol-usd-oracle.mjs heartbeat-health.mjs sleep-assertion.mjs monitor.mjs reclaim-rent.mjs strategy.mjs trade-policy.mjs entry-contract.mjs entry-sizing.mjs network-fee-budget.mjs snipe-lane.mjs snipe-venue-pumpfun.mjs snipe-venue.mjs snipe-curve.mjs snipe-entry.mjs snipe-feed.mjs snipe-book.mjs snipe-shadow.mjs snipe-policy.mjs snipe-socials.mjs snipe-relay.mjs grpc-wire.mjs snipe-grpc.mjs shadow-sink.mjs grade-entry-gates.mjs snipe-execute.mjs dexscreener-consensus.mjs desk-mirror.mjs)
+RUNTIME_FILES=(poller.mjs burner-backup.mjs journal.mjs jupiter.mjs token2022.mjs balance-verification.mjs entry-quote-guard.mjs exit-trigger.mjs feed-drain.mjs sol-usd-oracle.mjs heartbeat-health.mjs sleep-assertion.mjs monitor.mjs reclaim-rent.mjs strategy.mjs trade-policy.mjs entry-contract.mjs entry-sizing.mjs network-fee-budget.mjs snipe-lane.mjs snipe-venue-pumpfun.mjs snipe-venue.mjs snipe-curve.mjs snipe-entry.mjs snipe-feed.mjs snipe-book.mjs snipe-shadow.mjs snipe-policy.mjs snipe-volume.mjs snipe-socials.mjs snipe-relay.mjs grpc-wire.mjs snipe-grpc.mjs shadow-sink.mjs grade-entry-gates.mjs snipe-execute.mjs dexscreener-consensus.mjs desk-mirror.mjs)
 SOURCE_FILES=("${RUNTIME_FILES[@]}" package.json package-lock.json)
 # launchd adopts a DIRECTORY, not a command line: macos-launchagent.sh resolves
 # launchd-runner.mjs and poller.mjs out of the --executor-dir it is handed, and
@@ -1906,6 +1906,13 @@ fi
       SNIPE_REQUIRE_SOCIALS SNIPE_SOCIALS_TIMEOUT_MS SNIPE_STALL_MS SNIPE_STALL_AT_X SNIPE_TIME_STOP_MS \
       SNIPE_TAKE_AT_ENTRY_X SNIPE_STOP_FRAC SNIPE_HOLD_MAX_MS SNIPE_PRIORITY_FEE_LAMPORTS \
       SNIPE_MAX_PRICE_IMPACT_PCT SNIPE_MAX_ROUND_TRIP_LOSS_PCT \
+      SNIPE_MIN_SOL_PER_TRADE SNIPE_MAX_NETWORK_FEE_LAMPORTS SNIPE_MAX_NETWORK_FEE_PCT \
+      SNIPE_MAX_RENT_LAMPORTS SNIPE_NETWORK_FEE_RESERVE_SOL SNIPE_MAX_FEE_SHARE_OF_STOP \
+      SNIPE_SIGNATURE_FEE_LAMPORTS SNIPE_RENT_FEE_LAMPORTS SNIPE_NOTICE_MAX_MS \
+      SNIPE_VENUE_FEE_BPS SNIPE_FORWARD_SAMPLES SNIPE_FORWARD_INTERVAL_MS \
+      SNIPE_SHADOW_CAPACITY SNIPE_CHARGE_DAILY_CAP SNIPE_DISAGREE_STREAK_MAX \
+      SNIPE_CREATOR_EXIT_FRAC \
+      SNIPE_MAX_CREATOR_SHARE_PCT SNIPE_MAX_LAUNCH_SHARE_PCT SNIPE_MIN_VOLUME_SPIKE \
       SNIPE_RELAYS SNIPE_TIP_ACCOUNTS SNIPE_TIP_BASE_LAMPORTS SNIPE_TIP_MAX_LAMPORTS \
       SNIPE_GRPC_URL SNIPE_GRPC_TOKEN SNIPE_GRPC_COMMITMENT \
       JUPITER_EXCLUDE_DEXES WALLSTE_ALLOW_BATTERY_ENTRIES \

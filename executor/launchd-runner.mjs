@@ -47,6 +47,7 @@ const RUNTIME_FILES = Object.freeze([
   "snipe-book.mjs",
   "snipe-shadow.mjs",
   "snipe-policy.mjs",
+  "snipe-volume.mjs",
   "package.json",
   "package-lock.json",
 ]);
@@ -78,6 +79,35 @@ const ALLOWED_ENV = new Set([
   "SNIPE_GRPC_URL", "SNIPE_GRPC_TOKEN", "SNIPE_GRPC_COMMITMENT",
   "SNIPE_TAKE_AT_ENTRY_X", "SNIPE_STOP_FRAC", "SNIPE_HOLD_MAX_MS", "SNIPE_PRIORITY_FEE_LAMPORTS",
   "SNIPE_MAX_PRICE_IMPACT_PCT", "SNIPE_MAX_ROUND_TRIP_LOSS_PCT",
+  /* THE REST OF snipe-lane.mjs's OWN SNIPE_ENV TABLE, 2026-09-26 — and why this block used
+   * to end one line above is worth writing down.
+   *
+   * The parity check in test-launchd.mjs scans the runtime for `process.env.NAME` literals.
+   * The lane does not read its settings that way: it reads them through a TABLE of names
+   * (SNIPE_ENV), so none of these appears as `process.env.SNIPE_…` anywhere, and the check
+   * that exists to catch exactly this could not see them. Nineteen dials were therefore
+   * parsed, bounded, printed by the arming banner, documented in the README — and unable to
+   * reach the process on a real install, because launchd hands the executor only what this
+   * list names.
+   *
+   * Two of them are the ones that mattered most: SNIPE_MAX_CREATOR_SHARE_PCT and
+   * SNIPE_MAX_LAUNCH_SHARE_PCT are the thresholds grade-entry-gates.mjs exists to justify,
+   * so the whole measure-then-arm discipline ended at a variable the bot never saw.
+   * SNIPE_MIN_VOLUME_SPIKE, the owner's new spike floor, would have joined them.
+   *
+   * test-snipe-lane.mjs now derives this set from SNIPE_ENV and fails on any name missing
+   * from here or from install.sh's upgrade carry loop, so a dial cannot be half-wired again.
+   * Allowlisting a name enables nothing: each is bounded where it is parsed, and the money
+   * caps still require the `arm-caps` ceremony. */
+  "SNIPE_MIN_SOL_PER_TRADE", "SNIPE_MAX_NETWORK_FEE_LAMPORTS", "SNIPE_MAX_NETWORK_FEE_PCT",
+  "SNIPE_MAX_RENT_LAMPORTS", "SNIPE_NETWORK_FEE_RESERVE_SOL", "SNIPE_MAX_FEE_SHARE_OF_STOP",
+  "SNIPE_SIGNATURE_FEE_LAMPORTS", "SNIPE_RENT_FEE_LAMPORTS", "SNIPE_NOTICE_MAX_MS",
+  "SNIPE_VENUE_FEE_BPS", "SNIPE_FORWARD_SAMPLES", "SNIPE_FORWARD_INTERVAL_MS",
+  "SNIPE_SHADOW_CAPACITY", "SNIPE_CHARGE_DAILY_CAP", "SNIPE_DISAGREE_STREAK_MAX",
+  "SNIPE_CREATOR_EXIT_FRAC",
+  /* The three measured-first proxies, absent by default in every copy: they measure on every
+     launch and refuse nothing until the owner sets a number a scorecard has justified. */
+  "SNIPE_MAX_CREATOR_SHARE_PCT", "SNIPE_MAX_LAUNCH_SHARE_PCT", "SNIPE_MIN_VOLUME_SPIKE",
   "BLOCK_HEIGHT_WINDOW", "BOOK_HEAT_MAX", "CC_API", "CC_FLOOR", "CC_SECRET",
   "DAILY_LOSS_LIMIT_SOL",
   /* The share of the bankroll the realized-loss brake stops at, 0 to turn it off. Not a

@@ -3628,8 +3628,8 @@ const SNIPE_LANE_MODE = String(process.env.SNIPE_LANE || "off").trim().toLowerCa
 if (SNIPE_LANE_MODE !== "off") {
   try {
     const [{ createSnipeLane, snipeLaneConfig },
-      { PUMPFUN_VENUE, PUMPFUN_PROGRAM_ID, noticesFromLogs }, feedMod,
-      { grpcFromEnv, laserstreamTransport }, shadowMod, sinkMod] = await Promise.all([
+      { PUMPFUN_VENUE, PUMPFUN_PROGRAM_ID, noticesFromLogs, eventsFromLogs }, feedMod,
+      { grpcFromEnv, laserstreamTransport }, shadowMod, sinkMod, volumeMod] = await Promise.all([
       import("./snipe-lane.mjs"),
       import("./snipe-venue-pumpfun.mjs"),
       import("./snipe-feed.mjs"),
@@ -3638,6 +3638,7 @@ if (SNIPE_LANE_MODE !== "off") {
       import("./snipe-grpc.mjs"),
       import("./snipe-shadow.mjs"),
       import("./shadow-sink.mjs"),
+      import("./snipe-volume.mjs"),
     ]);
     const laneCfg = snipeLaneConfig(process.env);
     /* THE SIGNING PORT, on a live install only. Everything it needs is the desk's: the
@@ -3744,6 +3745,27 @@ if (SNIPE_LANE_MODE !== "off") {
        once. The alternative is a lane that runs on two sources while the operator believes
        it is running on three, which is the same silent degradation this whole subsystem
        exists to refuse. */
+    /* THE VOLUME TAPE AND ITS TAP — the owner's spike criterion, 2026-09-26.
+     *
+     * One tape, constructed here and handed to BOTH the tap that fills it and the lane that
+     * measures it, because two tapes would produce identical log lines and no measurement.
+     *
+     * The tap rides on the gRPC source, which is subscribed to the pump.fun PROGRAM: every
+     * buy and sell on every curve already arrives on that wire and snipe-feed.mjs already
+     * counts them as `unparsed` and drops them. Each carries a TradeEvent whose decoder is
+     * verified against real mainnet bytes, including `realQuoteRaw` — the curve's SOL
+     * reserve right after that trade. So the spike is measured from traffic this process is
+     * already receiving: no new subscription, no new request, no new key, and not one
+     * millisecond added to the path that buys.
+     *
+     * Without SNIPE_GRPC_* the tape still exists and still takes the lane's own curve reads;
+     * it simply has too few points to form a ratio, the gate records `null`, and since
+     * SNIPE_MIN_VOLUME_SPIKE is unset by default nothing is refused on an unknown. */
+    const flowTape = volumeMod.createFlowTape();
+    const flowTap = volumeMod.createTradeTap({
+      tape: flowTape,
+      tradesFrom: (notification) => eventsFromLogs(notification?.logs, { kind: "trade" }),
+    });
     const grpcCfg = grpcFromEnv(process.env);
     const grpcSource = grpcCfg ? feedMod.grpcSubscribeSource({
       id: "grpc:pumpfun", venueId: PUMPFUN_VENUE.id,
@@ -3760,8 +3782,10 @@ if (SNIPE_LANE_MODE !== "off") {
         });
         return notice ? { mint: notice.mint, creator: notice.creator, slot: notice.slot } : null;
       },
+      observe: (notification) => flowTap.observe(notification),
     }) : null;
-    if (grpcCfg) log(`[snipe] gRPC source armed against ${new URL(grpcCfg.endpoint).host} at ${grpcCfg.commitment}`);
+    if (grpcCfg) log(`[snipe] gRPC source armed against ${new URL(grpcCfg.endpoint).host} at ${grpcCfg.commitment}`
+      + "; every trade on it feeds the volume tape");
     const laneFeed = feedMod.createSnipeFeed({
       sources: [
         feedMod.sourceFromVenueWatch(PUMPFUN_VENUE, {
@@ -3803,6 +3827,8 @@ if (SNIPE_LANE_MODE !== "off") {
       feed: laneFeed,
       executor: snipeExecutor,
       shadow: shadowBook,
+      /* The same tape the tap above fills. */
+      flowTape,
       /* WHAT THE WALLET HOLDS, so the lane can tell a sell that FAILED from a position
          that has already GONE. Wired only on a live install, because only then is there a
          signing wallet whose balance means anything; in observe mode the lane latches and

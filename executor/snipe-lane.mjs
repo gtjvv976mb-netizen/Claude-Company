@@ -89,6 +89,7 @@ import { createSnipeShadow, latencyBudget, SHADOW_HOPS } from "./snipe-shadow.mj
 import { closeSnipe, ensureSnipeBook, openSnipe, snipeFor, snipeList, updateSnipe } from "./snipe-book.mjs";
 import * as snipePolicy from "./snipe-policy.mjs";
 import { readSocials, SOCIAL_DEFAULTS } from "./snipe-socials.mjs";
+import { createFlowTape } from "./snipe-volume.mjs";
 
 export const SNIPE_LANE_VERSION = "snipe-lane-v1";
 
@@ -219,6 +220,12 @@ export const SNIPE_LANE_DEFAULTS = Object.freeze({
      answer. src/launch-shadow.js states the discipline; snipe-shadow.mjs scores them. */
   maxCreatorSharePct: undefined,
   maxLaunchSharePct: undefined,
+  /* THE OWNER'S VOLUME-SPIKE FLOOR (2026-09-26). Net inflow over the last 30s against the
+     5 minutes before it, as a ratio. Undefined by default like the other two proxies: it
+     is measured on every notice, recorded in the shadow book and scored by
+     grade-entry-gates.mjs, and it kills nothing until the owner sets a number he has seen
+     a scorecard for. Set SNIPE_MIN_VOLUME_SPIKE=2 to demand twice the baseline. */
+  minVolumeSpike: undefined,
   /* Consecutive two-endpoint disagreements before blindness is treated as hostility and
      the position leaves. THREE, matching snipe-policy's confirmWindow, and for the same
      reason: it is the smallest run in which a single outlier cannot be the whole story.
@@ -334,6 +341,7 @@ export const SNIPE_ENV = Object.freeze({
   SNIPE_CHARGE_DAILY_CAP: Object.freeze({ key: "chargeDailyCap", parse: "flag" }),
   SNIPE_MAX_CREATOR_SHARE_PCT: Object.freeze({ key: "maxCreatorSharePct", parse: "number" }),
   SNIPE_MAX_LAUNCH_SHARE_PCT: Object.freeze({ key: "maxLaunchSharePct", parse: "number" }),
+  SNIPE_MIN_VOLUME_SPIKE: Object.freeze({ key: "minVolumeSpike", parse: "number" }),
   SNIPE_DISAGREE_STREAK_MAX: Object.freeze({ key: "disagreeStreakMax", parse: "number" }),
   SNIPE_CREATOR_EXIT_FRAC: Object.freeze({ key: "creatorExitFrac", parse: "number" }),
   SNIPE_TAKE_AT_ENTRY_X: Object.freeze({ key: "takeAtEntryX", parse: "number" }),
@@ -823,6 +831,17 @@ export function createSnipeLane({
      question — how many units of this mint does the signing wallet hold. Absent, nothing
      changes and the lane latches and retries exactly as before. */
   holdingsReader = null,
+  /* THE VOLUME TAPE — the owner's spike criterion, 2026-09-26: "when volume spikes on a
+     token, that's a sign to get in and ride the wave."
+
+     Handed in rather than created here whenever somebody else is filling it, which in
+     practice is always: the useful samples come from the launch subscription's own trade
+     traffic (snipe-volume.mjs, `createTradeTap`), and that tap is mounted on the feed
+     source in the poller, not in here. The lane still constructs one when none is given so
+     that `measure` is never a null check at three call sites — an empty tape answers
+     `not_enough_samples`, the gate treats unknown as not-a-spike, and with no threshold set
+     that is a recorded measurement and nothing else. */
+  flowTape = null,
 } = {}) {
   const conf = Object.freeze({ ...SNIPE_LANE_DEFAULTS, ...cfg });
   if (!SNIPE_LANE_MODES.includes(conf.lane))
@@ -892,6 +911,7 @@ export function createSnipeLane({
   ensureSnipeBook(S);
   if (S.positions === undefined) S.positions = {};
   const recorder = shadow ?? createSnipeShadow({ capacity: conf.shadowCapacity, laneMode: conf.lane });
+  const flow = flowTape ?? createFlowTape();
 
   const counters = {
     notices: 0, recorded: 0, cleared: 0, refused: 0, wouldHaveOpened: 0,
@@ -1004,6 +1024,15 @@ export function createSnipeLane({
     }
     hops.push({ hop: "prepare", atMs: clock() });
 
+    /* ONE STAMP FOR THE WHOLE GATE STACK, and the volume measurement taken against it.
+       The curve read this notice already paid for is added to the tape first — it is the
+       most recent point there is for this mint — and the spike is then measured as of the
+       same instant the rest of the gates are judged at. Two clock readings here would let
+       the budget gate and the volume gate disagree about when "now" was. */
+    const gateAtMs = clock();
+    flow.observe(mint, { atMs: gateAtMs, quoteRaw: curve?.realQuoteRaw ?? null });
+    const flowNow = flow.measure(mint, { nowMs: gateAtMs });
+
     const verdict = snipeContract({
       notice: {
         mint,
@@ -1017,8 +1046,9 @@ export function createSnipeLane({
       adapter,
       cfg: conf,
       book: bookView(),
-      nowMs: clock(),
+      nowMs: gateAtMs,
       control: controlView(),
+      flow: flowNow,
       mint: read.accounts[2] ?? null,
       creator: creatorFacts(record, curve),
       fees: feeModel(),
@@ -1381,6 +1411,10 @@ export function createSnipeLane({
     });
 
     counters.forwardSamples++;
+    /* The held position's own reserve reading, onto the same tape. Free — the read has
+       already happened — and it keeps a coin we are in measurable even if the trade tap is
+       not mounted or the wire went quiet. */
+    flow.observe(mint, { atMs: now, quoteRaw: curve?.realQuoteRaw ?? null });
     recorder.observe(mint, {
       atMs: now,
       slot: read.slot,
@@ -1585,6 +1619,10 @@ export function createSnipeLane({
 
     handleNotice,
     tick,
+    /* The tape, exposed so the process that MOUNTS the trade tap and the lane that reads
+       the tape are provably the same one. A second tape filled by the tap and never
+       measured would look identical in every log line either of them prints. */
+    flow,
     report(opts) { return recorder.report(opts); },
     render(opts) { return recorder.render(opts); },
     rows() { return recorder.rows(); },
@@ -1604,6 +1642,10 @@ export function createSnipeLane({
         hops: SHADOW_HOPS.length,
         chargeDailyCap: effective.chargeDailyCap === true,
         wouldHaveDeployedSol,
+        /* What the volume tape actually holds. A spike gate reporting "no spike" on every
+           launch and a spike gate whose tape is empty are the same sentence and different
+           facts, so the tape's own counters ride on the lane's stats. */
+        flow: flow.stats(),
         ...counters,
         /* STAMPED AND ASSERTED. Not a claim in a comment — a field the test reads. An
            observing lane reports zero for all three by construction; an armed lane reports

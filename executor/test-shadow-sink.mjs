@@ -50,11 +50,14 @@ const book = (n) => path.join(tmp, `${n}.jsonl`);
 
 /** A row the scorecard can actually judge. `curve.reserveKnown` + a forward sample above
  *  or below the fill is the whole of `followedAfterFill`. */
-const row = ({ mint, followed, creator = 12, share = 150, measured = true }) => ({
+const row = ({ mint, followed, creator = 12, share = 150, spike = 1.4, measured = true }) => ({
   mint,
   curve: { reserveKnown: true, realQuoteRaw: "1000" },
   forward: [{ realQuoteRaw: followed ? "2000" : "900" }],
-  gate: { measured: measured ? { creator_profile: creator, launch_share: share } : {} },
+  /* All three proxies, because the scorecard withholds its verdict until EVERY ruler has
+     n >= minRows — a fixture that measured only two would leave the grader permanently in
+     "not enough rows yet" and the no-edge verdict below would never be reached. */
+  gate: { measured: measured ? { creator_profile: creator, launch_share: share, volume_spike: spike } : {} },
 });
 
 console.log("\nthe sink writes a book that can be read back");
@@ -213,7 +216,7 @@ console.log("\nthe report says the honest thing, including when the answer is 'n
     scorecard: snipeScorecard(noiseRows), read: { total: 300, malformed: 0, files: 1 }, bookPath: "/x",
   });
   ok("a full sample that separates nothing says NO ENTRY EDGE, in those terms",
-    /no entry edge that these two measurements can find/.test(text));
+    /no entry edge that these measurements can find/.test(text));
   ok("...and names the honest options rather than implying another knob",
     /not a faster feed/.test(text) && /not another exit ladder/.test(text));
   ok("it never claims to have armed anything", /promotes: nothing/.test(text));
@@ -265,13 +268,13 @@ console.log("\nRUN THROUGH A SYMLINK — the way the owner is told to run it");
   ok("running it through a symlink produces output at all",
     viaLink.stdout.trim().length > 0, JSON.stringify(viaLink.stdout.slice(0, 80)));
   ok("...and it is the real report, not a stub",
-    /grading the two entry rulers/.test(viaLink.stdout) && /judged      6/.test(viaLink.stdout),
+    /grading the 3 entry rulers/.test(viaLink.stdout) && /judged      6/.test(viaLink.stdout),
     viaLink.stdout.split("\n").find((l) => /judged/.test(l)));
 
   const viaReal = spawnSync(process.execPath,
     [fileURLToPath(new URL("./grade-entry-gates.mjs", import.meta.url)), "--file", fixture],
     { encoding: "utf8" });
-  ok("the real path still works, unchanged", /grading the two entry rulers/.test(viaReal.stdout));
+  ok("the real path still works, unchanged", /grading the 3 entry rulers/.test(viaReal.stdout));
 
   /* And the other half of the guard: imported rather than executed, it must NOT run. */
   const asImport = spawnSync(process.execPath,

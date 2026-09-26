@@ -39,6 +39,8 @@ const need = ["poller.mjs", "journal.mjs", "jupiter.mjs", "token2022.mjs", "bala
   "snipe-book.mjs",
   "snipe-shadow.mjs",
   "snipe-policy.mjs",
+  // the volume tape: imported by snipe-lane.mjs at module scope, same as the socials filter.
+  "snipe-volume.mjs",
   // the socials filter: imported by snipe-lane.mjs at module scope, so an install that
   // fetches this list without it dies at boot the moment the lane is constructed.
   "snipe-socials.mjs",

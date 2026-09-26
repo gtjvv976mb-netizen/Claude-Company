@@ -35,6 +35,10 @@ const TRADING_RUNTIME_FILES = Object.freeze([
   "snipe-lane.mjs", "snipe-venue.mjs", "snipe-venue-pumpfun.mjs", "snipe-curve.mjs",
   "snipe-entry.mjs", "snipe-book.mjs", "snipe-shadow.mjs", "snipe-policy.mjs",
   "snipe-feed.mjs", "snipe-execute.mjs",
+  /* snipe-volume.mjs measures the volume spike the entry gate judges. Imported at module
+     scope by snipe-lane.mjs, so it is loaded whenever the lane is, and a change to the file
+     that decides what counts as a wave worth riding belongs in the fingerprint. */
+  "snipe-volume.mjs",
   /* snipe-socials.mjs decides which launches the lane may buy at all, and it is the one
      sniper module that fetches from a host the COIN'S DEPLOYER chose. A file with that
      job, loaded by the trading process, belongs in its fingerprint. */

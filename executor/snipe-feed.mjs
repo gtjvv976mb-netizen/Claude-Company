@@ -820,6 +820,21 @@ export function createSnipeFeed({
  */
 export function logsSubscribeSource({
   id, venueId = null, programId, commitment = "processed", transport, extractMint, kind = "logs",
+  /* THE OTHER 99% OF THIS SUBSCRIPTION, OPTIONALLY OBSERVED.
+   *
+   * A program filter delivers every transaction that touched the program, and nearly all of
+   * them are trades rather than creates: the `unparsed` branch below counts them and throws
+   * the bytes away. That traffic is a complete, already-paid-for volume feed for every
+   * curve on the venue, which is exactly what snipe-volume.mjs measures a spike against.
+   *
+   * So: an optional observer, handed every notification before it is parsed. It is NOT a
+   * second source of notices and cannot become one — its return value is discarded and it
+   * is given no `emit`. It MUST NOT THROW: a throw here is swallowed rather than failing
+   * the source, because a secondary measurement must never be able to blind the launch
+   * feed, and an observer is therefore required to keep its own error counter (createTradeTap
+   * does) so a tap that is quietly recording nothing shows up in a report instead of
+   * looking like a venue with no volume. */
+  observe = null,
 } = {}) {
   if (!isNonEmptyString(id)) throw new FeedConfigError("logsSubscribeSource needs an id");
   /* `logs` and `grpc` are the same SHAPE — a push subscription with an injected transport —
@@ -834,13 +849,19 @@ export function logsSubscribeSource({
     throw new FeedConfigError(`logsSubscribeSource ${id} needs a transport with subscribe()`);
   if (typeof extractMint !== "function")
     throw new FeedConfigError(`logsSubscribeSource ${id} needs an explicit extractMint(): no venue log layout is verified in this repo, so this module refuses to guess one`);
+  if (observe !== null && typeof observe !== "function")
+    throw new FeedConfigError(`logsSubscribeSource ${id} observe must be a function or null, got ${typeof observe}`);
 
   return {
     id, kind, venueId, programId, commitment,
+    observes: observe !== null,
     start({ emit, fail }) {
       const handle = transport.subscribe({
         programId, commitment,
         onNotice: (notification, context) => {
+          /* First, and inside its own catch: the observer sees the notification whether or
+             not it parses as a launch, and cannot affect whether it does. */
+          if (observe) { try { observe(notification, context); } catch { /* see `observe` above */ } }
           let parsed = null;
           try { parsed = extractMint(notification, context); }
           catch (error) { fail(error); return; }

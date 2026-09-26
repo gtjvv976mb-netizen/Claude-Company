@@ -30,7 +30,7 @@ const runtimeFiles = [
   // The launch lane, now that it can sign: validated like jupiter.mjs, for the same reason.
   "snipe-execute.mjs", "snipe-lane.mjs", "snipe-venue-pumpfun.mjs", "snipe-venue.mjs",
   "snipe-curve.mjs", "snipe-entry.mjs", "snipe-feed.mjs", "snipe-book.mjs",
-  "snipe-shadow.mjs", "snipe-policy.mjs",
+  "snipe-shadow.mjs", "snipe-policy.mjs", "snipe-volume.mjs",
   "package.json", "package-lock.json",
 ];
 let failures = 0;
