@@ -214,10 +214,10 @@ function classicMintBytes({ mintAuthority = null, freezeAuthority = null, decima
 
 /* ════ 1. THE SHAPE OF THE LIST ═══════════════════════════════════════════════════════ */
 
-ok("SNIPE_GATES is a frozen, ordered, duplicate-free list of 24 codes", () => {
+ok("SNIPE_GATES is a frozen, ordered, duplicate-free list of 26 codes", () => {
   assert.equal(Object.isFrozen(SNIPE_GATES), true, "SNIPE_GATES is not frozen");
-  assert.equal(SNIPE_GATES.length, 24, `SNIPE_GATES has ${SNIPE_GATES.length} entries`);
-  assert.equal(new Set(SNIPE_GATES).size, 24, "SNIPE_GATES repeats a code");
+  assert.equal(SNIPE_GATES.length, 26, `SNIPE_GATES has ${SNIPE_GATES.length} entries`);
+  assert.equal(new Set(SNIPE_GATES).size, 26, "SNIPE_GATES repeats a code");
   console.log(`       ${SNIPE_GATES.join(" > ")}`);
 });
 
@@ -297,7 +297,7 @@ ok("a clean launch clears all 22 gates, and the trace names every one", () => {
   const v = snipeContract(baseArgs());
   assert.equal(v.ok, true, `the clean launch was refused at ${v.gate}: ${v.detail.message}`);
   assert.equal(v.gate, null, `gate came back ${v.gate}`);
-  assert.equal(v.trace.length, 24, `the trace holds ${v.trace.length} steps`);
+  assert.equal(v.trace.length, 26, `the trace holds ${v.trace.length} steps`);
   assert.deepEqual(v.trace.map((s) => s.gate), [...SNIPE_GATES], "the trace ran the gates out of order");
   assert.equal(v.trace.every((s) => s.ok), true, "a step in a passing trace is not ok");
   console.log(`       ${v.detail.mint.slice(0, 8)}… buys ${v.detail.baseOutRaw} base units for at most ` +
@@ -375,6 +375,20 @@ const HOSTILE = [
   ["launch_share", "two thirds of the opening quote is already bought, against a 10% bar",
     { cfg: { ...LIVE_CFG, maxLaunchSharePct: 10 },
       curve: { ...STANDARD_CURVE, vQuoteRaw: 50n * SOL, realQuoteRaw: 20n * SOL } }],
+  /* The owner's spike criterion, 2026-09-26, and the only proxy that is a FLOOR: it refuses
+     what is too LOW rather than what is too high. Net inflow running at a fifth of the coin's
+     own baseline is the opposite of a wave to ride. */
+  ["volume_spike", "net inflow is a fifth of the coin's own baseline, against a 2x floor",
+    { cfg: { ...LIVE_CFG, minVolumeSpike: 2 },
+      flow: { spike: 0.2, recentLamportsPerSec: 200_000, baselineLamportsPerSec: 1_000_000, reason: null } }],
+  /* THE MARKET FLOOR, 2026-09-26. The launch lane's whole population is minutes old, which is
+     why this gate is off by default — and why the hostile fact here is simply a real launch
+     judged against bagworkagent.fun's own one-hour floor. */
+  ["market_floor", "the coin is four minutes old against a one-hour floor",
+    { cfg: { ...LIVE_CFG, marketFloor: { minAgeHours: 1, minLiquidityUsd: null, minVolume24hUsd: null,
+      minMcapUsd: null, maxVolumeToLiquidity: null, minTxns24h: null, maxSellShare: null,
+      maxPriceChange24hPct: null, minTopPoolLiquidityUsd: null } },
+      market: { ok: true, clause: null, message: null, facts: { ageHours: 4 / 60 } } }],
   ["network_fee_over_cap", "605,000 lamports of fees on a ~5,000,000 lamport basis is over 10%",
     { fees: { signatureFeeLamports: 5_000, prioritizationFeeLamports: 600_000, rentFeeLamports: 0 } }],
   ["rent_over_cap", "5,000,000 lamports of rent exceeds the 4,200,000 ceiling",
@@ -442,7 +456,7 @@ ok("every hostile EXTENSION in the desk's vocabulary is refused under ext_<name>
   console.log("       6 hazardous extensions refused by name; defaultAccountState refused only when the state is not \"initialized\"");
 });
 
-ok("the two proxy gates MEASURE on every notice and kill only when a threshold is set", () => {
+ok("the three proxy gates MEASURE on every notice and kill only when a threshold is set", () => {
   const noThreshold = snipeContract(baseArgs({ creator: { shareOfSupplyPct: 92, priorLaunches: 14 } }));
   assert.equal(noThreshold.ok, true,
     `a 92%-holding deployer was refused with no threshold configured (${noThreshold.gate})`);
@@ -456,9 +470,35 @@ ok("the two proxy gates MEASURE on every notice and kill only when a threshold i
   const priorLaunches = snipeContract(baseArgs({
     cfg: { ...LIVE_CFG, maxCreatorPriorLaunches: 2 }, creator: { shareOfSupplyPct: 1, priorLaunches: 9 } }));
   assert.equal(priorLaunches.gate, "creator_profile", `9 prior launches against a bar of 2 answered ${priorLaunches.gate}`);
-  assert.deepEqual([...SNIPE_PROXY_GATES], ["creator_profile", "launch_share"],
+
+  /* THE VOLUME SPIKE, under the same discipline and with one extra trap of its own.
+     A spike is a ratio, and a brand-new curve has no denominator — so `spike: null` reaches
+     this gate constantly and MUST NOT read as a spike. With no threshold it is recorded as
+     null and nothing is refused; with a threshold set it refuses, because a floor nobody
+     could measure against is not evidence that the floor was cleared. Getting this backwards
+     would fire hardest on the youngest launches, which on this desk's own 64 trades won 0%
+     of the time. */
+  assert.equal(noThreshold.detail.measured.volume_spike, null,
+    `an unmeasured volume spike was recorded as ${noThreshold.detail.measured.volume_spike}`);
+  const spiking = snipeContract(baseArgs({ cfg: { ...LIVE_CFG, minVolumeSpike: 2 }, flow: { spike: 4.5, reason: null } }));
+  assert.equal(spiking.ok, true, `a 4.5x spike against a 2x floor was refused at ${spiking.gate}: ${spiking.detail.message}`);
+  assert.equal(spiking.detail.measured.volume_spike, 4.5, `the spike was recorded as ${spiking.detail.measured.volume_spike}`);
+  const quiet = snipeContract(baseArgs({ flow: { spike: 0.01, reason: null } }));
+  assert.equal(quiet.ok, true, `a dead-quiet coin was refused with no floor configured (${quiet.gate})`);
+  assert.equal(quiet.detail.measured.volume_spike, 0.01, `the spike was recorded as ${quiet.detail.measured.volume_spike}`);
+  const noBaseline = snipeContract(baseArgs({
+    cfg: { ...LIVE_CFG, minVolumeSpike: 2 }, flow: { spike: null, reason: "no_baseline", baselineEmpty: true } }));
+  assert.equal(noBaseline.gate, "volume_spike",
+    `a fresh curve with no baseline answered ${noBaseline.gate} against a configured floor`);
+  assert.match(noBaseline.detail.message, /no_baseline/, noBaseline.detail.message);
+  assert.match(noBaseline.detail.message, /unverified is not safe/, noBaseline.detail.message);
+  const noFlow = snipeContract(baseArgs({ cfg: { ...LIVE_CFG, minVolumeSpike: 2 }, flow: null }));
+  assert.equal(noFlow.gate, "volume_spike", `no flow tape at all answered ${noFlow.gate} against a configured floor`);
+
+  assert.deepEqual([...SNIPE_PROXY_GATES], ["creator_profile", "launch_share", "volume_spike"],
     `the declared proxy gates are ${SNIPE_PROXY_GATES.join(", ")}`);
   console.log("       measured always, killing never — until an operator sets a bar the scorecard has justified");
+  console.log("       volume_spike: 4.5x passes a 2x floor · an unmeasurable spike refuses it · unset measures only");
 });
 
 /* ════ 5. THE CEILING IS NEVER LOOSER THAN A SLIPPAGE TOLERANCE ═══════════════════════ */

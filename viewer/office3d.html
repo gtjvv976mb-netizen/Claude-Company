@@ -7093,13 +7093,16 @@ window.__hawkBoardUpdate = () => {
   }
 
   /* THE TOTAL, big, and coloured by sign — a board is read by its sign first. */
-  const net = Number(bk.realizedSol) || 0;
+  /* A NULL TOTAL IS "NOT READ", never +0.0000: the bot sends null when no close in the record
+     has a result on the ledger, and chalking that as break-even would be a claim nobody measured. */
+  const unread = bk.realizedSol === null || bk.realizedSol === undefined || !Number.isFinite(Number(bk.realizedSol));
+  const net = unread ? 0 : Number(bk.realizedSol);
   x.textAlign = "left";
   x.fillStyle = DIM; x.font = F(500, 22);
   x.fillText("REALISED", 34, 148);
-  x.fillStyle = net > 0 ? GOOD : net < 0 ? BAD : INK;
+  x.fillStyle = unread ? DIM : net > 0 ? GOOD : net < 0 ? BAD : INK;
   x.font = F(700, 72);
-  x.fillText(`${net > 0 ? "+" : ""}${net.toFixed(4)} SOL`, 34, 202);
+  x.fillText(unread ? "not read" : `${net > 0 ? "+" : ""}${net.toFixed(4)} SOL`, 34, 202);
 
   x.textAlign = "right";
   x.fillStyle = DIM; x.font = F(500, 22);
@@ -13506,7 +13509,11 @@ function loadHawkDashboard() {
         + `${bk.unknown ? `, ${bk.unknown} the bot could not price` : ""}. `
         + "Realised is net of the network fee and of what the position cost, straight from the "
         + "confirmed transactions — not a mark, and not the desk's paper.",
-        sol(bk.realizedSol), sign(bk.realizedSol)));
+        /* A NULL TOTAL IS "NOT READ", NEVER +0. The bot sends null when no close in the record
+           has a result on the ledger, and a board that printed that as break-even would be the
+           one dishonest thing this page could do. */
+        bk.realizedSol === null || bk.realizedSol === undefined ? "not read" : sol(bk.realizedSol),
+        bk.realizedSol === null || bk.realizedSol === undefined ? "" : sign(bk.realizedSol)));
       const rows = (bk.closed || []).filter((r) => r && r.mint);
       if (rows.length) {
         const list = dashNode("div", "dashgrid");

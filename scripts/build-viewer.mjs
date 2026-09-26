@@ -37,6 +37,14 @@ const PAGES = [
   { src: "tower.html",    out: "tower.html" },
   { src: "office3d.html", out: "floor.html" },
   { src: "buy.html",      out: "buy.html" },
+  /* The public agent page (2026-09-26). One floor's bot, its record, its level and its strategy,
+     open to anyone the floor is already open to — a bot nobody can look at is a bot nobody can
+     check. Its three money figures are three cards and never four, because the fourth would be
+     their sum. */
+  { src: "agent.html",    out: "agent.html" },
+  /* The creator-fee claim (2026-09-26). One job: read the two vaults, build the unsigned claim, and
+     let the owner's own wallet sign it. Nothing on the server or the bot holds the creator key. */
+  { src: "fees.html",     out: "fees.html" },
   { src: "404.html",      out: "404.html" },
 ];
 const ASSETS = [
@@ -195,6 +203,20 @@ const EXECUTOR_FILES = [
   "snipe-book.mjs",
   "snipe-shadow.mjs",
   "snipe-policy.mjs",
+  /* The volume tape (2026-09-26): imported at module scope by snipe-lane.mjs, so an
+     install that fetches this list without it dies at boot the moment the lane is built. */
+  "snipe-volume.mjs",
+  /* The market floor (2026-09-26): imported at module scope by snipe-lane.mjs and by
+     snipe-entry.mjs, so an install missing it dies at boot the moment the lane is built. */
+  "snipe-market.mjs",
+  /* The creator-fee lane (2026-09-26): the revenue line. Imported dynamically by poller.mjs,
+     but published like every other runtime file — a 404 here is a desk that cannot claim. */
+  "fee-lane.mjs",
+  /* The claim itself. It shipped one commit before anything imported it, so nothing required
+     it to be published and no list named it — then wiring the fee lane made poller.mjs load
+     it and this build's own import-graph check said the installed bot would die at boot. That
+     check is why this line exists rather than a support thread in a week. */
+  "pumpfun-fees.mjs",
   /* The lane's signing path (2026-09-12): imported dynamically by poller.mjs only under
      SNIPE_LANE=execute, and a 404 there is a bot that armed and cannot buy. Published. */
   "snipe-execute.mjs",

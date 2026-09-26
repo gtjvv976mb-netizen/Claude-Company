@@ -44,7 +44,7 @@ import { fileURLToPath } from "node:url";
 import bs58 from "bs58";
 
 import {
-  LANE_REFUSED_VENUE_METHODS, LANE_SIGNALS, SNIPE_ENV, SNIPE_LANE_DEFAULTS, SNIPE_LANE_MODES, SNIPE_LANE_VERSION,
+  LANE_REFUSED_VENUE_METHODS, LANE_SIGNALS, SNIPE_ENV, SNIPE_LANE_CLAUSES, SNIPE_LANE_DEFAULTS, SNIPE_LANE_MODES, SNIPE_LANE_VERSION,
   SnipeLaneError, bindDeterminer, createSnipeLane, observeOnlyVenue, readAcrossEndpoints, snipeLaneConfig,
 } from "./snipe-lane.mjs";
 import {
@@ -340,6 +340,34 @@ section("2. THE CONFIG IS ITS OWN OBJECT, AND THE LEGACY EXECUTE FLAG IS REFUSED
   ok("every env name carries the SNIPE_ prefix",
     Object.keys(SNIPE_ENV).every((n) => n.startsWith("SNIPE_")),
     `${Object.keys(SNIPE_ENV).length} names, e.g. ${Object.keys(SNIPE_ENV).slice(0, 3).join(", ")}`);
+
+  /* EVERY DIAL MUST BE ABLE TO REACH THE PROCESS — checked against the two lists that decide
+     whether it can, and derived from this table rather than typed out beside it.
+
+     2026-09-26: nineteen of these were in NEITHER list. They parsed, they were bounded, they
+     were printed by the arming banner and documented in the README, and on a real install
+     launchd simply never passed them — among them SNIPE_MAX_CREATOR_SHARE_PCT and
+     SNIPE_MAX_LAUNCH_SHARE_PCT, the two thresholds grade-entry-gates.mjs exists to justify,
+     so the whole measure-then-arm discipline ended at a variable the bot could not see.
+     test-launchd.mjs's allowlist check could not catch it: it scans the runtime for
+     `process.env.NAME` literals and the lane reads its settings through this TABLE instead.
+     So the check has to start where the names actually live. */
+  const laneEnv = Object.keys(SNIPE_ENV);
+  const runnerSrc = fs.readFileSync(path.join(HERE, "launchd-runner.mjs"), "utf8");
+  const allowlist = runnerSrc.slice(runnerSrc.indexOf("const ALLOWED_ENV"), runnerSrc.indexOf("const SAFE_INHERITED_ENV"));
+  ok("the allowlist slice is real, not an empty one", allowlist.length > 400, `${allowlist.length} chars`);
+  const missingAllow = laneEnv.filter((n) => !allowlist.includes(`"${n}"`));
+  ok("launchd's exact environment allowlist names every dial this table parses",
+    missingAllow.length === 0, missingAllow.join(", ") || `all ${laneEnv.length} allowed`);
+
+  const installSrc = fs.readFileSync(path.join(HERE, "install.sh"), "utf8");
+  const carryFrom = installSrc.indexOf("for dial in ENTRY_MODE");
+  const carry = installSrc.slice(carryFrom, installSrc.indexOf("; do", carryFrom));
+  ok("install.sh's upgrade carry loop is a real slice, not an empty one",
+    carryFrom > 0 && carry.length > 400, `${carry.length} chars`);
+  const missingCarry = laneEnv.filter((n) => !carry.includes(n));
+  ok("the upgrade carry loop names every dial too, so an upgrade cannot silently drop one",
+    missingCarry.length === 0, missingCarry.join(", ") || `all ${laneEnv.length} carried`);
 
   const observe = snipeLaneConfig({ SNIPE_LANE: "observe", SNIPE_NOTICE_MAX_MS: "1500" });
   ok("SNIPE_LANE=observe arms the observe lane", observe.lane === "observe", `lane ${observe.lane}`);
@@ -826,8 +854,8 @@ section("8. THE SCORECARD, AGAINST A CASE WHOSE ANSWER IS KNOWN");
     excluded.judged === 4 && excluded.proxies.creator_profile.n === 4,
     `judged ${excluded.judged} of ${rows.length + 1} rows supplied`);
 
-  ok("the proxy set matches the two gates the lane deliberately does not kill on",
-    Object.keys(SNIPE_PROXIES).sort().join(",") === "creator_profile,launch_share",
+  ok("the proxy set matches the three gates the lane deliberately does not kill on",
+    Object.keys(SNIPE_PROXIES).sort().join(",") === "creator_profile,launch_share,volume_spike",
     Object.keys(SNIPE_PROXIES).join(", "));
 }
 
@@ -1311,6 +1339,39 @@ section("15. THE DEPLOYER GETTING OUT — the branch that could not fire");
   ok("LANE_SIGNALS now reports every exit signal wired",
     Object.values(LANE_SIGNALS).every((v) => v === "wired"),
     Object.entries(LANE_SIGNALS).filter(([, v]) => v !== "wired").map(([k]) => k).join(", ") || "all wired");
+}
+
+section("16. A LISTING ROW'S METADATA IS READ WHERE A LISTING ROW KEEPS IT");
+{
+  /* THE BUG THIS PINS. A create event decodes to `uri`; a pump.fun listing row — every
+     momentum candidate, and any launch the poll hears first — carries `metadata_uri` and no
+     `uri` (50 of 50 live rows, 2026-09-26). The lane read only `uri`, so with the socials
+     filter on by default every momentum candidate was refused at no_socials with "no uri"
+     and not one of them ever reached the market floor it was fetched for. */
+  const asked = [];
+  const spy = async ({ uri }) => { asked.push(uri); return Object.freeze({
+    ok: true, socials: { twitter: "https://x.com/f", telegram: null, website: null, present: ["twitter"], any: true },
+    message: "names twitter" }); };
+  const lane = laneFor({ socials: spy });
+  await lane.handleNotice(noticeRecord(keyFor(300), {
+    firstSource: "poll:pumpfun-momentum", firstKind: "poll",
+    raw: { mint: keyFor(300), metadata_uri: "https://ipfs.io/ipfs/listing-row", complete: false },
+  }));
+  ok("a listing row's metadata_uri reaches the socials reader", asked[0] === "https://ipfs.io/ipfs/listing-row", String(asked[0]));
+  await lane.handleNotice(noticeRecord(keyFor(301), { raw: { uri: "https://ipfs.io/ipfs/create-event" } }));
+  ok("a create event's uri still does", asked[1] === "https://ipfs.io/ipfs/create-event", String(asked[1]));
+}
+
+section("17. A SPIKE FLOOR ON A TAPE NOBODY FILLS IS REFUSED AT CONSTRUCTION");
+{
+  let err = null;
+  try { laneFor({ cfg: { minVolumeSpike: 2 } }); } catch (e) { err = e; }
+  ok("minVolumeSpike with no flowTape port is refused, not run as a gate that refuses everything",
+    err instanceof SnipeLaneError && err.clause === "volume_tape_unfed", `${err?.clause}: ${err?.message?.slice(0, 80)}`);
+  ok("...and the clause is named in the frozen list", SNIPE_LANE_CLAUSES.includes("volume_tape_unfed"));
+  let none = null;
+  try { laneFor({}); } catch (e) { none = e; }
+  ok("with no spike floor, no tape is required", none === null, String(none?.message ?? ""));
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

@@ -720,6 +720,28 @@ await ok("every source dead: ok=false, state dead, and both are named", async ()
   console.log(`         ok=${health.ok} state=${health.state} "${health.message}" · poll lastError "${pollState.lastError}"`);
 });
 
+await ok("a poll that ANSWERS with nothing to emit is alive, not dead", async () => {
+  /* THE MOMENTUM SOURCE'S SHAPE. Its pre-filter can keep 0 of 70 rows for long stretches, so
+     it emits nothing while every poll succeeds. Judged on notices alone it went degraded at
+     60s and DEAD at 300s — "the endpoint is broken" for a source that was working. */
+  const clocks = fakeTimers();
+  const f = createSnipeFeed({
+    sources: [pollSource({ id: "filtered", fetchRows: async () => [], intervalMs: 30_000 })],
+    clock, schedule: clocks.schedule, cancel: clocks.cancel,
+  });
+  NOW = 7_000_000;
+  await f.start();
+  for (let i = 0; i < 12; i++) { await clocks.runAll(); NOW += 30_000; }
+  await clocks.runAll();
+  const health = f.health(NOW);
+  const st = health.sources.find((s) => s.id === "filtered");
+  assert.equal(st.state, "live", `state = ${st.state} (${st.reason}) after ${(NOW - 7_000_000) / 1000}s of empty polls`);
+  assert.ok(st.pulses >= 12, `pulses = ${st.pulses}`);
+  assert.equal(st.notices, 0, "an empty poll must not be counted as a notice");
+  await f.stop();
+  console.log(`         ${st.pulses} empty polls over ${(NOW - 7_000_000) / 1000}s: state ${st.state}, notices ${st.notices}`);
+});
+
 /* ── §10 the venue-watch source, and what it refuses ───────────────────────────────── */
 
 console.log("\n10. A VENUE ADAPTER AS A SOURCE");

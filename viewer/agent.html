@@ -1,0 +1,267 @@
+<title>Claude Co — Agent</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<style>
+/* THE AGENT PAGE. Same night palette as tower.html — violet stone, brass numerals, mint as
+   light — because this is a room in the same building and not a second product. */
+:root{
+  --cream:#e6ddf5; --teal:#9945ff; --amber:#d1a84f; --glass:#5ee9b5;
+  --bg:#08050f; --panel:#120c20; --panel-2:#1a1230; --line:#2b1f45;
+  --dim:#9a90b5; --loss:#e0685f; --win:#5ee9b5;
+  --serif:"Instrument Serif",Georgia,serif;
+  --sans:Archivo,system-ui,-apple-system,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--cream);font-family:var(--sans);
+  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+a{color:var(--glass)}
+.wrap{max-width:900px;margin:0 auto;padding:28px 16px 80px}
+
+header.top{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;
+  border-bottom:1px solid var(--line);padding-bottom:18px;margin-bottom:24px}
+header.top h1{font-family:var(--serif);font-size:38px;font-weight:400;margin:0;letter-spacing:.2px}
+.floorno{font-family:var(--mono);font-size:13px;color:var(--amber);
+  border:1px solid var(--amber);border-radius:999px;padding:3px 10px}
+.state{font-family:var(--mono);font-size:12px;padding:3px 10px;border-radius:999px;
+  border:1px solid var(--line);color:var(--dim)}
+.state.up{color:var(--win);border-color:var(--win)}
+.state.down{color:var(--loss);border-color:var(--loss)}
+.who{font-family:var(--mono);font-size:12px;color:var(--dim);word-break:break-all}
+
+h2{font-family:var(--serif);font-weight:400;font-size:24px;margin:34px 0 6px}
+.lede{color:var(--dim);margin:0 0 16px;max-width:62ch}
+
+/* THE THREE FIGURES. Deliberately three cards and never a fourth: the fourth would be their
+   sum, and their sum is how a bot that loses money on every round trip displays a profit. */
+.money{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+.card .k{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+.card .v{font-family:var(--mono);font-size:27px;margin-top:6px;font-variant-numeric:tabular-nums}
+.card .v.pos{color:var(--win)} .card .v.neg{color:var(--loss)} .card .v.none{color:var(--dim)}
+.card .n{font-size:12px;color:var(--dim);margin-top:6px}
+.never{margin-top:12px;font-size:13px;color:var(--dim);border-left:2px solid var(--amber);
+  padding-left:12px;max-width:66ch}
+
+table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:13px;margin-top:8px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line)}
+th{color:var(--dim);font-weight:500;font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+.dash{color:var(--dim)}
+
+.level{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+.level .lv{font-family:var(--serif);font-size:30px}
+.level .blocked{color:var(--amber);font-size:14px;margin-top:8px}
+.level .note{color:var(--dim);font-size:13px;margin-top:8px;max-width:62ch}
+.rungs{display:flex;gap:6px;margin-top:14px;flex-wrap:wrap}
+.rung{font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:999px;
+  border:1px solid var(--line);color:var(--dim)}
+.rung.on{border-color:var(--glass);color:var(--glass)}
+
+pre.env{background:#0d0818;border:1px solid var(--line);border-radius:8px;padding:12px 14px;
+  font-family:var(--mono);font-size:12.5px;overflow-x:auto;color:var(--cream)}
+.feed{font-family:var(--mono);font-size:12.5px;max-height:260px;overflow-y:auto;
+  background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+.feed div{padding:2px 0;border-bottom:1px solid rgba(255,255,255,.04)}
+.err{color:var(--loss)}
+footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);color:var(--dim);font-size:13px}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <h1 id="name">Agent</h1>
+    <span class="floorno" id="floorno">—</span>
+    <span class="state" id="state">loading</span>
+  </header>
+  <div class="who" id="who"></div>
+
+  <h2>The money, in three figures</h2>
+  <p class="lede" id="lede">Trading, creator fees and house rewards — reported separately.</p>
+  <div class="money">
+    <div class="card"><div class="k">Trading</div><div class="v" id="m-trade">—</div>
+      <div class="n" id="m-trade-n">realised, from the bot's own journal</div></div>
+    <div class="card"><div class="k">Creator fees</div><div class="v" id="m-fee">—</div>
+      <div class="n" id="m-fee-n">claimed from the coin's vaults</div></div>
+    <div class="card"><div class="k">House rewards</div><div class="v" id="m-reward">—</div>
+      <div class="n" id="m-reward-n">paid for levels reached</div></div>
+  </div>
+  <p class="never" id="never"></p>
+
+  <h2>The record</h2>
+  <table>
+    <tr><th>Closed trades</th><td class="num" id="r-closed">—</td>
+      <th>With a readable result</th><td class="num" id="r-counted">—</td></tr>
+    <tr><th>Wins</th><td class="num" id="r-wins">—</td>
+      <th>Win rate</th><td class="num" id="r-rate">—</td></tr>
+  </table>
+
+  <h2>Level</h2>
+  <div class="level">
+    <div class="lv"><span id="l-no">—</span> <span id="l-name" style="color:var(--dim)"></span></div>
+    <div class="blocked" id="l-blocked"></div>
+    <div class="note" id="l-note"></div>
+    <div class="rungs" id="l-rungs"></div>
+  </div>
+
+  <h2>Strategy</h2>
+  <p class="lede" id="s-lede">The dials this desk's bot is configured with.</p>
+  <table id="s-table"></table>
+  <p class="lede" style="margin-top:16px">The bot runs on its operator's own machine, so these are
+    the exact lines to put in its environment file. A saved form has not reached a laptop.</p>
+  <pre class="env" id="s-env">—</pre>
+
+  <h2>Live</h2>
+  <div class="feed" id="feed"><div class="dash">waiting for the desk…</div></div>
+
+  <footer id="foot"></footer>
+</div>
+
+<script>
+const API = window.__API_BASE__ || "";
+/* The floor comes from ?floor=N, or from #/agent/N so a link in their shape also works. */
+const floorOf = () => {
+  const q = Number(new URLSearchParams(location.search).get("floor"));
+  if (Number.isInteger(q) && q >= 1 && q <= 50) return q;
+  const m = /#\/agent\/(\d+)/.exec(location.hash || "");
+  const h = m ? Number(m[1]) : NaN;
+  return Number.isInteger(h) && h >= 1 && h <= 50 ? h : 50;
+};
+const FLOOR = floorOf();
+const $ = (id) => document.getElementById(id);
+/* THE SESSION, SENT THE WAY EVERY OTHER PAGE SENDS IT. A leased floor answers only its tenant or
+   a pass-holder, and the desk knows who is asking only from the bearer token — there is no
+   cookie. The first version of this page sent nothing, so a tenant opening their own floor's
+   agent page was told it was "private to its tenant". Read inside a try: storage can be
+   blocked, and a page that throws on that shows nothing at all. */
+const TOKEN = (() => { try { return localStorage.getItem("cc_token") || null; } catch { return null; } })();
+const authHeaders = TOKEN ? { authorization: "Bearer " + TOKEN } : {};
+
+/* A NULL IS A DASH, NEVER A ZERO. Every money field on this page can be "not measured", and a
+   zero would be a claim about a number nobody took. This one function is the whole rule. */
+const sol = (v, { sign = true } = {}) => {
+  if (v === null || v === undefined || !Number.isFinite(Number(v))) return null;
+  const n = Number(v);
+  return `${sign && n > 0 ? "+" : ""}${n.toFixed(4)} SOL`;
+};
+const put = (id, text, cls) => {
+  const el = $(id);
+  el.textContent = text === null ? "—" : text;
+  el.className = el.className.replace(/\b(pos|neg|none)\b/g, "").trim() + (text === null ? " none" : (cls || ""));
+};
+const pct = (v) => (v === null || v === undefined || !Number.isFinite(Number(v)) ? null : `${(Number(v) * 100).toFixed(1)}%`);
+
+async function load() {
+  let a;
+  try {
+    const r = await fetch(`${API}/api/agent/${FLOOR}`, { headers: { accept: "application/json", ...authHeaders } });
+    a = await r.json();
+    if (!r.ok) throw new Error(a?.error || `HTTP ${r.status}`);
+  } catch (e) {
+    $("state").textContent = "unavailable";
+    $("state").className = "state down";
+    const span = document.createElement("span");
+    span.className = "err";
+    span.textContent = String(e.message);
+    $("lede").replaceChildren(span);
+    return;
+  }
+
+  $("name").textContent = a.name || `Floor ${a.floor}`;
+  $("floorno").textContent = `Floor ${a.floor}`;
+  const live = a.live === true;
+  /* "RUNNING" IS A CLAIM ABOUT NOW, so a pulse older than the desk's 150-second window reads as
+     when it was last heard, not as the state it last reported. */
+  const ago = (ms) => (ms < 90_000 ? `${Math.round(ms / 1000)}s` : ms < 5_400_000 ? `${Math.round(ms / 60_000)} min`
+    : ms < 172_800_000 ? `${Math.round(ms / 3_600_000)} h` : `${Math.round(ms / 86_400_000)} days`);
+  const stale = a.pulseAgeMs !== null && a.pulseAgeMs !== undefined && a.pulseAgeMs >= 150_000;
+  $("state").textContent = a.live === null ? "never reported"
+    : stale ? `last heard ${ago(a.pulseAgeMs)} ago` : (live ? "running" : "stopped");
+  $("state").className = "state " + (a.live === null ? "" : (live ? "up" : "down"));
+  $("who").textContent = a.operator ? `operator ${a.operator}` : "";
+
+  put("m-trade", sol(a.tradingSol), Number(a.tradingSol) >= 0 ? " pos" : " neg");
+  put("m-fee", sol(a.feeSol, { sign: false }), " pos");
+  put("m-reward", sol(a.rewardSol, { sign: false }), " pos");
+  /* CLAIMED IS WHAT LANDED; WAITING IS WHAT THE LAST READ FOUND. The owner signs claims in their
+     own wallet and this desk does not record them, so "claimed" is usually a dash — and the
+     amount waiting in the vaults is said beside it, as waiting, never as income. */
+  const waiting = sol(a.feeClaimableSol, { sign: false });
+  $("m-fee-n").textContent = (a.feeClaims === null
+      ? "claims are signed by the coin's creator in their own wallet"
+      : `${a.feeClaims} claim${a.feeClaims === 1 ? "" : "s"}${a.feeSolComplete === false ? " — at least one amount was never reported, so this is a floor, not a total" : ""}`)
+    + (waiting ? ` · ${waiting} waiting in the vaults${a.feeClaimableAtMs ? ` (read ${ago(Date.now() - a.feeClaimableAtMs)} ago)` : ""}` : "");
+  /* The sentence the payload carries, printed rather than paraphrased. */
+  $("never").textContent = a.accounting || "";
+
+  put("r-closed", a.closedTrades === null ? null : String(a.closedTrades));
+  put("r-counted", a.countedTrades === null ? null : String(a.countedTrades)
+    + (a.unmeasuredTrades ? ` (${a.unmeasuredTrades} unreadable)` : ""));
+  put("r-wins", a.wins === null ? null : String(a.wins));
+  put("r-rate", pct(a.winRate));
+
+  $("l-no").textContent = a.level ?? "—";
+  $("l-name").textContent = a.levelName || "";
+  $("l-blocked").textContent = a.levelBlockedReason
+    ? `Level ${a.nextLevel}: ${a.levelBlockedReason}${a.nextLevelReward ? ` (pays ${a.nextLevelReward} SOL)` : ""}` : "";
+  $("l-note").textContent = a.recordNote || a.levelNote || "";
+  /* Built as nodes, not HTML: every string here arrived over the network. */
+  const el = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; };
+  $("l-rungs").replaceChildren(...(a.ladder || []).map((r) =>
+    el("span", `${r.level} ${r.name}`, `rung${r.level <= (a.level || 0) ? " on" : ""}`)));
+
+  const dials = a.strategy ? Object.entries(a.strategy).filter(([, v]) => v !== null) : [];
+  const rows = [];
+  if (dials.length) {
+    const head = el("tr"); head.append(el("th", "Dial"), el("th", "Value")); rows.push(head);
+    for (const [k, v] of dials) { const tr = el("tr"); tr.append(el("td", String(k)), el("td", String(v), "num")); rows.push(tr); }
+  } else {
+    const tr = el("tr"); tr.append(el("td", "no strategy saved — this desk runs the shipped defaults", "dash")); rows.push(tr);
+  }
+  $("s-table").replaceChildren(...rows);
+  $("s-env").textContent = (a.strategyEnv || []).join("\n") || "—";
+  if (a.strategyStale) {
+    $("s-lede").replaceChildren(el("span", `the saved strategy names dials this bot no longer reads: ${a.strategyStale.join("; ")}`, "err"));
+  }
+
+  $("foot").textContent = a.updatedAtMs
+    ? `strategy last saved ${new Date(a.updatedAtMs).toISOString()}`
+    : "";
+  return a;
+}
+
+/* THE LIVE HALF. Attached to the named kinds AND to the unnamed default, because the desk's own
+   tape has always been unnamed and the named kinds were added beside it rather than instead. */
+function listen() {
+  const feed = $("feed");
+  let first = true;
+  const line = (label, ev) => {
+    if (first) { feed.innerHTML = ""; first = false; }
+    const d = document.createElement("div");
+    let body = "";
+    try { const o = JSON.parse(ev.data); body = o.text || o.msg || JSON.stringify(o).slice(0, 220); }
+    catch { body = String(ev.data).slice(0, 220); }
+    d.textContent = `${new Date().toISOString().slice(11, 19)}  ${label}  ${body}`;
+    feed.prepend(d);
+    while (feed.childElementCount > 60) feed.lastElementChild.remove();
+  };
+  let es;
+  /* The stream takes the session as ?sid=, the way office3d.html passes it — EventSource cannot
+     send a header. */
+  try { es = new EventSource(`${API}/events?floor=${FLOOR}${TOKEN ? `&sid=${encodeURIComponent(TOKEN)}` : ""}`); } catch { return; }
+  es.onmessage = (ev) => line("·", ev);
+  for (const kind of ["fees", "levelup", "reward"]) es.addEventListener(kind, (ev) => line(kind, ev));
+  es.addEventListener("hello", (ev) => { try {
+    const o = JSON.parse(ev.data);
+    if (o.private) { feed.innerHTML = `<div class="dash">this floor's tape is private to its tenant</div>`; es.close(); }
+  } catch {} });
+  es.onerror = () => { /* the browser reconnects; a dropped stream is not an error worth shouting */ };
+}
+
+load().then(listen);
+setInterval(load, 30_000);
+</script>
