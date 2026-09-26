@@ -1651,6 +1651,17 @@ agent page, and with `SNIPE_REMOTE_FILTERS=1` picking one changes the running bo
 - **These are three honest guesses, not measured edges.** Nothing in this desk's record proves any
   of them profitable yet; the scorecard (`grade-entry-gates.mjs`) is how one earns trust.
 
+### Room for the price to move: `SNIPE_ENTRY_SLIPPAGE_BPS`
+
+Default **300** (3%), Mac-only. The busiest coins move between the moment the bot reads the curve and
+the moment its buy lands, and a buy capped at exactly the price it read is refused by pump.fun with
+`TooMuchSolRequired` (6002) — the first 43 live attempts on momentum coins all failed that way in
+simulation, spending nothing. So the bot asks for this many basis points **fewer tokens** and caps
+the spend at the ticket itself: if the price held, the buy costs a little under the ticket; if it
+rose by up to about 3%, it costs at most the ticket; beyond that it is refused as before. **The most
+a buy can spend is still exactly `SNIPE_MAX_SOL_PER_TRADE`.** `0` restores the strict ceiling; the
+maximum is 2000.
+
 ### The volume spike
 
 > *"When volume spikes on a token, that's a sign to get in and ride the wave."* — the owner,

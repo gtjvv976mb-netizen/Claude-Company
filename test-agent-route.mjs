@@ -193,6 +193,15 @@ console.log("\nthe filter panel: saved by the owner, sent live-only, confirmed b
   ok("...with what it refused, names checked and reasons capped",
     page.body.remote?.rejected?.[0]?.name === "SNIPE_MIN_VOLUME_SPIKE" && page.body.remote?.rejected?.[1]?.name === "?"
     && page.body.remote?.rejected?.[1]?.reason.length <= 200);
+  /* WHY THE LAST BUY FAILED reaches the owner's page, shape-checked. */
+  await req("POST", "/api/floor/50/executor/heartbeat", { token: "secret-hq", body: { mode: "live", ts: Date.now(),
+    snipe: { mode: "execute", state: "up", counts: { entryFailures: 43 },
+      lastEntryFailure: { at: Date.now(), mint: "So11111111111111111111111111111111111111112", clause: "simulation_failed",
+        message: "primary: simulation failed: Custom 6002 " + "x".repeat(400) } } } });
+  const failed = await req("GET", "/api/agent/50", { token: "tok-hq" });
+  ok("the last buy failure reaches the page with its reason, capped",
+    failed.body.entryFailures === 43 && failed.body.lastEntryFailure?.clause === "simulation_failed"
+    && /6002/.test(failed.body.lastEntryFailure?.message) && failed.body.lastEntryFailure.message.length <= 240);
   const off = await beat({ enabled: false });
   page = await req("GET", "/api/agent/50", { token: "tok-hq" });
   ok("a bot that has not opted in says so, and the page can tell the owner", page.body.remote?.enabled === false && off.status === 200);

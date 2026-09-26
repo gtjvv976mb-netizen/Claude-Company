@@ -58,7 +58,7 @@ import { WSOL } from "./jupiter.mjs";
 import { PYTH_SOL_USD_CACHE_SOURCE } from "./sol-usd-oracle.mjs";
 import {
   constantProductExactIn, constantProductExactOut, constantProductSellExactIn,
-  snipeCurveState, snipeFloor,
+  snipeCurveState, snipeFloor, absoluteMaxCostLamports,
 } from "./snipe-curve.mjs";
 import { MAX_GROSS_RENT_LAMPORTS } from "./network-fee-budget.mjs";
 import {
@@ -570,6 +570,35 @@ ok("planSnipeCeiling reads NO slippage term, and refuses a tolerance outright", 
     cfg: LIVE_CFG, tolerance: 100 }), /a ceiling is not a slippage tolerance/,
   "planSnipeCeiling accepted a tolerance");
   console.log(`       ceiling ${b.maxQuoteInRaw} lamports at 0, 300 and 5000 bps alike; a tolerance argument throws`);
+});
+
+ok("entrySlippageBps takes room from the QUANTITY and never raises the cap above the ticket", () => {
+  /* THE BUG THIS FIXES, 2026-09-26: the owner's first 43 live attempts on momentum coins all
+     died in simulation with pump.fun 6002 TooMuchSolRequired — the price moved between the
+     read and the buy, and a ceiling equal to the exact cost at the read had no room at all. */
+  const state = snipeCurveState(STANDARD_CURVE);
+  const ticket = 5_000_000n;
+  const strict = planSnipeCeiling({ curve: state, adapter: PROVED_ADAPTER, solLamports: ticket, cfg: LIVE_CFG });
+  const roomy = planSnipeCeiling({ curve: state, adapter: PROVED_ADAPTER, solLamports: ticket, cfg: { ...LIVE_CFG, entrySlippageBps: 300 } });
+  assert.equal(roomy.maxQuoteInRaw <= ticket, true, `the cap ${roomy.maxQuoteInRaw} exceeded the ticket ${ticket}`);
+  assert.equal(roomy.maxQuoteInRaw, ticket, "with room, the cap is the ticket itself — never more");
+  assert.equal(roomy.baseOutRaw, (strict.baseOutRaw * 9_700n) / 10_000n, "the room is 3% fewer tokens");
+  /* Another buyer lands first and moves the price ~2%. The strict plan's quantity now costs
+     more than its ceiling (the program's 6002); the roomy plan's still fits under the ticket. */
+  const moved = constantProductExactIn({ vBase: state.vBaseRaw, vQuote: state.vQuoteRaw, quoteInRaw: 400_000_000n, feeBps: 0 });
+  const after = { ...state, vBaseRaw: state.vBaseRaw - moved.baseOutRaw, vQuoteRaw: state.vQuoteRaw + 400_000_000n };
+  const costAfter = (baseOutRaw) => absoluteMaxCostLamports({ curve: after, baseOutRaw, adapter: PROVED_ADAPTER, tolerance: 0 });
+  assert.equal(costAfter(strict.baseOutRaw) > strict.maxQuoteInRaw, true, "the strict plan should fail after the move — that is the bug");
+  assert.equal(costAfter(roomy.baseOutRaw) <= roomy.maxQuoteInRaw, true,
+    `the roomy plan should still fit: cost ${costAfter(roomy.baseOutRaw)} vs cap ${roomy.maxQuoteInRaw}`);
+  assert.equal(roomy.slippageBps, 300);
+  const off = planSnipeCeiling({ curve: state, adapter: PROVED_ADAPTER, solLamports: ticket, cfg: { ...LIVE_CFG, entrySlippageBps: 0 } });
+  assert.equal(off.maxQuoteInRaw, strict.maxQuoteInRaw, "0 bps is exactly the old strict ceiling");
+  for (const bad of [-5, 2_001, 12.5, "lots"])
+    assert.equal(planSnipeCeiling({ curve: state, adapter: PROVED_ADAPTER, solLamports: ticket, cfg: { ...LIVE_CFG, entrySlippageBps: bad } }).slippageBps, 0,
+      `a malformed value ${JSON.stringify(bad)} must fall back to the strict ceiling`);
+  console.log(`       ticket ${ticket}: strict ${strict.baseOutRaw} base @ ${strict.maxQuoteInRaw}; 3% room ${roomy.baseOutRaw} base @ ${roomy.maxQuoteInRaw}; `
+    + `after a 0.4 SOL buy lands first: strict needs ${costAfter(strict.baseOutRaw)}, roomy needs ${costAfter(roomy.baseOutRaw)}`);
 });
 
 /* ════ 6. THE INSTRUCTION ROUND TRIP ══════════════════════════════════════════════════ */

@@ -299,6 +299,11 @@ export const SNIPE_LANE_DEFAULTS = Object.freeze({
   remoteFilters: false,
   /* The risk mode, or "off" for none. See RISK_MODES. */
   riskMode: "off",
+  /* ROOM FOR THE PRICE TO MOVE BETWEEN THE READ AND THE BUY, taken out of the quantity and
+     never added to the spend — see snipe-entry.mjs quoteOneRung. 3%: enough for one or two
+     trades landing in between on an active coin, and the ticket stays the hard cap either way.
+     Mac-only (not in LIVE_FILTER_ENV): it is how a fill is priced, not what is bought. */
+  entrySlippageBps: 300,
   minAgeHours: undefined,
   minLiquidityUsd: undefined,
   minVolume24hUsd: undefined,
@@ -430,6 +435,7 @@ export const SNIPE_ENV = Object.freeze({
   SNIPE_MARKET_FLOOR: Object.freeze({ key: "marketFloorPreset", parse: "preset" }),
   SNIPE_REMOTE_FILTERS: Object.freeze({ key: "remoteFilters", parse: "flag" }),
   SNIPE_RISK_MODE: Object.freeze({ key: "riskMode", parse: "risk" }),
+  SNIPE_ENTRY_SLIPPAGE_BPS: Object.freeze({ key: "entrySlippageBps", parse: "number" }),
   SNIPE_MIN_AGE_HOURS: Object.freeze({ key: "minAgeHours", parse: "number" }),
   SNIPE_MIN_LIQUIDITY_USD: Object.freeze({ key: "minLiquidityUsd", parse: "number" }),
   SNIPE_MIN_VOLUME_24H_USD: Object.freeze({ key: "minVolume24hUsd", parse: "number" }),
@@ -543,6 +549,13 @@ export function snipeLaneConfig(env = {}) {
      overrides one of them. A dial set with no preset arms a floor of exactly that dial —
      surprising the other way round would be worse, since inheriting three thresholds the
      operator never typed is how a bot ends up refusing on a number nobody chose. */
+  /* Whole basis points, at most 20%: past that it is not room for a trade landing in between,
+     it is buying whatever the price has become. */
+  if (!Number.isInteger(out.entrySlippageBps) || out.entrySlippageBps < 0 || out.entrySlippageBps > 2_000)
+    throw new SnipeLaneError("mode_invalid",
+      `SNIPE_ENTRY_SLIPPAGE_BPS=${out.entrySlippageBps} must be a whole number of basis points from 0 to 2000`,
+      { name: "SNIPE_ENTRY_SLIPPAGE_BPS", value: out.entrySlippageBps });
+
   /* THE RISK MODE FILLS IN WHAT NOBODY TYPED. Applied before the floor is assembled, so its
      floor preset and thresholds take part exactly as if they had been set by hand — and any
      dial the operator did set keeps its value. */
@@ -1481,6 +1494,7 @@ export function createSnipeLane({
    * the money has moved and the lane cannot hold the position — so it names the
    * signature and says to sell by hand; the journal has the intent either way.
    */
+  let lastEntryFailure = null;
   async function enterForReal({ row, mint, curve, verdict, frictionX, record, read, prepared }) {
     const creator = record?.creator ?? curve?.creator ?? null;
     let fill = null;
@@ -1491,6 +1505,10 @@ export function createSnipeLane({
       });
     } catch (error) {
       counters.entryFailures++;
+      /* The last reason, kept for the heartbeat: 43 simulation failures once reached nobody but
+         a log file on the owner's Mac, and the page could only say "entryFailures: 43". */
+      lastEntryFailure = Object.freeze({ atMs: clock(), mint: String(mint), clause: String(error?.clause ?? error?.name ?? "error"),
+        message: String(error?.message ?? error).slice(0, 240) });
       log(`snipe live ${mint}: ENTRY FAILED (${error?.clause ?? error?.name ?? "error"}): ${error?.message ?? error}`);
       return null;
     }
@@ -1981,6 +1999,7 @@ export function createSnipeLane({
         marketFloor: conf.marketFloor,
         marketFloorArmed: floorIsArmed(conf.marketFloor),
         marketReaderWired: typeof marketReader === "function",
+        lastEntryFailure,
         ...counters,
         /* STAMPED AND ASSERTED. Not a claim in a comment — a field the test reads. An
            observing lane reports zero for all three by construction; an armed lane reports

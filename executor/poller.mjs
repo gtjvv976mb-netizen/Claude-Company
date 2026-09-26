@@ -2635,6 +2635,10 @@ function snipeHeartbeat() {
         reconciled: Number(s.reconciled) || 0,
         marketReadsSkipped: Number(s.marketReadsSkipped) || 0,
       };
+      /* WHY THE LAST BUY FAILED, if one did — the reason used to live only in the local log. */
+      const lf = s.lastEntryFailure;
+      out.lastEntryFailure = lf ? { at: Number(lf.atMs) || null, mint: String(lf.mint || "").slice(0, 64),
+        clause: String(lf.clause || "").slice(0, 40), message: String(lf.message || "").slice(0, 240) } : null;
       /* THE VOLUME TAPE, FROM BOTH ENDS. The tap counts what arrived off the wire and the tape
          counts what it holds; before this they were computed and never left the process, so a
          tape recording nothing (no SNIPE_GRPC_*, or a TradeEvent that stopped decoding) looked

@@ -103,6 +103,7 @@ footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);color:v
     <span class="state" id="state">loading</span>
   </header>
   <div class="who" id="who"></div>
+  <div class="sstat err" id="buyfail"></div>
 
   <h2>The money, in three figures</h2>
   <p class="lede" id="lede">Trading, creator fees and house rewards — reported separately.</p>
@@ -210,6 +211,12 @@ async function load() {
     : stale ? `last heard ${ago(a.pulseAgeMs)} ago` : (live ? "running" : "stopped");
   $("state").className = "state " + (a.live === null ? "" : (live ? "up" : "down"));
   $("who").textContent = a.operator ? `operator ${a.operator}` : "";
+  /* A BUY THAT KEEPS FAILING IS SAID ON THE PAGE, with the program's own reason — the first
+     43 live attempts once failed with nothing anywhere but the Mac's log to say why. */
+  const lf = a.lastEntryFailure;
+  $("buyfail").textContent = lf
+    ? `${a.entryFailures ?? "?"} buy attempt(s) failed — last ${lf.at ? ago(Date.now() - lf.at) + " ago" : ""}: ${lf.clause}: ${lf.message}`
+    : "";
 
   put("m-trade", sol(a.tradingSol), Number(a.tradingSol) >= 0 ? " pos" : " neg");
   put("m-fee", sol(a.feeSol, { sign: false }), " pos");
