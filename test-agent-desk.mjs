@@ -21,9 +21,9 @@
 import fs from "node:fs";
 import {
   AGENT_LEVELS, MAX_AGENT_LEVEL, REWARD_KINDS, STRATEGY_DIALS, STRATEGY_KEYS,
-  agentLevel, levelReward, rewardsOwed, validateStrategy, strategyAsEnv, agentView,
+  agentLevel, levelReward, rewardsOwed, validateStrategy, strategyAsEnv, agentView, LIVE_STRATEGY_KEYS, liveFilterEnv,
 } from "./src/agent-desk.js";
-import { SNIPE_ENV } from "./executor/snipe-lane.mjs";
+import { SNIPE_ENV, LIVE_FILTER_ENV } from "./executor/snipe-lane.mjs";
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => {
@@ -127,9 +127,35 @@ console.log("\nthe strategy builder: a strategy that saves is a strategy that ru
   const orphans = STRATEGY_KEYS.filter((k) => !laneNames.has(STRATEGY_DIALS[k].env));
   ok("every dial the builder offers is one the executor's lane actually reads",
     orphans.length === 0, orphans.map((k) => `${k} -> ${STRATEGY_DIALS[k].env}`).join(", ") || `all ${STRATEGY_KEYS.length} wired`);
-  ok("every dial has bounds and a unit",
-    STRATEGY_KEYS.every((k) => Number.isFinite(STRATEGY_DIALS[k].min) && Number.isFinite(STRATEGY_DIALS[k].max)
-      && typeof STRATEGY_DIALS[k].unit === "string"));
+  ok("every numeric dial has bounds, every dial a unit, and a typed dial its values",
+    STRATEGY_KEYS.every((k) => {
+      const d = STRATEGY_DIALS[k];
+      if (typeof d.unit !== "string") return false;
+      if (d.type === "preset") return Array.isArray(d.values) && d.values.length > 0;
+      if (d.type === "flag") return true;
+      return Number.isFinite(d.min) && Number.isFinite(d.max);
+    }));
+
+  /* THE PAGE MAY ONLY SEND WHAT THE BOT WILL TAKE. Every live dial must be one the executor's
+     own LIVE_FILTER_ENV lists — the executor is the authority, and a dial the page offered as
+     live that the bot refused would read as "the bot ignored my change". And no money dial may
+     ever be live. */
+  const liveEnv = new Set(LIVE_FILTER_ENV);
+  const wrongLive = LIVE_STRATEGY_KEYS.filter((k) => !liveEnv.has(STRATEGY_DIALS[k].env));
+  ok("every dial the page changes live is one the bot takes live", wrongLive.length === 0, wrongLive.join(", ") || `${LIVE_STRATEGY_KEYS.length} live`);
+  ok("no money, exit or pricing dial is live",
+    ["maxSolPerTrade", "dailySolCap", "stopFrac", "takeAtEntryX", "holdMaxMs", "stallMs", "maxPriceImpactPct"]
+      .every((k) => STRATEGY_DIALS[k].live === false && !LIVE_STRATEGY_KEYS.includes(k)));
+  const sent = liveFilterEnv({ maxSolPerTrade: 1, dailySolCap: 10, marketFloor: "curve", minVolume24hUsd: 25000,
+    requireSocials: false, minAgeHours: null });
+  ok("what travels to the bot is the live half only, env-spelled",
+    JSON.stringify(sent) === JSON.stringify({ SNIPE_MARKET_FLOOR: "curve", SNIPE_MIN_VOLUME_24H_USD: "25000", SNIPE_REQUIRE_SOCIALS: "0" }),
+    JSON.stringify(sent));
+  ok("a preset outside its list is refused by name", /must be one of off, curve, bagwork/.test(validateStrategy({ marketFloor: "yolo" }).errors[0] ?? ""));
+  ok("a flag takes on/off words and booleans", validateStrategy({ requireSocials: "off" }).strategy?.requireSocials === false
+    && validateStrategy({ requireSocials: true }).strategy?.requireSocials === true
+    && validateStrategy({ requireSocials: "maybe" }).ok === false);
+  ok("the env lines spell a flag as 1/0", strategyAsEnv({ requireSocials: false }).join() === "SNIPE_REQUIRE_SOCIALS=0");
   ok("the per-trade ceiling matches the operator maximum the lane enforces",
     STRATEGY_DIALS.maxSolPerTrade.max === 1);
 

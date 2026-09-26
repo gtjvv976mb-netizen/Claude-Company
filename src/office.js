@@ -587,6 +587,22 @@ export function sanitizeExecutorSnipe(value) {
         lastError: v.lastError == null ? null : String(v.lastError).slice(0, 160),
       };
     })(),
+    /* THE FILTER PANEL AS THE BOT SEES IT: whether it takes one, which saved version it is
+       running, what it refused. Names are matched against the env shape, reasons are capped. */
+    remote: (() => {
+      const v = value.remote && typeof value.remote === "object" && !Array.isArray(value.remote) ? value.remote : null;
+      if (!v) return null;
+      const name = (x) => (/^SNIPE_[A-Z0-9_]{1,40}$|^\(combined\)$/.test(String(x)) ? String(x) : null);
+      return {
+        enabled: v.enabled === true,
+        version: timestamp(v.version),
+        appliedAt: timestamp(v.appliedAt),
+        accepted: Array.isArray(v.accepted) ? v.accepted.map(name).filter(Boolean).slice(0, 20) : [],
+        rejected: Array.isArray(v.rejected) ? v.rejected.filter((r) => r && typeof r === "object").slice(0, 20)
+          .map((r) => ({ name: name(r.name) ?? "?", reason: String(r.reason ?? "").slice(0, 200) })) : [],
+        error: v.error == null ? null : String(v.error).slice(0, 200),
+      };
+    })(),
     momentum: (() => {
       const v = value.momentum && typeof value.momentum === "object" && !Array.isArray(value.momentum) ? value.momentum : null;
       if (!v) return null;
@@ -594,7 +610,7 @@ export function sanitizeExecutorSnipe(value) {
       const d = v.dropped && typeof v.dropped === "object" && !Array.isArray(v.dropped) ? v.dropped : {};
       return {
         polls: count(v.polls), arrived: count(v.arrived), survived: count(v.survived),
-        capped: count(v.capped), keep: count(v.keep),
+        capped: count(v.capped), keep: count(v.keep), idle: count(v.idle),
         dropped: Object.fromEntries(CLAUSES.map((k) => [k, count(d[k])])),
       };
     })(),
@@ -1361,7 +1377,18 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           ring.push({ seenAt: hb.seenAt, mode: hb.mode, open: hb.open, state: hb.health?.state ?? null });
           db.prepare("UPDATE copy_settings SET executor_heartbeat=?, executor_heartbeat_log=? WHERE floor_no=?")
             .run(JSON.stringify(hb), JSON.stringify(ring.slice(-48)), floorNo);
-          return json(200, { ok: true });
+          /* THE FLOOR'S FILTER PANEL, IN THE REPLY. This is the only channel from the desk to a
+             bot on its owner's machine, and it carries only the LIVE half of the saved strategy
+             (agent-desk liveFilterEnv) — never a money, exit or mode dial. The bot applies it
+             only if its owner set SNIPE_REMOTE_FILTERS=1, re-validates every value itself, and
+             reports back which version it is running. The version is the save time, so a bot
+             that already runs it does nothing. */
+          let strategy = null;
+          try {
+            const saved = agentStore.strategyFor(floorNo);
+            if (saved?.strategy) strategy = { version: saved.updatedAtMs, env: agentDesk.liveFilterEnv(saved.strategy) };
+          } catch {}
+          return json(200, { ok: true, strategy });
         }
 
         /* ── WALL-ST-E DASHBOARD — owner-only observation, never control ─────
@@ -1840,6 +1867,12 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               seenAt: pub?.seenAt ?? null,
               pulseAgeMs: pub?.ageMs ?? null,
               strategyStale: saved?.stale === true ? saved.staleErrors : null,
+              /* THE FILTER PANEL. `canEdit` is the same test the POST uses, so the page offers
+                 the form exactly to the people the server will accept it from. The dial table
+                 says which are live; `remote` is the bot's own report of what it applied. */
+              canEdit: holdsFloor(floorNo),
+              strategyDials: agentDesk.STRATEGY_DIALS,
+              remote: showRaw ? pub?.snipe?.remote ?? null : null,
               ladder: agentStore.ladder(),
               rewards: agentStore.rewardsFor(floorNo),
             });
@@ -1860,11 +1893,15 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
               strategy: body && typeof body === "object" ? body.strategy ?? body : null,
             });
             if (!verdict.ok) return json(400, { error: "this strategy would not run", errors: verdict.errors });
-            /* AND THE LINES TO PASTE. The bot runs on the tenant's own machine, so a saved form
-               has not reached it — pretending otherwise is the failure mode this endpoint exists
-               to avoid. The exact env lines are returned so the change is something they can
-               actually apply. */
-            return json(200, { ok: true, strategy: verdict.strategy, env: agentDesk.strategyAsEnv(verdict.strategy) });
+            /* WHAT TRAVELS AND WHAT DOES NOT. The live filters go to the bot with its next
+               heartbeat (if its owner opted in); everything else is returned as the exact env
+               lines to put on the Mac, because a saved money or exit dial has not reached a laptop
+               and the page must not pretend it has. */
+            const savedNow = agentStore.strategyFor(floorNo);
+            return json(200, { ok: true, strategy: verdict.strategy, updatedAtMs: savedNow?.updatedAtMs ?? null,
+              live: agentDesk.liveFilterEnv(verdict.strategy),
+              env: agentDesk.strategyAsEnv(Object.fromEntries(Object.entries(verdict.strategy)
+                .filter(([k]) => agentDesk.STRATEGY_DIALS[k]?.live === false))) });
           }
           if (tail === "strategy" && req.method === "GET")
             return json(200, { strategy: agentStore.strategyFor(floorNo)?.strategy ?? null, dials: agentDesk.STRATEGY_DIALS });

@@ -46,6 +46,7 @@ import bs58 from "bs58";
 import {
   LANE_REFUSED_VENUE_METHODS, LANE_SIGNALS, SNIPE_ENV, SNIPE_LANE_CLAUSES, SNIPE_LANE_DEFAULTS, SNIPE_LANE_MODES, SNIPE_LANE_VERSION,
   SnipeLaneError, bindDeterminer, createSnipeLane, observeOnlyVenue, readAcrossEndpoints, snipeLaneConfig,
+  remoteFilterConfig, LIVE_FILTER_ENV,
 } from "./snipe-lane.mjs";
 import {
   PROMOTION_MIN_FLAGGED, PROMOTION_MIN_ROWS, PROMOTION_PRECISION_BAR, SHADOW_FORBIDDEN_MEASURES,
@@ -1360,6 +1361,70 @@ section("16. A LISTING ROW'S METADATA IS READ WHERE A LISTING ROW KEEPS IT");
   ok("a listing row's metadata_uri reaches the socials reader", asked[0] === "https://ipfs.io/ipfs/listing-row", String(asked[0]));
   await lane.handleNotice(noticeRecord(keyFor(301), { raw: { uri: "https://ipfs.io/ipfs/create-event" } }));
   ok("a create event's uri still does", asked[1] === "https://ipfs.io/ipfs/create-event", String(asked[1]));
+}
+
+section("18. THE DESK MAY CHANGE WHAT THE BOT BUYS — AND NOTHING ELSE");
+{
+  /* bagworkagent.fun lets an owner retune an agent from its page. This lane takes the same from
+     the desk for its ENTRY FILTERS only, through applyFilters(); money, exits and mode are never
+     taken, whatever the desk sends. */
+  const lane = laneFor({ cfg: { requireSocials: true } });
+  ok("a lane starts on the filters it was built with", lane.filters().requireSocials === true && lane.cfg.requireSocials === true);
+  const r1 = remoteFilterConfig({ baseEnv: { SNIPE_LANE: "observe" }, remote: { SNIPE_REQUIRE_SOCIALS: "0" } });
+  const applied = lane.applyFilters(r1.cfg);
+  ok("a desk-sent filter changes the RUNNING lane, no restart", applied.ok && lane.filters().requireSocials === false,
+    JSON.stringify(applied));
+  ok("...and lane.cfg reads the filters in force now, not a snapshot", lane.cfg.requireSocials === false);
+  ok("...and says what changed", (applied.changed ?? []).includes("requireSocials"));
+
+  /* AND THE NEXT NOTICE IS JUDGED ON IT. A launch that names no social is refused at
+     no_socials while the filter is on, and is not refused there once the desk turns it off. */
+  const bare = async () => Object.freeze({ ok: false, clause: "no_socials", message: "the metadata names no social" });
+  const judged = laneFor({ socials: bare, cfg: { requireSocials: true } });
+  const before = await judged.handleNotice(noticeRecord(keyFor(310)));
+  judged.applyFilters(remoteFilterConfig({ remote: { SNIPE_REQUIRE_SOCIALS: "0" } }).cfg);
+  const after = await judged.handleNotice(noticeRecord(keyFor(311)));
+  ok("the gate stack judges the next notice on the filters in force now",
+    before.verdict?.gate === "no_socials" && after.verdict?.gate !== "no_socials",
+    `${before.verdict?.gate} -> ${after.verdict?.ok ? "cleared" : after.verdict?.gate}`);
+
+  const beforeMoney = lane.cfg.maxSolPerTrade;
+  lane.applyFilters({ ...r1.cfg, maxSolPerTrade: 1, dailySolCap: 1000, lane: "execute", stopFrac: 0.9 });
+  ok("a money, exit or mode value in the same object is IGNORED, not applied",
+    lane.cfg.maxSolPerTrade === beforeMoney && lane.cfg.lane === "observe" && lane.cfg.stopFrac === SNIPE_LANE_DEFAULTS.stopFrac);
+
+  /* remoteFilterConfig is the gate on what the desk may even ask for. */
+  const r2 = remoteFilterConfig({ baseEnv: { SNIPE_MAX_SOL_PER_TRADE: "0.1" },
+    remote: { SNIPE_MAX_SOL_PER_TRADE: "1", SNIPE_STOP_FRAC: "0.9", SNIPE_LANE: "execute", SNIPE_REMOTE_FILTERS: "1",
+      SNIPE_MIN_VOLUME_24H_USD: "25000", SNIPE_MIN_AGE_HOURS: "-1" } });
+  ok("every non-filter name is refused by name", ["SNIPE_MAX_SOL_PER_TRADE", "SNIPE_STOP_FRAC", "SNIPE_LANE", "SNIPE_REMOTE_FILTERS"]
+    .every((n) => r2.rejected.some((x) => x.name === n)));
+  ok("...and never reaches the config", r2.cfg.maxSolPerTrade === 0.1 && r2.cfg.lane === "off" && r2.cfg.remoteFilters === false);
+  ok("a bad filter value is refused on its own, and the good ones still apply",
+    r2.rejected.some((x) => x.name === "SNIPE_MIN_AGE_HOURS") && r2.cfg.marketFloor?.minVolume24hUsd === 25000);
+  const r3 = remoteFilterConfig({ baseEnv: { SNIPE_MARKET_FLOOR: "curve" }, remote: { SNIPE_MARKET_FLOOR: null } });
+  ok("a filter cleared on the page reverts to the ENV FILE, never to no filter", r3.cfg.marketFloor?.minAgeHours === 1
+    && r3.cfg.marketFloor?.minVolume24hUsd === 50_000);
+  ok("the live list holds no money, exit, pricing or mode name",
+    !LIVE_FILTER_ENV.some((n) => /SOL_PER_TRADE|DAILY_SOL_CAP|STOP_FRAC|TAKE_AT|HOLD_MAX|STALL|TIME_STOP|PRICE_IMPACT|FEE|RENT|^SNIPE_LANE$|LIVE_ACK|REMOTE_FILTERS/.test(n)));
+
+  /* The same port checks construction makes: a floor with no reader and a spike floor with no
+     tape refuse every candidate, so they are refused here and the running filters stand. */
+  const noReader = lane.applyFilters(remoteFilterConfig({ remote: { SNIPE_MARKET_FLOOR: "curve" } }).cfg);
+  ok("a floor asked for on a lane with no market reader is refused, filters unchanged",
+    noReader.ok === false && /market reader/.test(noReader.reason) && lane.cfg.marketFloor === null);
+  const noTape = lane.applyFilters(remoteFilterConfig({ remote: { SNIPE_MIN_VOLUME_SPIKE: "2" } }).cfg);
+  ok("a spike floor asked for on a lane with no trade tape is refused", noTape.ok === false && /trade tape/.test(noTape.reason));
+  ok("applyFilters never throws on junk", lane.applyFilters(null).ok === false && lane.applyFilters("x").ok === false);
+  ok("the opt-in is off by default", SNIPE_LANE_DEFAULTS.remoteFilters === false && snipeLaneConfig({}).remoteFilters === false
+    && snipeLaneConfig({ SNIPE_REMOTE_FILTERS: "1" }).remoteFilters === true);
+
+  const poller = fs.readFileSync(path.join(HERE, "poller.mjs"), "utf8");
+  ok("the poller applies the desk's panel ONLY when the owner opted in",
+    /if \(!remoteFilters \|\| !strategy/.test(poller) && /const remoteFilters = laneCfg\.remoteFilters === true;/.test(poller));
+  ok("...re-validates it through remoteFilterConfig against the owner's env file",
+    /remoteFilterConfig\(\{ baseEnv, remote: dials \}\)/.test(poller));
+  ok("...and reads it from the heartbeat reply", /snipeStatus\.remote\?\.apply\(b\?\.strategy\)/.test(poller));
 }
 
 section("17. A SPIKE FLOOR ON A TAPE NOBODY FILLS IS REFUSED AT CONSTRUCTION");

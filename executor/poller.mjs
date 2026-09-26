@@ -2457,7 +2457,13 @@ function sendHeartbeat() {
       ts: Date.now(),
     }),
   }).then((r) => {
-    if (r.ok) { heartbeatMisses = 0; lastHeartbeatAckAt = Date.now(); return; }
+    if (r.ok) {
+      heartbeatMisses = 0; lastHeartbeatAckAt = Date.now();
+      /* The desk answers with the floor's saved filter panel. Applied only when the owner
+         opted in (SNIPE_REMOTE_FILTERS=1); a body that will not parse costs nothing. */
+      if (snipeStatus.remote) r.json().then((b) => snipeStatus.remote?.apply(b?.strategy)).catch(() => {});
+      return;
+    }
     noteHeartbeatMiss(`HTTP ${r.status}`);
   }).catch((error) => noteHeartbeatMiss(error?.name === "TimeoutError" ? "timed out after 5s" : String(error?.message ?? error)));
 }
@@ -2518,7 +2524,7 @@ const snipeStatus = {
   faults: 0, retryAt: 0,   // the backoff, while faulted with a position open
   lastFillAt: 0,           // the last confirmed buy or sell the port reported
   lane: null, feed: null,  // references, read by the builder below and never serialized
-  flowTap: null, momentum: null,
+  flowTap: null, momentum: null, remote: null,
 };
 const setSnipeState = (state, error) => {
   snipeStatus.state = state;
@@ -2647,6 +2653,9 @@ function snipeHeartbeat() {
       };
     }
   } catch {}
+  /* THE DESK'S FILTER PANEL, AS THIS BOT SEES IT: whether it accepts one at all, which saved
+     version is running, and what it refused. The page reads this instead of assuming. */
+  try { const rr = snipeStatus.remote?.report?.(); if (rr) out.remote = rr; } catch {}
   /* THE MOMENTUM SOURCE'S PRE-FILTER TALLY — what arrived, what survived, and the clause for
      every row that did not. "0 of 70 survived, 51 bonded, 19 too young" and "the endpoint is
      empty" need opposite responses, and until this was carried only the second could be
@@ -2655,7 +2664,7 @@ function snipeHeartbeat() {
     const m = snipeStatus.momentum?.stats?.();
     if (m) out.momentum = {
       polls: Number(m.polls) || 0, arrived: Number(m.arrived) || 0, survived: Number(m.survived) || 0,
-      capped: Number(m.capped) || 0, keep: Number(m.keep) || 0,
+      capped: Number(m.capped) || 0, keep: Number(m.keep) || 0, idle: Number(m.idle) || 0,
       dropped: Object.fromEntries(Object.entries(m.dropped || {}).slice(0, 8)
         .map(([k, v]) => [String(k).slice(0, 24), Number(v) || 0])),
     };
@@ -3800,7 +3809,7 @@ if (FEE_CLAIM_MODE !== "off") {
 const SNIPE_LANE_MODE = String(process.env.SNIPE_LANE || "off").trim().toLowerCase();
 if (SNIPE_LANE_MODE !== "off") {
   try {
-    const [{ createSnipeLane, snipeLaneConfig },
+    const [{ createSnipeLane, snipeLaneConfig, remoteFilterConfig },
       { PUMPFUN_VENUE, PUMPFUN_PROGRAM_ID, noticesFromLogs, eventsFromLogs }, feedMod,
       { grpcFromEnv, laserstreamTransport }, shadowMod, sinkMod, volumeMod, marketMod] = await Promise.all([
       import("./snipe-lane.mjs"),
@@ -3992,13 +4001,22 @@ if (SNIPE_LANE_MODE !== "off") {
       throw new Error(`SNIPE_MIN_VOLUME_SPIKE=${laneCfg.minVolumeSpike} needs the gRPC trade tap to fill the volume tape `
         + "(SNIPE_GRPC_ENDPOINT + SNIPE_GRPC_TOKEN). Without it no candidate can have a 5-minute baseline, so every "
         + "one would be refused at volume_spike. Set the gRPC pair, or unset SNIPE_MIN_VOLUME_SPIKE.");
-    const momentumWanted = marketMod.floorIsArmed(marketFloor) || spikeArmed;
+    /* FILTERS THE DESK MAY CHANGE WHILE THIS RUNS (SNIPE_REMOTE_FILTERS=1). When the owner has
+       opted in, the parts that serve a filter are mounted up front — the momentum source and
+       the market reader — so switching a floor on from the page does not need a restart. The
+       momentum source sits idle (polling nothing) while no filter that wants its candidates is
+       armed, so mounting it early changes nothing until then. */
+    const remoteFilters = laneCfg.remoteFilters === true;
+    let liveLane = null;
+    const currentFilters = () => (liveLane ? liveLane.filters() : laneCfg);
+    const spikeSet = (f) => f.minVolumeSpike !== undefined && f.minVolumeSpike !== null;
+    const momentumWanted = marketMod.floorIsArmed(marketFloor) || spikeArmed || remoteFilters;
     /* THE FLOOR AND THE FEED CAN CANCEL EACH OTHER OUT, PARTLY. The momentum source reports
        coins the launch sources may already have heard, so one younger than the feed's dedupe
        window is still remembered from its own launch and is dropped as a duplicate before any
        gate runs. Older candidates arrive normally, so this is a band lost rather than a dead
        source — said at startup with both numbers, not refused. */
-    const dedupeClash = momentumWanted ? marketMod.momentumDedupeConflict({
+    const dedupeClash = marketMod.floorIsArmed(marketFloor) || spikeArmed ? marketMod.momentumDedupeConflict({
       minAgeHours: marketFloor?.minAgeHours ?? null,
       dedupeTtlMs: feedMod.FEED_DEFAULTS.dedupeTtlMs,
     }) : null;
@@ -4007,14 +4025,15 @@ if (SNIPE_LANE_MODE !== "off") {
       ? marketMod.momentumFetcher({
           /* With no floor (the spike dial alone) the pre-filter drops only what this desk
              cannot trade at all — bonded coins — and judges nothing else. */
-          floor: marketFloor ?? {},
+          floor: () => currentFilters().marketFloor ?? {},
+          active: () => marketMod.floorIsArmed(currentFilters().marketFloor) || spikeSet(currentFilters()),
           fetchRows: feedMod.pumpfunListingFetcher({ pages: 2, sort: "last_trade_timestamp" }),
         })
       : null;
     /* The floor's DexScreener half, as the port the lane takes. `pairsFor` is the desk's own
        function — the same one the mirror evaluator prices with — so there is one HTTP client
        for this API in the install and not two. */
-    const marketReader = marketMod.floorIsArmed(marketFloor)
+    const marketReader = marketMod.floorIsArmed(marketFloor) || remoteFilters
       ? marketMod.createMarketReader({ pairsFor: (mint) => dexPairsFor(mint) })
       : null;
     if (momentumFetch) log(`[snipe] momentum source armed: pump.fun activity listing, pre-filtered against the floor`
@@ -4125,6 +4144,54 @@ if (SNIPE_LANE_MODE !== "off") {
     /* Hand the heartbeat its references, and say the lane is starting. From here every
        transition — up, faulted, disabled — is written to snipeStatus as it happens. */
     snipeStatus.lane = lane; snipeStatus.feed = laneFeed;
+    liveLane = lane;
+    /* THE DESK'S FILTER PANEL, applied to this running lane. The desk answers every heartbeat
+       with the floor's saved strategy; this applies the entry filters in it — and only those,
+       see snipe-lane.mjs LIVE_FILTER_ENV — when its version changes, and reports back which
+       version is running, what was accepted and what was refused and why. The page shows that
+       report rather than assuming a save reached the bot. The owner's env file stays the base:
+       a filter cleared on the page reverts to the env value, never to "no filter". */
+    const baseEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith("SNIPE_")));
+    const remoteState = { enabled: remoteFilters, version: null, appliedAt: null, accepted: {}, rejected: [], error: null };
+    snipeStatus.remote = {
+      apply(strategy) {
+        if (!remoteFilters || !strategy || typeof strategy !== "object" || Array.isArray(strategy)) return;
+        const version = Number(strategy.version) || 0;
+        if (version === remoteState.version) return;
+        try {
+          const dials = strategy.env && typeof strategy.env === "object" && !Array.isArray(strategy.env) ? { ...strategy.env } : {};
+          const refusedHere = [];
+          if (!grpcSource && dials.SNIPE_MIN_VOLUME_SPIKE !== undefined && dials.SNIPE_MIN_VOLUME_SPIKE !== null) {
+            refusedHere.push({ name: "SNIPE_MIN_VOLUME_SPIKE",
+              reason: "this bot has no gRPC trade tap (SNIPE_GRPC_*), so no candidate could ever be measured" });
+            delete dials.SNIPE_MIN_VOLUME_SPIKE;
+          }
+          const r = remoteFilterConfig({ baseEnv, remote: dials });
+          const applied = r.ok ? lane.applyFilters(r.cfg) : { ok: false, reason: r.rejected.map((x) => `${x.name}: ${x.reason}`).join("; ") };
+          remoteState.version = version;
+          remoteState.rejected = [...refusedHere, ...r.rejected].slice(0, 20);
+          if (!applied.ok) { remoteState.error = String(applied.reason).slice(0, 200); return; }
+          remoteState.error = null;
+          remoteState.accepted = r.accepted;
+          remoteState.appliedAt = Date.now();
+          const clash = marketMod.momentumDedupeConflict({
+            minAgeHours: lane.filters().marketFloor?.minAgeHours ?? null, dedupeTtlMs: feedMod.FEED_DEFAULTS.dedupeTtlMs });
+          if (clash && (applied.changed ?? []).length) log(`[snipe] WARNING: ${clash.message}`);
+          for (const x of remoteState.rejected) log(`[snipe] desk filter refused — ${x.name}: ${x.reason}`);
+        } catch (error) {
+          remoteState.version = version;
+          remoteState.error = String(error?.message ?? error).slice(0, 200);
+        }
+      },
+      report() {
+        return {
+          enabled: remoteState.enabled, version: remoteState.version, appliedAt: remoteState.appliedAt,
+          accepted: Object.keys(remoteState.accepted), rejected: remoteState.rejected, error: remoteState.error,
+        };
+      },
+    };
+    if (remoteFilters) log("[snipe] SNIPE_REMOTE_FILTERS=1: the desk's filter panel may change this lane's ENTRY FILTERS "
+      + "(never its money caps, exits or mode); changes arrive with the heartbeat, about once a minute");
     snipeStatus.flowTap = grpcSource ? flowTap : null; snipeStatus.momentum = momentumFetch;
     setSnipeState("starting", null);
     const snipeTickMs = Number(process.env.SNIPE_TICK_MS || 1_000);
