@@ -233,6 +233,30 @@ environment file has never existed. Before this it defaulted there, refused, and
 your environment file was missing rather than that it had looked in the wrong place. If
 none of the four has it, the refusal now prints every path it tried.
 
+#### `load` must be run from the versioned release path, never through `current`
+
+This is worth its own heading because getting it wrong takes the bot down, and the command
+above is the shape people copy.
+
+`macos-launchagent.sh` resolves its own directory with `cd` + `pwd -P`, which follows the
+`current` symlink through to `releases/<release>`. So a `load` run that way renders a plist
+naming **that** path, while the plist launchd already has installed names
+`versioned-releases/<commit>`. `load` then compares the two byte for byte, finds them
+different, and refuses — **every time, by construction.** It is not a flaky check and
+re-running cannot help.
+
+```bash
+# the form that works on a live install
+bash ~/claudeco-executor/versioned-releases/<full-commit-sha>/executor/macos-launchagent.sh load
+```
+
+`readlink ~/claudeco-executor/current` and the `ProgramArguments` in
+`~/Library/LaunchAgents/com.claudeco.wallste.plist` will tell you which paths your install
+actually uses. On 2026-09-18 the `current` form was given to this desk's owner as a
+lightweight restart; the load failed as described and the bot stayed down, with entries
+unpaused, until it was loaded from the versioned path. `buys`, `status` and `unload` are
+unaffected either way — only the commands that render and compare a plist care.
+
 `install` only writes the plist. The separate `load` command validates the runtime,
 requires the installed plist to match it byte-for-byte, and refuses to start while a
 manually launched poller still owns the executor lock. It does not terminate that
@@ -1480,6 +1504,24 @@ looks identical to a dead market and to a broken filter, and those need opposite
 Age and market cap are treated differently on purpose: unknown age is dropped, because the
 floor exists so this bot stops buying coins whose age it does not know, while unknown market
 cap is kept, because the gate can still measure it from better evidence.
+
+#### One interaction worth knowing about
+
+The momentum source reports coins the launch sources **already saw at t=0**, so whether one of
+its candidates is emitted at all depends on whether the feed has forgotten it yet — and that is
+the dedupe window, 30 minutes, chosen years ago for an unrelated reason (it must outlive any
+position the lane can hold, or a mint re-enters as a fresh launch while it is still open).
+
+The shipped pairing works: a one-hour age floor against a thirty-minute window means every
+candidate has aged out. But it works **by coincidence** — two constants chosen for unrelated
+reasons that happen to sit the right way round. `SNIPE_MIN_AGE_HOURS=0.25` is a reasonable thing
+to try, and every candidate would still be held in the ledger from its own launch and dropped as
+a duplicate *before any gate ran*: a source delivering nothing, reporting no error, looking
+exactly like a dead API.
+
+So an age floor under the dedupe window is **refused at startup**, with both numbers named and
+the value to raise it to. Same posture as the gRPC pair: a lane that stops and says why beats a
+lane that runs and silently does less than its operator believes.
 
 #### The honest limit
 

@@ -1634,7 +1634,15 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             const realizedSol = book && Number.isFinite(Number(book.realizedSol)) ? Number(book.realizedSol) : null;
             /* PAY ANY LEVEL REWARD EARNED AND NOT YET PAID. Idempotent twice over — filtered
                against the rows already booked and refused by a unique index — because this runs
-               on every page load and a reward that can pay twice pays forever. */
+               on every page load and a reward that can pay twice pays forever.
+             *
+             * YES, THIS IS A WRITE ON A GET, and that is a deliberate trade rather than an
+             * oversight. The alternative is a separate "claim" call the operator has to make,
+             * which means a desk that earned a level and never visited its own page is owed money
+             * nobody has recorded. The write is bounded absolutely: at most one row per rung per
+             * floor, four rungs, so a floor can cause four inserts in its lifetime no matter how
+             * many times the page is loaded. Every load after that does one indexed SELECT and
+             * writes nothing. */
             const judged = counted ?? closedTrades;
             try {
               const paid = agentStore.creditRewards({ floor: floorNo, closedTrades, realizedSol,

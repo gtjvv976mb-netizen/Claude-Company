@@ -1039,6 +1039,61 @@ export const batteryEntriesAllowed = (env = process.env) =>
      indented six spaces inside another case contains those exact characters. The `buys`
      block has one, so the unanchored search found it first, ran the arm-caps slice
      backwards and emptied it — a source check silently grading nothing. */
+  /* ── THE FOUR THINGS THAT COST AN EVENING, PINNED ────────────────────────────────────
+   *
+   * 2026-09-18: a `load` was run through the `current` symlink as a lightweight restart. It
+   * cannot work — see below — so the load failed, the bot stayed down with entries unpaused,
+   * and the loop of re-running the installer to fix it hit "release already exists" every
+   * time and rolled the previous release back on each attempt. Half an hour went into
+   * diagnosing that as a readiness problem in the runner. Four separate pieces of text were
+   * complicit, and each is now a fact this suite checks. */
+  {
+    const install = fs.readFileSync(path.join(executorDir, "install.sh"), "utf8");
+    const readme = fs.readFileSync(path.join(executorDir, "README.md"), "utf8");
+    const release = fs.readFileSync(path.join(executorDir, "macos-release.sh"), "utf8");
+
+    /* 1. ONE CONTROLLER PATH IN THE BANNER. It printed `buys` through $CURRENT_LINK and
+       `status`/`unload` through the release directory, and those are not interchangeable —
+       an operator who sees two paths concludes they are, and eventually types the wrong one
+       with `load`. */
+    const banner = install.slice(install.indexOf("  Buys off:"), install.indexOf("  Protected env:"));
+    check("the closing banner prints ONE controller path, not two",
+      banner.includes("$CONTROLLER_DIR/macos-launchagent.sh") && !banner.includes("$CURRENT_LINK/macos-launchagent.sh"),
+      banner.split("\n").filter((l) => l.includes("macos-launchagent")).join(" | "));
+    check("and that path prefers the versioned release directory, which works for every subcommand",
+      /CONTROLLER_DIR="\$\{DARWIN_EXECUTOR_DIR:-\$CURRENT_LINK\}"/.test(install));
+
+    /* 2. THE README SAYS WHICH FORM OF `load` ACTUALLY WORKS. The failure is structural —
+       `pwd -P` resolves `current` to releases/<release> while the installed plist names
+       versioned-releases/<commit>, so the byte-for-byte comparison cannot ever pass — and a
+       reader who does not know that reads the refusal as flaky and retries. */
+    check("the README names the versioned-release form of `load` as the one that works",
+      /load` must be run from the versioned release path/.test(readme)
+      && /versioned-releases\/<full-commit-sha>\/executor\/macos-launchagent\.sh load/.test(readme));
+    check("...and says the comparison cannot ever pass, so retrying is pointless",
+      /every time, by construction/.test(readme) && /re-running cannot help/.test(readme));
+
+    /* 3. THE ENV-CANDIDATE COMMENT WAS OFF BY ONE LEVEL, which is how a reader concludes the
+       env search is broken for `current` installs when it is not: `current` resolves two
+       levels down, not one. Verified against a real symlink, not reasoned about. */
+    const candidates = shell.slice(shell.indexOf("ENV_CANDIDATES=("), shell.indexOf("for entry in"));
+    check("the env-candidate list does not claim `current` is one level down",
+      !/current -> a directory one level down/.test(candidates));
+    check("...and says which candidate actually catches it",
+      /`current` is two levels down/.test(shell) || /which is what\n *`current` resolves to/.test(shell));
+
+    /* 4. "RELEASE ALREADY EXISTS" now says what it means and what to do. It fires on the most
+       natural action after an install that looked half-finished — re-running at the same
+       commit — and reads like corruption, so the reflex is to run it again, which is the one
+       thing that cannot help. */
+    check("the release refusal explains that re-running at the same commit always lands there",
+      /re-running the installer at the SAME commit always lands here/.test(release));
+    check("...and that it is refused rather than overwritten because launchd may be running it",
+      /launchd may be running that code right now/.test(release));
+    check("...and offers the restart that does work instead",
+      /macos-launchagent\.sh unload/.test(release) && /macos-launchagent\.sh load/.test(release));
+  }
+
   const caseAt = (label) => shell.indexOf(`\n  ${label})`) + 1;
   /* `buys` is the first case in the block, so it runs from its own label to install's. */
   const buysCase = shell.slice(caseAt("buys"), caseAt("install"));

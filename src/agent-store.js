@@ -35,6 +35,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_rewards_once
   ON agent_rewards(floor, kind, level);
 `);
 
+/* ONE CONSTRAINT THIS INDEX DOES NOT ENFORCE, WRITTEN DOWN BEFORE IT MATTERS.
+ *
+ * SQLite treats NULLs as DISTINCT in a unique index, so two rows with the same (floor, kind) and
+ * a NULL level do not collide. Today that is harmless — `level_up` is the only kind and it always
+ * carries a level, so every row the code can write is covered. But a future reward kind that is
+ * not per-level (a referral, a one-off bounty) would slip straight through the second half of the
+ * double-pay guard and rely on `rewardsOwed`'s filter alone.
+ *
+ * Whoever adds that kind: give it a non-null discriminator in the `level` column, or add an index
+ * that covers it. The reason this is a comment and not a CHECK constraint is that the right answer
+ * depends on what the new kind is keyed by, and guessing it now would be a constraint somebody
+ * works around rather than one that helps. */
+
 const asFloor = (v) => {
   const n = Number(v);
   return Number.isInteger(n) && n >= 1 && n <= 50 ? n : null;

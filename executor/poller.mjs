@@ -3931,6 +3931,17 @@ if (SNIPE_LANE_MODE !== "off") {
      * quietly returning two rows out of seventy looks identical to a dead market and to a
      * broken filter, and those need opposite responses. */
     const marketFloor = laneCfg.marketFloor;
+    /* THE FLOOR AND THE FEED MUST NOT CANCEL EACH OTHER OUT. The momentum source reports coins
+       the launch sources already saw, so a candidate younger than the feed's dedupe window is
+       still remembered from its own launch and is dropped as a duplicate before any gate runs.
+       The defaults sit the right way round by coincidence; a lowered age floor would produce a
+       source that delivers nothing and reports no error. Same posture as the gRPC pair: stop and
+       say why. */
+    const dedupeClash = marketMod.momentumDedupeConflict({
+      minAgeHours: marketFloor?.minAgeHours ?? null,
+      dedupeTtlMs: feedMod.FEED_DEFAULTS.dedupeTtlMs,
+    });
+    if (dedupeClash) throw new Error(dedupeClash.message);
     const momentumFetch = marketMod.floorIsArmed(marketFloor)
       ? marketMod.momentumFetcher({
           floor: marketFloor,

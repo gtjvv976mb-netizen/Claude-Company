@@ -439,6 +439,51 @@ export function floorIsArmed(floor) {
   return isPlainObject(floor) && MARKET_FLOOR_KEYS.some((k) => num(floor[k]) !== null);
 }
 
+/**
+ * THE ONE PLACE THE FLOOR AND THE FEED CAN SILENTLY CANCEL EACH OTHER OUT.
+ *
+ * The feed dedupes by mint and forgets a mint after `dedupeTtlMs` — 30 minutes by default,
+ * chosen to outlive any position the lane can hold, because a mint that re-enters as a fresh
+ * launch while it is still open is the bug that dedupe exists to prevent.
+ *
+ * The momentum source's whole job is to report coins the LAUNCH sources already saw at t=0. So
+ * whether one of its candidates is emitted at all depends on whether the feed has forgotten it
+ * yet, and that is decided by the candidate's age against the dedupe window:
+ *
+ *   minAgeHours 1 against a 30-minute window   ->  every candidate has aged out. Works.
+ *   minAgeHours 0.25 against the same window   ->  every candidate is still remembered from its
+ *                                                  own launch, and every one is dropped as a
+ *                                                  duplicate.
+ *
+ * The default pairing works, and it works BY COINCIDENCE: two constants chosen for unrelated
+ * reasons happen to sit the right way round. An operator lowering the age floor to a quarter of
+ * an hour — a completely reasonable thing to try — would get a momentum source that delivers
+ * nothing at all, reports no error, and looks exactly like a dead API or a broken pre-filter.
+ *
+ * So it is refused at startup with both numbers named. This is the same posture the gRPC pair
+ * already takes for a half-configured endpoint: a lane that stops and says why beats a lane
+ * that runs and silently does less than the operator believes.
+ */
+export function momentumDedupeConflict({ minAgeHours = null, dedupeTtlMs = null } = {}) {
+  const hours = num(minAgeHours);
+  const ttl = num(dedupeTtlMs);
+  /* No age floor means the momentum source is not selecting on age at all, so there is nothing
+     for the window to cancel out. An unknown TTL is not assumed. */
+  if (hours === null || ttl === null || !(ttl > 0)) return null;
+  const ageMs = hours * 3_600_000;
+  if (ageMs >= ttl) return null;
+  const mins = (ms) => `${Math.round(ms / 60_000)} minute${Math.round(ms / 60_000) === 1 ? "" : "s"}`;
+  return Object.freeze({
+    clause: "momentum_dedupe_conflict",
+    minAgeHours: hours, minAgeMs: ageMs, dedupeTtlMs: ttl,
+    message: `SNIPE_MIN_AGE_HOURS=${hours} asks the momentum source for coins ${mins(ageMs)} old, but the `
+      + `feed remembers every mint it has seen for ${mins(ttl)} — so every candidate would still be held `
+      + "in the dedupe ledger from its own launch and would be dropped as a duplicate before any gate ran. "
+      + "The source would deliver nothing, report no error, and look exactly like a dead API. Raise "
+      + `SNIPE_MIN_AGE_HOURS to at least ${(ttl / 3_600_000).toFixed(2)}, or turn the floor off.`,
+  });
+}
+
 export const SNIPE_MARKET_VERSION = "snipe-market-v1";
 
 /* ── THE MOMENTUM SOURCE'S PRE-FILTER ──────────────────────────────────────────────────

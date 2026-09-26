@@ -2099,6 +2099,21 @@ SECRET=""; JUPITER_KEY=""; LIVE_ACK=""; LIVE_CAPS_ACK=""; CAPS_ACK_EXPECTED=""; 
 UPGRADE_VALUE=""
 unset SECRET JUPITER_KEY LIVE_ACK LIVE_CAPS_ACK CAPS_ACK_EXPECTED REPLY CRED_VALUE UPGRADE_VALUE
 
+# ONE PATH FOR THE CONTROLLER, AND IT IS THE VERSIONED ONE.
+#
+# This banner printed two: `buys` through $CURRENT_LINK and `status`/`unload` through the
+# release directory. They are not interchangeable, and the difference is not cosmetic —
+# `cd` + `pwd -P` in macos-launchagent.sh resolves `current` through to releases/<release>,
+# so a `load` run that way renders a plist naming that path while the INSTALLED plist names
+# versioned-releases/<commit>. The byte-for-byte comparison then fails, every time, by
+# construction. On 2026-09-18 that command was given to the owner as a lightweight restart
+# and took the bot down with entries unpaused.
+#
+# `buys` happens to work either way, because it only touches a sentinel file and the env
+# search above handles both depths. But an operator who sees two paths reasonably concludes
+# they are equivalent and eventually types the wrong one with `load`. So the banner prints
+# the release directory for everything, which is correct for every subcommand.
+CONTROLLER_DIR="${DARWIN_EXECUTOR_DIR:-$CURRENT_LINK}"
 cat <<DONE
 
 ════════════════════════════════════════════════════════════════
@@ -2113,8 +2128,8 @@ cat <<DONE
     if [ "$NO_EQUITY_BRAKE" -eq 1 ]; then
       printf '\n  Equity brake OFF (DAILY_LOSS_PCT_OF_EQUITY=0) — the %s SOL figure\n  above is now the ONLY loss brake. Raise it with arm-caps to trade\n  until the wallet is the stop.' "$DAILY_LOSS_CAP"
     fi)
-  Buys off:       bash $CURRENT_LINK/macos-launchagent.sh buys off
-  Buys on:        bash $CURRENT_LINK/macos-launchagent.sh buys on
+  Buys off:       bash $CONTROLLER_DIR/macos-launchagent.sh buys off
+  Buys on:        bash $CONTROLLER_DIR/macos-launchagent.sh buys on
                   (off opens nothing new; what is held still exits)
   Resume entries: rm -f $PAUSE_FILE   (or pass --resume-entries next time)
   Hard stop:      install -m 600 /dev/null $HARD_STOP_FILE

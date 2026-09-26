@@ -25,7 +25,7 @@ import {
   BAGWORK_FLOOR, CLAUDE_CO_ADDITIONS, MARKET_FLOOR_DEFAULTS, MARKET_FLOOR_KEYS, MARKET_FACTS,
   PREFILTER_CLAUSES, SNIPE_MARKET_VERSION, MarketFloorError,
   marketFacts, marketFloor, resolveMarketFloor, floorIsArmed, solUsdFromPairs,
-  createMarketReader, marketReadFor, prefilterListingRow, momentumFetcher,
+  createMarketReader, marketReadFor, prefilterListingRow, momentumFetcher, momentumDedupeConflict,
 } from "./snipe-market.mjs";
 import { SNIPE_GATES, SNIPE_GATE_COST, SOL_QUOTE_MINT } from "./snipe-entry.mjs";
 import { MARKET_FLOOR_PRESETS, snipeLaneConfig } from "./snipe-lane.mjs";
@@ -367,6 +367,36 @@ console.log("\nthe momentum source: cheap facts first, and it counts what it dro
   ok("an omitted clock still uses the default rather than reading as a fault",
     prefilterListingRow(goodListing(), floor) === null);
   ok("momentumFetcher needs a fetcher", threw(() => momentumFetcher({})) !== null);
+}
+
+console.log("\nthe floor and the feed must not silently cancel each other out");
+{
+  /* THE DEFAULT PAIRING WORKS BY COINCIDENCE: a 1-hour age floor against a 30-minute dedupe
+     window. Two constants chosen for unrelated reasons that happen to sit the right way round. */
+  const TTL = 30 * 60_000;
+  ok("the shipped pairing is fine — an hour-old candidate has aged out of the window",
+    momentumDedupeConflict({ minAgeHours: 1, dedupeTtlMs: TTL }) === null);
+  /* AND THE ONE THAT WOULD SILENTLY DELIVER NOTHING. A quarter-hour floor is a reasonable thing
+     to try, and every candidate would still be held in the ledger from its own launch. */
+  const clash = momentumDedupeConflict({ minAgeHours: 0.25, dedupeTtlMs: TTL });
+  ok("a floor under the dedupe window is a REFUSAL, not a quiet afternoon of nothing", clash !== null);
+  ok("...and it names both numbers", /15 minutes old/.test(clash.message) && /30 minutes/.test(clash.message));
+  ok("...and says what it would have looked like instead",
+    /look exactly like a dead API/.test(clash.message));
+  ok("...and gives the number to raise it to", /at least 0\.50/.test(clash.message));
+  ok("exactly at the window is fine, since insertion order is time order",
+    momentumDedupeConflict({ minAgeHours: 0.5, dedupeTtlMs: TTL }) === null);
+  /* No age floor means the source is not selecting on age, so there is nothing to cancel. */
+  ok("no age floor is not a conflict", momentumDedupeConflict({ minAgeHours: null, dedupeTtlMs: TTL }) === null);
+  ok("an unknown window is not assumed",
+    momentumDedupeConflict({ minAgeHours: 0.1, dedupeTtlMs: null }) === null
+    && momentumDedupeConflict({ minAgeHours: 0.1, dedupeTtlMs: 0 }) === null);
+
+  const poller = fs.readFileSync(new URL("./poller.mjs", import.meta.url), "utf8");
+  ok("the poller refuses the clash at startup rather than discovering it as silence",
+    /momentumDedupeConflict\(\{/.test(poller) && /if \(dedupeClash\) throw new Error\(dedupeClash\.message\);/.test(poller));
+  ok("...against the feed's real constant, not a copy of it",
+    /dedupeTtlMs: feedMod\.FEED_DEFAULTS\.dedupeTtlMs/.test(poller));
 }
 
 console.log("\nwiring");
