@@ -214,10 +214,10 @@ function classicMintBytes({ mintAuthority = null, freezeAuthority = null, decima
 
 /* ════ 1. THE SHAPE OF THE LIST ═══════════════════════════════════════════════════════ */
 
-ok("SNIPE_GATES is a frozen, ordered, duplicate-free list of 25 codes", () => {
+ok("SNIPE_GATES is a frozen, ordered, duplicate-free list of 26 codes", () => {
   assert.equal(Object.isFrozen(SNIPE_GATES), true, "SNIPE_GATES is not frozen");
-  assert.equal(SNIPE_GATES.length, 25, `SNIPE_GATES has ${SNIPE_GATES.length} entries`);
-  assert.equal(new Set(SNIPE_GATES).size, 25, "SNIPE_GATES repeats a code");
+  assert.equal(SNIPE_GATES.length, 26, `SNIPE_GATES has ${SNIPE_GATES.length} entries`);
+  assert.equal(new Set(SNIPE_GATES).size, 26, "SNIPE_GATES repeats a code");
   console.log(`       ${SNIPE_GATES.join(" > ")}`);
 });
 
@@ -297,7 +297,7 @@ ok("a clean launch clears all 22 gates, and the trace names every one", () => {
   const v = snipeContract(baseArgs());
   assert.equal(v.ok, true, `the clean launch was refused at ${v.gate}: ${v.detail.message}`);
   assert.equal(v.gate, null, `gate came back ${v.gate}`);
-  assert.equal(v.trace.length, 25, `the trace holds ${v.trace.length} steps`);
+  assert.equal(v.trace.length, 26, `the trace holds ${v.trace.length} steps`);
   assert.deepEqual(v.trace.map((s) => s.gate), [...SNIPE_GATES], "the trace ran the gates out of order");
   assert.equal(v.trace.every((s) => s.ok), true, "a step in a passing trace is not ok");
   console.log(`       ${v.detail.mint.slice(0, 8)}… buys ${v.detail.baseOutRaw} base units for at most ` +
@@ -381,6 +381,14 @@ const HOSTILE = [
   ["volume_spike", "net inflow is a fifth of the coin's own baseline, against a 2x floor",
     { cfg: { ...LIVE_CFG, minVolumeSpike: 2 },
       flow: { spike: 0.2, recentLamportsPerSec: 200_000, baselineLamportsPerSec: 1_000_000, reason: null } }],
+  /* THE MARKET FLOOR, 2026-09-26. The launch lane's whole population is minutes old, which is
+     why this gate is off by default — and why the hostile fact here is simply a real launch
+     judged against bagworkagent.fun's own one-hour floor. */
+  ["market_floor", "the coin is four minutes old against a one-hour floor",
+    { cfg: { ...LIVE_CFG, marketFloor: { minAgeHours: 1, minLiquidityUsd: null, minVolume24hUsd: null,
+      minMcapUsd: null, maxVolumeToLiquidity: null, minTxns24h: null, maxSellShare: null,
+      maxPriceChange24hPct: null, minTopPoolLiquidityUsd: null } },
+      market: { ok: true, clause: null, message: null, facts: { ageHours: 4 / 60 } } }],
   ["network_fee_over_cap", "605,000 lamports of fees on a ~5,000,000 lamport basis is over 10%",
     { fees: { signatureFeeLamports: 5_000, prioritizationFeeLamports: 600_000, rentFeeLamports: 0 } }],
   ["rent_over_cap", "5,000,000 lamports of rent exceeds the 4,200,000 ceiling",

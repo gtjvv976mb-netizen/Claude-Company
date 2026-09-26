@@ -109,6 +109,7 @@ import {
 import { venueContract } from "./snipe-venue.mjs";
 import { assertNetworkFeeBudget } from "./network-fee-budget.mjs";
 import { ALLOWED_MINT_EXTENSIONS, EXTENSION_NAMES, auditMintAccount } from "./token2022.mjs";
+import { floorIsArmed, marketFloor } from "./snipe-market.mjs";
 
 export const SNIPE_ENTRY_VERSION = "snipe-entry-v1";
 
@@ -143,6 +144,7 @@ export const SNIPE_GATES = Object.freeze([
   "exit_route_unimplemented",
   "mint_refused",
   "no_socials",
+  "market_floor",
   // ── COST 2: pure arithmetic on bytes already fetched ─────────────────────────────
   "impact_over_cap",
   "round_trip_over_cap",
@@ -165,7 +167,7 @@ export const SNIPE_GATE_COST = Object.freeze({
   lane_off: 0, venue_not_enabled: 0, hard_stop: 0, pause_entries: 0,
   daily_capacity: 0, notice_stale: 0, already_holding: 0, already_attempted: 0,
   curve_unreadable: 1, curve_type_unsupported: 1, quote_not_sol: 1, curve_already_complete: 1,
-  exit_route_unimplemented: 1, mint_refused: 1, no_socials: 1,
+  exit_route_unimplemented: 1, mint_refused: 1, no_socials: 1, market_floor: 1,
   impact_over_cap: 2, round_trip_over_cap: 2, stop_floor: 2, size_under_minimum: 2,
   creator_profile: 3, launch_share: 3, volume_spike: 3,
   network_fee_over_cap: 4, rent_over_cap: 4, instruction_mismatch: 4,
@@ -720,6 +722,45 @@ const GATE_IMPLS = Object.freeze({
           "see is not a filter", socialsClause: clause };
   },
 
+  /**
+   * THE MARKET FLOOR — bagworkagent.fun's floor, and the biggest change to what this bot
+   * buys. See snipe-market.mjs for where each of the four facts honestly comes from and why
+   * this desk adds five more.
+   *
+   * OFF MEANS OFF, like the socials filter: with no floor configured this gate passes
+   * without looking, because the launch lane's whole population is minutes old and an
+   * accidentally-armed floor would refuse every notice while looking like a broken feed.
+   * The momentum source arms it deliberately; the launch source does not.
+   *
+   * ON, IT FAILS CLOSED. A threshold set against a fact that could not be measured refuses.
+   * That is the rule that makes it trustworthy: the alternative turns a DexScreener outage
+   * into an afternoon of unfiltered buying, and it turns `Number(null) === 0` into a silent
+   * pass rather than a loud one.
+   *
+   * It reads a SETTLED fact. The market read happens beside the account read in the lane,
+   * for the same reason the metadata read does: a gate that awaited an outside service would
+   * make the whole contract async and put a trade's fate in somebody else's latency.
+   */
+  market_floor: (c) => {
+    const floor = c.cfg.marketFloor ?? null;
+    if (!isPlainObject(floor) || !floorIsArmed(floor)) return null;
+    const market = c.market ?? null;
+    /* The measurement rides on the row whether or not it refuses — a floor nobody can audit
+       is a floor nobody should trust, and grade-entry-gates.mjs reads these. */
+    c.trace.measured.market_floor = isPlainObject(market?.facts)
+      ? Object.freeze({ ...market.facts }) : null;
+    if (!isPlainObject(market) || !isPlainObject(market.facts))
+      return { message: "a market floor is configured but no market read reached this candidate "
+        + `(${market?.clause ?? "no reader wired"}) — unverified is not safe`,
+        floorClause: market?.clause ?? "no_read" };
+    let refusal = null;
+    try { refusal = marketFloor(market.facts, floor); }
+    catch (error) { return { message: `the market floor could not be applied: ${error.message}`, floorClause: error.clause ?? null }; }
+    if (refusal === null) return null;
+    return { message: refusal.message, floorClause: refusal.clause, fact: refusal.fact,
+      threshold: refusal.threshold, measured: refusal.measured };
+  },
+
   impact_over_cap: (c) => (c.plan.impactOverCap ? {
     message: `price impact ${c.plan.impactPct?.toFixed(4)}% exceeds the ${c.cfg.maxPriceImpactPct}% cap ` +
       `at every rung down to ${Number(c.plan.spendLamports) / LAMPORTS_PER_SOL} SOL ` +
@@ -938,6 +979,9 @@ export function snipeContract({
   notice = {}, curve = null, adapter = null, cfg = {}, book = {}, nowMs = null,
   control = {}, mint: mintAccount = null, creator = {}, fees = {}, instruction = null,
   socials = null,
+  /* The settled market read — see the `market_floor` gate. Null whenever no floor is
+     configured, because then nothing asked for it and nothing should have paid for it. */
+  market = null,
   /* The volume-spike reading for this mint, measured by the lane from its own flow tape
      (snipe-volume.mjs) before the contract runs. Passed in rather than computed here for
      the same reason the curve is: this function is pure, and a replay of a captured
@@ -977,6 +1021,7 @@ export function snipeContract({
     /* The settled result of the lane's metadata read — see the `no_socials` gate for why
        it arrives as a fact rather than being awaited here. */
     socials: isPlainObject(socials) ? socials : null,
+    market: isPlainObject(market) ? market : null,
     creator: isPlainObject(creator) ? creator : {},
     launchSharePct: state && state.vQuote0Raw !== null && state.realQuoteRaw !== null
       ? pctOf(state.realQuoteRaw, state.vQuote0Raw) : null,

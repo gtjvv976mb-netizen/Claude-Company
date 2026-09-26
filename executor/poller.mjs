@@ -39,7 +39,7 @@ import {
   MIRROR_MARK_MS, evaluateMirror, mirrorLatchExpiry, mirrorPriceable,
   reconcileGate, reconcileVerdict, refreshDeskLevels,
 } from "./desk-mirror.mjs";
-import { consensusMark } from "./dexscreener-consensus.mjs";
+import { consensusMark, pairsFor as dexPairsFor } from "./dexscreener-consensus.mjs";
 import { executorHeartbeatHealth, executorRuntimeFingerprint } from "./heartbeat-health.mjs";
 import {
   validateEntryPreflightContext, validateExecutableEntryOrder,
@@ -3593,6 +3593,94 @@ log(`resuming ${openList().length} position(s) from cursor ${S.cursor}`);
 await tick();
 setInterval(tick, POLL_MS);
 
+/* ── THE FEE LANE: THE BUSINESS, AS OPPOSED TO THE MARKETING ─────────────────────────
+ *
+ * Measured across 26 of bagworkagent.fun's agents and 362 closed trades: trading -0.077 SOL,
+ * creator fees +14.515 SOL, level rewards +0.620. Not one of their agents makes money trading.
+ * Every SOL of profit is the pump.fun creator fee on the coin the agent itself launched.
+ *
+ * So this is a lane of its own, on its own timer, deliberately independent of both the desk
+ * and the sniper: it earns whether or not either of them is running, and neither can take it
+ * down. It writes to its OWN BOOK — a different file from the trading journal — because their
+ * `pnlSol` adds claimed fees to trading P&L and that addition is how a bot that loses every
+ * round trip displays +15.6 SOL. See fee-lane.mjs.
+ *
+ * OFF, then DRY, then live. FEE_CLAIM=dry reads the vaults every pass and records what it
+ * WOULD have claimed, signing nothing; that is the mode to run first, because the rows it
+ * writes are the evidence arming should rest on. Nothing here can sign at all yet — `submit`
+ * is null — and that is on purpose: a claim pays only a coin's own creator, so until a mint
+ * exists whose creator is this wallet there is no vault to sign against, and a money-moving
+ * path with nothing real to verify against is exactly how the Number(null) bug shipped.
+ */
+const FEE_CLAIM_MODE = String(process.env.FEE_CLAIM || "off").trim().toLowerCase();
+if (FEE_CLAIM_MODE !== "off") {
+  try {
+    if (!["dry", "live"].includes(FEE_CLAIM_MODE))
+      throw new Error(`FEE_CLAIM=${JSON.stringify(FEE_CLAIM_MODE)} is not one of off, dry, live`);
+    if (FEE_CLAIM_MODE === "live")
+      throw new Error("FEE_CLAIM=live is not yet honoured: the claim's signing path is deliberately unbuilt until a "
+        + "mint exists whose creator is this wallet, because a path that moves money with nothing real to verify "
+        + "against is how a plausible-looking bug ships. Run FEE_CLAIM=dry; it reads the vaults and records what it "
+        + "would have taken.");
+    const [feeMod, feesMod, sinkMod] = await Promise.all([
+      import("./fee-lane.mjs"), import("./pumpfun-fees.mjs"), import("./shadow-sink.mjs"),
+    ]);
+    const feeCreator = String(process.env.FEE_CLAIM_CREATOR || (EXECUTE ? kp.publicKey.toBase58() : "")).trim() || null;
+    if (!feeCreator)
+      throw new Error("FEE_CLAIM needs a creator wallet: set FEE_CLAIM_CREATOR, or run on a live install where the "
+        + "desk's own wallet is the creator of the coin whose fees are being claimed");
+
+    /* A MISSING ACCOUNT IS A DEFINITE ZERO; AN UNREADABLE ONE IS NOT.
+     *
+     * getBalance answers 0 for an address that holds nothing and has never existed, which is
+     * the truth for a desk that has not launched a coin yet — "there is nothing there", not
+     * "nobody knows". A THROW is the second case, and readClaimable turns it into null. Those
+     * two facts must not be folded together: one means skip quietly forever, the other means
+     * retry, and a lane that confused them would stop claiming at the first RPC hiccup and
+     * never say why. */
+    const feeLane = feeMod.createFeeLane({
+      creator: feeCreator,
+      wallet: EXECUTE ? kp.publicKey.toBase58() : null,
+      cfg: {
+        live: false,
+        intervalMs: Number(process.env.FEE_CLAIM_INTERVAL_MS || feeMod.FEE_LANE_DEFAULTS.intervalMs),
+        minNetLamports: Number(process.env.FEE_CLAIM_MIN_NET_LAMPORTS || feeMod.FEE_LANE_DEFAULTS.minNetLamports),
+        priorityFeeLamports: Number(process.env.SNIPE_PRIORITY_FEE_LAMPORTS || 0),
+      },
+      readClaimable: (creator) => feesMod.readClaimable({
+        creator,
+        readLamports: async (address) => conn.getBalance(new PublicKey(String(address)), "confirmed"),
+        readTokenAmount: async (address) => {
+          const info = await conn.getParsedAccountInfo(new PublicKey(String(address)), "confirmed");
+          /* No account is no tokens — a definite zero. A balance that will not parse is null,
+             because a claim sized on a number nobody could read is a claim on a guess. */
+          if (!info?.value) return 0;
+          const amount = info.value?.data?.parsed?.info?.tokenAmount?.amount;
+          return /^\d+$/.test(String(amount ?? "")) ? Number(amount) : null;
+        },
+      }),
+      /* A claim is a signature, so the desk's own HARD STOP governs it exactly as it governs a
+         trade. PAUSE ENTRIES does not: it stops new exposure, and a claim takes money in. */
+      control: () => ({ hardStop: hardStop() === true }),
+      book: sinkMod.createShadowSink({ file: sinkMod.feeBookPath(STATE_DB) }),
+      submit: null,
+      log: (msg) => log(`[fees] ${msg}`),
+    });
+    log(`[fees] lane ${feeLane.version} DRY for creator ${feeCreator}: reading both vaults every `
+      + `${Math.round(feeLane.intervalMs / 60_000)} min, booking to ${sinkMod.feeBookPath(STATE_DB)}, signing nothing`);
+    const feeTick = async () => {
+      try { await feeLane.tick(); }
+      catch (err) { log(`[fees] pass failed — ${err?.message || err}`); }
+    };
+    await feeTick();
+    setInterval(feeTick, feeLane.intervalMs).unref?.();
+  } catch (err) {
+    /* IT CANNOT TAKE THE DESK DOWN, the same rule the launch lane runs under. A revenue line
+       that stops the bot that trades is worse than no revenue line. */
+    log(`[fees] fee lane did not start: ${err?.message || err}`);
+  }
+}
+
 /* ── THE LAUNCH LANE, OBSERVE-ONLY AND OFF UNLESS ASKED FOR ──────────────────────────
  *
  * A second lane in this process, watching pump.fun launches and recording what it WOULD
@@ -3629,7 +3717,7 @@ if (SNIPE_LANE_MODE !== "off") {
   try {
     const [{ createSnipeLane, snipeLaneConfig },
       { PUMPFUN_VENUE, PUMPFUN_PROGRAM_ID, noticesFromLogs, eventsFromLogs }, feedMod,
-      { grpcFromEnv, laserstreamTransport }, shadowMod, sinkMod, volumeMod] = await Promise.all([
+      { grpcFromEnv, laserstreamTransport }, shadowMod, sinkMod, volumeMod, marketMod] = await Promise.all([
       import("./snipe-lane.mjs"),
       import("./snipe-venue-pumpfun.mjs"),
       import("./snipe-feed.mjs"),
@@ -3639,6 +3727,7 @@ if (SNIPE_LANE_MODE !== "off") {
       import("./snipe-shadow.mjs"),
       import("./shadow-sink.mjs"),
       import("./snipe-volume.mjs"),
+      import("./snipe-market.mjs"),
     ]);
     const laneCfg = snipeLaneConfig(process.env);
     /* THE SIGNING PORT, on a live install only. Everything it needs is the desk's: the
@@ -3786,6 +3875,39 @@ if (SNIPE_LANE_MODE !== "off") {
     }) : null;
     if (grpcCfg) log(`[snipe] gRPC source armed against ${new URL(grpcCfg.endpoint).host} at ${grpcCfg.commitment}`
       + "; every trade on it feeds the volume tape");
+    /* THE MOMENTUM SOURCE (2026-09-26) — the other end of the market, and the reason the
+       market floor exists.
+     *
+     * The three sources above all answer one question: what launched just now. That is the
+     * population this desk has traded 64 times for -0.361 SOL, and its own numbers say the
+     * problem is structural — a coin nobody has traded yet has no demand to measure. This
+     * source asks the opposite question: what is being traded RIGHT NOW, whatever its age.
+     *
+     * It is ADDED, never substituted. The launch sources stay exactly as they are, the feed's
+     * source race still prices one against the other, and with SNIPE_MARKET_FLOOR=off this
+     * source's rows are judged by the same gates as any launch — so turning the floor on and
+     * off changes what is bought without changing what is heard.
+     *
+     * Its rows are pre-filtered on the facts they already carry (still on the curve, old
+     * enough, market cap over the bar) before anything is fetched for them, because the floor's
+     * fourth fact costs a request per candidate. What it drops is counted by clause: a source
+     * quietly returning two rows out of seventy looks identical to a dead market and to a
+     * broken filter, and those need opposite responses. */
+    const marketFloor = laneCfg.marketFloor;
+    const momentumFetch = marketMod.floorIsArmed(marketFloor)
+      ? marketMod.momentumFetcher({
+          floor: marketFloor,
+          fetchRows: feedMod.pumpfunListingFetcher({ pages: 2, sort: "last_trade_timestamp" }),
+        })
+      : null;
+    /* The floor's DexScreener half, as the port the lane takes. `pairsFor` is the desk's own
+       function — the same one the mirror evaluator prices with — so there is one HTTP client
+       for this API in the install and not two. */
+    const marketReader = marketMod.floorIsArmed(marketFloor)
+      ? marketMod.createMarketReader({ pairsFor: (mint) => dexPairsFor(mint) })
+      : null;
+    if (momentumFetch) log(`[snipe] momentum source armed: pump.fun activity listing, pre-filtered against the floor`);
+
     const laneFeed = feedMod.createSnipeFeed({
       sources: [
         feedMod.sourceFromVenueWatch(PUMPFUN_VENUE, {
@@ -3796,6 +3918,13 @@ if (SNIPE_LANE_MODE !== "off") {
           fetchRows: feedMod.pumpfunListingFetcher({ pages: 1 }),
         }),
         ...(grpcSource ? [grpcSource] : []),
+        ...(momentumFetch ? [feedMod.pollSource({
+          id: "poll:pumpfun-momentum", venueId: PUMPFUN_VENUE.id,
+          fetchRows: momentumFetch,
+          /* Slower than the launch poll on purpose: these coins are hours old, so a five
+             second cadence would spend requests to learn nothing new. */
+          intervalMs: 30_000,
+        })] : []),
       ],
     });
     /* THE SHADOW BOOK, ON DISK. Until now createSnipeShadow() was constructed inside the
@@ -3829,6 +3958,10 @@ if (SNIPE_LANE_MODE !== "off") {
       shadow: shadowBook,
       /* The same tape the tap above fills. */
       flowTape,
+      /* The market floor's reader. Null when no floor is configured, and createSnipeLane
+         REFUSES an armed floor with no reader rather than refusing every candidate for want
+         of a measurement — which in a log is indistinguishable from an empty market. */
+      marketReader,
       /* WHAT THE WALLET HOLDS, so the lane can tell a sell that FAILED from a position
          that has already GONE. Wired only on a live install, because only then is there a
          signing wallet whose balance means anything; in observe mode the lane latches and

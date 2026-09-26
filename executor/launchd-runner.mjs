@@ -48,6 +48,9 @@ const RUNTIME_FILES = Object.freeze([
   "snipe-shadow.mjs",
   "snipe-policy.mjs",
   "snipe-volume.mjs",
+  "snipe-market.mjs",
+  "fee-lane.mjs",
+  "pumpfun-fees.mjs",
   "package.json",
   "package-lock.json",
 ]);
@@ -108,6 +111,22 @@ const ALLOWED_ENV = new Set([
   /* The three measured-first proxies, absent by default in every copy: they measure on every
      launch and refuse nothing until the owner sets a number a scorecard has justified. */
   "SNIPE_MAX_CREATOR_SHARE_PCT", "SNIPE_MAX_LAUNCH_SHARE_PCT", "SNIPE_MIN_VOLUME_SPIKE",
+  /* THE MARKET FLOOR (2026-09-26). SNIPE_MARKET_FLOOR=bagwork loads the four thresholds
+     bagworkagent.fun's own agents run; the nine dials override individual numbers. All off by
+     default, and allowlisting them enables nothing — an unarmed floor passes every candidate
+     without looking, and an armed one with no reader wired is refused at construction rather
+     than silently refusing every trade. */
+  "SNIPE_MARKET_FLOOR", "SNIPE_MIN_AGE_HOURS", "SNIPE_MIN_LIQUIDITY_USD",
+  "SNIPE_MIN_VOLUME_24H_USD", "SNIPE_MIN_MCAP_USD", "SNIPE_MAX_VOLUME_TO_LIQUIDITY",
+  "SNIPE_MIN_TXNS_24H", "SNIPE_MAX_SELL_SHARE", "SNIPE_MAX_PRICE_CHANGE_24H_PCT", "SNIPE_MIN_TOP_POOL_LIQUIDITY_USD",
+  /* THE FEE LANE (2026-09-26) — the desk's only revenue that does not depend on winning a
+     trade. FEE_CLAIM is off | dry | live; "dry" reads the vaults and records what it would
+     have claimed without signing anything, which is what it ships as the moment a creator
+     wallet exists. "live" additionally needs FEE_CLAIM_ACK, the sentence the lane prints for
+     the creator wallet and the wallet the fees land in — a claim is a signature, and an
+     acknowledgement that does not contain the wallet cannot prove the operator knew which
+     one they were arming. */
+  "FEE_CLAIM", "FEE_CLAIM_CREATOR", "FEE_CLAIM_ACK", "FEE_CLAIM_INTERVAL_MS", "FEE_CLAIM_MIN_NET_LAMPORTS",
   "BLOCK_HEIGHT_WINDOW", "BOOK_HEAT_MAX", "CC_API", "CC_FLOOR", "CC_SECRET",
   "DAILY_LOSS_LIMIT_SOL",
   /* The share of the bankroll the realized-loss brake stops at, 0 to turn it off. Not a

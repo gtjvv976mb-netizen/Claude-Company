@@ -41,6 +41,12 @@ const need = ["poller.mjs", "journal.mjs", "jupiter.mjs", "token2022.mjs", "bala
   "snipe-policy.mjs",
   // the volume tape: imported by snipe-lane.mjs at module scope, same as the socials filter.
   "snipe-volume.mjs",
+  // the market floor: imported by both snipe-lane.mjs and snipe-entry.mjs at module scope.
+  "snipe-market.mjs",
+  // the creator-fee lane: the desk's only revenue that does not depend on winning a trade.
+  "fee-lane.mjs",
+  // the claim instruction the fee lane signs. Imported by fee-lane's wiring in poller.mjs.
+  "pumpfun-fees.mjs",
   // the socials filter: imported by snipe-lane.mjs at module scope, so an install that
   // fetches this list without it dies at boot the moment the lane is constructed.
   "snipe-socials.mjs",

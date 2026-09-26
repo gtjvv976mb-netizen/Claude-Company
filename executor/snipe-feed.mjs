@@ -1067,14 +1067,34 @@ export function pumpfunRowToNotice(row) {
  * same endpoint the desk already reads. `fetchJson` is injected so the test runs offline;
  * the default reaches the network only when the returned function is actually called.
  */
+export const PUMPFUN_LIST_SORTS = Object.freeze(["created_timestamp", "last_trade_timestamp", "market_cap"]);
+
 export function pumpfunListingFetcher({
   pages = 1, timeoutMs = 9_000, origin = PUMPFUN_LIST_ORIGIN,
   fetchJson = defaultFetchJson,
+  /* WHICH END OF THE MARKET TO LOOK AT (2026-09-26).
+   *
+   * `created_timestamp` is the launch sniper's view: newest first, the population this desk
+   * has traded 64 times for -0.361 SOL. `last_trade_timestamp` is the other question — what
+   * is being traded RIGHT NOW, regardless of when it was born — and it is how the momentum
+   * source finds coins that already have the demand the market floor insists on. Created-order
+   * paging cannot reach them: at roughly 29 launches a minute, an hour of history is some
+   * 1,700 rows, and this endpoint caps out at twelve pages of 70.
+   *
+   * Every value here was verified against the live endpoint (HTTP 200, rows carrying mint,
+   * creator, created_timestamp, last_trade_timestamp, complete and usd_market_cap) rather
+   * than assumed from documentation, because a sort the server silently ignores would hand
+   * this source the created-order list while it reported it was reading activity. */
+  sort = "created_timestamp", order = "DESC",
 } = {}) {
+  if (!PUMPFUN_LIST_SORTS.includes(sort))
+    throw new FeedConfigError(`pumpfunListingFetcher sort ${JSON.stringify(sort)} is not one of ${PUMPFUN_LIST_SORTS.join(", ")}`);
+  if (!["DESC", "ASC"].includes(order))
+    throw new FeedConfigError(`pumpfunListingFetcher order ${JSON.stringify(order)} must be DESC or ASC`);
   const wanted = Math.max(1, Math.min(12, Math.floor(pages) || 1));
   return async function fetchRows() {
     const urls = Array.from({ length: wanted }, (_, i) =>
-      `${origin}/coins?offset=${i * PUMPFUN_PAGE_ROWS}&limit=${PUMPFUN_PAGE_ROWS}&sort=created_timestamp&order=DESC&includeNsfw=true`);
+      `${origin}/coins?offset=${i * PUMPFUN_PAGE_ROWS}&limit=${PUMPFUN_PAGE_ROWS}&sort=${sort}&order=${order}&includeNsfw=true`);
     const results = await Promise.allSettled(urls.map((url) => fetchJson(url, { timeoutMs })));
     const rows = [];
     let failures = 0;
