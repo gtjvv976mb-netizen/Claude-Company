@@ -90,14 +90,18 @@ import { closeSnipe, ensureSnipeBook, openSnipe, snipeFor, snipeList, updateSnip
 import * as snipePolicy from "./snipe-policy.mjs";
 import { readSocials, SOCIAL_DEFAULTS } from "./snipe-socials.mjs";
 import { createFlowTape } from "./snipe-volume.mjs";
-import { BAGWORK_FLOOR, MARKET_FLOOR_KEYS, floorIsArmed, marketReadFor, resolveMarketFloor } from "./snipe-market.mjs";
+import {
+  MARKET_FLOOR_KEYS, MARKET_FLOOR_PRESET_VALUES, ageAloneRefuses, curveReachability, floorIsArmed, marketReadFor,
+  resolveMarketFloor,
+} from "./snipe-market.mjs";
 
 export const SNIPE_LANE_VERSION = "snipe-lane-v1";
 
-/** The market-floor presets SNIPE_MARKET_FLOOR admits. "bagwork" is not a guess: it is the
- *  four thresholds bagworkagent.fun's own agents run, and the only preset here that is
- *  evidence rather than a hypothesis. */
-export const MARKET_FLOOR_PRESETS = Object.freeze(["off", "bagwork"]);
+/** The market-floor presets SNIPE_MARKET_FLOOR admits. "bagwork" is the four thresholds
+ *  bagworkagent.fun's own agents run, copied literally; "curve" is the two of those four a
+ *  bonding curve can physically meet, and the one to run on this desk — bagwork's liquidity
+ *  and market-cap bars sit above anything a curve holds (snipe-market.mjs, CURVE_FLOOR). */
+export const MARKET_FLOOR_PRESETS = Object.freeze(Object.keys(MARKET_FLOOR_PRESET_VALUES));
 
 /** The only two modes this file admits. `execute` is listed so a caller can NAME it and
  *  be refused by name; there is no signing path here to run it on. */
@@ -117,6 +121,8 @@ export const SNIPE_LANE_CLAUSES = Object.freeze([
      same reason cap_over_operator_max is: a refusal that ships without a clause reports
      under whatever code happened to be nearby. */
   "market_reader_missing",
+  /* A spike threshold is configured and nothing feeds the tape it would be measured on. */
+  "volume_tape_unfed",
   /* A money dial above the operator ceiling. Added 2026-09-11 with the ceiling itself —
      the clause list is frozen precisely so a new refusal cannot ship without being named,
      and this one refused correctly while reporting the wrong error until it was. */
@@ -481,7 +487,7 @@ export function snipeLaneConfig(env = {}) {
      operator never typed is how a bot ends up refusing on a number nobody chose. */
   const dialed = {};
   for (const key of MARKET_FLOOR_KEYS) if (out[key] !== undefined) dialed[key] = out[key];
-  const preset = out.marketFloorPreset === "bagwork" ? BAGWORK_FLOOR : {};
+  const preset = MARKET_FLOOR_PRESET_VALUES[out.marketFloorPreset] ?? {};
   const asked = { ...preset, ...dialed };
   if (Object.keys(asked).length) {
     const floor = {};
@@ -997,10 +1003,21 @@ export function createSnipeLane({
   ensureSnipeBook(S);
   if (S.positions === undefined) S.positions = {};
   const recorder = shadow ?? createSnipeShadow({ capacity: conf.shadowCapacity, laneMode: conf.lane });
+  /* A SPIKE FLOOR ON A TAPE NOBODY FILLS REFUSES EVERYTHING. The lane's own reads give a
+     mint one sample per notice, and a ratio needs 330 seconds of history, so without a tape
+     handed in by whoever mounts the trade tap, every candidate would be refused at
+     volume_spike for want of a baseline — in a log, the same sentence as "nothing spiked".
+     Refused at construction, like a floor with no reader. */
+  if (conf.minVolumeSpike !== undefined && conf.minVolumeSpike !== null && !flowTape)
+    throw new SnipeLaneError("volume_tape_unfed",
+      `minVolumeSpike is ${conf.minVolumeSpike} but no flowTape port was wired — the lane's own reads cannot `
+      + "form a 5-minute baseline, so every candidate would be refused at volume_spike. Mount the trade tap "
+      + "(SNIPE_GRPC_ENDPOINT + SNIPE_GRPC_TOKEN) or unset SNIPE_MIN_VOLUME_SPIKE.",
+      { minVolumeSpike: conf.minVolumeSpike });
   const flow = flowTape ?? createFlowTape();
 
   const counters = {
-    notices: 0, recorded: 0, cleared: 0, refused: 0, wouldHaveOpened: 0,
+    notices: 0, recorded: 0, cleared: 0, refused: 0, wouldHaveOpened: 0, marketReadsSkipped: 0,
     wouldHaveExited: 0, forwardSamples: 0, readErrors: 0, ticks: 0, deterministErrors: 0,
     /* Execute mode. `entered`/`exited` count fills the port confirmed; the two failure
        counters count buys and sells the port refused or could not land, which in observe
@@ -1060,7 +1077,11 @@ export function createSnipeLane({
        so an operator who did not ask for it makes no request at all. */
     const socialsPromise = conf.requireSocials === true
       ? Promise.resolve(socialsReader({
-          uri: record?.raw?.uri ?? record?.uri ?? null,
+          /* A create event decodes to `uri`; a pump.fun LISTING row — every momentum candidate,
+             and any launch the poll hears before the socket — spells it `metadata_uri`
+             (50 of 50 live rows, 2026-09-26). Reading only the first sent every momentum
+             candidate to no_socials with "no uri", so none ever reached the floor. */
+          uri: record?.raw?.uri ?? record?.raw?.metadata_uri ?? record?.uri ?? null,
           timeoutMs: Number(conf.socialsTimeoutMs) || undefined,
         })).catch((error) => Object.freeze({ ok: false, clause: "fetch_failed",
           message: String(error?.message ?? error).slice(0, 160) }))
@@ -1069,10 +1090,24 @@ export function createSnipeLane({
        account read and the metadata read, never after them. Only when a floor is actually
        configured: an operator running no floor makes no request, and the gate passes without
        looking. */
-    const marketPromise = floorIsArmed(conf.marketFloor) && typeof marketReader === "function"
-      ? Promise.resolve(marketReader(mint)).catch((error) => Object.freeze({
-          ok: false, clause: "fetch_failed", message: String(error?.message ?? error).slice(0, 160), pairs: null }))
-      : null;
+    const listingRow = isPlainObject(record?.raw) ? record.raw : null;
+    /* NOT FOR A COIN THE AGE RULE ALREADY REFUSES. Age is free — the listing's creation stamp,
+       or for a create event the moment it arrived — so with an age floor armed, a launch
+       notice is known to fail before anything is fetched, and paying DexScreener for it was
+       ~29 wasted requests a minute. The facts are still assembled (with no pairs), so the gate
+       refuses on age by name exactly as before. */
+    const floorArmed = floorIsArmed(conf.marketFloor);
+    const skipMarketRead = floorArmed
+      && ageAloneRefuses(conf.marketFloor, { listing: listingRow, createdAtMs: noticeAtMs, nowMs: clock() });
+    if (skipMarketRead) counters.marketReadsSkipped++;
+    const marketPromise = !floorArmed ? null
+      : skipMarketRead
+        ? Promise.resolve(Object.freeze({ ok: false, clause: "skipped_age",
+            message: "not fetched: the coin's age alone already fails the floor", pairs: null }))
+        : typeof marketReader === "function"
+          ? Promise.resolve(marketReader(mint)).catch((error) => Object.freeze({
+              ok: false, clause: "fetch_failed", message: String(error?.message ?? error).slice(0, 160), pairs: null }))
+          : null;
     let read;
     try {
       read = await readAcrossEndpoints({ readers, addresses: adapter.accountsFor(mint), mint });
@@ -1135,7 +1170,7 @@ export function createSnipeLane({
           read: await marketPromise,
           /* The candidate row the momentum source carried, when there was one. A launch
              notice has no listing, and its age is then taken from when it arrived. */
-          listing: isPlainObject(record?.raw) ? record.raw : null,
+          listing: listingRow,
           curve,
           solUsd: typeof solUsdReader === "function" ? (() => { try { return solUsdReader(); } catch { return null; } })() : null,
           createdAtMs: noticeAtMs,
@@ -1717,6 +1752,7 @@ export function createSnipeLane({
         const named = MARKET_FLOOR_KEYS.filter((k) => conf.marketFloor[k] !== null)
           .map((k) => `${k}=${conf.marketFloor[k]}`).join(", ");
         log(`snipe market floor ARMED: ${named} — candidates under any of these are refused at market_floor`);
+        for (const w of curveReachability(conf.marketFloor)) log(`snipe market floor WARNING: ${w.message}`);
       } else log("snipe market floor: off (every candidate is judged on the launch gates alone)");
       const summary = await feed.start();
       consumed = consume();

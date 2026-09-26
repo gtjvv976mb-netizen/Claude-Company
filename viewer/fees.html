@@ -77,6 +77,7 @@ footer{margin-top:40px;padding-top:16px;border-top:1px solid var(--line);color:v
     <button id="connect">Connect wallet</button>
     <button id="claim" disabled>Sign the claim</button>
   </div>
+  <div class="row" id="wallets"></div>
   <div class="status" id="claimStatus"></div>
 
   <p class="note" id="note"></p>
@@ -111,30 +112,106 @@ const CLAUDECO_CREATOR = "3J57tqAJqRmSBn1ZYDu9JpMMyTfBHdcGGwECiPQeiji3";
 $("creator").value = new URLSearchParams(location.search).get("creator") || CLAUDECO_CREATOR;
 
 let latest = null;          // the last vault reading
-let wallet = null;          // { kind, w, account }
+let wallet = null;          // { kind, w, account?, address }
 
-async function read() {
+/* BASE64 TO BYTES, IN THE BROWSER'S OWN TERMS. The first version of this page called
+   `Buffer.from(ix.data, "base64")`, and Buffer is Node's — esm.sh's web3.js keeps its own copy
+   module-private and never puts one on window. So the claim threw "Buffer is not defined"
+   before any wallet was asked, in every browser, on the only claim path this desk ships. */
+const fromBase64 = (b64) => Uint8Array.from(atob(String(b64 ?? "")), (c) => c.charCodeAt(0));
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const b58 = (bytes) => {
+  if (typeof bytes === "string") return bytes;
+  const u = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes ?? []);
+  let n = 0n; for (const x of u) n = n * 256n + BigInt(x);
+  let out = ""; while (n > 0n) { out = B58[Number(n % 58n)] + out; n /= 58n; }
+  for (const x of u) { if (x !== 0) break; out = "1" + out; }
+  return out;
+};
+
+/* ── which wallet? — the discovery tower.html uses, because it is the one that works ──────
+   A Wallet Standard wallet does not sit in a list on window. It REGISTERS: the page listens
+   for `wallet-standard:register-wallet` and announces itself with `wallet-standard:app-ready`,
+   and each wallet then calls `register(wallet)`. The first version of this page read
+   `navigator.wallets` as if it held wallet objects — it holds registration callbacks, when it
+   exists at all — so no standard-only wallet was ever found. Legacy injected providers are the
+   fallback, exactly as on the tower. */
+const FOUND = new Map();
+const registry = { register: (...ws) => {
+  for (const w of ws) {
+    const chains = w?.chains ?? [];
+    if (w?.features?.["standard:connect"] && w.features["solana:signAndSendTransaction"]
+      && chains.some((c) => String(c).startsWith("solana:")))
+      FOUND.set(w.name, { kind: "standard", w });
+  }
+  return () => {};
+} };
+window.addEventListener("wallet-standard:register-wallet", (e) => { try { e.detail(registry); } catch {} });
+const scanWallets = () => {
+  try { window.dispatchEvent(new CustomEvent("wallet-standard:app-ready", { detail: registry })); } catch {}
+  const has = (re) => [...FOUND.keys()].some((n) => re.test(n));
+  if (window.solana?.isPhantom && !has(/phantom/i)) FOUND.set("Phantom", { kind: "legacy", w: window.solana });
+  if (window.solflare?.isSolflare && !has(/solflare/i)) FOUND.set("Solflare", { kind: "legacy", w: window.solflare });
+  if (window.backpack && !has(/backpack/i)) FOUND.set("Backpack", { kind: "legacy", w: window.backpack });
+  return FOUND.size;
+};
+scanWallets();
+setTimeout(scanWallets, 300);
+setTimeout(scanWallets, 1200);          // late injectors
+
+/* ONE RULE FOR THE SIGN BUTTON, evaluated in one place. It used to be decided twice — once
+   after a read and once after a connect — and the two disagreed: connecting after a read
+   enabled it with one vault unreadable (and then claimed only half), and reading after a
+   connect enabled it for a wallet that was not the creator. Every path now calls this. */
+function refreshClaimButton() {
+  const addr = wallet?.address ?? null;
+  const v = latest;
+  /* THE WALLET MUST BE THE CREATOR. Only the creator's signature can send this, so a mismatch
+     is said before somebody taps approve and watches it fail on chain — whichever order the
+     read and the connect happened in. */
+  const mismatch = Boolean(wallet && v && addr !== v.creator);
+  const mismatchWhy = mismatch ? `connected ${addr}, but the fees belong to ${v.creator} — only that wallet can claim them` : null;
+  let why = null;
+  if (!v) why = "read the vaults first";
+  else if (!v.readable || v.includeCurve === null || v.includeAmm === null)
+    why = "a vault could not be read — an unreadable side is not an empty one, so nothing is offered";
+  else if (!(v.claimableLamports > 0)) why = "nothing to claim";
+  else if (!wallet) why = "connect the creator's wallet";
+  else if (mismatch) why = mismatchWhy;
+  $("claim").disabled = why !== null;
+  if (wallet) say("claimStatus", mismatch ? mismatchWhy : `connected ${addr}`, mismatch ? "err" : "ok");
+  return why;
+}
+
+async function read(opts) {
   const creator = $("creator").value.trim();
+  const fresh = opts?.fresh === true;
   say("readStatus", "reading both vaults…");
   $("read").disabled = true;
   try {
-    const v = await api(`/api/fees/claimable?creator=${encodeURIComponent(creator)}`);
+    const v = await api(`/api/fees/claimable?creator=${encodeURIComponent(creator)}${fresh ? "&fresh=1" : ""}`);
     latest = v;
     const amount = sol(v.claimableLamports);
     $("claimable").textContent = amount ?? "—";
     $("claimable").className = "big " + (amount === null ? "none" : "pos");
     $("verdict").textContent = v.verdict?.reason ?? "";
-    $("detail").innerHTML = `
-      <tr><th>Curve vault</th><td>${v.curveVault}</td><td class="num">${sol(v.curveLamports) ?? "—"}</td></tr>
-      <tr><th>…of which rent that cannot move</th><td></td><td class="num">${sol(v.rentReserveLamports)}</td></tr>
-      <tr><th>pump-amm vault</th><td>${v.ammVaultAta}</td><td class="num">${sol(v.ammLamports) ?? "—"}</td></tr>`;
-    /* A side nobody could read is not a side known to be empty, so an unreadable vault disables the
-       button rather than quietly claiming the other half. */
-    const ready = v.readable && v.claimableLamports > 0 && v.includeCurve !== null && v.includeAmm !== null;
-    $("claim").disabled = !(ready && wallet);
-    say("readStatus", v.readable
-      ? `read at ${new Date().toISOString().slice(11, 19)}`
-      : "neither vault could be read — that is not the same fact as an empty vault, so nothing is offered", v.readable ? "ok" : "err");
+    const tr = (label, addr, value) => {
+      const row = document.createElement("tr");
+      for (const [tag, text, cls] of [["th", label], ["td", addr ?? ""], ["td", value ?? "—", "num"]]) {
+        const c = document.createElement(tag); c.textContent = text; if (cls) c.className = cls; row.appendChild(c);
+      }
+      return row;
+    };
+    $("detail").replaceChildren(
+      tr("Curve vault", v.curveVault, sol(v.curveLamports)),
+      tr("…of which rent that cannot move", "", sol(v.rentReserveLamports)),
+      tr("pump-amm vault", v.ammVaultAta, sol(v.ammLamports)));
+    const partial = v.partial === true || (v.readable && (v.includeCurve === null || v.includeAmm === null));
+    say("readStatus", !v.readable
+      ? "neither vault could be read — that is not the same fact as an empty vault, so nothing is offered"
+      : partial ? "one vault could not be read, so the claim is held until both can be — try Read again"
+        : `read at ${new Date().toISOString().slice(11, 19)}${v.cachedMs ? ` (cached ${Math.round(v.cachedMs / 1000)}s)` : ""}`,
+      v.readable && !partial ? "ok" : "err");
     $("note").textContent = v.verdict?.worth === false
       ? "Worth knowing: fees keep accruing whether or not you claim, so waiting costs nothing but the "
         + "time. The only thing a claim loses is the network fee, which is why this page tells you the net."
@@ -142,42 +219,51 @@ async function read() {
   } catch (e) {
     latest = null;
     say("readStatus", e.message, "err");
-  } finally { $("read").disabled = false; }
+  } finally {
+    $("read").disabled = false;
+    refreshClaimButton();
+  }
 }
 
-/* The wallet-standard handshake, the same shape tower.html uses: a modern wallet announces itself
-   through window.navigator.wallets / the standard registry, and the legacy Phantom object is the
-   fallback. Phantom specifically needed the legacy path here before. */
+function chooseWallet() {
+  const list = [...FOUND.entries()];
+  if (list.length <= 1) return Promise.resolve(list[0]?.[1] ?? null);
+  return new Promise((resolve) => {
+    const box = $("wallets");
+    box.replaceChildren();
+    for (const [name, entry] of list) {
+      const b = document.createElement("button");
+      b.textContent = name;
+      b.onclick = () => { box.replaceChildren(); resolve(entry); };
+      box.appendChild(b);
+    }
+  });
+}
+
 async function connect() {
   say("claimStatus", "looking for a wallet…");
   try {
-    const std = window.navigator?.wallets ?? [];
-    const found = [...std].find((w) => w?.features?.["solana:signAndSendTransaction"]);
-    if (found) {
-      const connectFeat = found.features["standard:connect"];
-      const res = connectFeat ? await connectFeat.connect() : { accounts: found.accounts };
-      const account = (res.accounts ?? found.accounts ?? [])[0];
+    if (!FOUND.size) { scanWallets(); await new Promise((r) => setTimeout(r, 350)); scanWallets(); }
+    const entry = await chooseWallet();
+    if (!entry) throw new Error("no Solana wallet found — if one is installed, unlock it and press Connect again");
+    if (entry.kind === "legacy") {
+      const res = await entry.w.connect();
+      wallet = { kind: "legacy", w: entry.w, address: res?.publicKey?.toString?.() ?? entry.w.publicKey?.toString?.() ?? null };
+    } else {
+      const res = await entry.w.features["standard:connect"].connect();
+      const account = (res?.accounts ?? entry.w.accounts ?? [])
+        .find((a) => (a.chains ?? []).some((c) => String(c).startsWith("solana:"))) ?? (res?.accounts ?? [])[0];
       if (!account) throw new Error("the wallet connected but offered no account");
-      wallet = { kind: "standard", w: found, account };
-    } else if (window.solana?.isPhantom || window.solana?.connect) {
-      const res = await window.solana.connect();
-      wallet = { kind: "legacy", w: window.solana, address: res?.publicKey?.toString?.() ?? null };
-    } else throw new Error("no Solana wallet found in this browser");
-    const addr = wallet.kind === "standard" ? wallet.account.address : wallet.address;
-    say("claimStatus", `connected ${addr}`, "ok");
-    /* THE WALLET MUST BE THE CREATOR. Only the creator's signature can send this, so a mismatch is
-       worth saying before somebody taps approve and watches it fail on chain. */
-    if (addr && latest && addr !== latest.creator) {
-      say("claimStatus", `connected ${addr}, but the fees belong to ${latest.creator} — only that wallet can claim them`, "err");
-      $("claim").disabled = true;
-      return;
+      wallet = { kind: "standard", w: entry.w, account, address: account.address };
     }
-    if (latest?.readable && latest.claimableLamports > 0) $("claim").disabled = false;
-  } catch (e) { wallet = null; say("claimStatus", e.message, "err"); }
+    if (!wallet.address) throw new Error("the wallet connected but did not say which address");
+    refreshClaimButton();
+  } catch (e) { wallet = null; refreshClaimButton(); say("claimStatus", e.message, "err"); }
 }
 
 async function claim() {
-  if (!wallet || !latest) return;
+  /* Re-checked here as well as on the button: a disabled attribute is a hint, not a guard. */
+  if (refreshClaimButton() !== null) return;
   $("claim").disabled = true;
   try {
     say("claimStatus", "building the claim…");
@@ -192,7 +278,7 @@ async function claim() {
       tx.add(new W3.TransactionInstruction({
         programId: new W3.PublicKey(ix.programId),
         keys: ix.keys.map((k) => ({ pubkey: new W3.PublicKey(k.pubkey), isSigner: k.isSigner, isWritable: k.isWritable })),
-        data: Buffer.from(ix.data, "base64"),
+        data: fromBase64(ix.data),
       }));
     }
     say("claimStatus", `sign in your wallet — ${ticket.instructions.length} instructions`);
@@ -205,23 +291,20 @@ async function claim() {
         account: wallet.account, chain: "solana:mainnet",
         transaction: tx.serialize({ requireAllSignatures: false, verifySignatures: false }),
       });
-      signature = out.signature;
-      if (signature && typeof signature !== "string") {
-        const b58 = (await import("https://esm.sh/bs58@5.0.0")).default;
-        signature = b58.encode(signature);
-      }
+      signature = b58(out.signature);
     }
     say("claimStatus", `sent. ${signature}`, "ok");
     /* Re-read rather than assume: what landed is what the vaults now say, and an estimate booked as
-       a result is how a revenue line starts drifting from the wallet. */
-    setTimeout(read, 4000);
+       a result is how a revenue line starts drifting from the wallet. The read goes around the
+       desk's short cache, so the number after a claim is the chain's and not the one before it. */
+    setTimeout(() => read({ fresh: true }), 4000);
   } catch (e) {
+    refreshClaimButton();
     say("claimStatus", e.message, "err");
-    $("claim").disabled = false;
   }
 }
 
-$("read").addEventListener("click", read);
+$("read").addEventListener("click", () => read());
 $("connect").addEventListener("click", connect);
 $("claim").addEventListener("click", claim);
 read();

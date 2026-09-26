@@ -83,7 +83,7 @@ export const FEE_RECORD_KINDS = Object.freeze(["claim_skipped", "claim_would_hav
 /** Why a pass claimed nothing. Every one of these is a normal outcome, not an error. */
 export const SKIP_CLAUSES = Object.freeze([
   "no_creator",        // no coin's creator is this desk's wallet — nothing has ever accrued
-  "unreadable",        // neither vault could be read: unknown is not zero
+  "unreadable",        // a vault could not be read: unknown is not zero
   "below_floor",       // there is money there, but not enough to clear its own cost
   "not_live",          // dry run: decided, recorded, nothing signed
   "hard_stop",         // the desk's own sentinel; a claim is a signature like any other
@@ -106,6 +106,35 @@ export const FEE_LANE_DEFAULTS = Object.freeze({
   /* DRY BY DEFAULT. See the header. */
   live: false,
 });
+
+/**
+ * THE LANE'S NUMBERS FROM THE ENVIRONMENT, validated — and refused by name when they are not
+ * numbers this lane can run on.
+ *
+ * `Number(env value || default)` was the whole parser before, and it accepted everything:
+ * `FEE_CLAIM_INTERVAL_MS=30m` is NaN and `=0` is zero, and setInterval treats both as ~1ms, so a
+ * typo turned a half-hourly read into a flood of RPC calls on the connection the trading path
+ * shares. An unparseable floor was NaN, which made every `net < floor` comparison false and so
+ * behaved as a floor of zero. Both are refused now, at startup, with the value named.
+ */
+export const FEE_LANE_MIN_INTERVAL_MS = 60_000;
+export function feeLaneConfigFromEnv(env = {}) {
+  const read = (name, dflt, { min }) => {
+    const raw = env[name];
+    if (raw === undefined || raw === null || String(raw).trim() === "") return dflt;
+    const text = String(raw).trim();
+    if (!/^\d+$/.test(text))
+      throw new FeeLaneError("config_invalid", `${name}=${JSON.stringify(text)} is not a whole number`, { name, value: text });
+    const n = Number(text);
+    if (!Number.isSafeInteger(n) || n < min)
+      throw new FeeLaneError("config_invalid", `${name}=${text} is under the minimum of ${min}`, { name, value: n, min });
+    return n;
+  };
+  return Object.freeze({
+    intervalMs: read("FEE_CLAIM_INTERVAL_MS", FEE_LANE_DEFAULTS.intervalMs, { min: FEE_LANE_MIN_INTERVAL_MS }),
+    minNetLamports: read("FEE_CLAIM_MIN_NET_LAMPORTS", FEE_LANE_DEFAULTS.minNetLamports, { min: 0 }),
+  });
+}
 
 export class FeeLaneError extends Error {
   constructor(clause, message, detail = {}) {
@@ -161,10 +190,16 @@ export function feeClaimDecision({ claimable = null, cfg = {}, hardStop = false 
       message: "neither creator vault could be read. That is not the same fact as an empty vault, and this "
         + "lane will not spend a signature on a guess — it retries next pass" });
 
-  /* THE RENT THAT CANNOT BE MOVED, off the curve vault only. The pump-amm side is a token
-     account the claim closes, so its rent comes back in the same transaction. */
-  const curve = lamports(claimable.curveLamports) ?? 0;
-  const amm = lamports(claimable.ammLamports) ?? 0;
+  /* HALF A READING IS NOT A READING. `readable` is true when EITHER side answered, so a failed
+     curve read beside an AMM account that simply does not exist yet came through as "readable",
+     and `?? 0` then booked the unknown curve as a measured zero: a claim sized on half the
+     vaults, and a below_floor row reporting "0.000000 SOL" for money nobody had counted. */
+  const curve = lamports(claimable.curveLamports);
+  const amm = lamports(claimable.ammLamports);
+  if (curve === null || amm === null)
+    return Object.freeze({ ...base, clause: "unreadable", partial: true,
+      message: `the ${curve === null ? "bonding-curve" : "pump-amm"} vault could not be read, so what is claimable is `
+        + "unknown — the other side's figure is not the total, and this lane retries next pass rather than acting on half" });
   const curveClaimable = Math.max(0, curve - rent);
   const gross = curveClaimable + amm;
   const net = gross - cost;
@@ -241,6 +276,12 @@ export function createFeeLane({
   }
 
   const counters = { passes: 0, claimed: 0, skipped: 0, failed: 0, lamportsClaimed: 0, bookErrors: 0 };
+  /* WHAT IS SITTING IN THE VAULTS, as of the last read that could say. This is not revenue and
+     never becomes revenue by being reported: nothing is revenue until a claim lands, and on
+     this desk the claim is the owner's, signed at /fees.html. It is carried so the page can say
+     "this much is waiting" instead of showing the dry lane's permanent zero of claims as if it
+     were a measurement of income. */
+  const lastRead = { grossLamports: null, netLamports: null, atMs: null };
   const bySkipClause = {};
   for (const c of SKIP_CLAUSES) bySkipClause[c] = 0;
 
@@ -273,6 +314,11 @@ export function createFeeLane({
         claimable: claimable ?? (creator ? { creator, readable: false } : null),
         cfg: conf, hardStop: sentinels.hardStop === true,
       });
+      if (decision.grossLamports !== null && decision.grossLamports !== undefined) {
+        lastRead.grossLamports = decision.grossLamports;
+        lastRead.netLamports = decision.netLamports;
+        lastRead.atMs = clock();
+      }
 
       if (!decision.claim) {
         counters.skipped++;
@@ -323,6 +369,9 @@ export function createFeeLane({
         creator, wallet, intervalMs: conf.intervalMs,
         ...counters, skippedBy: Object.freeze({ ...bySkipClause }),
         solClaimed: counters.lamportsClaimed / LAMPORTS_PER_SOL,
+        claimableSol: lastRead.grossLamports === null ? null : lastRead.grossLamports / LAMPORTS_PER_SOL,
+        claimableNetSol: lastRead.netLamports === null ? null : lastRead.netLamports / LAMPORTS_PER_SOL,
+        claimableAtMs: lastRead.atMs,
       });
     },
   };

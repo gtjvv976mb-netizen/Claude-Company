@@ -155,15 +155,26 @@ export function measureSpike(samples, { nowMs, windowMs = DEFAULT_WINDOW_MS, bas
   const recentStart = at(recentFrom) ?? rows[0];
   const baseStart = at(baseFrom);
 
-  const perSec = (a, b) => {
+  /* A RATE IS INFLOW OVER THE WINDOW, NOT OVER THE GAP BETWEEN TWO SAMPLES. The reserve is
+     a level that holds between readings, so the level at each edge is exact and the inflow
+     across a window is end minus start — but the time that inflow took is the window,
+     however far apart the two boundary samples happen to sit. Dividing by the sample gap
+     instead made a 5 SOL buy at t-310s get spread across the hour of silence before it (a
+     2.7x "spike" on flow that was actually slowing, 0.78x) and made 4.5 SOL in the last ten
+     seconds of a quiet coin read 7.9x instead of 90x. A coin trading on a steady tick never
+     shows the difference, which is why only an uneven tape exposed it.
+
+     The one exception is the young coin above: its recent span is the life it has had, from
+     its first sample to now, because the seconds before it existed are not seconds of zero
+     flow. */
+  const perSec = (a, b, ms) => {
     if (!a || !b) return null;
-    const ms = b.at - a.at;
     if (!(ms > 0)) return null;
     return Number(b.q - a.q) / (ms / 1000);
   };
 
-  const recentRate = perSec(recentStart, latest);
-  const baselineRate = perSec(baseStart, recentStart);
+  const recentRate = perSec(recentStart, latest, nowMs - Math.max(recentFrom, rows[0].at));
+  const baselineRate = perSec(baseStart, recentStart, baselineMs);
   const netInflow = recentStart ? Number(latest.q - recentStart.q) : null;
 
   /* THE TRAP, handled. A baseline of zero inflow — a curve too young to have one, or one

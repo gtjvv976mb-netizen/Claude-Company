@@ -63,6 +63,44 @@ export const BAGWORK_FLOOR = Object.freeze({
 });
 
 /**
+ * THE HALF OF BAGWORK'S FLOOR A BONDING CURVE CAN ACTUALLY MEET — and the preset to run.
+ *
+ * Their four numbers were written for coins that have long since bonded, and two of them are
+ * physically out of reach on a curve, which is the only place this desk can buy:
+ *
+ *   minLiquidityUsd $30,000   a standard curve graduates at 85.005 SOL of real reserve, so the
+ *                             deepest a curve ever gets is ~$10,300 at SOL $121.69 (measured
+ *                             2026-09-26). Meeting $30k would need SOL above ~$353.
+ *   minMcapUsd      $50,000   a standard curve's market cap at the instant it graduates is
+ *                             ~410.9 SOL — $50,000 at exactly that SOL price, and reached only
+ *                             by the last buy before the coin leaves the curve for good.
+ *
+ * Measured the same day over the 70 most recently traded coins: 25 were on a curve, the
+ * deepest held 68 SOL, the richest was a $36k cap, and NONE of the five over an hour old
+ * cleared $50k of cap. So `bagwork` on this desk is not a strict floor, it is a floor with
+ * nothing above it — every candidate refused, forever, in a log that reads like an empty
+ * market.
+ *
+ * The other two are reachable and they carry the bet: older than an hour, and $50,000 of
+ * 24-hour volume. The same snapshot had on-curve coins at $110,756 (2.4h old), $97,857 (10.2h)
+ * and $69,878 of volume. That is the population "proven demand, still buyable here" names,
+ * so it is the preset the README recommends. `bagwork` stays, literal, for the day this desk
+ * can trade a bonded pool — and `curveReachability` below says so at startup whenever a
+ * floor asks a curve for more than a curve can hold.
+ */
+export const CURVE_FLOOR = Object.freeze({
+  minAgeHours: 1,
+  minVolume24hUsd: 50_000,
+});
+
+/** The named presets SNIPE_MARKET_FLOOR admits. "off" is the absence of one. */
+export const MARKET_FLOOR_PRESET_VALUES = Object.freeze({
+  off: Object.freeze({}),
+  curve: CURVE_FLOOR,
+  bagwork: BAGWORK_FLOOR,
+});
+
+/**
  * WHAT THIS DESK ADDS, AND WHY EACH ONE EARNS ITS PLACE.
  *
  * Their floor is four thresholds on four numbers, and every one of those numbers can be
@@ -220,16 +258,19 @@ export function marketFacts({ listing = null, curve = null, pairs = null, solUsd
   const liquiditySol = realQuoteRaw === null ? null : Number(realQuoteRaw) / LAMPORTS;
   const liquidityUsd = liquiditySol !== null && sol !== null ? liquiditySol * sol : null;
 
-  /* MARKET CAP, the venue's own USD figure. Cross-checked against DexScreener below when
-     both are present, because a market cap is supply x price and this venue quotes some
-     curves in mints other than SOL — a case already proved on mainnet in the venue adapter. */
-  const mcapUsd = nonNeg(row.usd_market_cap ?? row.market_cap_usd);
-
   /* THE DEXSCREENER HALF. Solana pairs only, sorted deepest first, and every figure summed
      ACROSS pools except the ones that are only meaningful per pool. */
   const list = Array.isArray(pairs) ? pairs.filter((p) => isPlainObject(p) && p.chainId === "solana") : null;
-  const depths = list === null ? null : list.map((p) => nonNeg(p.liquidity?.usd)).filter((x) => x !== null);
-  const topPoolLiquidityUsd = depths === null || !depths.length ? null : Math.max(...depths);
+
+  /* THE CURVE IS A POOL. For an on-curve coin it is THE pool — DexScreener lists a pumpfun
+     pair with `liquidity` absent altogether (measured 2026-09-26 on every on-curve coin
+     sampled), so a top-pool figure read from pair depths alone was null for every coin this
+     desk can buy, and an armed minTopPoolLiquidityUsd refused all of them as "could not be
+     measured". The curve's own real reserve is the depth a seller actually meets, so it
+     stands beside whatever pools DexScreener does report and the deepest one wins. */
+  const depths = list === null ? [] : list.map((p) => nonNeg(p.liquidity?.usd)).filter((x) => x !== null);
+  if (liquidityUsd !== null) depths.push(liquidityUsd);
+  const topPoolLiquidityUsd = depths.length ? Math.max(...depths) : null;
   const vols = list === null ? null : list.map((p) => nonNeg(p.volume?.h24)).filter((x) => x !== null);
   const volume24hUsd = vols === null || !vols.length ? null : vols.reduce((a, b) => a + b, 0);
 
@@ -252,6 +293,25 @@ export function marketFacts({ listing = null, curve = null, pairs = null, solUsd
     : list.reduce((a, b) => ((nonNeg(b.liquidity?.usd) ?? -1) > (nonNeg(a.liquidity?.usd) ?? -1) ? b : a));
   const priceChange24hPct = deepest === null ? null : num(deepest.priceChange?.h24);
 
+  /* MARKET CAP: the venue's own USD figure first, DexScreener's when the venue gave none — a
+     launch notice carries no listing row, and the pre-filter keeps a row whose cap is unknown
+     precisely BECAUSE the gate can still measure it here. Until 2026-09-26 it could not: the
+     DexScreener figure was computed, carried, and never used, so the pre-filter's reason for
+     keeping those rows was false.
+
+     TWO CAPS THAT DISAGREE BY MORE THAN 3x mean one of them is measuring something else — a
+     curve quoted in a mint other than SOL, a stale pool — and a floor that picked the
+     friendlier of the two would not be a floor. So the SMALLER one is judged, the disagreement
+     is stamped on the facts, and the shadow row keeps both. */
+  const venueMcapUsd = nonNeg(row.usd_market_cap ?? row.market_cap_usd);
+  const dexMcapUsd = deepest === null ? null : nonNeg(deepest.marketCap ?? deepest.fdv);
+  const mcapDisagreement = venueMcapUsd !== null && dexMcapUsd !== null && venueMcapUsd > 0 && dexMcapUsd > 0
+    && Math.max(venueMcapUsd, dexMcapUsd) / Math.min(venueMcapUsd, dexMcapUsd) > 3;
+  const mcapUsd = mcapDisagreement ? Math.min(venueMcapUsd, dexMcapUsd) : (venueMcapUsd ?? dexMcapUsd);
+  const mcapSource = mcapUsd === null ? null
+    : mcapDisagreement ? (mcapUsd === venueMcapUsd ? "venue(lower)" : "dexscreener(lower)")
+      : (venueMcapUsd !== null ? "venue" : "dexscreener");
+
   return Object.freeze({
     mint: typeof row.mint === "string" ? row.mint : (typeof curve?.mint === "string" ? curve.mint : null),
     ageHours, mcapUsd, liquidityUsd, topPoolLiquidityUsd,
@@ -260,10 +320,7 @@ export function marketFacts({ listing = null, curve = null, pairs = null, solUsd
        keeps the inputs beside the verdict. */
     liquiditySol, solUsd: sol, solUsdSource, createdAtMs, pools: list === null ? null : list.length,
     onCurve: row.complete === undefined ? null : row.complete !== true,
-    /* THE DISAGREEMENT, REPORTED. Two independent market caps that differ by more than 3x
-       mean one of them is measuring something else — a non-SOL-quoted curve, a stale pool —
-       and a floor that silently picks the friendlier one is not a floor. */
-    dexMcapUsd: deepest === null ? null : nonNeg(deepest.marketCap ?? deepest.fdv),
+    venueMcapUsd, dexMcapUsd, mcapSource, mcapDisagreement,
   });
 }
 
@@ -457,31 +514,84 @@ export function floorIsArmed(floor) {
  *
  * The default pairing works, and it works BY COINCIDENCE: two constants chosen for unrelated
  * reasons happen to sit the right way round. An operator lowering the age floor to a quarter of
- * an hour — a completely reasonable thing to try — would get a momentum source that delivers
- * nothing at all, reports no error, and looks exactly like a dead API or a broken pre-filter.
+ * an hour — a completely reasonable thing to try — would get a momentum source that silently
+ * delivers only its older candidates and looks, for the younger ones, exactly like a quiet
+ * market.
  *
- * So it is refused at startup with both numbers named. This is the same posture the gRPC pair
- * already takes for a half-configured endpoint: a lane that stops and says why beats a lane
- * that runs and silently does less than the operator believes.
+ * WHAT IS LOST IS A BAND, NOT EVERYTHING — the first version of this guard said "the source
+ * would deliver nothing" and refused the whole lane, which overstated it: a coin the launch
+ * sources saw 45 minutes ago has aged out of a 30-minute ledger and arrives normally. What is
+ * swallowed is the band between the age floor and the window, and only for coins a launch
+ * source actually heard. So this is a WARNING the poller logs with both numbers named, not a
+ * refusal: a lane that runs and says precisely what it is not seeing beats a lane that will not
+ * start over a partial loss.
+ *
+ * NO AGE FLOOR IS AN AGE FLOOR OF ZERO. With the source mounted and nothing selecting on age —
+ * a volume-only floor, or the spike dial on its own — the whole first half hour is the
+ * swallowed band, and returning "no conflict" there was the second half of the same mistake.
  */
 export function momentumDedupeConflict({ minAgeHours = null, dedupeTtlMs = null } = {}) {
-  const hours = num(minAgeHours);
+  const hours = num(minAgeHours) ?? 0;
   const ttl = num(dedupeTtlMs);
-  /* No age floor means the momentum source is not selecting on age at all, so there is nothing
-     for the window to cancel out. An unknown TTL is not assumed. */
-  if (hours === null || ttl === null || !(ttl > 0)) return null;
-  const ageMs = hours * 3_600_000;
+  /* An unknown TTL is not assumed. */
+  if (ttl === null || !(ttl > 0)) return null;
+  const ageMs = Math.max(0, hours) * 3_600_000;
   if (ageMs >= ttl) return null;
   const mins = (ms) => `${Math.round(ms / 60_000)} minute${Math.round(ms / 60_000) === 1 ? "" : "s"}`;
+  const from = ageMs > 0 ? `${mins(ageMs)} and ${mins(ttl)}` : `0 and ${mins(ttl)}`;
   return Object.freeze({
     clause: "momentum_dedupe_conflict",
+    severity: "warning",
     minAgeHours: hours, minAgeMs: ageMs, dedupeTtlMs: ttl,
-    message: `SNIPE_MIN_AGE_HOURS=${hours} asks the momentum source for coins ${mins(ageMs)} old, but the `
-      + `feed remembers every mint it has seen for ${mins(ttl)} — so every candidate would still be held `
-      + "in the dedupe ledger from its own launch and would be dropped as a duplicate before any gate ran. "
-      + "The source would deliver nothing, report no error, and look exactly like a dead API. Raise "
-      + `SNIPE_MIN_AGE_HOURS to at least ${(ttl / 3_600_000).toFixed(2)}, or turn the floor off.`,
+    message: `the momentum source can deliver candidates aged ${ageMs > 0 ? `${mins(ageMs)} and up` : "from 0"}, but the `
+      + `feed remembers every mint it has seen for ${mins(ttl)} — so a coin aged between ${from} that a launch `
+      + "source already heard is dropped as a duplicate before any gate runs, and never reaches market_floor or "
+      + "volume_spike. Older candidates arrive normally. To see the whole band, raise SNIPE_MIN_AGE_HOURS to at "
+      + `least ${(ttl / 3_600_000).toFixed(2)} (SNIPE_MARKET_FLOOR=curve does).`,
   });
+}
+
+/**
+ * WHICH THRESHOLDS A BONDING CURVE CANNOT MEET, stated at startup with the SOL price each one
+ * would need. See CURVE_FLOOR for the measurement. Uses the STANDARD curve (85.005 SOL of real
+ * reserve at graduation, ~410.9 SOL of market cap) — boosted and mini curves graduate elsewhere,
+ * so this is a warning about the common case and never a gate: nothing here refuses a trade.
+ */
+export const STANDARD_CURVE_GRADUATION_SOL = 85.005;
+export const STANDARD_CURVE_GRADUATION_MCAP_SOL = 410.9;
+export function curveReachability(floor) {
+  if (!isPlainObject(floor)) return Object.freeze([]);
+  const out = [];
+  const say = (key, bar, solAtMax, what) => {
+    const needed = bar / solAtMax;
+    out.push(Object.freeze({ key, threshold: bar, solUsdNeeded: needed,
+      message: `${key}=${bar} needs ${what}: a standard curve tops out at ${solAtMax} SOL, so this is `
+        + `reachable only while SOL is above $${needed.toFixed(0)} — and on this desk, which buys only on a curve, `
+        + "a threshold no curve can meet refuses every candidate. SNIPE_MARKET_FLOOR=curve keeps the half that can." }));
+  };
+  const liq = num(floor.minLiquidityUsd);
+  if (liq !== null && liq > 0) say("minLiquidityUsd", liq, STANDARD_CURVE_GRADUATION_SOL, "that much real SOL in the curve");
+  const top = num(floor.minTopPoolLiquidityUsd);
+  if (top !== null && top > 0) say("minTopPoolLiquidityUsd", top, STANDARD_CURVE_GRADUATION_SOL, "that much depth in one pool");
+  const cap = num(floor.minMcapUsd);
+  if (cap !== null && cap > 0) say("minMcapUsd", cap, STANDARD_CURVE_GRADUATION_MCAP_SOL, "that market cap");
+  return Object.freeze(out);
+}
+
+/**
+ * WHETHER AGE ALONE ALREADY REFUSES THIS CANDIDATE — the one floor fact that costs nothing.
+ *
+ * The lane starts the DexScreener read beside the account read so the floor costs the slower
+ * of the two. With a floor armed, that meant a request for every launch notice (~29 a minute)
+ * to learn facts about coins the age rule was always going to refuse from the notice's own
+ * timestamp. True only when the age is KNOWN and under the bar: an unknown age is left to the
+ * gate, which refuses it by name.
+ */
+export function ageAloneRefuses(floor, { listing = null, createdAtMs = null, nowMs = null } = {}) {
+  const bar = num(floor?.minAgeHours);
+  if (bar === null) return false;
+  const { ageHours } = marketFacts({ listing, createdAtMs, nowMs });
+  return ageHours !== null && ageHours < bar;
 }
 
 export const SNIPE_MARKET_VERSION = "snipe-market-v1";
@@ -538,8 +648,9 @@ export function prefilterListingRow(row, floor = {}, { nowMs = Date.now() } = {}
   if (minMcap !== null) {
     const mcap = nonNeg(row.usd_market_cap ?? row.market_cap_usd);
     /* An unknown market cap is NOT dropped here. Unlike age, the gate can still measure it
-       from DexScreener, so dropping it now would refuse a candidate the floor might have
-       judged on better evidence. Only a mcap that is KNOWN and under the bar is dropped. */
+       from DexScreener (marketFacts falls back to the deepest pair's cap), so dropping it now
+       would refuse a candidate the floor might have judged on better evidence. Only a mcap
+       that is KNOWN and under the bar is dropped. */
     if (mcap !== null && mcap < minMcap) return { clause: "under_mcap", mint: row.mint, mcapUsd: mcap, threshold: minMcap };
   }
   return null;

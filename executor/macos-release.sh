@@ -168,19 +168,30 @@ case "$COMMAND" in
       # It is a REFUSAL rather than a no-op on purpose: overwriting a release that launchd
       # may currently be running is how a live bot gets its code changed underneath it. But
       # a refusal that does not say what to do instead is a refusal that gets fought.
+      #
+      # AND WHEN IT FIRES FROM install.sh, THE BOT IS STOPPED. install.sh refuses to run at all
+      # while the LaunchAgent is loaded (darwin_preflight_label), so by the time this line is
+      # reached the agent is down — unloaded by the previous attempt's rollback, or by hand to
+      # get past the preflight. The first version of this message told the owner there was
+      # nothing to be done, and named the controller one directory too high (the clone root, not
+      # its executor/), so the one command that would have restarted the bot failed with "No such
+      # file" and the bot stayed stopped with open positions nobody was managing.
       fail "$(printf 'this commit is already installed at %s
 ' "$FINAL_RELEASE")$(printf '
-Nothing is wrong and nothing needs reinstalling: a versioned release is named after its
-commit, so re-running the installer at the SAME commit always lands here. It is refused
-rather than overwritten because launchd may be running that code right now.
+That release does not need reinstalling: a versioned release is named after its commit, so
+re-running the installer at the SAME commit always lands here. It is refused rather than
+overwritten because launchd may be running that code.
 
-What you probably want instead:
-  - already running this commit and it is healthy -> nothing to do
-  - it is loaded but you want it restarted        -> bash %s/macos-launchagent.sh unload
-                                                    bash %s/macos-launchagent.sh load
-  - you want to install a DIFFERENT commit        -> check out that commit and re-run
-  - this release really is damaged                -> remove it deliberately, with the agent
-                                                    unloaded first, then re-run
+If you ran install.sh, YOUR BOT IS NOT RUNNING RIGHT NOW: the installer only gets this far
+with the LaunchAgent unloaded. Start this commit with:
+
+  bash %s/executor/macos-launchagent.sh load
+  bash %s/executor/macos-launchagent.sh status
+
+Other cases:
+  - you want to install a DIFFERENT commit -> check out that commit and re-run
+  - this release really is damaged         -> remove it deliberately, with the agent
+                                              unloaded first, then re-run
 ' "$FINAL_RELEASE" "$FINAL_RELEASE")"
     fi
     STAGE_PARENT="$(mktemp -d "$RELEASES_DIR/.staging.XXXXXXXX")"

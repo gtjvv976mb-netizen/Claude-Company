@@ -270,22 +270,36 @@ export function strategyAsEnv(strategy) {
 export function agentView({
   floor = null, name = null, operator = null, live = null,
   closedTrades = null, wins = null, realizedSol = null,
-  /* HOW MANY OF THOSE TRADES HAVE A KNOWN RESULT, which is not the same as how many closed.
-     The bot's book reports `wins` and `losses` only for closures whose realised number could be
-     read from the chain; the rest are `unknown`. Dividing wins by ALL closed trades therefore
-     counts every unreadable closure as a loss and understates the record — quietly, and in the
-     direction that holds a desk at a lower level than it earned. When it is not supplied the
-     denominator falls back to the closed count, which is right when nothing is unknown. */
-  counted = null,
+  /* THE DENOMINATOR, AS THE BOT ACTUALLY DEFINES IT. `wins` and `losses` cover only the
+     closures whose realised number is on the ledger; the rest are `unknown`. The first version
+     of this function divided by the book's `counted`, believing it meant "readable" — the bot
+     sends it as "rows the tally covers", unknowns included — so every unreadable close was
+     counted as a loss: 5 wins of 41 readable showed as 5 of 64. `losses` and `unknown` are
+     taken as sent; `counted` survives only as the fallback for a bot that sends neither. */
+  losses = null, unknown = null, counted = null,
+  /* WHETHER THE TALLY COVERS EVERY TRADE. A bot that predates snipeExitTotals tallied its last
+     200 closes and sent that beside a lifetime count. A window is not a record: a desk that lost
+     money on its first 800 trades and made some on its last 200 read as profitable, and cleared
+     rungs the ladder says it never would. So a partial tally shows its figures but does not
+     advance the level. */
+  recordComplete = null,
   feeSol = null, feeClaims = null, feeComplete = null,
+  /* WHAT IS WAITING IN THE VAULTS — not revenue, and never summed into anything. */
+  feeClaimableSol = null, feeClaimableAtMs = null,
   rewardSol = null, strategy = null, updatedAtMs = null,
 } = {}) {
   const closed = num(closedTrades);
   const won = num(wins);
-  const judged = num(counted) ?? closed;
-  const winRate = judged !== null && judged > 0 && won !== null ? won / judged : null;
-  const realized = num(realizedSol);
-  const level = agentLevel({ closedTrades: closed, realizedSol: realized, winRate });
+  const lost = num(losses);
+  const readable = won !== null && lost !== null ? won + lost : (num(counted) ?? closed);
+  const winRate = readable !== null && readable > 0 && won !== null ? won / readable : null;
+  /* A SUM OVER NOTHING IS NOT A BREAK-EVEN. With no readable close the realised figure is
+     unknown whatever number arrived beside it, and a zero is enough to clear the ladder's
+     "at least 0 SOL" rung. */
+  const realized = readable === 0 ? null : num(realizedSol);
+  const partial = recordComplete === false;
+  const level = agentLevel({ closedTrades: closed, realizedSol: partial ? null : realized, winRate: partial ? null : winRate });
+  const unmeasured = num(unknown) ?? (closed !== null && readable !== null ? Math.max(0, closed - readable) : null);
 
   return Object.freeze({
     floor: num(floor),
@@ -296,16 +310,25 @@ export function agentView({
     operator: typeof operator === "string" && operator ? operator : null,
     live: live === true ? true : (live === false ? false : null),
 
-    closedTrades: closed, wins: won, winRate,
+    closedTrades: closed, wins: won, losses: lost, winRate,
     /* Reported, so a page can say "5 of 41 measurable closures" rather than implying the rate
        was computed over everything. */
-    countedTrades: judged, unmeasuredTrades: closed !== null && judged !== null ? Math.max(0, closed - judged) : null,
+    countedTrades: readable, unmeasuredTrades: unmeasured,
+    recordComplete: recordComplete === true ? true : (recordComplete === false ? false : null),
+    recordNote: partial
+      ? "this bot tallied only its most recent closes, not its whole record, so the level is held until it "
+        + "reports the whole record — upgrading the bot fixes it"
+      : null,
     /* TRADING, ON ITS OWN. */
     tradingSol: realized,
-    /* REVENUE, ON ITS OWN. `feeComplete: false` means at least one claim's amount was never
-       reported, so the figure is a floor rather than a total — and the page has to say so. */
+    /* REVENUE, ON ITS OWN — claims that LANDED, and null when nothing on this desk records them
+       (the dry lane never claims; the owner signs at /fees.html). `feeComplete: false` means at
+       least one landed claim's amount was never reported, so the figure is a floor. */
     feeSol: num(feeSol), feeClaims: num(feeClaims),
     feeSolComplete: feeComplete === true ? true : (feeComplete === false ? false : null),
+    /* WAITING, NOT EARNED: what the last vault read found. Its own field, never folded into
+       feeSol, because money in a vault nobody has claimed is not revenue yet. */
+    feeClaimableSol: num(feeClaimableSol), feeClaimableAtMs: num(feeClaimableAtMs),
     /* THE HOUSE'S REWARDS, ON THEIR OWN. */
     rewardSol: num(rewardSol),
 

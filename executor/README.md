@@ -1436,6 +1436,17 @@ FEE_CLAIM=dry
 FEE_CLAIM_CREATOR=3J57tqAJqRmSBn1ZYDu9JpMMyTfBHdcGGwECiPQeiji3
 ```
 
+All three are **validated at startup** and refused by name: a creator that is not a Solana
+address, an interval that is not a whole number of milliseconds of at least 60000, or a floor
+that is not a whole number of lamports. (`FEE_CLAIM_INTERVAL_MS=30m` used to parse as NaN, which
+`setInterval` treats as ~1 ms — an RPC flood on the connection the trading path shares.) A read
+where one vault answered and the other did not is `unreadable`, never "the half that answered
+is all there is".
+
+What the agent page shows is two separate things: **claimed** — what landed, which is a dash on
+this desk because the owner signs and the desk does not record it — and **waiting**, what the
+last read found in the vaults. Waiting is not revenue and is never summed into anything.
+
 The claim itself is two clicks at `solana.claudedotcompany.com/fees.html`: connect the creator
 wallet, sign. The page refuses to offer a claim from any other wallet, because only the creator's
 signature can send it and finding that out on chain is a worse way to learn it.
@@ -1455,15 +1466,31 @@ no demand to measure, so there is nothing to be right about. A floor is the oppo
 refuses to be first and insists on evidence.
 
 ```bash
-SNIPE_MARKET_FLOOR=bagwork    # their four measured numbers, wholesale
+SNIPE_MARKET_FLOOR=curve      # the two of their four a bonding curve can meet — RUN THIS ONE
 ```
 
-| Variable | Their value | Purpose |
-|---|---:|---|
-| `SNIPE_MIN_AGE_HOURS` | 1 | The coin must have existed this long |
-| `SNIPE_MIN_LIQUIDITY_USD` | 30000 | Real SOL in the curve — what a seller can actually get out |
-| `SNIPE_MIN_VOLUME_24H_USD` | 50000 | Traded volume over the last day |
-| `SNIPE_MIN_MCAP_USD` | 50000 | Market capitalisation |
+| Variable | Their value | `curve` | Purpose |
+|---|---:|---:|---|
+| `SNIPE_MIN_AGE_HOURS` | 1 | 1 | The coin must have existed this long |
+| `SNIPE_MIN_LIQUIDITY_USD` | 30000 | — | Real SOL in the curve — what a seller can actually get out |
+| `SNIPE_MIN_VOLUME_24H_USD` | 50000 | 50000 | Traded volume over the last day |
+| `SNIPE_MIN_MCAP_USD` | 50000 | — | Market capitalisation |
+
+#### Why not `bagwork`: two of their numbers are out of reach on a curve
+
+`SNIPE_MARKET_FLOOR=bagwork` loads their four numbers literally, and **on this desk it admits
+nothing.** Their floor was written for coins that bonded long ago; this desk can only buy on a
+bonding curve, and a standard curve graduates at **85.005 SOL** of real reserve — about **$10,300**
+at the SOL price measured on 2026-09-26 ($121.69). Their $30,000 liquidity bar needs SOL above
+~$353 for *any* curve to meet it. Their $50,000 cap is reached only by the last buy before a coin
+leaves the curve for good (~410.9 SOL of cap at graduation).
+
+Measured the same day over the 70 most recently traded coins: 25 were on a curve, the deepest
+held 68 SOL, the richest was a $36k cap, and none of the five over an hour old cleared $50k of cap.
+Volume is different — on-curve coins did $110,756 (2.4 h old), $97,857 (10.2 h) and $69,878 of
+24-hour volume — so the two thresholds a curve *can* meet carry the bet, and that is the `curve`
+preset. `bagwork` stays, literal, for the day this desk can trade a bonded pool, and the lane
+prints a startup WARNING naming every threshold no curve can reach and the SOL price it would need.
 
 Each dial overrides one threshold of the preset. **A dial set on its own arms a floor of
 exactly that dial** and nothing else — inheriting three thresholds you never typed is how a
@@ -1475,14 +1502,21 @@ Nothing here adds a request to the path that buys.
 
 - **age** — the venue's own `created_timestamp`, off the listing row.
 - **liquidity** — the curve's real quote reserve × SOL/USD. For a bonding curve this is not a
-  proxy for depth, it *is* the depth. The lane already read the curve.
-- **market cap** — the venue's own `usd_market_cap`, off the same row.
+  proxy for depth, it *is* the depth. The lane already read the curve. It also counts as a pool
+  for `SNIPE_MIN_TOP_POOL_LIQUIDITY_USD`: DexScreener lists on-curve pumpfun pairs with no
+  liquidity field at all, so a top-pool figure from pairs alone was unknown for every coin this
+  desk can buy.
+- **market cap** — the venue's own `usd_market_cap`, off the same row; DexScreener's when the row
+  carries none (a launch notice has no row). When the two disagree by more than 3x the **smaller**
+  is judged and the disagreement is stamped on the facts.
 - **SOL/USD** — derived from the same DexScreener response, WSOL-quoted pools only, as the
   median of `priceUsd / priceNative`. No oracle call, no cache. Wire `solUsdReader` to use the
   desk's verified Pyth price instead; a supplied price always wins, and which one was used is
   reported on the facts, because a depth figure is only as good as its denominator.
 - **24h volume** — DexScreener, the only source for it, and the one request this costs. Paid
-  only for candidates that already cleared the three free facts.
+  only for candidates that already cleared the three free facts — and never for a coin whose
+  age alone already fails the floor, which with an age floor armed is every launch notice
+  (~29 a minute that used to be fetched for nothing; the lane counts them as `marketReadsSkipped`).
 
 **Unknown is never zero.** `Number(null)` is `0`, and this desk has shipped that bug once
 already — a creator-fee vault read that failed came back as a confident "empty". Here it would
@@ -1524,7 +1558,16 @@ and what it drops is counted by clause — a source quietly returning two rows o
 looks identical to a dead market and to a broken filter, and those need opposite responses.
 Age and market cap are treated differently on purpose: unknown age is dropped, because the
 floor exists so this bot stops buying coins whose age it does not know, while unknown market
-cap is kept, because the gate can still measure it from better evidence.
+cap is kept, because the gate can still measure it from DexScreener.
+
+The drop tally rides the heartbeat as `snipe.momentum` (arrived, survived, and the count per
+clause), and a poll that **answers** counts as proof the source is alive even when the
+pre-filter keeps nothing — before that, a correctly-working source under an armed floor was
+reported `DEAD` after five minutes of keeping 0 of 70 rows.
+
+Its candidates are listing rows, which carry their metadata link as `metadata_uri`; the socials
+filter reads that field too. It used to read only a create event's `uri`, so with the filter on
+(the default) every momentum candidate was refused at `no_socials` before the floor ever saw it.
 
 #### One interaction worth knowing about
 
@@ -1535,14 +1578,16 @@ position the lane can hold, or a mint re-enters as a fresh launch while it is st
 
 The shipped pairing works: a one-hour age floor against a thirty-minute window means every
 candidate has aged out. But it works **by coincidence** — two constants chosen for unrelated
-reasons that happen to sit the right way round. `SNIPE_MIN_AGE_HOURS=0.25` is a reasonable thing
-to try, and every candidate would still be held in the ledger from its own launch and dropped as
-a duplicate *before any gate ran*: a source delivering nothing, reporting no error, looking
-exactly like a dead API.
+reasons that happen to sit the right way round. With `SNIPE_MIN_AGE_HOURS=0.25`, a candidate aged
+between 15 and 30 minutes that a launch source already heard is still held in the ledger from
+its own launch and dropped as a duplicate *before any gate runs*. Older candidates arrive
+normally, so what is lost is a band, not the source. With no age floor at all (a volume-only
+floor, or the spike dial on its own) the band is the whole first half hour.
 
-So an age floor under the dedupe window is **refused at startup**, with both numbers named and
-the value to raise it to. Same posture as the gRPC pair: a lane that stops and says why beats a
-lane that runs and silently does less than its operator believes.
+So the lane prints a **startup WARNING** naming the band and the value to raise the age floor to.
+It is a warning rather than a refusal because the source still delivers everything older — an
+earlier version refused the whole lane over it, claiming the source "would deliver nothing",
+which overstated it.
 
 #### The honest limit
 
@@ -1589,6 +1634,21 @@ reserve levels.
 |---|---:|---|
 | `SNIPE_MIN_VOLUME_SPIKE` | unset | Net inflow must be at least this multiple of the coin's own baseline. Unset means **measure only** |
 
+**A launch can never be measured, by construction.** A spike is 30 seconds of flow against the 5
+minutes before it, and a launch notice is judged within 30 seconds of the coin's birth — there is
+no before. So the spike is judged on coins that are **already trading**: setting
+`SNIPE_MIN_VOLUME_SPIKE` mounts the momentum source (the same one the market floor uses) whether or
+not a floor is armed, and every launch notice is then refused at `volume_spike` for want of a
+baseline, which is exactly the "stop sniping, ride the wave" the owner asked for. Their history
+comes only from the gRPC trade tap, so the dial **refuses to start without `SNIPE_GRPC_*`** rather
+than refusing every candidate in a log that reads like a market where nothing moved. The tap's
+and the tape's own counters ride the heartbeat as `snipe.flow`.
+
+The rate is inflow over the **window**, not over the gap between two readings: a coin that trades
+in bursts has readings far apart, and dividing by the gap called a slowing coin a 2.7x spike and
+read a 90x wave as 7.9x. Pair it with `SNIPE_MARKET_FLOOR=curve` so the candidates are an hour old
+and every one of them has a full baseline on the tape.
+
 **A brand-new curve has no baseline, and that is the whole trap.** Divide by it and every
 fresh launch reads as an infinite spike — so a naive version of this gate fires on every new
 launch while calling itself a volume signal. On this burner's own 64 trades that is the
@@ -1603,9 +1663,11 @@ flow, and reads quiet here. And a falling reserve reports a **negative** number 
 being clamped to zero, because "everyone is leaving" and "nothing is happening" are the two
 facts a holder most needs to tell apart.
 
-Like `creator_profile` and `launch_share`, it ships **unset**: measured on every launch,
-recorded in the shadow book, scored by `grade-entry-gates.mjs` against launches whose outcome
-is already known. Arm it only once a scorecard has justified a number:
+Like `creator_profile` and `launch_share`, it ships **unset**: measured on every candidate,
+recorded in the shadow book, scored by `grade-entry-gates.mjs` against candidates whose outcome
+is already known. On a book of launches it measures nothing, so the grader leaves it out of the
+verdict by name (`NOT IN THE VERDICT: volume_spike`) instead of holding the "no edge" reading open
+forever. Arm it only once a scorecard has justified a number:
 
 ```bash
 SNIPE_MIN_VOLUME_SPIKE=2     # demand twice the coin's own baseline

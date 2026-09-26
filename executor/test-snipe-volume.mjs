@@ -155,6 +155,43 @@ console.log("\nthe measurement itself");
   ok("a wider recent window dilutes a 30s burst", tight.spike > wide.spike, `${tight.spike} > ${wide.spike}`);
 }
 
+console.log("\nan uneven tape: rates are per WINDOW, not per gap between samples");
+{
+  /* THE BUG THIS PINS. Every case above is a steady 1s tick, where the gap between two
+     boundary samples IS the window, so dividing by either gives the same number. A coin the
+     momentum source delivers trades in bursts, and there the two diverge badly. Points are
+     [seconds before now, SOL level]; the last one is the lane's own read at `now`. */
+  const NOW = 10_000_000;
+  const tape = (pts) => pts.map(([ago, sol]) => ({ atMs: NOW - ago * 1000, quoteRaw: String(Math.round(sol * 1e9)) }));
+
+  /* A: a 5 SOL buy at t-310s after an hour of silence, then a trickle. The level at t-330 is
+     5, at t-30 is 10.1, at t is 10.5 — baseline 5.1 SOL over 300s, recent 0.4 SOL over 30s.
+     The flow is SLOWING (0.78x). Dividing by sample gaps instead spread the baseline's 5 SOL
+     across the hour of nothing before it and called this a 2.7x spike. */
+  const a = measureSpike(tape([[3600, 5], [310, 10], [100, 10.1], [5, 10.5], [0, 10.5]]), { nowMs: NOW });
+  ok("a burst followed by a trickle reads as slowing, not as a spike",
+    a.spike !== null && Math.abs(a.spike - (0.4 / 30) / (5.1 / 300)) < 0.01, String(a.spike));
+  ok("the recent rate is the window's inflow over the window",
+    Math.abs(a.recentLamportsPerSec - 0.4e9 / 30) < 1, String(a.recentLamportsPerSec));
+  ok("the baseline rate is the baseline's inflow over the baseline",
+    Math.abs(a.baselineLamportsPerSec - 5.1e9 / 300) < 1, String(a.baselineLamportsPerSec));
+  ok("net inflow and the recent rate now agree with each other",
+    Math.abs(a.recentLamportsPerSec * 30 - a.netInflowLamports) < 10, `${a.recentLamportsPerSec * 30} vs ${a.netInflowLamports}`);
+
+  /* B: a quiet coin (0.5 SOL at t-320s) takes 4.5 SOL in the last ten seconds. That IS the
+     wave: 4.5/30 against 0.5/300 is 90x. Divided by sample gaps it was 7.9x, and a floor of 10
+     would have refused exactly what the owner asked this gate to catch. */
+  const b = measureSpike(tape([[600, 10], [320, 10.5], [10, 15], [0, 15]]), { nowMs: NOW });
+  ok("a sudden wave on a quiet coin reads at its full size",
+    b.spike !== null && Math.abs(b.spike - 90) < 0.01, String(b.spike));
+  ok("and clears a floor of 10 that the gap-divided number refused", b.spike >= 10);
+
+  /* C: nothing traded in the last 30s. Under the level model that is a measured zero for the
+     recent window, not an unknown — the edge sample says where the reserve stood. */
+  const c = measureSpike(tape([[900, 10], [320, 11], [200, 12], [0, 12]]), { nowMs: NOW });
+  ok("a coin that went quiet measures a zero recent rate, not null", c.recentLamportsPerSec === 0 && c.spike === 0, String(c.spike));
+}
+
 console.log("\nthe tape holds a baseline even for the coins that trade hardest");
 {
   /* THE BUG THIS PINS. The tape is fed by trade events, so a hot coin produces samples far

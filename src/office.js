@@ -471,7 +471,12 @@ export function sanitizeExecutorReporting(value) {
 export function sanitizeExecutorFees(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const modes = new Set(["off", "dry", "live"]);
-  const mode = modes.has(String(value.mode)) ? String(value.mode) : "off";
+  /* AN UNRECOGNISED MODE IS NOT "OFF". The executor reports whatever FEE_CLAIM said, beside
+     the error that stopped the lane starting — `FEE_CLAIM=dyr` arrives as mode "dyr" with
+     "is not one of off, dry, live". Mapping that to "off" and returning early dropped the
+     error too, and "asked for, never started" is the one case this block exists to show. */
+  const raw = String(value.mode ?? "");
+  const mode = modes.has(raw) ? raw : "invalid";
   if (mode === "off") return { mode: "off", running: false };
   const count = (input) => Math.min(1_000_000, Math.max(0, Math.floor(Number(input) || 0)));
   const sol = (input) => {
@@ -490,6 +495,11 @@ export function sanitizeExecutorFees(value) {
       passes: count(st.passes), claimed: count(st.claimed),
       failed: count(st.failed), skipped: count(st.skipped),
       solClaimed: sol(st.solClaimed),
+      /* Waiting in the vaults, NOT revenue: null when no read could say, never a coerced 0. */
+      claimableSol: st.claimableSol === null || st.claimableSol === undefined
+        || !Number.isFinite(Number(st.claimableSol)) || Number(st.claimableSol) < 0
+        ? null : Math.min(1_000_000, Number(st.claimableSol)),
+      claimableAt: Number.isSafeInteger(Number(st.claimableAt)) && Number(st.claimableAt) > 0 ? Number(st.claimableAt) : null,
       bookErrors: count(st.bookErrors),
       /* Only the clauses the lane declares. An unknown key is dropped rather than displayed,
          because a board rendering a label it cannot explain is worse than a shorter board. */
@@ -559,7 +569,35 @@ export function sanitizeExecutorSnipe(value) {
       readErrors: count(c.readErrors), ticks: count(c.ticks),
       signed: count(c.signed), sent: count(c.sent),
       reconciled: count(c.reconciled),
+      marketReadsSkipped: count(c.marketReadsSkipped),
     } : null,
+    /* THE VOLUME TAPE, FROM BOTH ENDS, and the momentum source's drop tally. Both were computed
+       on the bot and never left it, so a tape recording nothing and a pre-filter keeping nothing
+       read, everywhere a person could look, exactly like a quiet market. Counts only — the one
+       string is the tap's last decode error, length-capped because it is rendered. */
+    flow: (() => {
+      const v = value.flow && typeof value.flow === "object" && !Array.isArray(value.flow) ? value.flow : null;
+      if (!v) return null;
+      const maybe = (x) => (x === null || x === undefined ? null : count(x));
+      return {
+        tapped: v.tapped === true,
+        mints: count(v.mints), observed: count(v.observed), rejected: count(v.rejected), evictedMints: count(v.evictedMints),
+        notifications: maybe(v.notifications), trades: maybe(v.trades), recorded: maybe(v.recorded),
+        tapErrors: maybe(v.tapErrors),
+        lastError: v.lastError == null ? null : String(v.lastError).slice(0, 160),
+      };
+    })(),
+    momentum: (() => {
+      const v = value.momentum && typeof value.momentum === "object" && !Array.isArray(value.momentum) ? value.momentum : null;
+      if (!v) return null;
+      const CLAUSES = ["no_mint", "bonded", "too_young", "under_mcap", "unknown_age"];
+      const d = v.dropped && typeof v.dropped === "object" && !Array.isArray(v.dropped) ? v.dropped : {};
+      return {
+        polls: count(v.polls), arrived: count(v.arrived), survived: count(v.survived),
+        capped: count(v.capped), keep: count(v.keep),
+        dropped: Object.fromEntries(CLAUSES.map((k) => [k, count(d[k])])),
+      };
+    })(),
     /* THE LATENCY BUDGET (owner, 2026-09-18: "the fastest in the market"). Bounded and
        typed like everything else on this block, because it arrives from a machine the
        desk does not control. Milliseconds are clamped to a day: a hop cannot legitimately
@@ -635,7 +673,12 @@ export function sanitizeExecutorSnipe(value) {
       wins: count(b.wins),
       losses: count(b.losses),
       unknown: count(b.unknown),
-      realizedSol: signedSol(b.realizedSol) ?? 0,
+      /* The subset with a result on the ledger — the win rate's only honest denominator. An
+         older bot sends none, and wins + losses is the same number by construction. */
+      readable: b.readable === undefined ? count(b.wins) + count(b.losses) : count(b.readable),
+      /* NULL STAYS NULL. `?? 0` here turned "no trade could be read" into "broke even", and a
+         zero is enough to clear the agent ladder's "at least 0 SOL" rung. */
+      realizedSol: signedSol(b.realizedSol),
     } : null,
   };
 }
@@ -1291,13 +1334,25 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
              than by trusting a flag on the pulse: the heartbeat is a snapshot repeated every
              minute, so "claimed: 3" arrives sixty times an hour and only the first of them is
              news. The previous block is read before it is overwritten below. */
+          /* NOTHING IS ANNOUNCED ON FIRST SIGHT. The poller's first pulse after a restart goes out
+             before the fee lane is built, so the next one is the first to carry stats — and the
+             old `!before` branch announced "claimed 0.000000 SOL" to the public tape on every
+             reboot, for a dry lane that can never claim anything. Only a claim COUNT that rose
+             against a stored block is news. The lane's counters are in memory and restart at
+             zero, so a count that went DOWN is a restart and the baseline is zero, not the old
+             number — otherwise the first real claim after a reboot would never be announced. */
           try {
             const before = executorHeartbeatPayload(floorNo).heartbeat?.fees?.stats ?? null;
             const now2 = hb.fees?.stats ?? null;
-            if (now2 && (!before || now2.claimed > before.claimed)) {
-              const gained = now2.solClaimed - (before?.solClaimed ?? 0);
-              emit("fees", { floor: floorNo, claims: now2.claimed, sol: Number(gained.toFixed(9)),
-                text: `floor ${floorNo} claimed ${gained.toFixed(6)} SOL in creator fees` });
+            if (before && now2) {
+              const base = now2.claimed >= before.claimed ? before : { claimed: 0, solClaimed: 0 };
+              const newClaims = now2.claimed - base.claimed;
+              const gained = now2.solClaimed - base.solClaimed;
+              if (newClaims > 0)
+                emit("fees", { floor: floorNo, claims: newClaims, sol: gained > 0 ? Number(gained.toFixed(9)) : null,
+                  text: gained > 0
+                    ? `floor ${floorNo} claimed ${gained.toFixed(6)} SOL in creator fees`
+                    : `floor ${floorNo} made ${newClaims} creator-fee claim${newClaims === 1 ? "" : "s"} of an unreported amount` });
             }
           } catch {}
           let ring = [];
@@ -1429,15 +1484,38 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
          * be sent by a signature only the creator can make. Gating them would imply a secrecy that
          * does not exist, and secrecy that does not exist is the kind somebody later relies on. */
         if (url.pathname === "/api/fees/claimable") {
-          const { readClaimable: readVaults, FeeClaimError } = await import("./fee-claim.js");
+          const { readClaimable: readVaults, worthClaiming, FeeClaimError } = await import("./fee-claim.js");
           const { readRpc } = await import("./lib/http.js");
+          /* CACHED PER CREATOR, because this route is public, CORS-open, and costs two to six
+             calls against the desk's own RPC endpoint each time — the same endpoint the rest of
+             the building reads through. Vault balances move per trade on the coin and a claim is
+             a few-times-a-month act, so twenty seconds is fresh enough to decide on. Concurrent
+             requests for one creator share one read. `fresh=1` (the page asks for it right after
+             a claim) is honoured only once an entry is three seconds old, so it cannot be used
+             to turn the cache off. An unreadable answer is kept for three seconds only: a node
+             that hiccuped should be asked again soon, but not by every request in between. */
+          const creator = String(url.searchParams.get("creator") ?? "").trim();
+          if (!isAddress(creator)) return json(400, { error: `${JSON.stringify(creator)} is not a base58 Solana address`, clause: "creator_invalid" });
+          const cache = (globalThis.__feeReads ??= new Map());
+          const now = Date.now();
+          const hit = cache.get(creator);
+          const age = hit ? now - hit.at : Infinity;
+          const ttl = hit?.readable === false ? 3_000 : 20_000;
+          const wantFresh = url.searchParams.get("fresh") === "1" && age >= 3_000;
+          let entry = hit && age < ttl && !wantFresh ? hit : null;
+          if (!entry) {
+            const promise = readVaults({ creator, rpcGet: (method, params) => readRpc(cfg.rpc, method, params) });
+            entry = { at: now, promise, readable: null };
+            cache.delete(creator);
+            cache.set(creator, entry);
+            while (cache.size > 256) cache.delete(cache.keys().next().value);
+            promise.then((out) => { entry.readable = out?.readable === true && out?.partial !== true; },
+              () => { if (cache.get(creator) === entry) cache.delete(creator); });
+          }
           try {
-            const out = await readVaults({
-              creator: url.searchParams.get("creator"),
-              rpcGet: (method, params) => readRpc(cfg.rpc, method, params),
-            });
-            const { worthClaiming } = await import("./fee-claim.js");
-            return json(200, { ...out, verdict: worthClaiming({ claimableLamports: out.claimableLamports }) });
+            const out = await entry.promise;
+            return json(200, { ...out, verdict: worthClaiming({ claimableLamports: out.claimableLamports }),
+              cachedMs: Math.max(0, Date.now() - entry.at) });
           } catch (error) {
             if (error instanceof FeeClaimError) return json(400, { error: error.message, clause: error.clause });
             throw error;
@@ -1667,6 +1745,13 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
 
           if (!tail && req.method === "GET") {
             const pub = houseBotPublic(floorNo);
+            /* THE BOT'S RAW BLOCKS ARE THE TENANT'S, not a pass-holder's. floorPrivate() lets a
+               guest pass in, and that is right for the aggregate record — but the snipe block
+               carries open positions, mints, the closed book and the bot's raw error text, and
+               /api/floor/N/feed and /executor/status both withhold exactly that from a guest.
+               houseBotPublic was written as HQ's public projection; on a leased floor only the
+               tenant sees what it projects. */
+            const showRaw = floorNo === HQ_FLOOR || holdsFloor(floorNo);
             const book = pub?.snipe?.book ?? null;
             const lease = leasing.leaseFor(floorNo);
             const saved = agentStore.strategyFor(floorNo);
@@ -1679,10 +1764,21 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
                rate has to use `counted` as its denominator — dividing by every closure counts
                each unreadable one as a loss and understates the record in the direction that
                holds a desk below the level it earned. */
-            const closedTrades = book && Number.isFinite(Number(book.trades)) ? Number(book.trades) : null;
-            const counted = book && Number.isFinite(Number(book.counted)) ? Number(book.counted) : null;
-            const wins = book && Number.isFinite(Number(book.wins)) ? Number(book.wins) : null;
-            const realizedSol = book && Number.isFinite(Number(book.realizedSol)) ? Number(book.realizedSol) : null;
+            /* Every one of these can be absent, and `Number(null)` is 0 — so absence is checked
+               first, explicitly, for each. */
+            const field = (k) => (book && book[k] !== null && book[k] !== undefined && Number.isFinite(Number(book[k]))
+              ? Number(book[k]) : null);
+            const closedTrades = field("trades");
+            const counted = field("counted");
+            const wins = field("wins");
+            const losses = field("losses");
+            const unknown = field("unknown");
+            /* WINS + LOSSES IS THE READABLE SUBSET — see agentView. A sum over no readable close
+               is unknown, whatever number the book carried beside it. */
+            const readable = wins !== null && losses !== null ? wins + losses : null;
+            const realizedSol = readable === 0 ? null : field("realizedSol");
+            /* The tally covers the whole record only when every trade is in it. */
+            const recordComplete = closedTrades === null || counted === null ? null : counted >= closedTrades;
             /* PAY ANY LEVEL REWARD EARNED AND NOT YET PAID. Idempotent twice over — filtered
                against the rows already booked and refused by a unique index — because this runs
                on every page load and a reward that can pay twice pays forever.
@@ -1694,9 +1790,10 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
              * floor, four rungs, so a floor can cause four inserts in its lifetime no matter how
              * many times the page is loaded. Every load after that does one indexed SELECT and
              * writes nothing. */
-            const judged = counted ?? closedTrades;
+            const judged = readable ?? counted ?? closedTrades;
             try {
-              const paid = agentStore.creditRewards({ floor: floorNo, closedTrades, realizedSol,
+              /* A partial tally advances nothing — the same rule agentView applies to the level. */
+              const paid = recordComplete === false ? [] : agentStore.creditRewards({ floor: floorNo, closedTrades, realizedSol,
                 winRate: judged && wins !== null ? wins / judged : null });
               /* A level reached and a reward paid are two events, not one: the first is the
                  desk's record improving, the second is money moving. A page showing one and not
@@ -1713,21 +1810,35 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
                 floor: floorNo,
                 name: tower.getFloor(floorNo)?.name ?? null,
                 operator: lease?.wallet ?? (floorNo === HQ_FLOOR ? tower.hqOwnerWallet() : null),
-                live: pub?.snipe ? pub.snipe.state === "up" : null,
-                closedTrades, wins, realizedSol, counted,
-                feeSol: pub?.fees?.stats ? pub.fees.stats.solClaimed : null,
-                feeClaims: pub?.fees?.stats ? pub.fees.stats.claimed : null,
-                /* A dry lane has claimed nothing and that is not an incomplete measurement, so
-                   completeness is only claimed once the lane is actually live. */
-                feeComplete: pub?.fees?.stats ? pub.fees.stats.live === true : null,
+                /* "RUNNING" NEEDS A RECENT PULSE. The stored block says whatever the last pulse said,
+                   so a Mac that went to sleep a week ago still read "up" and the public page showed
+                   a green "running" chip for as long as nobody looked. Every other surface calls a
+                   pulse older than 150 seconds stale, and so does this one. */
+                live: pub?.snipe
+                  ? (pub.ageMs !== null && pub.ageMs < 150_000 ? pub.snipe.state === "up" : false)
+                  : null,
+                closedTrades, wins, losses, unknown, realizedSol, counted, recordComplete,
+                /* CLAIMED FEES ARE ONLY WHAT LANDED. The dry lane never claims — FEE_CLAIM=live is
+                   refused for good and the owner signs at /fees.html, which this desk does not
+                   record — so its permanent zero of claims is not a measurement of income and is
+                   not shown as one. What the last read found waiting goes out as its own field. */
+                feeSol: pub?.fees?.stats?.live === true ? pub.fees.stats.solClaimed : null,
+                feeClaims: pub?.fees?.stats?.live === true ? pub.fees.stats.claimed : null,
+                feeComplete: null,
+                feeClaimableSol: pub?.fees?.stats?.claimableSol ?? null,
+                feeClaimableAtMs: pub?.fees?.stats?.claimableAt ?? null,
                 rewardSol: agentStore.rewardSolFor(floorNo),
                 strategy: saved?.strategy ?? null,
                 updatedAtMs: saved?.updatedAtMs ?? null,
               }),
               /* The lane's own posture, unsummarised, so the page can say "configured but never
                  started" rather than showing zeros that look like an idle market. */
-              snipe: pub?.snipe ?? null,
-              feeLane: pub?.fees ?? null,
+              snipe: showRaw ? pub?.snipe ?? null : null,
+              feeLane: showRaw ? pub?.fees ?? null : null,
+              /* How old the pulse is, so the page can say "last heard 3 days ago" rather than
+                 leaving a reader to trust a state nobody has refreshed. */
+              seenAt: pub?.seenAt ?? null,
+              pulseAgeMs: pub?.ageMs ?? null,
               strategyStale: saved?.stale === true ? saved.staleErrors : null,
               ladder: agentStore.ladder(),
               rewards: agentStore.rewardsFor(floorNo),

@@ -220,6 +220,30 @@ console.log("\nthe report says the honest thing, including when the answer is 'n
   ok("...and names the honest options rather than implying another knob",
     /not a faster feed/.test(text) && /not another exit ladder/.test(text));
   ok("it never claims to have armed anything", /promotes: nothing/.test(text));
+
+  /* THE REAL BOOK'S SHAPE. A launch row cannot measure volume_spike — five minutes of history
+     does not exist thirty seconds after a coin is born — so on a book of launches that ruler's
+     n stays 0 forever. Requiring EVERY ruler to reach n >= minRows made the no-edge verdict
+     unreachable on exactly the book this desk writes. */
+  const launchRows = [];
+  for (let i = 0; i < 300; i++) {
+    const r = row({ mint: `L${i}`, followed: i % 2 === 0, creator: 30, share: 200 });
+    delete r.gate.measured.volume_spike;
+    launchRows.push(r);
+  }
+  const launchText = formatReport({
+    scorecard: snipeScorecard(launchRows), read: { total: 300, malformed: 0, files: 1 }, bookPath: "/x",
+  });
+  ok("a launch-only book still reaches the no-edge verdict", /no entry edge that these measurements can find/.test(launchText),
+    launchText.split("\n").find((l) => /READ THIS AS/.test(l)));
+  ok("...and names the ruler it could not measure instead of silently dropping it",
+    /NOT IN THE VERDICT: volume_spike — measured on 0 of 300 judged rows/.test(launchText));
+  ok("...but a ruler that IS being measured, just not enough yet, still holds the verdict open",
+    (() => {
+      const some = launchRows.map((r, i) => (i < 10 ? { ...r, gate: { measured: { ...r.gate.measured, volume_spike: 3 } } } : r));
+      return /not enough judged rows yet/.test(formatReport({
+        scorecard: snipeScorecard(some), read: { total: 300, malformed: 0, files: 1 }, bookPath: "/x" }));
+    })());
 }
 
 console.log("\nthe command itself");

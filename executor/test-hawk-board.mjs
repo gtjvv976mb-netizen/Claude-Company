@@ -176,6 +176,29 @@ ok("...with the identical realised numbers",
   JSON.stringify(afterRestart) === JSON.stringify(rows), "byte-identical to the pre-restart read");
 ok("...and the count too", j.snipeExitCount() === 3, `${j.snipeExitCount()}`);
 
+console.log("\nthe tally covers the whole record, by the database");
+{
+  /* THE AGENT LADDER IS JUDGED ON THESE NUMBERS. The heartbeat used to tally the last 200
+     rows and send that sum beside a lifetime count; past 200 trades a desk that lost money
+     overall could read as a profitable record. snipeExitTotals is one aggregate over every
+     row, and it must agree with the rows themselves. */
+  const all = j.snipeExits({ limit: 200 });
+  const known = all.filter((r) => r.realizedLamports !== null);
+  const t = j.snipeExitTotals();
+  ok("the totals count every trade", t.trades === j.snipeExitCount(), `${t.trades}`);
+  ok("wins and losses agree with the rows",
+    t.wins === known.filter((r) => BigInt(r.realizedLamports) > 0n).length
+    && t.losses === known.filter((r) => BigInt(r.realizedLamports) <= 0n).length, JSON.stringify(t));
+  ok("readable is wins + losses, and unknown is the rest",
+    t.readable === t.wins + t.losses && t.unknown === t.trades - t.readable);
+  ok("the realised total is the sum of the readable rows",
+    t.realizedLamports === known.reduce((a, r) => a + Number(r.realizedLamports), 0), String(t.realizedLamports));
+  ok("sinceMs takes the same floor as the count",
+    j.snipeExitTotals({ sinceMs: T0 + 2_500 }).trades === j.snipeExitCount({ sinceMs: T0 + 2_500 }));
+  ok("a window with no trade at all has a NULL total, not 0",
+    j.snipeExitTotals({ sinceMs: T0 + 1e12 }).realizedLamports === null);
+}
+
 console.log("\nthe unknown is not zero");
 /* A CLOSE WHOSE RESULT CANNOT BE READ. The write paths cannot produce this — markAccounted
    refuses an exit with no basis — so it is injected, which is the only honest way to test a
@@ -190,6 +213,11 @@ ok("...which is null, and emphatically not 0", damaged?.realizedLamports !== 0 &
 ok("...and the row is still listed rather than silently dropped",
   j.snipeExits({ limit: 50 }).length === 3 && j.snipeExitCount() === 3,
   "a trade you cannot price is still a trade that happened");
+{
+  const t = j.snipeExitTotals();
+  ok("the totals count it as unknown, not as a break-even loss", t.unknown >= 1 && t.trades === 3 && t.readable === 3 - t.unknown,
+    JSON.stringify(t));
+}
 j.close();
 
 console.log("\nwhat the desk accepts from the bot");
@@ -255,10 +283,12 @@ const beat = poller.slice(poller.indexOf("function snipeHeartbeat()"),
   poller.indexOf("const lane = snipeStatus.lane;", poller.indexOf("function snipeHeartbeat()")));
 ok("the heartbeat's book comes from the durable journal", /journal\.snipeExits\(/.test(beat),
   "journal.snipeExits(...)");
-ok("...and its trade count from the journal too, not from the rows it read",
-  /trades: journal\.snipeExitCount\(\)/.test(beat), "trades: journal.snipeExitCount()");
-ok("...reporting the window it actually tallied as a separate number",
-  /counted: rows\.length/.test(beat), "counted: rows.length");
+ok("...and its tally from the journal's aggregate over EVERY row, not from the rows it read",
+  /const t = journal\.snipeExitTotals\(\);/.test(beat) && /trades: t\.trades,/.test(beat), "journal.snipeExitTotals()");
+ok("...so the tallies cover every trade and say so",
+  /counted: t\.trades,/.test(beat) && /readable: t\.readable/.test(beat), "counted: t.trades");
+ok("...and an unreadable record sends a null total, never 0",
+  /realizedSol: t\.realizedLamports === null \? null/.test(beat));
 ok("the book never takes the pulse down with it", /\} catch \{\}/.test(beat),
   "a throwing journal costs this block, not the heartbeat");
 ok("the book is declared on the heartbeat's own shape", /open: \[\], counts: null, feed: null, book: null/.test(poller),

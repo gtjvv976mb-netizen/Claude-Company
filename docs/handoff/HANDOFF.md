@@ -1,10 +1,11 @@
-# Handoff — continue the Claude Co / BAGWORK session
+# Handoff — the Claude Co / BAGWORK session, written down
 
-Written 2026-09-26 by the Claude Code session `session_01F71n8BkTmDSf7vg3XzRX3p`, so that a
-**different Claude account** can pick up exactly where it stopped. A conversation cannot be moved
-between accounts, so everything that lived only in that conversation — the decisions, the
-measurements, the traps, what is pending — is written down here. If you are the new session: read
-this whole file before touching anything.
+Written 2026-09-26 by the Claude Code session `session_01F71n8BkTmDSf7vg3XzRX3p`. It was first
+written so a different Claude account could take over; the owner then chose to **keep working in
+the original session**, which finished the PR #45 review and fixed what it found (§6). The file
+stays as the record of everything that otherwise lived only in the conversation — decisions,
+measurements, traps, what is pending. Any session picking this up: read it all before touching
+anything.
 
 ---
 
@@ -14,11 +15,11 @@ this whole file before touching anything.
 |---|---|
 | **Repo** | `gtjvv976mb-netizen/Claude-Company` (the desk + the executor). *Not* `Claude-Company-Solana` — that repo only republishes the site from this repo's `main` on a schedule and holds none of this work. |
 | **Branch** | `claude/eloquent-mayer-3jwcyb` — all development goes here |
-| **Open PR** | [#45](https://github.com/gtjvv976mb-netizen/Claude-Company/pull/45) "Everything BAGWORK runs on — and the parts of it that are wrong" — six code commits, **open, mergeable, not merged** |
-| **Last code commit** | `a8d885e` "The fee claim, signed by the owner and by nothing else" |
-| **Base (`main`)** | `5646b1c` — an ancestor of the branch; a test merge is clean |
-| **Tests** | `192/192` test files pass on `a8d885e` |
-| **In flight when written** | An adversarially-verified review of PR #45 (§6). Its results will be committed to `docs/handoff/review-results.md` if they land before the old session goes idle; if that file does not exist, re-run it. |
+| **Open PR** | [#45](https://github.com/gtjvv976mb-netizen/Claude-Company/pull/45) "Everything BAGWORK runs on — and the parts of it that are wrong" — **open, not merged** |
+| **Last code commit** | the review-fix commit on top of `a8d885e` — see `git log` on the branch |
+| **Base (`main`)** | `5646b1c` — an ancestor of the branch |
+| **Tests** | the full suite passes on the review-fix commit (count in the PR description) |
+| **Review** | done — ~25 confirmed findings, all fixed on the branch (§6) |
 
 **The immediate next steps are §7.** Nothing in §7 needs the old conversation.
 
@@ -56,7 +57,8 @@ this whole file before touching anything.
 6. "What kind of coin will each user launch?" → answered: the house coin `$CLAUDECO` already exists
    and the owner **holds its creator key**. Owner chose **house coin first**; per-floor coins are a
    later opt-in.
-7. "Move this to my other account" → this file.
+7. "Move this to my other account" → this file. Then: "continue here everything, no need for
+   other account" → the transfer was cancelled and the original session carried on (§6).
 
 ---
 
@@ -86,9 +88,13 @@ this whole file before touching anything.
   first written as 890,880 from memory — always ask the chain.
 
 ### 3.3 Market floor — `executor/snipe-market.mjs`, gate `market_floor`
-- `SNIPE_MARKET_FLOOR=bagwork` = BAGWORK's measured floor: `minAgeHours 1`, `minLiquidityUsd 30000`,
-  `minVolume24hUsd 50000`, `minMcapUsd 50000`. Plus five of ours, all off by default:
-  volume/depth, 24h trade count, sell share, 24h run-up, deepest-pool depth.
+- `SNIPE_MARKET_FLOOR=bagwork` = BAGWORK's floor, literally: `minAgeHours 1`, `minLiquidityUsd 30000`,
+  `minVolume24hUsd 50000`, `minMcapUsd 50000`. **On this desk it admits nothing** — a standard curve
+  graduates at 85.005 SOL (~$10.3k at SOL $121.69), so the liquidity and cap bars are out of reach
+  on a curve. **`SNIPE_MARKET_FLOOR=curve`** (age ≥ 1 h, 24 h volume ≥ $50k — the two a curve can
+  meet) is the preset to run; the lane prints a startup warning for any unreachable threshold.
+  Plus five of ours, all off by default: volume/depth, 24h trade count, sell share, 24h run-up,
+  deepest-pool depth (the curve itself now counts as a pool).
 - Liquidity = the curve's real SOL reserve × SOL/USD; SOL/USD derived free from DexScreener as the
   median `priceUsd/priceNative` over **WSOL-quoted pools only** (non-SOL-quoted curves exist).
 - **Momentum source**: pump.fun `sort=last_trade_timestamp` listing (verified live), pre-filtered,
@@ -96,13 +102,17 @@ this whole file before touching anything.
 - **Honest limit**: only pump.fun bonding-curve buy/sell layouts are proved here, so the floor
   applies to coins still on their curve. Bonded (AMM) coins would need a pump-amm buy layout proved
   against landed transactions.
-- Startup guard: `SNIPE_MIN_AGE_HOURS` below the feed's 30-min dedupe TTL is refused — otherwise
-  every momentum candidate is silently dropped as a duplicate.
+- Startup **warning** (not a refusal): an age floor below the feed's 30-min dedupe TTL loses the
+  band of candidates between the two that a launch source already heard; older ones still arrive.
 
 ### 3.4 Volume spike — `executor/snipe-volume.mjs`, gate `volume_spike`
 - Net SOL inflow over 30 s vs the 5 min before, fed from gRPC trade events the feed used to drop.
+  Rates are per **window**, not per gap between samples (the review's finding I).
 - No-baseline → `null`, never Infinity. Samples are 2-second buckets (one sample per trade let a
   hot coin evict its own baseline). **Ships measure-only** (`SNIPE_MIN_VOLUME_SPIKE` unset).
+- A launch notice can never be measured (no 5-minute history 30 s after birth), so setting the dial
+  mounts the momentum source and **requires `SNIPE_GRPC_*`**; the grader leaves an unmeasured ruler
+  out of its verdict by name.
 
 ### 3.5 Agent pages, levels, rewards, strategy builder (desk)
 - `src/agent-desk.js` (pure rules), `src/agent-store.js` (tables `agent_strategies`,
@@ -128,8 +138,17 @@ this whole file before touching anything.
 1.25%/side; fees ≈ 45% of the average loss.
 
 **BAGWORK (26 agents, 362 closed trades):** trading −0.077 SOL, creator fees +14.515, rewards
-+0.620. #1 agent took 6.196 SOL of fees (43%); the other 25 averaged ~0.33 SOL (~$66). At 30 bps
-that is ~$22k of volume for a typical coin, ~$413k for the top one.
++0.620. #1 agent took 6.196 SOL of fees (43%); the other 25 averaged ~0.33 SOL (~$40). At 30 bps
+that is ~110 SOL (~$13k) of volume for a typical coin, ~2,065 SOL (~$251k) for the top one.
+
+**SOL/USD on 2026-09-26: $121.69** (an earlier draft of these notes assumed $200 — the dollar
+figures above are at $121.69).
+
+**On-curve market, 2026-09-26, the 70 most recently traded coins:** 25 on a curve, 45 bonded. The
+deepest on-curve SOL-quoted curve held 68 SOL; the top on-curve cap was $36k; 5 on-curve coins were
+≥ 1 h old and none had a $50k cap. 24 h volume on on-curve coins: $110,756 (2.4 h old), $97,857
+(10.2 h), $69,878 (0.2 h), $31,201, $28,312, the rest under $9k. DexScreener lists pumpfun pairs
+with `liquidity` absent. Listing rows carry `metadata_uri`, not `uri` (50 of 50).
 
 **`$CLAUDECO`:** mint `HRkkxgaFDDmZ3qZX8xP5SiMRBNvFNVUUv4FJUjPCpump`, **bonded**, creator
 `3J57tqAJqRmSBn1ZYDu9JpMMyTfBHdcGGwECiPQeiji3` (**the owner holds this key**). Vaults on 2026-09-26:
@@ -147,7 +166,9 @@ curve `5TmPpLwreotwnpVqWdgwDEwSMv5RzUUcskH3NYCazUPq` 3,571,512 lamports; pump-am
   the installed one byte for byte). It took the bot down on 2026-09-18. Load from
   `~/claudeco-executor/versioned-releases/<full-sha>/executor/macos-launchagent.sh`.
 - **Re-running the installer at the same commit always fails** ("release already exists") and
-  rolls back. That is expected; the message now says so.
+  rolls back. That is expected. When install.sh gets there the LaunchAgent is **unloaded** (the
+  installer refuses to run while it is loaded), so the bot is stopped — the message now says so
+  and names the controller at `<release>/executor/macos-launchagent.sh`.
 - **A new runtime module must be registered in seven places**: `install.sh` (source_file loop
   **and** `RUNTIME_FILES`), `macos-release.sh` `RUNTIME_PATHS`, `scripts/build-viewer.mjs`
   `EXECUTOR_FILES`, `executor/heartbeat-health.mjs` fingerprint, `executor/launchd-runner.mjs`
@@ -174,32 +195,50 @@ mv /tmp/pw-hidden node_modules/playwright 2>/dev/null
 
 ---
 
-## 6. The review that was in flight
+## 6. The review — done, and fixed
 
-An exhaustive review of PR #45 was running when this was written: six areas (fee claim, fee lane,
-market floor, volume spike, config/install, agent pages), two finders per area then
-loop-until-dry, every finding judged by three verifiers (reproduce / refute / impact, ≥ 2 of 3 to
-survive), then a completeness critic and a round on its gaps.
+An exhaustive review of PR #45 ran as a Claude Code Workflow (script committed at
+`docs/handoff/review-pr45.workflow.js`): six areas, two finders each. The machine's 4 CPUs capped
+the workflow at 2 concurrent agents, so after the 12 finders the ~120 queued verifiers would have
+taken most of a day; the session stopped it there and verified each finding directly instead —
+reproducing the important ones against live data, a headless browser, or the real server.
 
-- The script is committed at **`docs/handoff/review-pr45.workflow.js`**. It is a Claude Code
-  Workflow script; re-run it by asking the new session to "run the workflow script at
-  docs/handoff/review-pr45.workflow.js" (Workflow tool, `scriptPath`). Its prompts hard-code
-  `/home/user/claude-company` as the repo path — change that line if the checkout lives elsewhere.
-- If `docs/handoff/review-results.md` exists, the old session committed the results; **fix the
-  confirmed findings before merging**. If it does not exist, re-run the review first.
-- Two suspicions worth checking first (not yet confirmed): `viewer/fees.html` uses `Buffer.from`,
-  which is not a browser global; and it discovers wallet-standard wallets via
-  `window.navigator.wallets`, which may not be how the registry works — compare with how
-  `viewer/tower.html` does both.
+Confirmed and fixed on the branch (letters are the session's own labels):
+
+| | finding | fix |
+|---|---|---|
+| A | every momentum candidate refused at `no_socials` — listing rows carry `metadata_uri`, the lane read `uri` | read both |
+| B | `bagwork` admits nothing on a curve (see §4) | `curve` preset + startup warning; README recommends `curve` |
+| C | `fees.html` called Node's `Buffer` — "Buffer is not defined" in every browser, before any wallet was asked | `atob` → `Uint8Array`; verified in headless Chromium with stub wallets |
+| L, M | wallet-standard discovery read `navigator.wallets` wrongly; the Sign button's rule was split between two paths that disagreed | discovery by registration (as `tower.html`); one `refreshClaimButton()` |
+| D | `volume_spike` is never measured on launches, so the grader's "no edge" verdict was unreachable | sufficiency over measured rulers; the unmeasured one is named |
+| E | the "release already exists" restart command pointed at a file that does not exist | `<release>/executor/macos-launchagent.sh`, and it says the bot is stopped |
+| F | `FEE_CLAIM_INTERVAL_MS=30m` → NaN → ~1 ms RPC flood; bad floor / creator not caught | validated at startup, refused by name |
+| G | a momentum source keeping 0 of 70 rows was reported DEAD | a successful poll counts as liveness; its drop tally rides the heartbeat |
+| H | with a floor armed every launch notice paid a DexScreener request age alone already refuses | skipped and counted (`marketReadsSkipped`) |
+| I | spike rate divided by the gap between samples, not the window (2.7x "spike" on slowing flow; 90x read as 7.9x) | per-window rates; uneven-tape tests |
+| J | every restart announced "claimed 0.000000 SOL"; the agent page showed the dry lane's zero as revenue | only a rising claim count is news, restart-aware; page shows claimed (dash) and **waiting** separately |
+| K | `/api/fees/claimable` public, uncached, 2–6 RPC calls per request | 20 s per-creator cache, shared in-flight read, bounded, `fresh=1` floored at 3 s |
+| N | a failed curve read beside an absent AMM account became a measured zero | half a reading is `unreadable`/`partial`, never a total |
+| O | the trade tap's and tape's counters never left the process | `snipe.flow` on the heartbeat |
+| P, Q | the pre-filter's "gate can measure cap from DexScreener" was false; top-pool depth unmeasurable on-curve | DexScreener cap is the fallback (smaller wins on a 3x disagreement); the curve counts as a pool |
+| R, 33 | dedupe guard refused the lane over a partial loss, and missed the no-age-floor case | a warning naming the band, age 0 when unset |
+| 38 | a spike threshold with no trade tap refused every candidate | refused at startup; the dial mounts the momentum source |
+| T | a guest pass-holder got the tenant's open positions, closed book and raw bot errors | raw blocks only for HQ or the tenant |
+| U, V | an unreadable record read as 0 SOL and booked a reward; win rate divided by the wrong count; a 200-row window was treated as the record | lifetime totals from one SQL aggregate; `readable = wins + losses`; a partial tally advances nothing |
+| W | `agent.html` never sent the session, so a tenant's own page said "private" | bearer on the fetch, `sid` on the stream |
+| X | a week-old pulse read "running" | 150 s freshness, "last heard … ago" |
+
+New tests: `test-agent-route.mjs` (the route against the real server), plus additions in the
+volume, market, lane, feed, fee-lane, fee-claim, hawk-board, shadow-sink, launchd and agent-page
+suites.
 
 ---
 
 ## 7. What to do next
 
-**Engineering (the new session):**
-1. Get the review results (§6); fix every confirmed finding on this branch; run the full suite;
-   push; update PR #45's description.
-2. Watch PR #45 until the owner merges it. After merge, the Render deploy is the gate — check it.
+**Engineering:**
+1. Watch PR #45 until the owner merges it. After merge, the Render deploy is the gate — check it.
 
 **The owner's own steps (these need the owner, not Claude):**
 1. **Merge PR #45.**
@@ -210,9 +249,9 @@ survive), then a completeness critic and a round on its gaps.
    ```bash
    FEE_CLAIM=dry
    FEE_CLAIM_CREATOR=3J57tqAJqRmSBn1ZYDu9JpMMyTfBHdcGGwECiPQeiji3
-   SNIPE_MARKET_FLOOR=bagwork          # stops buying the population that lost money
+   SNIPE_MARKET_FLOOR=curve            # stops buying the population that lost money; NOT bagwork
    ```
-   `SNIPE_MIN_VOLUME_SPIKE` should wait for a scorecard:
+   `SNIPE_MIN_VOLUME_SPIKE` should wait for a scorecard, and needs `SNIPE_GRPC_*` set:
    `node ~/claudeco-executor/versioned-releases/<sha>/executor/grade-entry-gates.mjs`.
 4. **Claim fees** at `solana.claudedotcompany.com/fees.html` whenever the page says the net is worth it.
 
@@ -222,5 +261,8 @@ shadow book persisting and LaserStream `sgp` armed. PR #43 (`5646b1c`) and PR #4
 **Not done, and why:**
 - No trading edge was found. Nothing claims one — the volume spike ships unarmed because nobody has
   graded it.
+- Owner-signed claims made at `/fees.html` are not recorded by the desk, so "claimed" on the agent
+  page is a dash; recording them (the page posts the signature, the desk verifies it on chain) is a
+  possible follow-up.
 - Per-floor coin launches (a prepare / image / fund / confirm flow) — deferred by the owner's choice.
 - A pump-amm buy layout (needed to trade bonded coins) — not proved; needs landed transactions.

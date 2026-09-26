@@ -95,6 +95,16 @@ console.log("\nunknown is not zero, and an absent account is not unknown");
   const flaky = await readClaimable({ creator: CREATOR, rpcGet: async (m) =>
     m === "getBalance" ? { ok: true, data: { value: 2_000_000 } } : { ok: false, error: "429 rate limited" } });
   ok("a rate-limited read is unknown, not an empty account", flaky.ammLamports === null);
+  /* HALF A READING IS NOT A TOTAL. The curve side read and the AMM side did not: the old sum
+     treated the unknown side as 0 and offered the curve half as all there was. */
+  ok("with one side unknown there is no claimable total", flaky.claimableLamports === null && flaky.claimableSol === null);
+  ok("...the reading is flagged partial, not unreadable", flaky.partial === true && flaky.readable === true);
+  const curveDown = await readClaimable({ creator: CREATOR, rpcGet: async (m) =>
+    m === "getBalance" ? { ok: false, error: "503" } : { ok: false, error: "could not find account" } });
+  ok("a failed curve read beside an ATA that does not exist yet is partial, not a measured zero",
+    curveDown.curveLamports === null && curveDown.ammLamports === 0 && curveDown.claimableLamports === null
+    && curveDown.partial === true);
+  ok("a full reading is not partial", good.partial === false && noAta.partial === false);
 
   const empty = await readClaimable({ creator: CREATOR, rpcGet: async (m) =>
     m === "getBalance" ? { ok: true, data: { value: 0 } } : { ok: true, data: { value: { amount: "0" } } } });
@@ -203,9 +213,30 @@ console.log("\nnothing here holds a key");
   ok("it refuses to offer a claim from a wallet that is not the creator",
     /only that wallet can claim them/.test(page));
   ok("an unreadable vault disables the button rather than claiming half",
-    /not a side known to be empty/.test(page));
-  ok("it re-reads after sending rather than assuming what landed",
-    /setTimeout\(read, 4000\)/.test(page) && /what landed is what the vaults now say/.test(page));
+    /an unreadable side is not an empty one/.test(page) && /v\.includeCurve === null \|\| v\.includeAmm === null/.test(page));
+  ok("it re-reads after sending rather than assuming what landed, around the desk's cache",
+    /setTimeout\(\(\) => read\(\{ fresh: true \}\), 4000\)/.test(page) && /what landed is what the vaults now say/.test(page));
+
+  /* THE BUGS THE REVIEW FOUND IN THIS PAGE, pinned by source because the suite runs no browser.
+     A headless run against the real esm.sh bundle reproduced the first one: "Buffer is not
+     defined", before any wallet was asked, in every browser. */
+  const script = page.slice(page.indexOf("<script"));
+  const code = script.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("the page never touches Node's Buffer, which no browser has", !/\bBuffer\b/.test(code));
+  ok("instruction data is decoded with the browser's own atob", /atob\(/.test(code) && /data: fromBase64\(ix\.data\)/.test(code));
+  ok("standard wallets are discovered by registration, as tower.html does",
+    /wallet-standard:register-wallet/.test(code) && /wallet-standard:app-ready/.test(code));
+  ok("...not by reading navigator.wallets as if it held wallet objects", !/navigator\??\.wallets/.test(code));
+  ok("the Sign button is decided in ONE place, called from every path",
+    (code.match(/refreshClaimButton\(\)/g) || []).length >= 4 && !/\$\("claim"\)\.disabled = false/.test(code));
+  ok("the claim re-checks the rule rather than trusting a disabled attribute",
+    /async function claim\(\) \{\s*if \(refreshClaimButton\(\) !== null\) return;/.test(code));
+
+  ok("the public vault read is cached per creator", /globalThis\.__feeReads/.test(route) && /20_000/.test(route));
+  ok("...concurrent requests share one read", /promise: promise|entry = \{ at: now, promise/.test(route));
+  ok("...and fresh=1 cannot turn the cache off", /age >= 3_000/.test(route));
+  ok("...and the cache is bounded", /cache\.size > 256/.test(route));
+  ok("a junk creator is refused before it can become a cache key", route.indexOf("isAddress(creator)") < route.indexOf("cache.set("));
   ok("the page builds the transaction, so the server never holds a signable one",
     /new W3\.Transaction\(\{ feePayer: owner, recentBlockhash: blockhash \}\)/.test(page));
 

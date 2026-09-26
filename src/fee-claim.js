@@ -137,7 +137,12 @@ export async function readClaimable({ creator, rpcGet }) {
      claim closes, so its rent returns in the same transaction. */
   const curveClaimable = curveLamports === null ? null : Math.max(0, curveLamports - RENT_RESERVE_LAMPORTS);
   const readable = curveLamports !== null || ammLamports !== null;
-  const claimable = readable ? (curveClaimable ?? 0) + (ammLamports ?? 0) : null;
+  /* HALF A READING IS NOT A TOTAL. `readable` says either node answered; the claimable figure
+     needs BOTH, because `?? 0` on the side that failed booked an unknown as a measured zero and
+     showed the other half as everything there was. `partial` names the case so a page can say
+     "try again" rather than "this is all of it". */
+  const partial = readable && (curveLamports === null || ammLamports === null);
+  const claimable = readable && !partial ? curveClaimable + ammLamports : null;
 
   return Object.freeze({
     ...v,
@@ -145,7 +150,7 @@ export async function readClaimable({ creator, rpcGet }) {
     rentReserveLamports: RENT_RESERVE_LAMPORTS,
     claimableLamports: claimable,
     claimableSol: claimable === null ? null : claimable / LAMPORTS_PER_SOL,
-    readable,
+    readable, partial,
     /* WHICH HALVES ARE WORTH INCLUDING. A side holding nothing would add instructions and cost to
        move zero, and on the pump-amm side it would create and close a token account for no
        reason. Null stays null: a side nobody could read is not a side known to be empty. */

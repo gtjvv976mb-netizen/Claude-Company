@@ -133,6 +133,13 @@ const floorOf = () => {
 };
 const FLOOR = floorOf();
 const $ = (id) => document.getElementById(id);
+/* THE SESSION, SENT THE WAY EVERY OTHER PAGE SENDS IT. A leased floor answers only its tenant or
+   a pass-holder, and the desk knows who is asking only from the bearer token — there is no
+   cookie. The first version of this page sent nothing, so a tenant opening their own floor's
+   agent page was told it was "private to its tenant". Read inside a try: storage can be
+   blocked, and a page that throws on that shows nothing at all. */
+const TOKEN = (() => { try { return localStorage.getItem("cc_token") || null; } catch { return null; } })();
+const authHeaders = TOKEN ? { authorization: "Bearer " + TOKEN } : {};
 
 /* A NULL IS A DASH, NEVER A ZERO. Every money field on this page can be "not measured", and a
    zero would be a claim about a number nobody took. This one function is the whole rule. */
@@ -151,28 +158,43 @@ const pct = (v) => (v === null || v === undefined || !Number.isFinite(Number(v))
 async function load() {
   let a;
   try {
-    const r = await fetch(`${API}/api/agent/${FLOOR}`, { headers: { accept: "application/json" } });
+    const r = await fetch(`${API}/api/agent/${FLOOR}`, { headers: { accept: "application/json", ...authHeaders } });
     a = await r.json();
     if (!r.ok) throw new Error(a?.error || `HTTP ${r.status}`);
   } catch (e) {
     $("state").textContent = "unavailable";
     $("state").className = "state down";
-    $("lede").innerHTML = `<span class="err">${String(e.message)}</span>`;
+    const span = document.createElement("span");
+    span.className = "err";
+    span.textContent = String(e.message);
+    $("lede").replaceChildren(span);
     return;
   }
 
   $("name").textContent = a.name || `Floor ${a.floor}`;
   $("floorno").textContent = `Floor ${a.floor}`;
   const live = a.live === true;
-  $("state").textContent = a.live === null ? "never reported" : (live ? "running" : "stopped");
+  /* "RUNNING" IS A CLAIM ABOUT NOW, so a pulse older than the desk's 150-second window reads as
+     when it was last heard, not as the state it last reported. */
+  const ago = (ms) => (ms < 90_000 ? `${Math.round(ms / 1000)}s` : ms < 5_400_000 ? `${Math.round(ms / 60_000)} min`
+    : ms < 172_800_000 ? `${Math.round(ms / 3_600_000)} h` : `${Math.round(ms / 86_400_000)} days`);
+  const stale = a.pulseAgeMs !== null && a.pulseAgeMs !== undefined && a.pulseAgeMs >= 150_000;
+  $("state").textContent = a.live === null ? "never reported"
+    : stale ? `last heard ${ago(a.pulseAgeMs)} ago` : (live ? "running" : "stopped");
   $("state").className = "state " + (a.live === null ? "" : (live ? "up" : "down"));
   $("who").textContent = a.operator ? `operator ${a.operator}` : "";
 
   put("m-trade", sol(a.tradingSol), Number(a.tradingSol) >= 0 ? " pos" : " neg");
   put("m-fee", sol(a.feeSol, { sign: false }), " pos");
   put("m-reward", sol(a.rewardSol, { sign: false }), " pos");
-  $("m-fee-n").textContent = a.feeClaims === null ? "claimed from the coin's vaults"
-    : `${a.feeClaims} claim${a.feeClaims === 1 ? "" : "s"}${a.feeSolComplete === false ? " — at least one amount was never reported, so this is a floor, not a total" : ""}`;
+  /* CLAIMED IS WHAT LANDED; WAITING IS WHAT THE LAST READ FOUND. The owner signs claims in their
+     own wallet and this desk does not record them, so "claimed" is usually a dash — and the
+     amount waiting in the vaults is said beside it, as waiting, never as income. */
+  const waiting = sol(a.feeClaimableSol, { sign: false });
+  $("m-fee-n").textContent = (a.feeClaims === null
+      ? "claims are signed by the coin's creator in their own wallet"
+      : `${a.feeClaims} claim${a.feeClaims === 1 ? "" : "s"}${a.feeSolComplete === false ? " — at least one amount was never reported, so this is a floor, not a total" : ""}`)
+    + (waiting ? ` · ${waiting} waiting in the vaults${a.feeClaimableAtMs ? ` (read ${ago(Date.now() - a.feeClaimableAtMs)} ago)` : ""}` : "");
   /* The sentence the payload carries, printed rather than paraphrased. */
   $("never").textContent = a.accounting || "";
 
@@ -186,19 +208,24 @@ async function load() {
   $("l-name").textContent = a.levelName || "";
   $("l-blocked").textContent = a.levelBlockedReason
     ? `Level ${a.nextLevel}: ${a.levelBlockedReason}${a.nextLevelReward ? ` (pays ${a.nextLevelReward} SOL)` : ""}` : "";
-  $("l-note").textContent = a.levelNote || "";
-  $("l-rungs").innerHTML = (a.ladder || []).map((r) =>
-    `<span class="rung${r.level <= (a.level || 0) ? " on" : ""}">${r.level} ${r.name}</span>`).join("");
+  $("l-note").textContent = a.recordNote || a.levelNote || "";
+  /* Built as nodes, not HTML: every string here arrived over the network. */
+  const el = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; };
+  $("l-rungs").replaceChildren(...(a.ladder || []).map((r) =>
+    el("span", `${r.level} ${r.name}`, `rung${r.level <= (a.level || 0) ? " on" : ""}`)));
 
   const dials = a.strategy ? Object.entries(a.strategy).filter(([, v]) => v !== null) : [];
-  $("s-table").innerHTML = dials.length
-    ? `<tr><th>Dial</th><th>Value</th></tr>` + dials.map(([k, v]) =>
-        `<tr><td>${k}</td><td class="num">${v}</td></tr>`).join("")
-    : `<tr><td class="dash">no strategy saved — this desk runs the shipped defaults</td></tr>`;
+  const rows = [];
+  if (dials.length) {
+    const head = el("tr"); head.append(el("th", "Dial"), el("th", "Value")); rows.push(head);
+    for (const [k, v] of dials) { const tr = el("tr"); tr.append(el("td", String(k)), el("td", String(v), "num")); rows.push(tr); }
+  } else {
+    const tr = el("tr"); tr.append(el("td", "no strategy saved — this desk runs the shipped defaults", "dash")); rows.push(tr);
+  }
+  $("s-table").replaceChildren(...rows);
   $("s-env").textContent = (a.strategyEnv || []).join("\n") || "—";
   if (a.strategyStale) {
-    $("s-lede").innerHTML = `<span class="err">the saved strategy names dials this bot no longer reads: `
-      + `${a.strategyStale.join("; ")}</span>`;
+    $("s-lede").replaceChildren(el("span", `the saved strategy names dials this bot no longer reads: ${a.strategyStale.join("; ")}`, "err"));
   }
 
   $("foot").textContent = a.updatedAtMs
@@ -223,7 +250,9 @@ function listen() {
     while (feed.childElementCount > 60) feed.lastElementChild.remove();
   };
   let es;
-  try { es = new EventSource(`${API}/events?floor=${FLOOR}`); } catch { return; }
+  /* The stream takes the session as ?sid=, the way office3d.html passes it — EventSource cannot
+     send a header. */
+  try { es = new EventSource(`${API}/events?floor=${FLOOR}${TOKEN ? `&sid=${encodeURIComponent(TOKEN)}` : ""}`); } catch { return; }
   es.onmessage = (ev) => line("·", ev);
   for (const kind of ["fees", "levelup", "reward"]) es.addEventListener(kind, (ev) => line(kind, ev));
   es.addEventListener("hello", (ev) => { try {

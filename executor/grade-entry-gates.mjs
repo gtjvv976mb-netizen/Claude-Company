@@ -126,7 +126,22 @@ export function formatReport({ scorecard, read, bookPath }) {
      that result is worth as much as a positive one and is far easier to talk yourself out
      of. */
   const any = Object.values(scorecard.proxies).some((p) => p.promotable);
-  const enough = Object.values(scorecard.proxies).every((p) => p.n >= scorecard.minRows);
+  /* A RULER THAT IS NEVER MEASURED ON THIS BOOK CANNOT HOLD THE VERDICT OPEN. volume_spike
+     needs five minutes of a coin's history, and a launch notice is judged within thirty
+     seconds of its birth — so on a book of launches it measures nothing, by construction, and
+     "every ruler shows n >= 200" could never become true. The "no edge" reading was
+     unreachable. Sufficiency is therefore judged over the rulers that measured something, and
+     the ones that measured nothing are named as such rather than silently dropped. */
+  const entries = Object.entries(scorecard.proxies);
+  const measurable = entries.filter(([, p]) => p.n > 0);
+  const unmeasured = entries.filter(([, p]) => p.n === 0).map(([name]) => name);
+  const enough = measurable.length > 0 && measurable.every(([, p]) => p.n >= scorecard.minRows);
+  if (unmeasured.length) {
+    L.push(`NOT IN THE VERDICT: ${unmeasured.join(", ")} — measured on 0 of ${scorecard.judged} judged rows.`);
+    L.push("A ruler this book's population cannot measure is left out rather than holding the");
+    L.push("reading open forever. (volume_spike needs a 5-minute baseline; a launch has none.)");
+    L.push("");
+  }
   if (any) {
     L.push("READ THIS AS: at least one ruler clears the bar. That is a candidate, not a");
     L.push("decision — arming it is a separate deliberate change, and a ruler that works this");

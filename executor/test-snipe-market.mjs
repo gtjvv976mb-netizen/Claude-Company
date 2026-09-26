@@ -26,6 +26,7 @@ import {
   PREFILTER_CLAUSES, SNIPE_MARKET_VERSION, MarketFloorError,
   marketFacts, marketFloor, resolveMarketFloor, floorIsArmed, solUsdFromPairs,
   createMarketReader, marketReadFor, prefilterListingRow, momentumFetcher, momentumDedupeConflict,
+  CURVE_FLOOR, STANDARD_CURVE_GRADUATION_SOL, curveReachability, ageAloneRefuses,
 } from "./snipe-market.mjs";
 import { SNIPE_GATES, SNIPE_GATE_COST, SOL_QUOTE_MINT } from "./snipe-entry.mjs";
 import { MARKET_FLOOR_PRESETS, snipeLaneConfig } from "./snipe-lane.mjs";
@@ -156,8 +157,8 @@ console.log("\nthe five this desk adds");
     marketFloor(factsFor({ pairs: [goodPair({ priceChange: { h24: 900 } })] }),
       resolveMarketFloor({ maxPriceChange24hPct: 400 }))?.clause === "maxPriceChange24hPct");
   ok("minTopPoolLiquidityUsd looks at the pool you would trade in, not the sum",
-    marketFloor(factsFor({ pairs: [goodPair({ liquidity: { usd: 3_000 } }), goodPair({ liquidity: { usd: 3_100 } })] }),
-      resolveMarketFloor({ minTopPoolLiquidityUsd: 20_000 }))?.clause === "minTopPoolLiquidityUsd");
+    marketFloor(factsFor({ curve: null, pairs: [goodPair({ liquidity: { usd: 3_000 } }), goodPair({ liquidity: { usd: 3_100 } })] }),
+      snipeLaneConfig({ SNIPE_MIN_TOP_POOL_LIQUIDITY_USD: "20000" }).marketFloor)?.clause === "minTopPoolLiquidityUsd");
   /* A ZERO-TRADE DAY HAS NO SELL SHARE — reported null, not 0, which would read as "every
      trade was a buy": the most bullish possible reading of no trades at all. */
   const quiet = factsFor({ pairs: [goodPair({ txns: { h24: { buys: 0, sells: 0 } } })] });
@@ -200,16 +201,29 @@ console.log("\nfacts: assembled honestly, or not at all");
   ok("volume is summed across pools",
     factsFor({ pairs: [goodPair({ volume: { h24: 10 } }), goodPair({ volume: { h24: 32 } })] }).volume24hUsd === 42);
   ok("depth is NOT summed — the deepest pool is reported on its own",
-    factsFor({ pairs: [goodPair({ liquidity: { usd: 10 } }), goodPair({ liquidity: { usd: 32 } })] }).topPoolLiquidityUsd === 32);
+    factsFor({ curve: null, pairs: [goodPair({ liquidity: { usd: 10 } }), goodPair({ liquidity: { usd: 32 } })] }).topPoolLiquidityUsd === 32);
   ok("price change is taken from the deepest pool, not averaged across dust",
     factsFor({ pairs: [goodPair({ liquidity: { usd: 1 }, priceChange: { h24: 9_999 } }),
       goodPair({ liquidity: { usd: 90_000 }, priceChange: { h24: 12 } })] }).priceChange24hPct === 12);
   /* DexScreener really does return pairs with liquidity: null — measured against the live API
      while this was being built. A missing field must not become a zero. */
   ok("a pool with no liquidity field is skipped, not counted as zero depth",
-    factsFor({ pairs: [{ chainId: "solana", liquidity: null, volume: { h24: 60_000 } }, goodPair()] }).topPoolLiquidityUsd === 34_000);
+    factsFor({ curve: null, pairs: [{ chainId: "solana", liquidity: null, volume: { h24: 60_000 } }, goodPair()] }).topPoolLiquidityUsd === 34_000);
   ok("non-solana pairs are dropped",
-    factsFor({ pairs: [{ chainId: "ethereum", liquidity: { usd: 9e9 }, volume: { h24: 9e9 } }] }).topPoolLiquidityUsd === null);
+    factsFor({ curve: null, pairs: [{ chainId: "ethereum", liquidity: { usd: 9e9 }, volume: { h24: 9e9 } }] }).topPoolLiquidityUsd === null);
+  /* THE CURVE IS A POOL. DexScreener lists every on-curve pumpfun pair with no liquidity
+     field at all (measured 2026-09-26), so a top-pool figure read from pairs alone was null
+     for every coin this desk can buy, and an armed minTopPoolLiquidityUsd refused them all. */
+  const pumpfunPair = { chainId: "solana", dexId: "pumpfun", quoteToken: { ...WSOL }, priceUsd: "0.00008",
+    priceNative: "0.0000004", liquidity: null, volume: { h24: 60_000 } };
+  const onCurve = factsFor({ curve: { realQuoteRaw: "68000000000" }, pairs: [pumpfunPair] });   // 68 SOL
+  ok("an on-curve coin's top pool is the curve itself, not unknown",
+    onCurve.topPoolLiquidityUsd !== null && Math.abs(onCurve.topPoolLiquidityUsd - onCurve.liquidityUsd) < 1e-9,
+    String(onCurve.topPoolLiquidityUsd));
+  ok("so minTopPoolLiquidityUsd can now be judged on the coins this desk buys",
+    marketFloor(onCurve, { minTopPoolLiquidityUsd: 10_000 }) === null);
+  ok("a deeper DexScreener pool still wins over a shallower curve",
+    factsFor({ curve: { realQuoteRaw: "1000000000" }, pairs: [goodPair()] }).topPoolLiquidityUsd === 34_000);
   ok("age can come from the notice when a listing carries no stamp",
     Math.abs(marketFacts({ createdAtMs: NOW - 7_200_000, nowMs: NOW }).ageHours - 2) < 0.001);
   ok("a listing stamp beats the notice hint",
@@ -220,7 +234,20 @@ console.log("\nfacts: assembled honestly, or not at all");
     factsFor().onCurve === true && marketFacts({ listing: { mint: "X", complete: true } }).onCurve === false
     && marketFacts({}).onCurve === null);
   ok("two independent market caps are BOTH reported rather than one being picked",
-    f.mcapUsd === 80_000 && f.dexMcapUsd === 81_000);
+    f.mcapUsd === 80_000 && f.venueMcapUsd === 80_000 && f.dexMcapUsd === 81_000 && f.mcapSource === "venue");
+  /* THE PRE-FILTER'S PROMISE, KEPT. It keeps a row whose cap is unknown "because the gate can
+     still measure it from DexScreener" — which was false until the gate actually did. */
+  const noVenueCap = marketFacts({ listing: goodListing({ usd_market_cap: undefined }), curve: goodCurve,
+    pairs: [goodPair()], nowMs: NOW });
+  ok("with no venue cap, DexScreener's is judged", noVenueCap.mcapUsd === 81_000 && noVenueCap.mcapSource === "dexscreener");
+  ok("so a launch notice with no listing can still be judged on cap",
+    marketFloor(noVenueCap, { minMcapUsd: 50_000 }) === null);
+  const disagree = factsFor({ pairs: [goodPair({ marketCap: 900_000 })] });
+  ok("two caps more than 3x apart: the SMALLER is judged, and the disagreement is stamped",
+    disagree.mcapUsd === 80_000 && disagree.mcapDisagreement === true && disagree.mcapSource === "venue(lower)");
+  const disagree2 = factsFor({ pairs: [goodPair({ marketCap: 5_000 })] });
+  ok("...whichever side is lower",
+    disagree2.mcapUsd === 5_000 && disagree2.mcapSource === "dexscreener(lower)");
 }
 
 console.log("\nthe config: a typo is a floor that is not there");
@@ -249,7 +276,66 @@ console.log("\nthe config: a typo is a floor that is not there");
     snipeLaneConfig({ SNIPE_MARKET_FLOOR: "bagwork", SNIPE_MIN_MCAP_USD: "250000" }).marketFloor.minMcapUsd === 250_000);
   ok("a misspelled preset is refused rather than silently becoming off",
     threw(() => snipeLaneConfig({ SNIPE_MARKET_FLOOR: "bagwrok" })) !== null);
-  ok("the preset vocabulary is named and small", MARKET_FLOOR_PRESETS.join(",") === "off,bagwork");
+  ok("the preset vocabulary is named and small", MARKET_FLOOR_PRESETS.join(",") === "off,curve,bagwork");
+  ok("SNIPE_MARKET_FLOOR=curve loads the two thresholds a curve can meet, and nothing else",
+    (() => { const f = snipeLaneConfig({ SNIPE_MARKET_FLOOR: "curve" }).marketFloor;
+      return f.minAgeHours === 1 && f.minVolume24hUsd === 50_000 && f.minLiquidityUsd === null
+        && f.minMcapUsd === null && f.minTopPoolLiquidityUsd === null; })());
+  ok("the curve preset is exactly CURVE_FLOOR", JSON.stringify(CURVE_FLOOR) === JSON.stringify({ minAgeHours: 1, minVolume24hUsd: 50_000 }));
+  ok("...and every one of its numbers is one of bagwork's, not an invention",
+    Object.entries(CURVE_FLOOR).every(([k, v]) => BAGWORK_FLOOR[k] === v));
+}
+
+console.log("\nbagwork on a curve: a floor with nothing above it");
+{
+  /* THE FIXTURE ABOVE HOLDS 200 SOL, AND NO STANDARD CURVE EVER DOES — it graduates at 85.005.
+     These are the shapes the 2026-09-26 snapshot actually saw on-curve at SOL $121.69: the
+     deepest curve held 68 SOL, the richest cap was $36k, and the busiest hour-old coin did
+     $110,756 of volume. bagwork refuses it; curve admits it. */
+  const SOL = 121.69;
+  const real = marketFacts({
+    listing: goodListing({ created_timestamp: NOW - 2.4 * 3_600_000, usd_market_cap: 36_000 }),
+    curve: { realQuoteRaw: "68000000000" }, solUsd: SOL,
+    pairs: [{ chainId: "solana", dexId: "pumpfun", quoteToken: { ...WSOL }, liquidity: null, volume: { h24: 110_756 },
+      priceUsd: "0.00004", priceNative: String(0.00004 / SOL) }],
+    nowMs: NOW,
+  });
+  /* Resolved exactly as the lane resolves them — snipeLaneConfig names every key, so a preset
+     never inherits another preset's thresholds through resolveMarketFloor's defaults. */
+  const presetFloor = (name) => snipeLaneConfig({ SNIPE_MARKET_FLOOR: name }).marketFloor;
+  const bag = marketFloor(real, presetFloor("bagwork"));
+  ok("bagwork refuses the best on-curve coin of the day", bag !== null, bag?.message);
+  ok("...on a threshold no curve can reach", ["minLiquidityUsd", "minMcapUsd"].includes(bag?.clause), bag?.clause);
+  const cur = marketFloor(real, presetFloor("curve"));
+  ok("curve admits it", cur === null, cur?.message);
+  const maxCurveUsd = STANDARD_CURVE_GRADUATION_SOL * SOL;
+  ok("a FULL standard curve at today's price is still under bagwork's $30k", maxCurveUsd < BAGWORK_FLOOR.minLiquidityUsd,
+    `$${maxCurveUsd.toFixed(0)}`);
+
+  const warn = curveReachability(presetFloor("bagwork"));
+  ok("the startup check names both unreachable bagwork thresholds",
+    warn.map((w) => w.key).sort().join(",") === "minLiquidityUsd,minMcapUsd", warn.map((w) => w.key).join(","));
+  ok("...with the SOL price each would need", Math.round(warn.find((w) => w.key === "minLiquidityUsd").solUsdNeeded) === 353);
+  ok("...and points at the preset that works", warn.every((w) => /SNIPE_MARKET_FLOOR=curve/.test(w.message)));
+  ok("the curve preset draws no warning", curveReachability(presetFloor("curve")).length === 0);
+  ok("no floor draws no warning", curveReachability(null).length === 0);
+  const lane = fs.readFileSync(new URL("./snipe-lane.mjs", import.meta.url), "utf8");
+  ok("the lane logs the warning at start", /curveReachability\(conf\.marketFloor\)/.test(lane));
+}
+
+console.log("\nage is free, so it is judged before anything is fetched");
+{
+  const floor = snipeLaneConfig({ SNIPE_MARKET_FLOOR: "curve" }).marketFloor;
+  ok("a launch notice 10s old is refused on age alone",
+    ageAloneRefuses(floor, { createdAtMs: NOW - 10_000, nowMs: NOW }) === true);
+  ok("an hour-and-a-half-old listing row is not", ageAloneRefuses(floor, { listing: goodListing(), nowMs: NOW }) === false);
+  ok("an UNKNOWN age is not 'refused on age' here — the gate refuses it by name",
+    ageAloneRefuses(floor, { nowMs: NOW }) === false);
+  ok("no age floor refuses nothing",
+    ageAloneRefuses(snipeLaneConfig({ SNIPE_MIN_VOLUME_24H_USD: "1" }).marketFloor, { createdAtMs: NOW, nowMs: NOW }) === false);
+  const lane = fs.readFileSync(new URL("./snipe-lane.mjs", import.meta.url), "utf8");
+  ok("the lane skips the paid read when age alone refuses", /skipMarketRead/.test(lane) && /clause: "skipped_age"/.test(lane));
+  ok("...and counts it", /counters\.marketReadsSkipped\+\+/.test(lane));
 }
 
 console.log("\nthe gate above it");
@@ -379,22 +465,25 @@ console.log("\nthe floor and the feed must not silently cancel each other out");
   /* AND THE ONE THAT WOULD SILENTLY DELIVER NOTHING. A quarter-hour floor is a reasonable thing
      to try, and every candidate would still be held in the ledger from its own launch. */
   const clash = momentumDedupeConflict({ minAgeHours: 0.25, dedupeTtlMs: TTL });
-  ok("a floor under the dedupe window is a REFUSAL, not a quiet afternoon of nothing", clash !== null);
-  ok("...and it names both numbers", /15 minutes old/.test(clash.message) && /30 minutes/.test(clash.message));
-  ok("...and says what it would have looked like instead",
-    /look exactly like a dead API/.test(clash.message));
+  ok("a floor under the dedupe window is reported, not a quiet afternoon of nothing", clash !== null);
+  ok("...as a WARNING: only a band is lost, so the lane still runs", clash.severity === "warning");
+  ok("...naming the band that is swallowed", /between 15 minutes and 30 minutes/.test(clash.message), clash.message);
+  ok("...and saying older candidates still arrive, rather than claiming the source delivers nothing",
+    /Older candidates arrive normally/.test(clash.message) && !/deliver nothing/.test(clash.message));
   ok("...and gives the number to raise it to", /at least 0\.50/.test(clash.message));
   ok("exactly at the window is fine, since insertion order is time order",
     momentumDedupeConflict({ minAgeHours: 0.5, dedupeTtlMs: TTL }) === null);
-  /* No age floor means the source is not selecting on age, so there is nothing to cancel. */
-  ok("no age floor is not a conflict", momentumDedupeConflict({ minAgeHours: null, dedupeTtlMs: TTL }) === null);
+  /* NO AGE FLOOR IS AN AGE FLOOR OF ZERO — the whole first half hour is the swallowed band. */
+  const noAge = momentumDedupeConflict({ minAgeHours: null, dedupeTtlMs: TTL });
+  ok("no age floor is the WIDEST conflict, not none", noAge !== null && /between 0 and 30 minutes/.test(noAge.message), noAge?.message);
   ok("an unknown window is not assumed",
     momentumDedupeConflict({ minAgeHours: 0.1, dedupeTtlMs: null }) === null
     && momentumDedupeConflict({ minAgeHours: 0.1, dedupeTtlMs: 0 }) === null);
 
   const poller = fs.readFileSync(new URL("./poller.mjs", import.meta.url), "utf8");
-  ok("the poller refuses the clash at startup rather than discovering it as silence",
-    /momentumDedupeConflict\(\{/.test(poller) && /if \(dedupeClash\) throw new Error\(dedupeClash\.message\);/.test(poller));
+  ok("the poller logs the clash at startup rather than discovering it as silence",
+    /momentumDedupeConflict\(\{/.test(poller) && /if \(dedupeClash\) log\(`\[snipe\] WARNING: \$\{dedupeClash\.message\}`\);/.test(poller));
+  ok("...and no longer refuses the whole lane over a partial loss", !/if \(dedupeClash\) throw/.test(poller));
   ok("...against the feed's real constant, not a copy of it",
     /dedupeTtlMs: feedMod\.FEED_DEFAULTS\.dedupeTtlMs/.test(poller));
 }
@@ -405,7 +494,7 @@ console.log("\nwiring");
   ok("the lane issues the market read BESIDE the account read, not after it",
     lane.indexOf("const marketPromise") < lane.indexOf("read = await readAcrossEndpoints"));
   ok("...and only when a floor is actually configured, so an operator running none pays nothing",
-    /floorIsArmed\(conf\.marketFloor\) && typeof marketReader === "function"/.test(lane));
+    /const floorArmed = floorIsArmed\(conf\.marketFloor\);/.test(lane) && /const marketPromise = !floorArmed \? null/.test(lane));
   ok("the facts are assembled after the curve decodes, where the honest depth is",
     lane.indexOf("marketReadFor({") > lane.indexOf("curve = adapter.curveFromAccount"));
   ok("an armed floor with no reader is refused at CONSTRUCTION, not once per candidate",

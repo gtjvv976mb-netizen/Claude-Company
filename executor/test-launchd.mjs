@@ -1089,9 +1089,17 @@ export const batteryEntriesAllowed = (env = process.env) =>
     check("the release refusal explains that re-running at the same commit always lands there",
       /re-running the installer at the SAME commit always lands here/.test(release));
     check("...and that it is refused rather than overwritten because launchd may be running it",
-      /launchd may be running that code right now/.test(release));
-    check("...and offers the restart that does work instead",
-      /macos-launchagent\.sh unload/.test(release) && /macos-launchagent\.sh load/.test(release));
+      /launchd may be running that code/.test(release));
+    /* THE PATH HAS TO EXIST. FINAL_RELEASE is the clone root and the controller lives in its
+       executor/ — the first version named `%s/macos-launchagent.sh`, which a substring check
+       passed and bash answered with "No such file or directory". */
+    check("...and names the controller where it actually is, under the release's executor/",
+      /bash %s\/executor\/macos-launchagent\.sh load/.test(release)
+      && !/bash %s\/macos-launchagent\.sh/.test(release));
+    /* install.sh refuses to run while the agent is loaded, so when this fires from the
+       installer the bot is stopped — "nothing to do" was the one wrong thing to lead with. */
+    check("...and leads with the fact that the bot is stopped, not with 'nothing to do'",
+      /YOUR BOT IS NOT RUNNING RIGHT NOW/.test(release) && !/nothing to do/.test(release));
   }
 
   const caseAt = (label) => shell.indexOf(`\n  ${label})`) + 1;

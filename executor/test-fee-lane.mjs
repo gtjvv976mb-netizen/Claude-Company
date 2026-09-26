@@ -23,6 +23,7 @@ import {
   FEE_LANE_VERSION, FEE_LANE_DEFAULTS, FEE_RECORD_KINDS, SKIP_CLAUSES,
   SYSTEM_RENT_EXEMPT_LAMPORTS, FeeLaneError,
   feeClaimDecision, feeArmSentence, createFeeLane, feeSummary,
+  feeLaneConfigFromEnv, FEE_LANE_MIN_INTERVAL_MS,
 } from "./fee-lane.mjs";
 
 let pass = 0, fail = 0;
@@ -295,6 +296,60 @@ console.log("\nwiring");
     /export const feeBookPath = \(stateDb\) => `\$\{String\(stateDb\)\}\.fees\.jsonl`/.test(sink));
   ok("...and why the separation is physical rather than a flag is written where the path is",
     /survives edits that a rule written in a comment does not/.test(sink));
+}
+
+console.log("\nhalf a reading is not a reading");
+{
+  /* THE BUG THIS PINS. `readable` is true when EITHER side answered, and `?? 0` then booked a
+     failed curve read as a measured zero whenever the pump-amm account simply did not exist yet:
+     a below_floor row reporting "0.000000 SOL" for money nobody had counted. */
+  const half = decide(vault({ curveLamports: null, ammLamports: 0 }));
+  ok("a failed curve read beside an absent AMM account does NOT claim", half.claim === false);
+  ok("...and is reported unreadable, not below_floor", half.clause === "unreadable" && half.partial === true, half.clause);
+  ok("...with no gross figure, rather than a gross of zero", half.grossLamports === null);
+  ok("...naming the side that failed", /bonding-curve vault could not be read/.test(half.message));
+  const otherHalf = decide(vault({ curveLamports: 9 * SOL, ammLamports: null }), { live: true });
+  ok("a failed AMM read beside a rich curve does not claim the curve half and call it everything",
+    otherHalf.claim === false && otherHalf.clause === "unreadable" && /pump-amm vault/.test(otherHalf.message));
+}
+
+console.log("\nthe claimable figure is reported, and it is not revenue");
+{
+  const rich = vault({ curveLamports: 3_571_512, ammLamports: 4_147_526 });
+  const lane = createFeeLane({ creator: CREATOR, readClaimable: async () => rich, clock: () => 42_000 });
+  ok("before any pass nothing is claimed to be waiting", lane.stats().claimableSol === null);
+  await lane.tick();
+  const st = lane.stats();
+  ok("after a pass the lane reports what is waiting",
+    st.claimableSol === (3_571_512 - SYSTEM_RENT_EXEMPT_LAMPORTS + 4_147_526) / SOL && st.claimableAtMs === 42_000, String(st.claimableSol));
+  ok("...and it is NOT counted as claimed", st.solClaimed === 0 && st.claimed === 0);
+  const blind = createFeeLane({ creator: CREATOR, readClaimable: async () => vault({ readable: false, curveLamports: null, ammLamports: null }) });
+  await blind.tick();
+  ok("an unreadable pass leaves the waiting figure unknown, not 0", blind.stats().claimableSol === null);
+}
+
+console.log("\nthe lane's numbers from the environment are validated, not coerced");
+{
+  ok("absent values take the defaults",
+    feeLaneConfigFromEnv({}).intervalMs === FEE_LANE_DEFAULTS.intervalMs
+    && feeLaneConfigFromEnv({}).minNetLamports === FEE_LANE_DEFAULTS.minNetLamports);
+  ok("an empty string is absent, not zero", feeLaneConfigFromEnv({ FEE_CLAIM_INTERVAL_MS: "" }).intervalMs === FEE_LANE_DEFAULTS.intervalMs);
+  ok("a valid interval is honoured", feeLaneConfigFromEnv({ FEE_CLAIM_INTERVAL_MS: "600000" }).intervalMs === 600_000);
+  /* `Number("30m")` is NaN and setInterval treats NaN and 0 as ~1ms: a typo was an RPC flood on
+     the connection the trading path shares. */
+  for (const bad of ["30m", "0", "-5", "1e3", "12.5", "NaN"])
+    ok(`FEE_CLAIM_INTERVAL_MS=${bad} is refused`,
+      threw(() => feeLaneConfigFromEnv({ FEE_CLAIM_INTERVAL_MS: bad }))?.clause === "config_invalid");
+  ok("an interval under a minute is refused, with the minimum named",
+    /under the minimum of 60000/.test(threw(() => feeLaneConfigFromEnv({ FEE_CLAIM_INTERVAL_MS: "5000" }))?.message ?? "")
+    && FEE_LANE_MIN_INTERVAL_MS === 60_000);
+  ok("an unparseable floor is refused rather than behaving as a floor of zero",
+    threw(() => feeLaneConfigFromEnv({ FEE_CLAIM_MIN_NET_LAMPORTS: "0.002 SOL" }))?.clause === "config_invalid");
+  ok("a floor of zero, typed, is allowed", feeLaneConfigFromEnv({ FEE_CLAIM_MIN_NET_LAMPORTS: "0" }).minNetLamports === 0);
+  const poller = fs.readFileSync(new URL("./poller.mjs", import.meta.url), "utf8");
+  ok("the poller uses the validated parser, not Number(env || default)",
+    /feeMod\.feeLaneConfigFromEnv\(process\.env\)/.test(poller) && !/Number\(process\.env\.FEE_CLAIM/.test(poller));
+  ok("a mistyped FEE_CLAIM_CREATOR is refused at startup", /FEE_CLAIM_CREATOR=\$\{JSON\.stringify\(feeCreator\)\} is not a Solana address/.test(poller));
 }
 
 console.log(`\n${fail === 0 ? "PASS" : "FAIL"} test-fee-lane  ${pass} passed, ${fail} failed`);

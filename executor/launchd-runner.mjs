@@ -111,8 +111,9 @@ const ALLOWED_ENV = new Set([
   /* The three measured-first proxies, absent by default in every copy: they measure on every
      launch and refuse nothing until the owner sets a number a scorecard has justified. */
   "SNIPE_MAX_CREATOR_SHARE_PCT", "SNIPE_MAX_LAUNCH_SHARE_PCT", "SNIPE_MIN_VOLUME_SPIKE",
-  /* THE MARKET FLOOR (2026-09-26). SNIPE_MARKET_FLOOR=bagwork loads the four thresholds
-     bagworkagent.fun's own agents run; the nine dials override individual numbers. All off by
+  /* THE MARKET FLOOR (2026-09-26). SNIPE_MARKET_FLOOR=curve loads the two of bagworkagent.fun's
+     four thresholds a bonding curve can meet (=bagwork loads all four, literally, and on a curve
+     admits nothing); the nine dials override individual numbers. All off by
      default, and allowlisting them enables nothing — an unarmed floor passes every candidate
      without looking, and an armed one with no reader wired is refused at construction rather
      than silently refusing every trade. */

@@ -106,8 +106,16 @@ console.log("\nthe fee block arrives as its own figure and stays one");
   ok("a lane that never started is distinguishable from one that found nothing",
     sanitizeExecutorFees({ mode: "dry", error: "rpc down" }).running === false);
   ok("an off lane says off", sanitizeExecutorFees({ mode: "off" }).mode === "off");
-  ok("junk is dropped rather than rendered",
-    sanitizeExecutorFees(null) === null && sanitizeExecutorFees({ mode: "wat" }).mode === "off");
+  ok("junk is dropped rather than rendered", sanitizeExecutorFees(null) === null);
+  /* AN UNRECOGNISED MODE IS NOT "OFF". FEE_CLAIM=dyr arrives as mode "dyr" beside the error
+     that stopped the lane; mapping it to off dropped the error, and "asked for, never started"
+     is the one thing this block exists to show. */
+  const typo = sanitizeExecutorFees({ mode: "dyr", error: 'FEE_CLAIM="dyr" is not one of off, dry, live' });
+  ok("an unrecognised mode is reported as invalid, not as off", typo.mode === "invalid" && typo.running === false);
+  ok("...and keeps the error that says why it never started", /not one of off, dry, live/.test(typo.error));
+  ok("the claimable figure survives as its own field, and null stays null",
+    sanitizeExecutorFees({ mode: "dry", stats: { claimableSol: 0.00707, claimableAt: 1_790_000_000_000 } }).stats.claimableSol === 0.00707
+    && sanitizeExecutorFees({ mode: "dry", stats: { claimableSol: null } }).stats.claimableSol === null);
   /* A CLAIM MOVES MONEY IN, so a negative claimed figure is a sign error rather than a loss —
      the opposite of the sniper's realised figure beside it, which is signed on purpose. */
   ok("a negative claimed amount is clamped, unlike a realised trading figure",
@@ -127,6 +135,31 @@ console.log("\nthe fee block arrives as its own figure and stays one");
      every unreadable closure as a loss and understate the record. */
   ok("the win rate is over the trades with a readable result, not over all of them",
     Math.abs(view.winRate - 5 / 41) < 1e-12 && view.unmeasuredTrades === 23);
+
+  /* THE SHAPE THE BOT ACTUALLY SENDS. `counted` is the rows its tally covers — unknowns
+     included — and the readable subset is wins + losses. The test above fed counted:41, a shape
+     the bot never sent, which is how the wrong denominator passed. */
+  const real = agentView({ closedTrades: 64, counted: 64, wins: 5, losses: 36, unknown: 23, realizedSol: -0.361,
+    recordComplete: true });
+  ok("on the bot's real book the win rate is 5 of 41, not 5 of 64",
+    Math.abs(real.winRate - 5 / 41) < 1e-12 && real.countedTrades === 41 && real.unmeasuredTrades === 23,
+    `${real.winRate} over ${real.countedTrades}, ${real.unmeasuredTrades} unmeasured`);
+
+  /* A RECORD NOBODY COULD READ. Twelve closes, none with a result on the ledger: the old path
+     read the realised sum as 0, cleared rung 2's "at least 0 SOL", and booked a reward. */
+  const blind = agentView({ closedTrades: 12, counted: 12, wins: 0, losses: 0, unknown: 12, realizedSol: 0, recordComplete: true });
+  ok("with no readable close the trading figure is unknown, not 0", blind.tradingSol === null);
+  ok("...and the level does not advance on it", blind.level === 1, `level ${blind.level}`);
+  ok("...and every close is reported unmeasured", blind.unmeasuredTrades === 12);
+
+  /* A WINDOW IS NOT A RECORD. An older bot tallies its last 200 closes beside a lifetime count;
+     a desk that lost on the first 800 and won on the last 200 must not read as Proven. */
+  const windowed = agentView({ closedTrades: 1000, counted: 200, wins: 90, losses: 110, unknown: 0, realizedSol: 1.2,
+    recordComplete: false });
+  ok("a partial tally does not advance the level", windowed.level === 1, `level ${windowed.level}`);
+  ok("...and says why", /most recent closes/.test(windowed.recordNote ?? ""));
+  ok("the claimable figure is its own field, never folded into fees",
+    agentView({ feeClaimableSol: 0.00707 }).feeClaimableSol === 0.00707 && agentView({ feeClaimableSol: 0.00707 }).feeSol === null);
 }
 
 console.log("\nthe boundary the page inherits");
@@ -178,6 +211,15 @@ console.log("\nthe page itself");
   ok("it listens to the named kinds AND the unnamed default",
     /es\.onmessage/.test(html) && /for \(const kind of \["fees", "levelup", "reward"\]\)/.test(html));
   ok("a private floor is told so rather than shown an empty tape", /private to its tenant/.test(html));
+  /* THE SESSION IS SENT. Without it a tenant opening their own leased floor was told the floor
+     was "private to its tenant" — the desk only knows who is asking from the bearer. */
+  ok("it sends the session as a bearer on the fetch",
+    /localStorage\.getItem\("cc_token"\)/.test(html) && /headers: \{ accept: "application\/json", \.\.\.authHeaders \}/.test(html));
+  ok("...and as ?sid= on the stream, which cannot carry a header", /&sid=\$\{encodeURIComponent\(TOKEN\)\}/.test(html));
+  ok("...and a blocked storage cannot break the page", /try \{ return localStorage\.getItem\("cc_token"\) \|\| null; \} catch \{ return null; \}/.test(html));
+  ok("a stale pulse reads as when it was last heard, not as 'running'", /last heard \$\{ago\(a\.pulseAgeMs\)\} ago/.test(html));
+  ok("money waiting in the vaults is said as waiting, never as income", /waiting in the vaults/.test(html));
+  ok("network strings are rendered as text, not HTML", !/innerHTML = `<tr>|\$\{String\(e\.message\)\}<\/span>/.test(html));
 
   const build = fs.readFileSync(new URL("./scripts/build-viewer.mjs", import.meta.url), "utf8");
   ok("the page is published", /\{ src: "agent\.html",\s+out: "agent\.html" \}/.test(build));
@@ -199,8 +241,11 @@ console.log("\nthe named kinds are actually emitted, or they are dead names");
   /* THE HEARTBEAT IS A SNAPSHOT REPEATED EVERY MINUTE, so "claimed: 3" arrives sixty times an
      hour and only the first is news. Detected by comparing against what was stored. */
   ok("a fee claim is announced once, by comparison, not once per pulse",
-    /now2\.claimed > before\.claimed/.test(office)
+    /const newClaims = now2\.claimed - base\.claimed;/.test(office) && /if \(newClaims > 0\)/.test(office)
     && /only the first of them is\n *news/.test(office));
+  /* The runtime half — first sight, a restart, and the claim after it — is driven against the
+     real server in test-agent-route.mjs. */
+  ok("nothing is announced on first sight of a stats block", /if \(before && now2\)/.test(office) && !/!before \|\|/.test(office));
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

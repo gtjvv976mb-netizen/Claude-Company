@@ -429,7 +429,12 @@ export function classifySource(source, nowMs, cfg = {}) {
   const deadAfter = cfg.deadAfterSilentMs ?? FEED_DEFAULTS.deadAfterSilentMs;
   const maxErrors = cfg.maxConsecutiveErrors ?? FEED_DEFAULTS.maxConsecutiveErrors;
 
-  const since = source.lastNoticeAtMs ?? source.startedAtMs ?? null;
+  /* PROOF OF LIFE IS EITHER A NOTICE OR A SUCCESSFUL POLL. A pre-filtered poll source can
+     answer every poll correctly and still emit nothing — the momentum source under an armed
+     floor keeps 0 of 70 rows for long stretches — and judging it on notices alone reported
+     it DEAD while it was working, the one confusion its drop tally exists to rule out. */
+  const lastProof = Math.max(source.lastNoticeAtMs ?? -Infinity, source.lastAliveAtMs ?? -Infinity);
+  const since = Number.isFinite(lastProof) ? lastProof : (source.startedAtMs ?? null);
   const silentMs = since == null ? null : nowMs - since;
   const base = {
     id: source.id, kind: source.kind, venueId: source.venueId ?? null,
@@ -438,6 +443,7 @@ export function classifySource(source, nowMs, cfg = {}) {
     firsts: source.firsts ?? 0, rejected: source.rejected ?? 0, unparsed: source.unparsed ?? 0,
     errors: source.errors ?? 0, consecutiveErrors: source.consecutiveErrors ?? 0,
     lastError: source.lastError ?? null, restarts: source.restarts ?? 0,
+    lastAliveAtMs: source.lastAliveAtMs ?? null, pulses: source.pulses ?? 0,
   };
   const verdict = (state, reason) => Object.freeze({ ...base, state, reason });
 
@@ -608,7 +614,7 @@ export function createSnipeFeed({
       id: source.id, kind: source.kind, venueId: source.venueId ?? null, source,
       state: "starting", startedAtMs: null, lastNoticeAtMs: null, handle: null, fatal: false,
       notices: 0, accepted: 0, firsts: 0, rejected: 0, unparsed: 0, errors: 0, consecutiveErrors: 0,
-      lastError: null, lastErrorAtMs: null, restarts: 0,
+      lastError: null, lastErrorAtMs: null, restarts: 0, lastAliveAtMs: null, pulses: 0,
     });
   }
 
@@ -692,9 +698,20 @@ export function createSnipeFeed({
     if (onHealth) { try { onHealth(health()); } catch { /* ditto */ } }
   }
 
+  /** A source that answered — a poll that returned an array — without necessarily having
+   *  anything to emit. Liveness, and nothing else: it neither queues nor dedupes. */
+  function alive(sourceId) {
+    const st = states.get(sourceId);
+    if (!st || stopped) return;
+    st.lastAliveAtMs = clock();
+    st.pulses++;
+    st.consecutiveErrors = 0;
+  }
+
   const ctxFor = (id) => Object.freeze({
     emit: (payload) => admit(id, payload),
     fail: (error, opts) => fail(id, error, opts),
+    alive: () => alive(id),
     clock, schedule, cancel, cfg: conf,
   });
 
@@ -926,7 +943,7 @@ export function pollSource({
 
   return {
     id, kind: "poll", venueId, intervalMs,
-    start({ emit, fail, schedule, cancel }) {
+    start({ emit, fail, schedule, cancel, alive }) {
       let timer = null, done = false;
       const tick = async () => {
         timer = null;
@@ -934,6 +951,9 @@ export function pollSource({
         try {
           const rows = await fetchRows();
           if (!Array.isArray(rows)) throw new Error(`fetchRows() returned ${rows === null ? "null" : typeof rows}, not an array`);
+          /* The endpoint answered. Said before the rows are emitted, so a poll whose every row
+             was filtered upstream still counts as a working source. */
+          if (typeof alive === "function") alive();
           for (const row of rows) {
             let notice = null;
             try { notice = mapRow(row); } catch { notice = null; }
