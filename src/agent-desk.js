@@ -1,0 +1,325 @@
+/**
+ * THE PUBLIC AGENT PAGE, AND THE TWO THINGS BAGWORK GETS WRONG ON IT.
+ *
+ * bagworkagent.fun gives every agent a public page — a share link, a live feed, a level, a
+ * strategy anyone can inspect. That is genuinely good and this desk copies it: a bot nobody can
+ * look at is a bot nobody can check, and Claude Co has had no per-desk public view at all.
+ *
+ * Two things are deliberately different, and both come from measuring their system rather than
+ * admiring it.
+ *
+ * ── 1. THEIR HEADLINE NUMBER ADDS FEES TO TRADING ─────────────────────────────────────
+ *
+ * Across 26 of their agents and 362 closed trades: trading -0.077 SOL, creator fees +14.515,
+ * rewards +0.620. Their `pnlSol` sums all three, which is how their #1 agent — a bot that is
+ * -0.105 on trading — displays +15.6 SOL. Nobody switches off a bot showing +15.6.
+ *
+ * So `agentView()` returns `tradingSol`, `feeSol` and `rewardSol` as three separate fields and
+ * NO total. There is no function in this file that adds them. The test asserts the absence of
+ * `total`, `pnl` and `net` by name, because that is the only way a rule like this survives a
+ * year of edits by people who did not read this comment.
+ *
+ * ── 2. THEIR LEVELS PAY FOR ACTIVITY, WHICH SUBSIDISES LOSING ─────────────────────────
+ *
+ * This is the part worth thinking about rather than copying. Their levels advance on how much
+ * an agent has DONE, and each level pays a reward. An agent therefore earns by trading, whether
+ * or not the trading works — and their aggregate numbers show exactly that outcome: a 21% win
+ * rate maintained across hundreds of trades, with the losses covered by fees and rewards. The
+ * reward structure is not incidental to the losing; it is what makes the losing survivable.
+ *
+ * So levels here require BOTH: the activity, and a record that justifies it. A desk that has
+ * closed a thousand trades and lost money on them stays at level 1 and is told why, in those
+ * words. Rewards are bounded, booked as their own kind, and never paid for churn.
+ *
+ * Everything in this file is pure: no clock of its own, no database, no HTTP. The endpoints
+ * hand it rows and it shapes them, so every rule here is testable without a server.
+ */
+
+/**
+ * THE LADDER. Each rung needs the trades AND the record.
+ *
+ * `minClosed` is the activity BAGWORK would pay for on its own. `minRealizedSol` and
+ * `minWinRate` are the part they leave out, and they are what stops this ladder paying a desk
+ * to churn. The thresholds are deliberately modest — this is meant to be reachable by a desk
+ * that is working, not a prize for a spectacular run.
+ *
+ * `rewardSol` is what reaching the rung pays, once, from the house. Bounded at every rung and
+ * small on purpose: a reward large enough to be worth farming is a reward that will be farmed.
+ */
+export const AGENT_LEVELS = Object.freeze([
+  Object.freeze({ level: 1, name: "Opened", minClosed: 0, minRealizedSol: null, minWinRate: null, rewardSol: 0 }),
+  Object.freeze({ level: 2, name: "Working", minClosed: 10, minRealizedSol: 0, minWinRate: null, rewardSol: 0.01 }),
+  Object.freeze({ level: 3, name: "Earning", minClosed: 25, minRealizedSol: 0.05, minWinRate: 0.3, rewardSol: 0.02 }),
+  Object.freeze({ level: 4, name: "Consistent", minClosed: 60, minRealizedSol: 0.25, minWinRate: 0.35, rewardSol: 0.05 }),
+  Object.freeze({ level: 5, name: "Proven", minClosed: 150, minRealizedSol: 1, minWinRate: 0.4, rewardSol: 0.1 }),
+]);
+
+export const MAX_AGENT_LEVEL = AGENT_LEVELS[AGENT_LEVELS.length - 1].level;
+
+/** The reward kinds this desk books. Each is its own kind for the same reason fees are: a
+ *  number that can be added to trading P&L eventually will be. */
+export const REWARD_KINDS = Object.freeze(["level_up"]);
+
+const isPlainObject = (v) => v != null && typeof v === "object" && !Array.isArray(v);
+
+/** A finite number, or null. NEVER a coerced zero — `Number(null)` is 0, and this codebase has
+ *  shipped that bug three times now: in a fee-vault read, in a spike measurement, and in the
+ *  very summary written to keep fees and trading apart. The absent check comes first. */
+const num = (v) => {
+  if (v === null || v === undefined || v === "") return null;
+  const x = Number(v);
+  return Number.isFinite(x) ? x : null;
+};
+
+/**
+ * What level a desk has earned, and what is holding it at that level.
+ *
+ * Returns the highest rung whose EVERY requirement is met — activity and record together. The
+ * `blockedBy` field names the first unmet requirement of the next rung, in the desk's own
+ * numbers, because "level 2" tells an operator nothing and "you need 25 closed trades, you have
+ * 12" tells them everything.
+ *
+ * An UNKNOWN record does not advance a level. A desk whose realized result cannot be read is
+ * not a desk that has proved anything, and treating unknown as zero would let a rung asking for
+ * "at least 0 SOL" be cleared by a missing measurement.
+ */
+export function agentLevel({ closedTrades = null, realizedSol = null, winRate = null } = {}) {
+  const closed = num(closedTrades);
+  const realized = num(realizedSol);
+  const rate = num(winRate);
+
+  const meets = (rung) => {
+    if (rung.minClosed > 0) {
+      if (closed === null || closed < rung.minClosed) return { ok: false, field: "closedTrades", need: rung.minClosed, got: closed };
+    }
+    if (rung.minRealizedSol !== null) {
+      if (realized === null) return { ok: false, field: "realizedSol", need: rung.minRealizedSol, got: null };
+      if (realized < rung.minRealizedSol) return { ok: false, field: "realizedSol", need: rung.minRealizedSol, got: realized };
+    }
+    if (rung.minWinRate !== null) {
+      if (rate === null) return { ok: false, field: "winRate", need: rung.minWinRate, got: null };
+      if (rate < rung.minWinRate) return { ok: false, field: "winRate", need: rung.minWinRate, got: rate };
+    }
+    return { ok: true };
+  };
+
+  let earned = AGENT_LEVELS[0], blocked = null, next = null;
+  for (const rung of AGENT_LEVELS) {
+    const verdict = meets(rung);
+    if (verdict.ok) { earned = rung; continue; }
+    next = rung; blocked = verdict; break;
+  }
+
+  const say = (b) => {
+    if (!b) return null;
+    const got = b.got === null ? "not measured" : (b.field === "winRate" ? `${Math.round(b.got * 100)}%` : String(b.got));
+    const need = b.field === "winRate" ? `${Math.round(b.need * 100)}%` : String(b.need);
+    const label = b.field === "closedTrades" ? "closed trades"
+      : b.field === "realizedSol" ? "realized SOL from trading" : "win rate";
+    return `needs ${need} ${label}, has ${got}`;
+  };
+
+  return Object.freeze({
+    level: earned.level,
+    name: earned.name,
+    nextLevel: next ? next.level : null,
+    nextName: next ? next.name : null,
+    nextRewardSol: next ? next.rewardSol : null,
+    blockedBy: blocked ? blocked.field : null,
+    blockedReason: say(blocked),
+    /* THE SENTENCE THAT IS THE WHOLE POINT. A desk that has done the work and lost the money is
+       told that in those words rather than being levelled up for the work. */
+    note: blocked && blocked.field !== "closedTrades"
+      ? "this level is held by the RECORD, not by the amount of work: a desk that trades more "
+        + "without earning more does not advance here, because a ladder that pays for activity "
+        + "pays for losing"
+      : null,
+  });
+}
+
+/** What reaching a level pays, once. Unknown levels pay nothing rather than throwing: a reward
+ *  table consulted with a bad argument must not be able to invent money. */
+export function levelReward(level) {
+  const rung = AGENT_LEVELS.find((r) => r.level === num(level));
+  return rung ? rung.rewardSol : 0;
+}
+
+/**
+ * The rewards a desk is owed but has not been paid, given the levels it has reached and the
+ * reward rows already booked.
+ *
+ * IDEMPOTENT BY CONSTRUCTION. A level's reward is keyed by `level`, so replaying this function
+ * against a book that already contains the payment yields nothing — which matters because this
+ * will be called on every page load and a reward that pays twice is a reward that pays forever.
+ */
+export function rewardsOwed({ level = 1, paidRows = [] } = {}) {
+  const reached = num(level) ?? 1;
+  const paid = new Set();
+  for (const r of Array.isArray(paidRows) ? paidRows : []) {
+    if (!isPlainObject(r) || r.kind !== "level_up") continue;
+    const l = num(r.level);
+    if (l !== null) paid.add(l);
+  }
+  const owed = [];
+  for (const rung of AGENT_LEVELS) {
+    if (rung.level > reached) break;
+    if (rung.rewardSol > 0 && !paid.has(rung.level))
+      owed.push(Object.freeze({ kind: "level_up", level: rung.level, name: rung.name, sol: rung.rewardSol }));
+  }
+  return Object.freeze(owed);
+}
+
+/* ── THE STRATEGY BUILDER ───────────────────────────────────────────────────────────────
+ *
+ * BAGWORK let an owner save a custom strategy: thresholds, caps, timings. Copied, with one
+ * change that matters more than the feature.
+ *
+ * THEIRS ACCEPTS WHATEVER IT IS GIVEN. A saved strategy naming a parameter their engine does not
+ * read is stored, displayed back, and silently does nothing — so an owner tunes a number for a
+ * week and watches a bot that never saw it. This desk has already been bitten by precisely that
+ * shape, from the other end: nineteen of its own dials were parsed, bounded, printed and
+ * documented while launchd never passed them to the process, so `SNIPE_MAX_LAUNCH_SHARE_PCT`
+ * could not reach the bot that was supposed to read it.
+ *
+ * So this validator refuses any key the lane does not actually read, by name, with the list of
+ * what it does. A strategy that saves is a strategy that runs.
+ */
+
+/** Every dial a saved strategy may set, with its bounds. Each maps to one env name the executor
+ *  lane genuinely reads — test-agent-desk.js asserts that mapping against the lane's own table,
+ *  so a dial cannot be offered here and ignored there. */
+export const STRATEGY_DIALS = Object.freeze({
+  maxSolPerTrade: Object.freeze({ env: "SNIPE_MAX_SOL_PER_TRADE", min: 0.001, max: 1, unit: "SOL" }),
+  dailySolCap: Object.freeze({ env: "SNIPE_DAILY_SOL_CAP", min: 0.001, max: 10, unit: "SOL" }),
+  takeAtEntryX: Object.freeze({ env: "SNIPE_TAKE_AT_ENTRY_X", min: 1.05, max: 100, unit: "x entry" }),
+  stopFrac: Object.freeze({ env: "SNIPE_STOP_FRAC", min: 0.01, max: 0.95, unit: "fraction of entry" }),
+  holdMaxMs: Object.freeze({ env: "SNIPE_HOLD_MAX_MS", min: 10_000, max: 24 * 3_600_000, unit: "ms" }),
+  stallMs: Object.freeze({ env: "SNIPE_STALL_MS", min: 0, max: 3_600_000, unit: "ms" }),
+  maxPriceImpactPct: Object.freeze({ env: "SNIPE_MAX_PRICE_IMPACT_PCT", min: 0.1, max: 50, unit: "%" }),
+  /* The market floor — the dials that decide what the bot will look at, which is the part of a
+     strategy that actually distinguishes one desk from another. */
+  minAgeHours: Object.freeze({ env: "SNIPE_MIN_AGE_HOURS", min: 0, max: 720, unit: "hours" }),
+  minLiquidityUsd: Object.freeze({ env: "SNIPE_MIN_LIQUIDITY_USD", min: 0, max: 10_000_000, unit: "USD" }),
+  minVolume24hUsd: Object.freeze({ env: "SNIPE_MIN_VOLUME_24H_USD", min: 0, max: 100_000_000, unit: "USD" }),
+  minMcapUsd: Object.freeze({ env: "SNIPE_MIN_MCAP_USD", min: 0, max: 100_000_000, unit: "USD" }),
+  minVolumeSpike: Object.freeze({ env: "SNIPE_MIN_VOLUME_SPIKE", min: 0, max: 1_000, unit: "x baseline" }),
+  maxSellShare: Object.freeze({ env: "SNIPE_MAX_SELL_SHARE", min: 0.01, max: 1, unit: "fraction" }),
+  maxVolumeToLiquidity: Object.freeze({ env: "SNIPE_MAX_VOLUME_TO_LIQUIDITY", min: 0.1, max: 10_000, unit: "x depth" }),
+});
+
+export const STRATEGY_KEYS = Object.freeze(Object.keys(STRATEGY_DIALS));
+
+/**
+ * Validate a saved strategy. Returns `{ ok, strategy, errors }` — never throws, because this is
+ * driven by a form and a 500 is a worse answer than a list of what is wrong.
+ *
+ * An unknown key is an ERROR, not a warning and not a silently dropped field. That is the whole
+ * difference from theirs: a strategy that cannot run must not be able to save.
+ */
+export function validateStrategy(input) {
+  if (!isPlainObject(input))
+    return Object.freeze({ ok: false, strategy: null, errors: Object.freeze(["a strategy must be an object of dial names to numbers"]) });
+  const errors = [];
+  const out = {};
+  for (const [key, raw] of Object.entries(input)) {
+    const dial = STRATEGY_DIALS[key];
+    if (!dial) {
+      errors.push(`${key} is not a dial this desk's bot reads, so saving it would change nothing. `
+        + `Known dials: ${STRATEGY_KEYS.join(", ")}`);
+      continue;
+    }
+    /* Null is how a dial is CLEARED, and it is not the same as zero: several of these are
+       thresholds where zero means "refuse everything" and absent means "do not judge this". */
+    if (raw === null) { out[key] = null; continue; }
+    const n = num(raw);
+    if (n === null) { errors.push(`${key} must be a number or null, got ${JSON.stringify(raw)}`); continue; }
+    if (n < dial.min || n > dial.max) {
+      errors.push(`${key} must be between ${dial.min} and ${dial.max} ${dial.unit}, got ${n}`);
+      continue;
+    }
+    out[key] = n;
+  }
+  return Object.freeze({
+    ok: errors.length === 0,
+    strategy: errors.length === 0 ? Object.freeze(out) : null,
+    errors: Object.freeze(errors),
+  });
+}
+
+/** A validated strategy as the environment the executor would run it under. Exists so the page
+ *  can SHOW the operator the exact lines to put in their env file, rather than asking them to
+ *  trust that a saved form reached a bot on their own laptop. */
+export function strategyAsEnv(strategy) {
+  if (!isPlainObject(strategy)) return Object.freeze([]);
+  const lines = [];
+  for (const key of STRATEGY_KEYS) {
+    const v = strategy[key];
+    if (v === undefined || v === null) continue;
+    lines.push(`${STRATEGY_DIALS[key].env}=${v}`);
+  }
+  return Object.freeze(lines);
+}
+
+/**
+ * THE PUBLIC VIEW. One desk, shaped for a page anybody can open.
+ *
+ * Three money figures, side by side, never summed — see the header. Every one of them can be
+ * `null`, and null means "not measured", which the page must render as such: a dash, not a
+ * zero. A zero is a claim.
+ */
+export function agentView({
+  floor = null, name = null, operator = null, live = null,
+  closedTrades = null, wins = null, realizedSol = null,
+  /* HOW MANY OF THOSE TRADES HAVE A KNOWN RESULT, which is not the same as how many closed.
+     The bot's book reports `wins` and `losses` only for closures whose realised number could be
+     read from the chain; the rest are `unknown`. Dividing wins by ALL closed trades therefore
+     counts every unreadable closure as a loss and understates the record — quietly, and in the
+     direction that holds a desk at a lower level than it earned. When it is not supplied the
+     denominator falls back to the closed count, which is right when nothing is unknown. */
+  counted = null,
+  feeSol = null, feeClaims = null, feeComplete = null,
+  rewardSol = null, strategy = null, updatedAtMs = null,
+} = {}) {
+  const closed = num(closedTrades);
+  const won = num(wins);
+  const judged = num(counted) ?? closed;
+  const winRate = judged !== null && judged > 0 && won !== null ? won / judged : null;
+  const realized = num(realizedSol);
+  const level = agentLevel({ closedTrades: closed, realizedSol: realized, winRate });
+
+  return Object.freeze({
+    floor: num(floor),
+    name: typeof name === "string" && name ? name : null,
+    /* The operator's wallet is PUBLIC on this page only as far as it already is on chain — it is
+       the lease holder, which /api/tower/floors already publishes. Nothing here exposes a
+       session, a token or an email. */
+    operator: typeof operator === "string" && operator ? operator : null,
+    live: live === true ? true : (live === false ? false : null),
+
+    closedTrades: closed, wins: won, winRate,
+    /* Reported, so a page can say "5 of 41 measurable closures" rather than implying the rate
+       was computed over everything. */
+    countedTrades: judged, unmeasuredTrades: closed !== null && judged !== null ? Math.max(0, closed - judged) : null,
+    /* TRADING, ON ITS OWN. */
+    tradingSol: realized,
+    /* REVENUE, ON ITS OWN. `feeComplete: false` means at least one claim's amount was never
+       reported, so the figure is a floor rather than a total — and the page has to say so. */
+    feeSol: num(feeSol), feeClaims: num(feeClaims),
+    feeSolComplete: feeComplete === true ? true : (feeComplete === false ? false : null),
+    /* THE HOUSE'S REWARDS, ON THEIR OWN. */
+    rewardSol: num(rewardSol),
+
+    level: level.level, levelName: level.name,
+    nextLevel: level.nextLevel, nextLevelReward: level.nextRewardSol,
+    levelBlockedBy: level.blockedBy, levelBlockedReason: level.blockedReason, levelNote: level.note,
+
+    strategy: isPlainObject(strategy) ? Object.freeze({ ...strategy }) : null,
+    strategyEnv: strategyAsEnv(strategy),
+    updatedAtMs: num(updatedAtMs),
+
+    /* And the sentence, on the payload, so a client that renders a total has to ignore it in
+       writing. */
+    accounting: "trading, creator fees and house rewards are three separate figures and are never "
+      + "summed: a fee line added to a losing trading line is how a losing bot displays a profit",
+  });
+}

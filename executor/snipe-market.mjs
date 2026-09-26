@@ -476,10 +476,16 @@ export function prefilterListingRow(row, floor = {}, { nowMs = Date.now() } = {}
   const minAge = num(floor.minAgeHours);
   if (minAge !== null) {
     const created = num(row.created_timestamp);
+    const at = num(nowMs);
     /* A row with no creation stamp cannot be judged on age. Dropped, not admitted: the whole
-       point of the floor is that this bot stops buying coins whose age it does not know. */
-    if (created === null) return { clause: "unknown_age", mint: row.mint };
-    const ageHours = (num(nowMs) - created) / 3_600_000;
+       point of the floor is that this bot stops buying coins whose age it does not know.
+       AN UNUSABLE CLOCK IS THE SAME REFUSAL UNDER A DIFFERENT NAME — and it has to be the
+       different name. Comparing against NaN drops the row either way, so the fail-closed
+       behaviour was already right; the clause was not, and `too_young` blames the coin for a
+       fault in this process. An operator reading a listing where every row is "too young"
+       looks at the market. One reading "unknown_age" looks at the clock. */
+    if (created === null || at === null) return { clause: "unknown_age", mint: row.mint, clockUnusable: at === null };
+    const ageHours = (at - created) / 3_600_000;
     if (!(ageHours >= minAge)) return { clause: "too_young", mint: row.mint, ageHours, threshold: minAge };
   }
 

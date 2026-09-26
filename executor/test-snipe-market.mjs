@@ -354,6 +354,18 @@ console.log("\nthe momentum source: cheap facts first, and it counts what it dro
   ok("a fetcher that returns something other than an array throws rather than reading as empty",
     await notAnArray().then(() => false).catch((e) => /not an array/.test(e.message)));
   ok("prefilterListingRow is pure and takes its clock", prefilterListingRow(goodListing(), floor, { nowMs: NOW }) === null);
+  /* A BROKEN CLOCK IS NOT A YOUNG COIN. Comparing against NaN drops the row either way, so the
+     fail-closed behaviour was always right — but an operator reading a listing where every row
+     is "too young" looks at the market, and one reading "unknown_age" looks at the clock. */
+  ok("an unusable clock is reported as unknown_age, not as a coin that is too young",
+    prefilterListingRow(goodListing(), floor, { nowMs: NaN }).clause === "unknown_age");
+  /* `undefined` is not the case here — it triggers the parameter default, which is Date.now()
+     and perfectly usable. `null` is the one that arrives when a caller passes a clock it could
+     not read. */
+  ok("...and says the clock was the fault, not the row",
+    prefilterListingRow(goodListing(), floor, { nowMs: null }).clockUnusable === true);
+  ok("an omitted clock still uses the default rather than reading as a fault",
+    prefilterListingRow(goodListing(), floor) === null);
   ok("momentumFetcher needs a fetcher", threw(() => momentumFetcher({})) !== null);
 }
 

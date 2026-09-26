@@ -37,6 +37,11 @@ const PAGES = [
   { src: "tower.html",    out: "tower.html" },
   { src: "office3d.html", out: "floor.html" },
   { src: "buy.html",      out: "buy.html" },
+  /* The public agent page (2026-09-26). One floor's bot, its record, its level and its strategy,
+     open to anyone the floor is already open to — a bot nobody can look at is a bot nobody can
+     check. Its three money figures are three cards and never four, because the fourth would be
+     their sum. */
+  { src: "agent.html",    out: "agent.html" },
   { src: "404.html",      out: "404.html" },
 ];
 const ASSETS = [

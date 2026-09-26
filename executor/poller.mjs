@@ -2449,6 +2449,11 @@ function sendHeartbeat() {
          the feed's health, the open snipes and the port's counts — so a floor can see the
          lane it armed, and support can see the one that never started. */
       snipe: snipeHeartbeat(),
+      /* THE REVENUE LINE, IN THE SAME PULSE AND AS ITS OWN BLOCK. Never merged into `ledger`
+         or into the sniper's book: bagworkagent.fun's headline adds claimed fees to trading
+         P&L, which is how a bot losing every round trip displays +15.6 SOL, and a block that
+         travels separately cannot be summed by accident at the far end. */
+      fees: feeHeartbeat(),
       ts: Date.now(),
     }),
   }).then((r) => {
@@ -2500,6 +2505,11 @@ const FILL_REPORT_WINDOW_MS = 7 * 24 * 3600e3;
    cannot be built loses detail and never stops the tick. Nothing here carries a key, an
    endpoint, or a wallet — the desk already knows the burner from the heartbeat's own
    `wallet` field, and a sniper row is a mint, a size and two levels. */
+/* THE FEE LANE'S HANDLE, for the heartbeat. Declared beside the sniper's for the same reason:
+   the lane is constructed far below, and the pulse has to be able to report "configured but
+   never started" — which is a different fact from "off" and the one an operator needs. */
+const feeStatus = { mode: String(process.env.FEE_CLAIM || "off").trim().toLowerCase(), lane: null, error: null };
+
 const snipeStatus = {
   mode: String(process.env.SNIPE_LANE || "off").trim().toLowerCase(),
   state: "off",            // off | starting | up | faulted | disabled | failed-to-start
@@ -2517,6 +2527,31 @@ const setSnipeState = (state, error) => {
     snipeStatus.lastErrorAt = error == null ? 0 : Date.now();
   }
 };
+/** The fee lane's block. Defensive like the sniper's: a lane that throws from stats() costs
+ *  the desk a field, never the pulse.
+ *
+ *  `configured` and `running` are separate booleans on purpose. A lane that was asked for and
+ *  did not start is the single most useful thing this block can report, and "mode: dry, no
+ *  numbers" would look identical to a lane that started and found empty vaults. */
+function feeHeartbeat() {
+  if (feeStatus.mode === "off") return { mode: "off", running: false };
+  const out = { mode: feeStatus.mode, configured: true, running: false, error: feeStatus.error, stats: null };
+  if (!feeStatus.lane) return out;
+  try {
+    const st = feeStatus.lane.stats();
+    out.running = true;
+    out.stats = {
+      live: st.live === true,
+      passes: st.passes, claimed: st.claimed, failed: st.failed, skipped: st.skipped,
+      /* THE REVENUE, and nothing else. No trading figure travels in this block. */
+      solClaimed: Number(st.solClaimed.toFixed(9)),
+      skippedBy: st.skippedBy,
+      bookErrors: st.bookErrors,
+    };
+  } catch (error) { out.error = String(error?.message ?? error).slice(0, 200); }
+  return out;
+}
+
 /** The block the heartbeat carries. Built defensively: a lane that throws from
  *  openPositions() or stats() costs the desk a field, not the pulse. */
 function snipeHeartbeat() {
@@ -3666,6 +3701,7 @@ if (FEE_CLAIM_MODE !== "off") {
       submit: null,
       log: (msg) => log(`[fees] ${msg}`),
     });
+    feeStatus.lane = feeLane;
     log(`[fees] lane ${feeLane.version} DRY for creator ${feeCreator}: reading both vaults every `
       + `${Math.round(feeLane.intervalMs / 60_000)} min, booking to ${sinkMod.feeBookPath(STATE_DB)}, signing nothing`);
     const feeTick = async () => {
@@ -3677,6 +3713,7 @@ if (FEE_CLAIM_MODE !== "off") {
   } catch (err) {
     /* IT CANNOT TAKE THE DESK DOWN, the same rule the launch lane runs under. A revenue line
        that stops the bot that trades is worse than no revenue line. */
+    feeStatus.error = String(err?.message || err).slice(0, 200);
     log(`[fees] fee lane did not start: ${err?.message || err}`);
   }
 }

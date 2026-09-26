@@ -31,6 +31,8 @@ import * as tower from "./tower.js";
 import { seatScorecard } from "./agents/codex-tutor.js";
 import * as auth from "./auth.js";
 import * as leasing from "./leasing.js";
+import * as agentDesk from "./agent-desk.js";
+import * as agentStore from "./agent-store.js";
 import * as rooms from "./rooms.js";
 import * as calls from "./calls.js";
 import * as mandate from "./mandate.js";
@@ -265,6 +267,8 @@ export function houseBotPublic(floorNo, { now = Date.now() } = {}) {
     /* The sniper rides the public book too: a floor's HAWK-AI tab must answer "is it
        running" for a signed-out viewer, and the block carries no wallet to hide. */
     snipe: sanitizeExecutorSnipe(stored.snipe),
+    /* And the revenue line, as its own field — never folded into `ledger` above. */
+    fees: sanitizeExecutorFees(stored.fees),
   };
 }
 
@@ -302,6 +306,7 @@ export async function executorStatusPayload(floorNo, {
     ledger: sanitizeExecutorLedger(stored.ledger),
     reporting: sanitizeExecutorReporting(stored.reporting),
     snipe: sanitizeExecutorSnipe(stored.snipe),
+    fees: sanitizeExecutorFees(stored.fees),
     ts: stored.ts,
     seenAt: stored.seenAt,
   } : null;
@@ -447,6 +452,53 @@ export function sanitizeExecutorReporting(value) {
  *  Bounded like the rest: an allowed-values set for the two states, counts clamped, the
  *  bot's error text capped and treated as data, at most twenty open rows of a mint, a
  *  size and two levels. Nothing here is a key, an endpoint or a wallet. */
+/**
+ * THE FEE LANE'S BLOCK, read as data from a machine the desk does not control.
+ *
+ * It arrives as its own block and stays one: it is never merged into `ledger` and never added
+ * to the sniper's realised figure. bagworkagent.fun's headline number adds claimed creator fees
+ * to trading P&L, which is how an agent that is -0.105 SOL on trading displays +15.6 — and a
+ * block that travels separately cannot be summed by accident at this end.
+ *
+ * `configured` and `running` are kept apart for the same reason the sniper's `state` exists: a
+ * lane that was asked for and never started is the most useful thing this block can report, and
+ * it would otherwise be indistinguishable from a lane that started and found empty vaults.
+ *
+ * Every number is bounded and every claimed figure is clamped at zero, because a claim moves
+ * money INTO the wallet and a negative claim is a sign error rather than a loss. That is the
+ * opposite of the sniper's realised figure beside it, which is signed on purpose.
+ */
+export function sanitizeExecutorFees(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const modes = new Set(["off", "dry", "live"]);
+  const mode = modes.has(String(value.mode)) ? String(value.mode) : "off";
+  if (mode === "off") return { mode: "off", running: false };
+  const count = (input) => Math.min(1_000_000, Math.max(0, Math.floor(Number(input) || 0)));
+  const sol = (input) => {
+    const n = Number(input);
+    return Number.isFinite(n) && n >= 0 ? Math.min(1_000_000, n) : 0;
+  };
+  const st = value.stats && typeof value.stats === "object" && !Array.isArray(value.stats) ? value.stats : null;
+  const by = st?.skippedBy && typeof st.skippedBy === "object" && !Array.isArray(st.skippedBy) ? st.skippedBy : null;
+  return {
+    mode,
+    configured: true,
+    running: value.running === true,
+    error: value.error == null ? null : String(value.error).slice(0, 200),
+    stats: st ? {
+      live: st.live === true,
+      passes: count(st.passes), claimed: count(st.claimed),
+      failed: count(st.failed), skipped: count(st.skipped),
+      solClaimed: sol(st.solClaimed),
+      bookErrors: count(st.bookErrors),
+      /* Only the clauses the lane declares. An unknown key is dropped rather than displayed,
+         because a board rendering a label it cannot explain is worse than a shorter board. */
+      skippedBy: by ? Object.fromEntries(["no_creator", "unreadable", "below_floor", "not_live", "hard_stop"]
+        .map((k) => [k, count(by[k])])) : null,
+    } : null,
+  };
+}
+
 export function sanitizeExecutorSnipe(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const modes = new Set(["off", "observe", "execute"]);
@@ -963,9 +1015,24 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
       // A room shows two things at once: the HOUSE desk working (floor null, the same
       // for every visitor) and that floor's own activity. Filtering strictly to the floor
       // hid the house team entirely, so every room looked idle while the desk was busy.
+      /* NAMED EVENT KINDS (2026-09-26), so a page can subscribe to one thing.
+       *
+       * Every event has always gone out unnamed, which means a client that only wants fee
+       * claims still receives and filters the entire desk's tape — fine for the trading floor,
+       * wasteful for an agent page on a phone. bagworkagent.fun name theirs (trade, fees,
+       * levelup, reward) and a listener can attach to one; this does the same.
+       *
+       * ADDITIVE, AND THAT IS THE WHOLE CARE HERE. An SSE `event:` line before the data is
+       * delivered to a listener attached to THAT name — and every existing client uses
+       * `onmessage`, which only ever fires for events with no name. So a name that appears
+       * without warning makes an event vanish from the floor. The default therefore stays
+       * unnamed, and only the kinds below — none of which any current page reads — carry one.
+       * The floor keeps receiving exactly what it received yesterday. */
+      const NAMED_EVENT_KINDS = new Set(["fees", "levelup", "reward"]);
       const onEvent = (ev) => {
         if (!eventVisibleOnFloor(wantFloor, ev)) return;
-        res.write(`data: ${JSON.stringify(ev)}\n\n`);
+        const named = typeof ev?.type === "string" && NAMED_EVENT_KINDS.has(ev.type) ? ev.type : null;
+        res.write(`${named ? `event: ${named}\n` : ""}data: ${JSON.stringify(ev)}\n\n`);
       };
       bus.on("event", onEvent);
       const ping = setInterval(() => res.write(": ping\n\n"), 15000);
@@ -1213,9 +1280,26 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
             /* The launch lane, through its own sanitizer — a block this whitelist did not
                name was dropped on the floor, which is how the sniper stayed invisible. */
             snipe: sanitizeExecutorSnipe(body.snipe),
+            /* The fee lane, through its own sanitizer. A block this whitelist does not name is
+               dropped on the floor — which is exactly how the sniper stayed invisible for a
+               week — so the revenue line is named here the day it starts being sent. */
+            fees: sanitizeExecutorFees(body.fees),
             ts: Number(body.ts) || Date.now(),
             seenAt: Date.now(),
           };
+          /* A NEW CLAIM IS AN EVENT, and it is detected by COMPARING to what was stored rather
+             than by trusting a flag on the pulse: the heartbeat is a snapshot repeated every
+             minute, so "claimed: 3" arrives sixty times an hour and only the first of them is
+             news. The previous block is read before it is overwritten below. */
+          try {
+            const before = executorHeartbeatPayload(floorNo).heartbeat?.fees?.stats ?? null;
+            const now2 = hb.fees?.stats ?? null;
+            if (now2 && (!before || now2.claimed > before.claimed)) {
+              const gained = now2.solClaimed - (before?.solClaimed ?? 0);
+              emit("fees", { floor: floorNo, claims: now2.claimed, sol: Number(gained.toFixed(9)),
+                text: `floor ${floorNo} claimed ${gained.toFixed(6)} SOL in creator fees` });
+            }
+          } catch {}
           let ring = [];
           try { ring = JSON.parse(db.prepare("SELECT executor_heartbeat_log FROM copy_settings WHERE floor_no=?").get(floorNo)?.executor_heartbeat_log || "[]"); } catch {}
           if (!Array.isArray(ring)) ring = [];
@@ -1502,6 +1586,121 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
           res.end(entry.buf);
           return;
         }
+        /* ── THE PUBLIC AGENT PAGE ────────────────────────────────────────────────────
+         *
+         * bagworkagent.fun gives every agent a public page — a share link, a live record, a
+         * level, a strategy anyone can inspect — and that is genuinely good: a bot nobody can
+         * look at is a bot nobody can check, and this desk has had no per-floor public view at
+         * all. Copied, with the two things they get wrong fixed.
+         *
+         * 1. THREE FIGURES, NEVER THEIR SUM. Their `pnlSol` adds claimed creator fees and level
+         *    rewards to trading P&L, which is how an agent that is -0.105 SOL on trading
+         *    displays +15.6. `agentView()` returns `tradingSol`, `feeSol` and `rewardSol`
+         *    separately and has no total field; the test asserts its absence by name.
+         * 2. UNMEASURED IS NULL, NEVER ZERO. A floor whose bot has never reported has null in
+         *    every money field and the page renders a dash. A zero is a claim.
+         *
+         * PUBLIC ONLY WHERE THE FLOOR ALREADY IS. It reuses floorPrivate(), so HQ is open to
+         * everyone and a leased floor answers only its tenant or a pass-holder — the same
+         * boundary every other read on this server runs under, rather than a second one written
+         * here that could drift from it. Nothing in the payload carries a session, a secret or
+         * an endpoint: the numbers come from the PUBLIC executor projection, which was already
+         * masked and already has its own regression test. */
+        if (url.pathname.startsWith("/api/agent/")) {
+          const rest = url.pathname.slice("/api/agent/".length);
+          const [floorText, tail] = rest.split("/");
+          const floorNo = Number(floorText);
+          if (!Number.isInteger(floorNo) || floorNo < 1 || floorNo > tower.FLOORS)
+            return json(400, { error: `floor must be 1-${tower.FLOORS}` });
+          if (floorPrivate(floorNo)) return json(403, { error: "this floor is private to its tenant" });
+
+          if (!tail && req.method === "GET") {
+            const pub = houseBotPublic(floorNo);
+            const book = pub?.snipe?.book ?? null;
+            const lease = leasing.leaseFor(floorNo);
+            const saved = agentStore.strategyFor(floorNo);
+            /* The record, and the deliberate nulls. `closed` counts and `realizedSol` come from
+               the bot's own durable journal by way of the heartbeat; when nothing has reported,
+               they stay null and the level ladder correctly refuses to advance on a measurement
+               nobody took. */
+            /* `trades` is everything that closed; `counted` is the subset whose realised number
+               could be read from the chain, and `wins`/`losses` only cover that subset. The win
+               rate has to use `counted` as its denominator — dividing by every closure counts
+               each unreadable one as a loss and understates the record in the direction that
+               holds a desk below the level it earned. */
+            const closedTrades = book && Number.isFinite(Number(book.trades)) ? Number(book.trades) : null;
+            const counted = book && Number.isFinite(Number(book.counted)) ? Number(book.counted) : null;
+            const wins = book && Number.isFinite(Number(book.wins)) ? Number(book.wins) : null;
+            const realizedSol = book && Number.isFinite(Number(book.realizedSol)) ? Number(book.realizedSol) : null;
+            /* PAY ANY LEVEL REWARD EARNED AND NOT YET PAID. Idempotent twice over — filtered
+               against the rows already booked and refused by a unique index — because this runs
+               on every page load and a reward that can pay twice pays forever. */
+            const judged = counted ?? closedTrades;
+            try {
+              const paid = agentStore.creditRewards({ floor: floorNo, closedTrades, realizedSol,
+                winRate: judged && wins !== null ? wins / judged : null });
+              /* A level reached and a reward paid are two events, not one: the first is the
+                 desk's record improving, the second is money moving. A page showing one and not
+                 the other would be showing half of what happened. */
+              for (const r of paid) {
+                emit("levelup", { floor: floorNo, level: r.level, name: r.name,
+                  text: `floor ${floorNo} reached level ${r.level} — ${r.name}` });
+                emit("reward", { floor: floorNo, kind: r.kind, level: r.level, sol: r.sol,
+                  text: `floor ${floorNo} earned ${r.sol} SOL for level ${r.level}` });
+              }
+            } catch {}
+            return json(200, {
+              ...agentDesk.agentView({
+                floor: floorNo,
+                name: tower.getFloor(floorNo)?.name ?? null,
+                operator: lease?.wallet ?? (floorNo === HQ_FLOOR ? tower.hqOwnerWallet() : null),
+                live: pub?.snipe ? pub.snipe.state === "up" : null,
+                closedTrades, wins, realizedSol, counted,
+                feeSol: pub?.fees?.stats ? pub.fees.stats.solClaimed : null,
+                feeClaims: pub?.fees?.stats ? pub.fees.stats.claimed : null,
+                /* A dry lane has claimed nothing and that is not an incomplete measurement, so
+                   completeness is only claimed once the lane is actually live. */
+                feeComplete: pub?.fees?.stats ? pub.fees.stats.live === true : null,
+                rewardSol: agentStore.rewardSolFor(floorNo),
+                strategy: saved?.strategy ?? null,
+                updatedAtMs: saved?.updatedAtMs ?? null,
+              }),
+              /* The lane's own posture, unsummarised, so the page can say "configured but never
+                 started" rather than showing zeros that look like an idle market. */
+              snipe: pub?.snipe ?? null,
+              feeLane: pub?.fees ?? null,
+              strategyStale: saved?.stale === true ? saved.staleErrors : null,
+              ladder: agentStore.ladder(),
+              rewards: agentStore.rewardsFor(floorNo),
+            });
+          }
+
+          /* THE STRATEGY BUILDER. Theirs stores whatever it is given, so a parameter their
+             engine does not read is saved, displayed back, and silently does nothing — an owner
+             tunes a number for a week and watches a bot that never saw it. This desk has been
+             bitten by that exact shape from the other end: nineteen of its own dials were
+             parsed, bounded, printed and documented while launchd never passed them. So an
+             unknown dial is a 400 with the list of what the bot actually reads, and nothing is
+             written unless the whole strategy is valid. */
+          if (tail === "strategy" && req.method === "POST") {
+            if (!holdsFloor(floorNo)) return json(403, { error: "only this floor's tenant may set its strategy" });
+            const body = await readBody();
+            const verdict = agentStore.saveStrategy({
+              floor: floorNo, wallet: me,
+              strategy: body && typeof body === "object" ? body.strategy ?? body : null,
+            });
+            if (!verdict.ok) return json(400, { error: "this strategy would not run", errors: verdict.errors });
+            /* AND THE LINES TO PASTE. The bot runs on the tenant's own machine, so a saved form
+               has not reached it — pretending otherwise is the failure mode this endpoint exists
+               to avoid. The exact env lines are returned so the change is something they can
+               actually apply. */
+            return json(200, { ok: true, strategy: verdict.strategy, env: agentDesk.strategyAsEnv(verdict.strategy) });
+          }
+          if (tail === "strategy" && req.method === "GET")
+            return json(200, { strategy: agentStore.strategyFor(floorNo)?.strategy ?? null, dials: agentDesk.STRATEGY_DIALS });
+          return json(404, { error: "no such agent route" });
+        }
+
         if (url.pathname === "/api/record") return json(200, perf.houseRecord());
         /* THE SCOREBOARD, public and aggregate: per seat, how often its direction was right
            and what the coins it killed did next. Counts and averages only — no prompt, no
