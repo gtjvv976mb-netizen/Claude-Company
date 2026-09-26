@@ -270,11 +270,16 @@ console.log("\nwiring");
     /const FEE_CLAIM_MODE = String\(process\.env\.FEE_CLAIM \|\| "off"\)/.test(poller)
     && /setInterval\(feeTick, feeLane\.intervalMs\)/.test(poller));
   ok("off is the shipped default, so an upgrade changes nothing", /FEE_CLAIM \|\| "off"/.test(poller));
-  /* FEE_CLAIM=live is REFUSED rather than quietly accepted. The signing path is deliberately
-     unbuilt: a claim pays only a coin's own creator, so until a mint exists whose creator is
-     this wallet there is nothing real to verify a money-moving path against. */
-  ok("live is refused by name, with the reason, rather than half-working",
-    /FEE_CLAIM=live is not yet honoured/.test(poller) && /submit: null,/.test(poller));
+  /* FEE_CLAIM=live IS REFUSED, AND NOT AS A GAP. A coin's creator fee is paid to the wallet that
+     created the coin, which is not this burner and should not be: the burner's security story is
+     that the only key on that disk is one generated there. bagworkagent.fun's server holds its
+     agents' keys and signs for them; this one does not, and neither does the bot. The lane reads,
+     the owner signs at /fees.html. */
+  ok("live is refused by name, as a settled design rather than a gap",
+    /FEE_CLAIM=live is not honoured, and this is now a settled design/.test(poller)
+    && /submit: null,/.test(poller));
+  ok("...and the refusal says WHERE the owner signs instead", /\/fees\.html/.test(poller));
+  ok("...and why the key is not on this machine", /widen the blast radius/.test(poller));
   ok("it books to its OWN file, not the trading journal", /feeBookPath\(STATE_DB\)/.test(poller));
   ok("HARD STOP governs a claim; PAUSE ENTRIES does not, because a claim takes money IN",
     /control: \(\) => \(\{ hardStop: hardStop\(\) === true \}\)/.test(poller)

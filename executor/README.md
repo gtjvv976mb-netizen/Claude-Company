@@ -1407,17 +1407,38 @@ Three distinctions the lane keeps that a simpler one would collapse:
 exception for the profitable path. `PAUSE ENTRIES` does not: it stops new exposure, and a claim
 takes money in.
 
-#### Why `FEE_CLAIM=live` is refused today
+#### Why `FEE_CLAIM=live` is refused, permanently
 
-It is refused by name, with the reason, rather than half-working. A claim pays only a coin's own
-creator, so **until a mint exists whose creator is this wallet there is no vault to sign
-against** — and a money-moving path with nothing real to verify it against is exactly how the
-`Number(null) === 0` bug shipped in `readClaimable`. The decision logic, the book, the counters
-and the reporting are all built and tested; the signer is the next piece, and it becomes
-verifiable the same hour a coin exists.
+It is refused by name, and this is a settled design rather than a gap.
 
-That is also the one thing this lane needs from its owner: launching a coin is money leaving a
-wallet, and it is not an action this desk takes on its own.
+A coin's creator fee is paid to the wallet that **created the coin** — for `$CLAUDECO` that is
+`3J57tqAJqRmSBn1ZYDu9JpMMyTfBHdcGGwECiPQeiji3`, not the burner this installer generates. The
+burner's entire security story is that the only key on that disk is one generated there and funded
+deliberately; a real creator wallet sitting beside it would widen the blast radius of everything
+else on the machine for the sake of a claim that happens a few times a month.
+
+bagworkagent.fun's server holds its agents' keys and signs for them. This desk does not, and
+neither does the bot. The split is:
+
+| who | does what |
+|---|---|
+| the bot | **reads** both vaults on a timer and reports what is claimable |
+| the desk | **builds** the unsigned claim, from the layout proved against three landed transactions |
+| the owner | **signs** once, in their own wallet, at `/fees.html` |
+
+So `FEE_CLAIM=dry` is not a rehearsal mode — it is the mode this lane runs in for good. Set
+`FEE_CLAIM_CREATOR` to the creator wallet you want watched (it need not be this machine's wallet,
+and for the house coin it is not), and the claimable figure rides the heartbeat to the desk and onto
+the agent page.
+
+```bash
+FEE_CLAIM=dry
+FEE_CLAIM_CREATOR=3J57tqAJqRmSBn1ZYDu9JpMMyTfBHdcGGwECiPQeiji3
+```
+
+The claim itself is two clicks at `solana.claudedotcompany.com/fees.html`: connect the creator
+wallet, sign. The page refuses to offer a claim from any other wallet, because only the creator's
+signature can send it and finding that out on chain is a worse way to learn it.
 
 ### The market floor — the biggest change to what this bot buys
 

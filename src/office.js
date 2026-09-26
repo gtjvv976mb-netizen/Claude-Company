@@ -1411,6 +1411,57 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
            mainnet RPC 403s browsers, so the page gets its blockhash here,
            through the server's own RPC. Nothing user-controlled reaches the
            RPC; 5s memo-cache keeps a click-storm at one upstream call. */
+        /* ── THE CREATOR-FEE CLAIM, AS SOMETHING THE OWNER SIGNS ─────────────────────
+         *
+         * bagworkagent.fun's server signs claims on its agents' behalf — it holds the keys. This
+         * desk does not, and neither does the bot: a coin's creator fee is paid to the wallet that
+         * created the coin, and for $CLAUDECO that is a wallet the owner holds, not the burner the
+         * installer generates. Putting a real creator key on the trading machine would widen the
+         * blast radius of everything else on it for a claim that happens a few times a month.
+         *
+         * So: the bot reads the vaults on a timer and reports what is claimable (fee-lane.mjs,
+         * dry), this endpoint builds the unsigned instructions from the layout proved against three
+         * mainnet transactions, and the owner's own wallet signs once. Nothing on this server can
+         * send it.
+         *
+         * NEITHER ROUTE IS GATED, and that is deliberate rather than an oversight. Both derive from
+         * a public address and return public on-chain facts; the transaction they describe can only
+         * be sent by a signature only the creator can make. Gating them would imply a secrecy that
+         * does not exist, and secrecy that does not exist is the kind somebody later relies on. */
+        if (url.pathname === "/api/fees/claimable") {
+          const { readClaimable: readVaults, FeeClaimError } = await import("./fee-claim.js");
+          const { readRpc } = await import("./lib/http.js");
+          try {
+            const out = await readVaults({
+              creator: url.searchParams.get("creator"),
+              rpcGet: (method, params) => readRpc(cfg.rpc, method, params),
+            });
+            const { worthClaiming } = await import("./fee-claim.js");
+            return json(200, { ...out, verdict: worthClaiming({ claimableLamports: out.claimableLamports }) });
+          } catch (error) {
+            if (error instanceof FeeClaimError) return json(400, { error: error.message, clause: error.clause });
+            throw error;
+          }
+        }
+        if (url.pathname === "/api/fees/claim-ticket") {
+          const { claimTicket, FeeClaimError } = await import("./fee-claim.js");
+          /* Which halves to include is the CALLER's, because only a fresh read knows which side
+             holds anything — and a claim that includes an empty side spends fees to move zero. */
+          const bool = (name, dflt) => {
+            const raw = url.searchParams.get(name);
+            return raw === null ? dflt : ["1", "true", "yes"].includes(raw.toLowerCase());
+          };
+          try {
+            return json(200, await claimTicket({
+              creator: url.searchParams.get("creator"),
+              includeCurve: bool("curve", true), includeAmm: bool("amm", true),
+            }));
+          } catch (error) {
+            if (error instanceof FeeClaimError) return json(400, { error: error.message, clause: error.clause });
+            throw error;
+          }
+        }
+
         if (url.pathname === "/api/pay/blockhash") {
           const now = Date.now();
           if (!globalThis.__bh || now - globalThis.__bh.at > 5000) {

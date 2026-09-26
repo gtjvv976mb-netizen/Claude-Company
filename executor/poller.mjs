@@ -3653,10 +3653,15 @@ if (FEE_CLAIM_MODE !== "off") {
     if (!["dry", "live"].includes(FEE_CLAIM_MODE))
       throw new Error(`FEE_CLAIM=${JSON.stringify(FEE_CLAIM_MODE)} is not one of off, dry, live`);
     if (FEE_CLAIM_MODE === "live")
-      throw new Error("FEE_CLAIM=live is not yet honoured: the claim's signing path is deliberately unbuilt until a "
-        + "mint exists whose creator is this wallet, because a path that moves money with nothing real to verify "
-        + "against is how a plausible-looking bug ships. Run FEE_CLAIM=dry; it reads the vaults and records what it "
-        + "would have taken.");
+      throw new Error("FEE_CLAIM=live is not honoured, and this is now a settled design rather than a gap.\n\n"
+        + "A coin's creator fee is paid to the wallet that CREATED the coin, which is not this burner and should not "
+        + "be. The burner's whole security story is that the only key on this disk is one generated here and funded "
+        + "deliberately; a real creator wallet sitting beside it would widen the blast radius of everything else on "
+        + "this machine for the sake of a claim that happens a few times a month. bagworkagent.fun's server holds "
+        + "its agents' keys and signs for them. This one does not, and neither does the bot.\n\n"
+        + "So the split is: this lane READS the vaults on a timer and reports what is claimable, and the OWNER signs "
+        + "the claim in their own wallet at /fees.html, which builds it from the same layout proved against three "
+        + "landed mainnet transactions. Run FEE_CLAIM=dry.");
     const [feeMod, feesMod, sinkMod] = await Promise.all([
       import("./fee-lane.mjs"), import("./pumpfun-fees.mjs"), import("./shadow-sink.mjs"),
     ]);
@@ -3698,6 +3703,9 @@ if (FEE_CLAIM_MODE !== "off") {
          trade. PAUSE ENTRIES does not: it stops new exposure, and a claim takes money in. */
       control: () => ({ hardStop: hardStop() === true }),
       book: sinkMod.createShadowSink({ file: sinkMod.feeBookPath(STATE_DB) }),
+      /* NO SUBMITTER, PERMANENTLY. The module takes one as a port so its live path can be driven by a
+         test, and the desk deliberately supplies none: the creator key is not on this machine and the
+         owner signs at /fees.html. See the FEE_CLAIM=live refusal above. */
       submit: null,
       log: (msg) => log(`[fees] ${msg}`),
     });

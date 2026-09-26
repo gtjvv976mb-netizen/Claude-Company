@@ -42,6 +42,9 @@ const PAGES = [
      check. Its three money figures are three cards and never four, because the fourth would be
      their sum. */
   { src: "agent.html",    out: "agent.html" },
+  /* The creator-fee claim (2026-09-26). One job: read the two vaults, build the unsigned claim, and
+     let the owner's own wallet sign it. Nothing on the server or the bot holds the creator key. */
+  { src: "fees.html",     out: "fees.html" },
   { src: "404.html",      out: "404.html" },
 ];
 const ASSETS = [
