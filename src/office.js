@@ -1872,6 +1872,7 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
                  says which are live; `remote` is the bot's own report of what it applied. */
               canEdit: holdsFloor(floorNo),
               strategyDials: agentDesk.STRATEGY_DIALS,
+              riskModes: agentDesk.RISK_MODES,
               remote: showRaw ? pub?.snipe?.remote ?? null : null,
               ladder: agentStore.ladder(),
               rewards: agentStore.rewardsFor(floorNo),

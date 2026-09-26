@@ -216,6 +216,9 @@ console.log("\nthe page itself");
     /r\.version === a\.updatedAtMs/.test(html) && /Running on your bot since/.test(html) && /waiting for your bot to pick it up/.test(html));
   ok("a bot that has not opted in is told exactly what line to add", /SNIPE_REMOTE_FILTERS="1"/.test(html));
   ok("what the owner is typing survives the 30-second refresh", /if \(dirty\) return;/.test(html));
+  ok("risk modes are offered as cards, with the size shown only as a Mac suggestion",
+    /Risk mode — pick how picky the bot is/.test(html) && /\$\{m\.risk\} risk · suggested size \$\{m\.suggestedSolPerTrade\} SOL\/trade — set on the Mac/.test(html));
+  ok("picking a mode clears the filters it covers, so its values apply", /if \(covered\.has\(input\.dataset\.key\)\) input\.value = ""/.test(html));
   ok("it listens to the named kinds AND the unnamed default",
     /es\.onmessage/.test(html) && /for \(const kind of \["fees", "levelup", "reward"\]\)/.test(html));
   ok("a private floor is told so rather than shown an empty tape", /private to its tenant/.test(html));

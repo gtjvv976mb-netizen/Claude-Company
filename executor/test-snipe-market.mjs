@@ -523,7 +523,7 @@ console.log("\nwiring");
   ok("the lane stamps the floor it is running and whether it can honour it",
     /marketFloor: conf\.marketFloor,/.test(lane) && /marketReaderWired: typeof marketReader === "function"/.test(lane));
   ok("the arming banner names the thresholds rather than saying 'armed'",
-    /snipe market floor ARMED: \$\{named\}/.test(lane));
+    /snipe market floor ARMED\$\{[^\n]*riskMode[^\n]*\}: \$\{named\}/.test(lane));
 
   const poller = fs.readFileSync(new URL("./poller.mjs", import.meta.url), "utf8");
   ok("the momentum source is ADDED to the feed, never substituted for the launch sources",

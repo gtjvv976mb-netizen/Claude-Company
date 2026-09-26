@@ -4166,7 +4166,16 @@ if (SNIPE_LANE_MODE !== "off") {
               reason: "this bot has no gRPC trade tap (SNIPE_GRPC_*), so no candidate could ever be measured" });
             delete dials.SNIPE_MIN_VOLUME_SPIKE;
           }
-          const r = remoteFilterConfig({ baseEnv, remote: dials });
+          let r = remoteFilterConfig({ baseEnv, remote: dials });
+          /* A spike can also arrive inside a risk mode (wave), not only as its own dial — so the
+             tap check is made on the RESOLVED config, and a mode that needs the tap is refused
+             whole on a bot that has none, rather than applied as a floor that refuses everything. */
+          if (!grpcSource && r.ok && r.cfg.minVolumeSpike !== undefined && r.cfg.minVolumeSpike !== null) {
+            refusedHere.push({ name: "SNIPE_RISK_MODE",
+              reason: `mode ${r.cfg.riskMode} needs the gRPC trade tap for its volume spike, and this bot has none` });
+            delete dials.SNIPE_RISK_MODE;
+            r = remoteFilterConfig({ baseEnv, remote: dials });
+          }
           const applied = r.ok ? lane.applyFilters(r.cfg) : { ok: false, reason: r.rejected.map((x) => `${x.name}: ${x.reason}`).join("; ") };
           remoteState.version = version;
           remoteState.rejected = [...refusedHere, ...r.rejected].slice(0, 20);

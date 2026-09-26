@@ -46,7 +46,7 @@ import bs58 from "bs58";
 import {
   LANE_REFUSED_VENUE_METHODS, LANE_SIGNALS, SNIPE_ENV, SNIPE_LANE_CLAUSES, SNIPE_LANE_DEFAULTS, SNIPE_LANE_MODES, SNIPE_LANE_VERSION,
   SnipeLaneError, bindDeterminer, createSnipeLane, observeOnlyVenue, readAcrossEndpoints, snipeLaneConfig,
-  remoteFilterConfig, LIVE_FILTER_ENV,
+  remoteFilterConfig, LIVE_FILTER_ENV, LIVE_FILTER_KEYS, RISK_MODES,
 } from "./snipe-lane.mjs";
 import {
   PROMOTION_MIN_FLAGGED, PROMOTION_MIN_ROWS, PROMOTION_PRECISION_BAR, SHADOW_FORBIDDEN_MEASURES,
@@ -1425,6 +1425,36 @@ section("18. THE DESK MAY CHANGE WHAT THE BOT BUYS — AND NOTHING ELSE");
   ok("...re-validates it through remoteFilterConfig against the owner's env file",
     /remoteFilterConfig\(\{ baseEnv, remote: dials \}\)/.test(poller));
   ok("...and reads it from the heartbeat reply", /snipeStatus\.remote\?\.apply\(b\?\.strategy\)/.test(poller));
+}
+
+section("19. RISK MODES: ONE CHOICE, A BUNDLE OF FILTERS, NEVER MONEY");
+{
+  const vet = snipeLaneConfig({ SNIPE_RISK_MODE: "veteran" });
+  ok("a mode fills in its whole bundle of filters", vet.marketFloor?.minAgeHours === 2 && vet.marketFloor?.minVolume24hUsd === 75_000
+    && vet.marketFloor?.minTxns24h === 300 && vet.marketFloor?.maxSellShare === 0.6 && vet.requireSocials === true);
+  const age = (m) => snipeLaneConfig({ SNIPE_RISK_MODE: m }).marketFloor.minAgeHours;
+  ok("veteran demands the oldest coins and early the youngest", age("veteran") > age("proven") && age("proven") > age("early"));
+  ok("the names say what each buys", Object.values(RISK_MODES).every((m) => /—/.test(m.label) && typeof m.risk === "string"));
+  const wave = snipeLaneConfig({ SNIPE_RISK_MODE: "wave" });
+  ok("wave rider arms the volume spike on hour-old coins", wave.minVolumeSpike === 3 && wave.marketFloor.minAgeHours === 1
+    && wave.marketFloor.minVolume24hUsd === 25_000);
+  const typed = snipeLaneConfig({ SNIPE_RISK_MODE: "veteran", SNIPE_MIN_VOLUME_24H_USD: "30000", SNIPE_REQUIRE_SOCIALS: "0" });
+  ok("a filter the owner typed always wins over the mode", typed.marketFloor.minVolume24hUsd === 30_000 && typed.requireSocials === false
+    && typed.marketFloor.minAgeHours === 2);
+  ok("a mode never sets money, exits or pricing",
+    Object.values(RISK_MODES).every((m) => Object.keys(m.filters).every((k) => LIVE_FILTER_KEYS.includes(k))));
+  ok("...and never touches size even when chosen", snipeLaneConfig({ SNIPE_RISK_MODE: "early" }).maxSolPerTrade === SNIPE_LANE_DEFAULTS.maxSolPerTrade);
+  ok("a misspelled mode is refused rather than silently off",
+    (() => { try { snipeLaneConfig({ SNIPE_RISK_MODE: "yolo" }); return false; } catch (e) { return e instanceof SnipeLaneError; } })());
+  ok("no mode is the default", snipeLaneConfig({}).riskMode === "off" && snipeLaneConfig({}).marketFloor === null);
+  ok("no mode's age floor sits under the dedupe window, so no candidate is swallowed",
+    Object.values(RISK_MODES).every((m) => (m.filters.minAgeHours ?? 1) * 3_600_000 >= 30 * 60_000));
+  const live = remoteFilterConfig({ baseEnv: { SNIPE_MARKET_FLOOR: "curve" }, remote: { SNIPE_RISK_MODE: "veteran" } });
+  ok("a mode can be picked from the page, live", live.ok && live.cfg.riskMode === "veteran" && live.cfg.marketFloor.minAgeHours === 2
+    && LIVE_FILTER_ENV.includes("SNIPE_RISK_MODE"));
+  const poller = fs.readFileSync(path.join(HERE, "poller.mjs"), "utf8");
+  ok("a wave mode sent to a bot with no gRPC tap is refused, not applied as a floor that refuses everything",
+    /if \(!grpcSource && r\.ok && r\.cfg\.minVolumeSpike !== undefined/.test(poller));
 }
 
 section("17. A SPIKE FLOOR ON A TAPE NOBODY FILLS IS REFUSED AT CONSTRUCTION");
