@@ -587,6 +587,17 @@ export function sanitizeExecutorSnipe(value) {
         lastError: v.lastError == null ? null : String(v.lastError).slice(0, 160),
       };
     })(),
+    /* WHY THE LAST BUY FAILED. Rendered, so the clause is shape-checked and the text capped. */
+    lastEntryFailure: (() => {
+      const v = value.lastEntryFailure && typeof value.lastEntryFailure === "object" && !Array.isArray(value.lastEntryFailure) ? value.lastEntryFailure : null;
+      if (!v) return null;
+      return {
+        at: timestamp(v.at),
+        mint: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(String(v.mint || "")) ? String(v.mint) : null,
+        clause: /^[a-z_]{1,40}$/i.test(String(v.clause || "")) ? String(v.clause) : "error",
+        message: String(v.message ?? "").slice(0, 240),
+      };
+    })(),
     /* THE FILTER PANEL AS THE BOT SEES IT: whether it takes one, which saved version it is
        running, what it refused. Names are matched against the env shape, reasons are capped. */
     remote: (() => {
@@ -1872,7 +1883,10 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
                  says which are live; `remote` is the bot's own report of what it applied. */
               canEdit: holdsFloor(floorNo),
               strategyDials: agentDesk.STRATEGY_DIALS,
+              riskModes: agentDesk.RISK_MODES,
               remote: showRaw ? pub?.snipe?.remote ?? null : null,
+              entryFailures: showRaw ? pub?.snipe?.counts?.entryFailures ?? null : null,
+              lastEntryFailure: showRaw ? pub?.snipe?.lastEntryFailure ?? null : null,
               ladder: agentStore.ladder(),
               rewards: agentStore.rewardsFor(floorNo),
             });

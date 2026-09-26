@@ -202,6 +202,8 @@ export const STRATEGY_DIALS = Object.freeze({
   /* LIVE (`live: true`): WHAT TO BUY. A bot whose owner set SNIPE_REMOTE_FILTERS=1 applies these
      from the page within a heartbeat, without a restart — bagworkagent.fun's "edit the agent and
      it picks it up", limited to the part of a strategy that cannot spend more money. */
+  riskMode: Object.freeze({ env: "SNIPE_RISK_MODE", type: "preset", values: Object.freeze(["off", "veteran", "proven", "wave", "early"]),
+    unit: "mode", live: true }),
   marketFloor: Object.freeze({ env: "SNIPE_MARKET_FLOOR", type: "preset", values: Object.freeze(["off", "curve", "bagwork"]),
     unit: "preset", live: true }),
   minAgeHours: Object.freeze({ env: "SNIPE_MIN_AGE_HOURS", min: 0, max: 720, unit: "hours", live: true }),
@@ -218,6 +220,37 @@ export const STRATEGY_DIALS = Object.freeze({
 });
 
 export const STRATEGY_KEYS = Object.freeze(Object.keys(STRATEGY_DIALS));
+
+/**
+ * THE RISK MODES, as the page describes them. The executor's RISK_MODES (snipe-lane.mjs) is the
+ * authority on what each mode sets; this is the same table for a desk that does not load the
+ * executor, and test-agent-desk.mjs asserts the two agree field for field, so the card a user
+ * reads cannot drift from the filters the bot applies. The size is a SUGGESTION shown to the
+ * owner: a mode never sets it, because size is money and money stays on the Mac.
+ */
+export const RISK_MODES = Object.freeze({
+  veteran: Object.freeze({
+    label: "Veteran — established coins only", risk: "lowest", suggestedSolPerTrade: 0.05,
+    summary: "Coins at least 2 hours old with $75k+ of 24h volume, 300+ trades, no more than 60% sells, and a social link. Fewest trades.",
+    filters: Object.freeze({ marketFloorPreset: "curve", minAgeHours: 2, minVolume24hUsd: 75_000, minTxns24h: 300,
+      maxSellShare: 0.6, requireSocials: true }),
+  }),
+  proven: Object.freeze({
+    label: "Proven mover — an hour of real demand", risk: "medium", suggestedSolPerTrade: 0.1,
+    summary: "Coins at least 1 hour old with $50k+ of 24h volume, no more than 70% sells, and a social link.",
+    filters: Object.freeze({ marketFloorPreset: "curve", maxSellShare: 0.7, requireSocials: true }),
+  }),
+  wave: Object.freeze({
+    label: "Wave rider — buy when volume spikes", risk: "medium-high", suggestedSolPerTrade: 0.1,
+    summary: "Coins at least 1 hour old with $25k+ of 24h volume and a social link, bought only while money is flowing in 3x faster than its last 5 minutes. Needs the gRPC feed.",
+    filters: Object.freeze({ marketFloorPreset: "curve", minVolume24hUsd: 25_000, minVolumeSpike: 3, requireSocials: true }),
+  }),
+  early: Object.freeze({
+    label: "Early riser — younger coins, more trades", risk: "highest", suggestedSolPerTrade: 0.2,
+    summary: "Coins from 30 minutes old with $25k+ of 24h volume, social link not required. The most trades, on the least proven coins.",
+    filters: Object.freeze({ marketFloorPreset: "curve", minAgeHours: 0.5, minVolume24hUsd: 25_000, requireSocials: false }),
+  }),
+});
 /** The dials a running bot takes from the page. The executor's own list is the authority
  *  (snipe-lane.mjs LIVE_FILTER_ENV); test-agent-desk.mjs asserts these are a subset of it. */
 export const LIVE_STRATEGY_KEYS = Object.freeze(STRATEGY_KEYS.filter((k) => STRATEGY_DIALS[k].live === true));

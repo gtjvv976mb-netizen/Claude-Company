@@ -21,9 +21,9 @@
 import fs from "node:fs";
 import {
   AGENT_LEVELS, MAX_AGENT_LEVEL, REWARD_KINDS, STRATEGY_DIALS, STRATEGY_KEYS,
-  agentLevel, levelReward, rewardsOwed, validateStrategy, strategyAsEnv, agentView, LIVE_STRATEGY_KEYS, liveFilterEnv,
+  agentLevel, levelReward, rewardsOwed, validateStrategy, strategyAsEnv, agentView, LIVE_STRATEGY_KEYS, liveFilterEnv, RISK_MODES as DESK_RISK_MODES,
 } from "./src/agent-desk.js";
-import { SNIPE_ENV, LIVE_FILTER_ENV } from "./executor/snipe-lane.mjs";
+import { SNIPE_ENV, LIVE_FILTER_ENV, RISK_MODES as LANE_RISK_MODES } from "./executor/snipe-lane.mjs";
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => {
@@ -156,6 +156,11 @@ console.log("\nthe strategy builder: a strategy that saves is a strategy that ru
     && validateStrategy({ requireSocials: true }).strategy?.requireSocials === true
     && validateStrategy({ requireSocials: "maybe" }).ok === false);
   ok("the env lines spell a flag as 1/0", strategyAsEnv({ requireSocials: false }).join() === "SNIPE_REQUIRE_SOCIALS=0");
+  /* THE CARD A USER READS MUST BE THE FILTERS THE BOT APPLIES. */
+  ok("the page's risk modes are the executor's, field for field",
+    JSON.stringify(DESK_RISK_MODES) === JSON.stringify(LANE_RISK_MODES), Object.keys(DESK_RISK_MODES).join(","));
+  ok("the risk-mode dial offers exactly the executor's modes",
+    JSON.stringify(STRATEGY_DIALS.riskMode.values) === JSON.stringify(["off", ...Object.keys(LANE_RISK_MODES)]) && STRATEGY_DIALS.riskMode.live === true);
   ok("the per-trade ceiling matches the operator maximum the lane enforces",
     STRATEGY_DIALS.maxSolPerTrade.max === 1);
 
