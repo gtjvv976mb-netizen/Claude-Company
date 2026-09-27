@@ -30,6 +30,7 @@ import {
   classifySource, summarizeFeedHealth, sourceLatency,
   createSnipeFeed, logsSubscribeSource, pollSource, sourceFromVenueWatch,
   web3LogsTransport, pumpfunRowToNotice, pumpfunListingFetcher, PUMPFUN_PAGE_ROWS,
+  createSourceWatchdog, GRPC_WATCHDOG,
 } from "./snipe-feed.mjs";
 import { REQUIRED_VENUE_METHODS } from "./snipe-venue.mjs";
 
@@ -897,6 +898,339 @@ await ok("a feed with no sources is refused — it could not report that it is b
   const dup = { id: "same", kind: "logs", start() { return { stop() {} }; } };
   assert.throws(() => createSnipeFeed({ sources: [dup, { ...dup }] }), /share the id/);
   console.log(`         refused: no sources, no start(), an unknown kind, two sources sharing an id`);
+});
+
+/* ── §13 the watchdog: who calls restartSource ─────────────────────────────────────── */
+
+console.log("\n13. THE WATCHDOG — THE STREAM DIED AND NOTHING REVIVED IT (2026-09-27)");
+
+/* The incident, in one line of the owner's heartbeat: "3/4 live; DEAD: grpc:pumpfun", for nine
+   hours, while the header of this file said restarting was "an explicit act by the lane" and no
+   code anywhere performed it. Every case below drives a REAL feed over the fake transport, with
+   the watchdog's timer injected and ticked by hand. */
+
+/** An interval the test owns: records what was armed and cleared, fires only when told. */
+function fakeInterval() {
+  const iv = { armed: [], cleared: [], fn: null,
+    set(fn, ms) { iv.fn = fn; const h = { id: iv.armed.length + 1, ms, unref() { h.unrefd = true; } }; iv.armed.push(h); return h; },
+    clear(h) { iv.cleared.push(h); },
+  };
+  return iv;
+}
+const grpcFeed = (t, extra = {}) => createSnipeFeed({
+  sources: [logsSubscribeSource({ id: "grpc:pumpfun", kind: "grpc", programId: PUMPFUN_PROGRAM, transport: t,
+    extractMint: (n) => (n?.create ? { mint: n.create } : null) })],
+  clock, schedule: fakeTimers().schedule, cancel: () => {}, ...extra,
+});
+const watchdogFor = (f, over = {}) => {
+  const iv = fakeInterval();
+  const lines = [];
+  const wd = createSourceWatchdog({ feed: f, sourceId: "grpc:pumpfun", setIntervalFn: iv.set, clearIntervalFn: iv.clear,
+    log: (m) => lines.push(m), ...over });
+  return { wd, iv, lines };
+};
+
+await ok("the shipped dials: 15s ticks, 15s -> 5m backoff, 60s silence, 5s after an error", () => {
+  assert.equal(GRPC_WATCHDOG.intervalMs, 15_000);
+  assert.deepEqual([...GRPC_WATCHDOG.backoffMs], [15_000, 30_000, 60_000, 120_000, 300_000]);
+  assert.equal(GRPC_WATCHDOG.silentMs, 60_000, "the silence rule must match the feed's degraded threshold");
+  assert.equal(GRPC_WATCHDOG.silentMs, FEED_DEFAULTS.degradedAfterSilentMs);
+  assert.ok(GRPC_WATCHDOG.backoffMs.at(-1) <= FEED_DEFAULTS.deadAfterSilentMs,
+    "the slowest retry must be no later than the moment the heartbeat already says DEAD");
+  assert.equal(GRPC_WATCHDOG.errorSilentMs, 5_000);
+  console.log(`         ${JSON.stringify(GRPC_WATCHDOG)}`);
+});
+
+await ok("constructing opens nothing; start() arms one timer; stop() clears exactly that timer", async () => {
+  const t = fakeTransport();
+  const f = grpcFeed(t);
+  const { wd, iv } = watchdogFor(f, { intervalMs: 15_000 });
+  assert.equal(iv.armed.length, 0, "a watchdog armed a timer at construction");
+  assert.equal(wd.stats().state, "idle");
+  wd.start();
+  wd.start();                                                   // idempotent
+  assert.equal(iv.armed.length, 1, `start() armed ${iv.armed.length} timers`);
+  assert.equal(iv.armed[0].ms, 15_000, `interval = ${iv.armed[0].ms}`);
+  assert.equal(iv.armed[0].unrefd, true, "the timer must not hold the process open");
+  const s = wd.stop();
+  assert.deepEqual(iv.cleared, [iv.armed[0]], "stop() did not clear the timer it armed");
+  assert.equal(s.state, "stopped");
+  assert.equal((await wd.tick()).restarts, 0, "a stopped watchdog still acted");
+  wd.start();
+  assert.equal(iv.armed.length, 1, "a stopped watchdog re-armed");
+  console.log(`         armed 1 x ${iv.armed[0].ms}ms (unref'd) · cleared on stop · inert after`);
+});
+
+await ok("refused at construction: no feed, no source id, a bad interval, an empty backoff", () => {
+  const f = grpcFeed(fakeTransport());
+  assert.throws(() => createSourceWatchdog({ sourceId: "x" }), /health\(\) and restartSource\(\)/);
+  assert.throws(() => createSourceWatchdog({ feed: f }), /id of the source/);
+  assert.throws(() => createSourceWatchdog({ feed: f, sourceId: "x", intervalMs: 0 }), /intervalMs/);
+  assert.throws(() => createSourceWatchdog({ feed: f, sourceId: "x", backoffMs: [] }), /backoffMs/);
+  assert.throws(() => createSourceWatchdog({ feed: f, sourceId: "x", silentMs: -1 }), /silentMs/);
+});
+
+await ok("DEAD -> restart: the feed's own verdict triggers it, and the old subscription is closed first", async () => {
+  const t = fakeTransport();
+  const f = grpcFeed(t, { cfg: { maxConsecutiveErrors: 1 } });
+  NOW = 20_000_000;
+  await f.start();
+  const { wd, lines } = watchdogFor(f);
+  assert.equal((await wd.tick()).restarts, 0, "a live source was restarted");
+  t.breakIt("gRPC stream ended; a subscription that ends is a dead source");
+  assert.equal(f.health().sources[0].state, "dead");
+  const s = await wd.tick();
+  assert.equal(s.restarts, 1, `restarts = ${s.restarts}`);
+  assert.equal(s.lastRestartOk, true, `lastRestartOk = ${s.lastRestartOk} (${s.lastRestartError})`);
+  assert.equal(s.lastRestartAtMs, 20_000_000, `lastRestartAtMs = ${s.lastRestartAtMs}`);
+  assert.equal(t.subscribes, 2, `subscribes = ${t.subscribes}`);
+  assert.equal(t.unsubscribes, 1, "the dead subscription was not closed before the new one opened");
+  assert.equal(t.live, 1, `${t.live} subscriptions are open — every trade would be counted twice`);
+  assert.equal(f.health().sources[0].restarts, 1);
+  assert.ok(lines.some((l) => /grpc:pumpfun is dead .* restart attempt 1/.test(l)), `no restart line in ${JSON.stringify(lines)}`);
+  assert.ok(lines.some((l) => /resubscribed \(attempt 1\)/.test(l)), "the outcome was not logged");
+  console.log(`         dead -> restart 1 at ${s.lastRestartAtMs}: subscribes ${t.subscribes}, unsubscribes ${t.unsubscribes}, open ${t.live}`);
+  console.log(`         log: "${lines[0]}"`);
+  await f.stop();
+});
+
+await ok("BACKOFF is respected while it stays down: 15s, then 30s, then 60s", async () => {
+  const t = fakeTransport();
+  const f = grpcFeed(t, { cfg: { maxConsecutiveErrors: 1 } });
+  NOW = 21_000_000;
+  await f.start();
+  const { wd } = watchdogFor(f);
+  const kill = () => t.breakIt("reset");
+  kill();
+  await wd.tick();                                           // attempt 1 at t0
+  assert.equal(wd.stats().nextAttemptAtMs, 21_015_000);
+  const at = async (ms) => { NOW = 21_000_000 + ms; kill(); return wd.tick(); };
+  let s = await at(14_999);
+  assert.equal(s.restarts, 1, `restarted inside the first 15s backoff (at +14.999s: ${s.restarts})`);
+  assert.equal(s.state, "backoff", `state = ${s.state}`);
+  s = await at(15_000);
+  assert.equal(s.restarts, 2, `no restart at +15s (${s.restarts})`);
+  s = await at(15_000 + 29_999);
+  assert.equal(s.restarts, 2, "restarted inside the 30s backoff");
+  s = await at(45_000);
+  assert.equal(s.restarts, 3, "no restart at +45s");
+  assert.equal(s.nextAttemptAtMs, 21_000_000 + 45_000 + 60_000, `next = ${s.nextAttemptAtMs}`);
+  assert.equal(t.subscribes, 4, `subscribes = ${t.subscribes}`);
+  await f.stop();
+  console.log(`         attempts at +0s, +15s, +45s; next no sooner than +105s · subscribes ${t.subscribes}`);
+});
+
+await ok("LIVE AGAIN resets the backoff — but only on data, not on a reconnect that says 'live'", async () => {
+  const t = fakeTransport();
+  const f = grpcFeed(t, { cfg: { maxConsecutiveErrors: 1 } });
+  NOW = 22_000_000;
+  await f.start();
+  const { wd, lines } = watchdogFor(f);
+  t.breakIt("reset"); await wd.tick();                      // attempt 1
+  NOW += 15_000; t.breakIt("reset"); await wd.tick();       // attempt 2, next wait 30s
+  assert.equal(wd.stats().failures, 2);
+  /* Reconnected and reading "live", but nothing has arrived: not a recovery. */
+  NOW += 1_000;
+  let s = await wd.tick();
+  assert.equal(f.health().sources[0].state, "live");
+  assert.equal(s.failures, 2, "a subscription that opened and delivered nothing reset the backoff");
+  /* Now a notification lands on the new subscription. */
+  t.push({ trade: true }, { slot: 1 });
+  s = await wd.tick();
+  assert.equal(s.failures, 0, `failures after data = ${s.failures}`);
+  assert.equal(s.nextAttemptAtMs, null, "the backoff was not cleared");
+  assert.equal(s.recoveries, 1);
+  assert.ok(lines.some((l) => /delivering again after 2 restart attempt\(s\); backoff reset/.test(l)), JSON.stringify(lines));
+  /* The next death is restarted at once, on the FIRST rung again. */
+  NOW += 1_000; t.breakIt("reset");
+  s = await wd.tick();
+  assert.equal(s.restarts, 3, "a fresh death after recovery waited out the old backoff");
+  assert.equal(s.nextAttemptAtMs - NOW, 15_000, `the ladder did not restart at 15s: ${s.nextAttemptAtMs - NOW}`);
+  await f.stop();
+  console.log(`         2 failed attempts -> data arrives -> failures 0 -> next death restarts at once, next rung 15s`);
+});
+
+await ok("SILENT for 60s restarts a stream that should never be quiet; 59.999s does not", async () => {
+  const t = fakeTransport();
+  const f = grpcFeed(t);
+  NOW = 23_000_000;
+  await f.start();
+  const { wd } = watchdogFor(f, { silentMs: 60_000 });
+  t.push({ trade: true }, { slot: 1 });                      // last notice at 23_000_000
+  NOW = 23_059_999;
+  let s = await wd.tick();
+  assert.equal(s.restarts, 0, `restarted at 59.999s of silence (${s.lastReason})`);
+  NOW = 23_060_000;
+  s = await wd.tick();
+  assert.equal(s.restarts, 1, "60s of silence on the trade stream was not restarted");
+  assert.match(s.lastReason, /silent 60000ms/, s.lastReason);
+  /* Without the option, the same silence waits for the feed's own verdict. */
+  const t2 = fakeTransport();
+  const f2 = grpcFeed(t2);
+  NOW = 24_000_000; await f2.start();
+  const plain = watchdogFor(f2).wd;
+  NOW = 24_060_000;
+  assert.equal((await plain.tick()).restarts, 0, "a watchdog with no silentMs restarted a merely quiet source");
+  NOW = 24_300_000;
+  assert.equal((await plain.tick()).restarts, 1, "a source the feed calls dead was not restarted");
+  await f.stop(); await f2.stop();
+  console.log(`         silentMs 60000: 59999 -> watch, 60000 -> restart ("${s.lastReason}") · no silentMs: waits for dead at 300s`);
+});
+
+await ok("an ERROR with nothing after it is restarted after errorSilentMs; one followed by data is not", async () => {
+  const t = fakeTransport();
+  const f = grpcFeed(t);
+  NOW = 25_000_000;
+  await f.start();
+  const { wd } = watchdogFor(f, { errorSilentMs: 5_000 });
+  t.push({ trade: true }, { slot: 1 });
+  t.breakIt("decode_failed");                                // one bad frame...
+  t.push({ trade: true }, { slot: 2 });                      // ...and the stream carries on
+  NOW = 25_010_000;
+  assert.equal((await wd.tick()).restarts, 0, "an error the stream recovered from was restarted");
+  NOW = 25_020_000;
+  t.push({ trade: true }, { slot: 3 });
+  t.breakIt("gRPC stream ended");                            // openGrpcStream closes on this
+  NOW = 25_024_999;
+  assert.equal((await wd.tick()).restarts, 0, "restarted inside the 5s grace");
+  NOW = 25_025_000;
+  const s = await wd.tick();
+  assert.equal(s.restarts, 1, "an error with nothing after it for 5s was not restarted");
+  assert.match(s.lastReason, /errored \(gRPC stream ended\)/, s.lastReason);
+  await f.stop();
+  console.log(`         recovered error -> no restart · unrecovered error + 5s -> restart ("${s.lastReason}")`);
+});
+
+await ok("a restart that THROWS or FAILS is caught, recorded, and backed off — never thrown from the timer", async () => {
+  /* A feed whose restartSource throws outright. */
+  let dead = true;
+  const fakeFeed = {
+    health: (nowMs = NOW) => ({ at: nowMs, sources: [{ id: "grpc:pumpfun", state: dead ? "dead" : "live", reason: "fatal: auth",
+      silentMs: 1, consecutiveErrors: 0, lastNoticeAtMs: null, lastAliveAtMs: null }] }),
+    restartSource: async () => { throw new Error("401 invalid x-token"); },
+  };
+  const { wd, iv, lines } = watchdogFor(fakeFeed, { log: () => { throw new Error("log sink exploded"); } });
+  NOW = 26_000_000;
+  const s = await wd.tick();
+  assert.equal(s.restarts, 1);
+  assert.equal(s.lastRestartOk, false);
+  assert.equal(s.lastRestartError, "401 invalid x-token", `lastRestartError = ${s.lastRestartError}`);
+  assert.equal(s.restartsFailed, 1);
+  assert.equal(lines.length, 0);
+  /* The timer callback itself: fired by hand, it returns and throws nothing. */
+  wd.start();
+  NOW += 15_000;
+  assert.doesNotThrow(() => iv.fn());
+  await flush();
+  assert.equal(wd.stats().restarts, 2, `the timer did not drive a second attempt (${wd.stats().restarts})`);
+  /* A health() that throws is a counted tick error, not a crash. */
+  const broken = watchdogFor({ health: () => { throw new Error("health exploded"); }, restartSource: async () => ({ ok: true }) }).wd;
+  const b = await broken.tick();
+  assert.equal(b.tickErrors, 1);
+  assert.match(b.lastTickError, /health exploded/);
+  /* A REAL feed whose transport refuses the reconnect: restartSource answers ok:false. */
+  const t = fakeTransport();
+  const f = grpcFeed(t, { cfg: { maxConsecutiveErrors: 1 } });
+  NOW = 27_000_000; await f.start();
+  const real = watchdogFor(f);
+  t.breakIt("reset");
+  t.refuse = "ECONNREFUSED laserstream";
+  const r = await real.wd.tick();
+  assert.equal(r.lastRestartOk, false);
+  assert.match(r.lastRestartError, /ECONNREFUSED laserstream/);
+  assert.equal(f.health().sources[0].state, "dead", "a failed reconnect must still read DEAD");
+  assert.ok(real.lines.some((l) => /restart attempt 1 FAILED: ECONNREFUSED/.test(l)), JSON.stringify(real.lines));
+  wd.stop(); await f.stop();
+  console.log(`         throw -> "${s.lastRestartError}" recorded · health() throw -> tickErrors ${b.tickErrors} · refused reconnect -> still dead`);
+});
+
+await ok("it stops itself when its feed stops, and clears its own timer", async () => {
+  const t = fakeTransport();
+  const f = grpcFeed(t);
+  NOW = 28_000_000; await f.start();
+  const { wd, iv } = watchdogFor(f);
+  wd.start();
+  await f.stop();
+  const s = await wd.tick();
+  assert.equal(s.state, "stopped", `state = ${s.state}`);
+  assert.equal(iv.cleared.length, 1, "the timer outlived the feed");
+  assert.equal(s.restarts, 0, "it tried to revive a feed that was stopped on purpose");
+});
+
+await ok("a frame from the RETIRED subscription is refused as stale and cannot fake the new one alive", async () => {
+  const t = fakeTransport();
+  const f = grpcFeed(t, { cfg: { maxConsecutiveErrors: 1 } });
+  NOW = 29_000_000; await f.start();
+  const old = t.handlers[0];
+  t.breakIt("reset");
+  NOW = 29_001_000;
+  await f.restartSource("grpc:pumpfun");
+  old.onNotice({ create: M1 }, { slot: 9 });                 // one frame still in flight on the dead socket
+  old.onError(new Error("late error from the dead socket"));
+  const st = f.health().sources[0];
+  assert.equal(st.lastNoticeAtMs, null, "a dead socket's frame reset the new subscription's silence clock");
+  assert.equal(st.consecutiveErrors, 0, "a dead socket's error was charged to the new subscription");
+  assert.equal(f.record(M1), null, "a frame from the retired subscription entered the ledger");
+  assert.equal(f.stats().afterRestart, 2, `afterRestart = ${f.stats().afterRestart}`);
+  /* The live one still works. */
+  t.push({ create: M2 }, { slot: 10 });
+  assert.ok(f.record(M2), "the new subscription's notice was lost");
+  await f.stop();
+  console.log(`         stale frame + stale error refused (afterRestart ${f.stats().afterRestart}); the new subscription delivered ${M2.slice(0, 6)}…`);
+});
+
+await ok("firstNoticeAtMs: the CURRENT subscription's first frame — cleared by a restart, never set by a retired one", async () => {
+  /* The feed reads a (re)started subscription `live` before it has delivered a byte, which is
+     a fact about the subscription and a lie about the data. `firstNoticeAtMs` is the proof a
+     trade tape asks for instead (snipe-volume.mjs tradeFeedStatus), and where its coverage
+     restarts — so it must be exactly this subscription's, never the one before it. */
+  const t = fakeTransport();
+  const f = grpcFeed(t, { cfg: { maxConsecutiveErrors: 1 } });
+  NOW = 31_000_000; await f.start();
+  const src = () => f.health().sources[0];
+  assert.equal(src().state, "live", "the premise: a fresh subscription reads live before it delivers");
+  assert.equal(src().firstNoticeAtMs, null, `firstNoticeAtMs before any frame = ${src().firstNoticeAtMs}`);
+  NOW = 31_001_000; t.push({ trade: true }, { slot: 1 });
+  NOW = 31_002_000; t.push({ trade: true }, { slot: 2 });
+  assert.equal(src().firstNoticeAtMs, 31_001_000, "the first frame is the first frame, not the latest");
+  assert.equal(src().lastNoticeAtMs, 31_002_000);
+  const old = t.handlers[0];
+  NOW = 31_003_000; t.breakIt("gRPC stream ended");
+  NOW = 31_010_000; await f.restartSource("grpc:pumpfun");
+  assert.equal(src().state, "live", "the premise again: the reconnect reads live at once");
+  assert.equal(src().firstNoticeAtMs, null, `a restart kept the old subscription's first frame (${src().firstNoticeAtMs})`);
+  NOW = 31_011_000; old.onNotice({ trade: true }, { slot: 3 });
+  assert.equal(src().firstNoticeAtMs, null, "a frame from the RETIRED subscription set the new one's first notice");
+  NOW = 31_015_000; t.push({ trade: true }, { slot: 4 });
+  assert.equal(src().firstNoticeAtMs, 31_015_000, `the new subscription's first frame = ${src().firstNoticeAtMs}`);
+  assert.equal(src().startedAtMs, 31_010_000);
+  await f.stop();
+  console.log(`         start -> null · frames at +1s,+2s -> first +1s · restart -> null · stale frame -> null · new frame -> ${src().firstNoticeAtMs}`);
+});
+
+await ok("two restarts at once open ONE subscription; a stop() during connect closes what it opened", async () => {
+  const t = fakeTransport();
+  const f = grpcFeed(t);
+  NOW = 30_000_000; await f.start();
+  const [a, b] = await Promise.all([f.restartSource("grpc:pumpfun"), f.restartSource("grpc:pumpfun")]);
+  assert.equal(t.subscribes, 2, `two concurrent restarts subscribed ${t.subscribes - 1} times`);
+  assert.equal(a, b, "the second caller did not get the first one's answer");
+  assert.equal(t.live, 1);
+  await f.stop();
+
+  let release = null, closed = 0;
+  const slow = { id: "slow", kind: "grpc",
+    start: () => new Promise((resolve) => { release = () => resolve({ stop() { closed++; } }); }) };
+  const g = createSnipeFeed({ sources: [slow], clock, schedule: fakeTimers().schedule, cancel: () => {} });
+  const starting = g.start();
+  await flush();
+  await g.stop();
+  release();
+  const summary = await starting;
+  assert.equal(closed, 1, "a subscription that finished connecting after stop() was left open");
+  assert.equal(g.health().sources[0].state, "stopped", `state = ${g.health().sources[0].state}`);
+  assert.equal(summary.failed.length, 1);
+  console.log(`         concurrent restarts -> subscribes ${t.subscribes} · stop during connect -> closed ${closed}, state stopped`);
 });
 
 console.log(`\n══ ${pass} passed, ${fail} failed ══\n`);

@@ -55,7 +55,8 @@ import {
   shadowReport, snipeScorecard,
 } from "./snipe-shadow.mjs";
 import { SNIPE_GATES } from "./snipe-entry.mjs";
-import { createSnipeFeed } from "./snipe-feed.mjs";
+import { createSnipeFeed, grpcSubscribeSource, createSourceWatchdog, GRPC_WATCHDOG } from "./snipe-feed.mjs";
+import { createFlowTape, createTradeTap, tradeFeedStatus } from "./snipe-volume.mjs";
 import {
   constantProductExactIn, constantProductExactOut, constantProductSellExactIn,
 } from "./snipe-curve.mjs";
@@ -243,6 +244,9 @@ function laneFor({
   curve = HEALTHY_CURVE, mint = mintAccount(), slots = [446_023_104, 446_023_104],
   cfg = {}, control = OK_CONTROL, clock = makeClock(), plan = null, book = null, log = () => {},
   venue = FAKE_VENUE, socials = null,
+  /* The volume tape and the two trade-feed ports, passed straight through. Null is exactly
+     the lane's own default, so every older case builds the lane it always built. */
+  flowTape = null, tradeFeedLive = null, tradeFeedSince = null,
 } = {}) {
   const accountsFor = (m) => [curveAccount(curve), { data: Buffer.from("global") }, mint];
   const readers = makeReaders(plan ?? [
@@ -254,6 +258,7 @@ function laneFor({
     cfg: { lane: "observe", ...cfg },
     state: {},
     book: book ?? { deployedTodaySol: 0, attempts: {} },
+    flowTape, tradeFeedLive, tradeFeedSince,
     /* THE SOCIALS PORT, STUBBED. The filter is ON by default — the owner asked for it
        after a run of losers — and these synthetic notices carry no metadata uri, so
        without a stub every launch in this file would refuse at `no_socials` and every
@@ -1512,6 +1517,216 @@ section("20. WHAT THE FIRST 46 LIVE MARKET-FLOOR TRADES TAUGHT (2026-09-27)");
     /minWalletReserveLamports: Math\.round\(Number\(laneCfg\.minWalletReserveSol\) \* 1_000_000_000\)/.test(poller));
   ok("the poller refuses a trades floor on a bot with no gRPC tap, by name",
     /SNIPE_MIN_RECENT_TRADES=\$\{laneCfg\.minRecentTrades\}/.test(poller));
+}
+
+section("21. THE gRPC TRADE FEED DIED AND NOTHING REVIVED IT (2026-09-27)");
+{
+  /* Nine hours of the owner's log read, for coin after coin the chain shows traded 2 to 25
+     times in the window:
+       refused at recent_trades — 0 trades in the last 5 minutes, under the 8 bar — a coin nobody is trading cannot move
+     The stream feeding the tape had died. These drive the lane's gate stamp with the feed's
+     two ports and read the verdict the owner would read. */
+  const TRADES = { minRecentTrades: 8 };
+  const lines = [];
+  const down = laneFor({ cfg: TRADES, flowTape: createFlowTape(), tradeFeedLive: () => false,
+    tradeFeedSince: () => NOW0 - 600_000, log: (m) => lines.push(m) });
+  const { verdict: v } = await down.handleNotice(noticeRecord(keyFor(401)));
+  ok("a dead trade feed still REFUSES at recent_trades — fail closed", v.gate === "recent_trades", `${v.gate}: ${v.detail?.message}`);
+  ok("...and names the feed, not the coin", /the gRPC trade feed is down, so this coin's recent trades cannot be counted/.test(v.detail.message)
+    && /the bot is reconnecting it/.test(v.detail.message) && !/nobody is trading|0 trades in the last/.test(v.detail.message), v.detail.message);
+  ok("...with the count NULL, not a zero", v.detail.measured === null, `measured ${v.detail.measured}`);
+  ok("...and the reason on the verdict", v.detail.reason === "trade_feed_down", String(v.detail.reason));
+  await down.handleNotice(noticeRecord(keyFor(402)));
+  const downLines = lines.filter((l) => /trade feed DOWN/.test(l));
+  ok("the flip to down is logged ONCE, not on every notice", downLines.length === 1, downLines[0]?.slice(0, 120));
+  ok("the lane's stats say the feed is down", down.stats().tradeFeedLive === false && down.stats().tradeFeedSinceMs === null);
+
+  /* The same empty tape with a feed that is live and has covered the window: then the old
+     sentence is the TRUE one, and it is still used. */
+  const live = laneFor({ cfg: TRADES, flowTape: createFlowTape(), tradeFeedLive: () => true, tradeFeedSince: () => NOW0 - 600_000 });
+  const { verdict: q } = await live.handleNotice(noticeRecord(keyFor(403)));
+  ok("with the feed live and covering, an untraded coin is refused as quiet, counted as 0",
+    q.gate === "recent_trades" && /0 trades in the last 5 minutes/.test(q.detail.message) && q.detail.measured === 0, q.detail.message);
+  ok("...and the stats say live, since when", live.stats().tradeFeedLive === true && live.stats().tradeFeedSinceMs === NOW0 - 600_000);
+
+  const throwing = laneFor({ cfg: TRADES, flowTape: createFlowTape(), tradeFeedLive: () => { throw new Error("status read failed"); } });
+  const t = (await throwing.handleNotice(noticeRecord(keyFor(404)))).verdict;
+  ok("a feed port that throws is a feed nobody can vouch for: down", t.gate === "recent_trades" && t.detail.reason === "trade_feed_down");
+
+  /* WARMING: the tape reconnected forty seconds ago. */
+  const warmTape = createFlowTape();
+  const busy = keyFor(405), quiet = keyFor(406);
+  for (let i = 0; i < 13; i++) warmTape.observe(busy, { atMs: NOW0 - 36_000 + i * 3_000, quoteRaw: String(1_000_000_000 + i * 1_000_000) });
+  for (let i = 0; i < 3; i++) warmTape.observe(quiet, { atMs: NOW0 - 30_000 + i * 10_000, quoteRaw: String(1_000_000_000 + i) });
+  const warm = laneFor({ cfg: TRADES, flowTape: warmTape, tradeFeedLive: () => true, tradeFeedSince: () => NOW0 - 40_000 });
+  const low = (await warm.handleNotice(noticeRecord(quiet))).verdict;
+  ok("2 trades in the 40s since a reconnect are refused as WARMING, not as a quiet coin",
+    low.gate === "recent_trades" && low.detail.reason === "trade_feed_warming"
+      && /2 trades counted in the 40s since the gRPC trade feed \(re\)connected/.test(low.detail.message), low.detail.message);
+  const high = (await warm.handleNotice(noticeRecord(busy))).verdict;
+  ok("12 trades in those 40s already clear a bar of 8 — a lower bound over the bar is over it",
+    high.ok === true, high.ok ? "cleared" : `${high.gate}: ${high.detail.message}`);
+
+  /* A LIVE FEED THAT CANNOT SAY SINCE WHEN. Read as "no answer, so covered from the
+     beginning of time" it would be the one reading that can pass a floor; it is down. */
+  const noSince = laneFor({ cfg: TRADES, flowTape: createFlowTape(), tradeFeedLive: () => true,
+    tradeFeedSince: () => { throw new Error("status read failed"); } });
+  const ns = (await noSince.handleNotice(noticeRecord(keyFor(408)))).verdict;
+  ok("a live feed whose since-port throws is DOWN, not fully covered",
+    ns.gate === "recent_trades" && ns.detail.reason === "trade_feed_down" && noSince.stats().tradeFeedLive === false,
+    `${ns.gate}: ${ns.detail.reason}`);
+  const nullSince = laneFor({ cfg: TRADES, flowTape: createFlowTape(), tradeFeedLive: () => true, tradeFeedSince: () => null });
+  ok("...and so is one whose since-port answers nothing",
+    (await nullSince.handleNotice(noticeRecord(keyFor(409)))).verdict.detail.reason === "trade_feed_down");
+
+  const spikeDown = laneFor({ cfg: { minVolumeSpike: 2 }, flowTape: createFlowTape(), tradeFeedLive: () => false });
+  const s = (await spikeDown.handleNotice(noticeRecord(keyFor(407)))).verdict;
+  ok("the spike floor is refused on the same wire, for the same honest reason",
+    s.gate === "volume_spike" && /the gRPC trade feed is down/.test(s.detail.message) && s.detail.measured === null, s.detail.message);
+
+  /* THE SPIKE IS WITHDRAWN WHILE THE TAPE WARMS — AND ONLY THEN. A real spike on the tape:
+     five quiet minutes (0.001 SOL a second... a thousand lamports), then 0.07 SOL in the
+     last thirty seconds, ending at exactly the reserve the lane's own read of the coin will
+     find, so that read adds a point and no flow. */
+  const END = BigInt(HEALTHY_CURVE.realQuoteRaw);
+  const spikeTape = (coin) => {
+    const tape = createFlowTape();
+    const recentStep = 5_000_000n, baseStep = 10_000n;
+    const start = END - recentStep * 14n - baseStep * 31n;
+    for (let i = 0; i < 32; i++) tape.observe(coin, { atMs: NOW0 - 340_000 + i * 10_000, quoteRaw: String(start + baseStep * BigInt(i)) });
+    for (let i = 1; i <= 14; i++) tape.observe(coin, { atMs: NOW0 - 30_000 + i * 2_000, quoteRaw: String(start + baseStep * 31n + recentStep * BigInt(i)) });
+    return tape;
+  };
+  const SPIKE = { minVolumeSpike: 2 };
+  const hot = keyFor(412);
+  const warmSpike = (await laneFor({ cfg: SPIKE, flowTape: spikeTape(hot), tradeFeedLive: () => true,
+    tradeFeedSince: () => NOW0 - 40_000 }).handleNotice(noticeRecord(hot))).verdict;
+  ok("a real spike on a tape that reconnected 40s ago is WITHDRAWN: refused at volume_spike as warming, nothing measured",
+    warmSpike.gate === "volume_spike" && warmSpike.detail.reason === "trade_feed_warming" && warmSpike.detail.measured === null,
+    `${warmSpike.gate}: ${warmSpike.detail.message}`);
+  const covered = (await laneFor({ cfg: SPIKE, flowTape: spikeTape(hot), tradeFeedLive: () => true,
+    tradeFeedSince: () => NOW0 - 340_000 }).handleNotice(noticeRecord(hot))).verdict;
+  ok("the same tape once coverage passes window + baseline (340s) is MEASURED again, and the spike clears the floor",
+    covered.ok === true && covered.detail.measured.volume_spike >= 2,
+    covered.ok ? `spike ${covered.detail.measured.volume_spike.toFixed(1)}x` : `${covered.gate}: ${covered.detail.message}`);
+  const edge = (await laneFor({ cfg: SPIKE, flowTape: spikeTape(hot), tradeFeedLive: () => true,
+    tradeFeedSince: () => NOW0 - 300_000 }).handleNotice(noticeRecord(hot))).verdict;
+  ok("...but not at 300s: the recent_trades window is covered there, the spike's 330s span is not",
+    edge.gate === "volume_spike" && edge.detail.reason === "trade_feed_warming", `${edge.gate}: ${edge.detail.reason}`);
+
+  let bad = null;
+  try { laneFor({ flowTape: createFlowTape(), tradeFeedLive: true }); } catch (e) { bad = e; }
+  ok("a tradeFeedLive that is not a function is refused at construction", bad instanceof SnipeLaneError, bad?.message);
+  ok("no port wired reads null — a lane with no tap, not a lane whose tap is down", laneFor({}).stats().tradeFeedLive === null);
+}
+{
+  /* THE BOT'S OWN READS NO LONGER EVICT TRADE HISTORY. The owner's tape: 2,000 mints (the cap),
+     6,511 evicted, because every launch notice the lane glanced at was inserted. */
+  const tape = createFlowTape();
+  const known = keyFor(410), fresh = keyFor(411);
+  tape.observe(known, { atMs: NOW0 - 10_000, quoteRaw: "100000000" });
+  const lane = laneFor({ flowTape: tape });
+  await lane.handleNotice(noticeRecord(fresh));
+  ok("a launch the trade feed never saw is NOT added to the tape by the lane's own read",
+    tape.has(fresh) === false && tape.size() === 1 && tape.stats().skippedUnknown === 1, JSON.stringify(tape.stats()));
+  await lane.handleNotice(noticeRecord(known));
+  ok("a coin the trade feed already knows gets the lane's fresher point",
+    tape.measure(known, { nowMs: NOW0 + 1_000 }).samples === 2 && tape.stats().evictedMints === 0);
+}
+{
+  /* THE RECONNECT THAT CLOSES ITS HOLE IN SECONDS, end to end: the real feed, trade tap,
+     watchdog and status check, wired into the lane's two ports exactly as poller.mjs wires
+     them. A coin takes steady inflow for ten minutes; the stream ends with an error; a buy
+     lands on chain INSIDE the outage and nothing trades after it; the watchdog resubscribes
+     15s later and the new stream delivers 5s after that. The hole is 20 seconds — far too
+     short for the tap's 60-second gap rule to break its run — so before coverage restarted
+     with the subscription, the lane saw a tape "covered" for ten minutes, the gap's buy was
+     credited to the last thirty seconds, and the wave mode's 3x floor PASSED a coin whose
+     last trade was 43 seconds old. */
+  let T = NOW0 - 645_000;
+  const clock = () => T;
+  const wire = { handlers: [], subscribes: 0,
+    subscribe({ onNotice, onError }) {
+      wire.subscribes++;
+      const h = { onNotice, onError };
+      wire.handlers.push(h);
+      return { unsubscribe() { wire.handlers = wire.handlers.filter((x) => x !== h); } };
+    },
+    push(n) { for (const h of [...wire.handlers]) h.onNotice(n, { slot: 1 }); },
+    breakIt(m) { for (const h of [...wire.handlers]) h.onError(new Error(m)); },
+  };
+  const tape = createFlowTape();
+  const tap = createTradeTap({ tape, clock, tradesFrom: (n) => n?.trades ?? [] });
+  const feed = createSnipeFeed({
+    sources: [grpcSubscribeSource({ id: "grpc:pumpfun", programId: VENUE_PROGRAM, transport: wire,
+      extractMint: () => null, observe: (n) => tap.observe(n) })],
+    clock, schedule: () => 0, cancel: () => {},
+  });
+  const wd = createSourceWatchdog({ feed, sourceId: "grpc:pumpfun", setIntervalFn: () => ({}), clearIntervalFn: () => {},
+    ...GRPC_WATCHDOG });
+  const status = () => {
+    const s = tap.stats();
+    return tradeFeedStatus({ source: feed.health(T).sources.find((x) => x.id === "grpc:pumpfun") ?? null,
+      lastNotificationAtMs: s.lastNotificationAtMs, liveSinceMs: s.liveSinceMs, nowMs: T });
+  };
+  const lines = [];
+  const lane = laneFor({ cfg: { minVolumeSpike: 3 }, flowTape: tape, clock: () => T, log: (m) => lines.push(m),
+    tradeFeedLive: () => status().live === true, tradeFeedSince: () => status().sinceMs });
+  await feed.start();
+  const coin = keyFor(430), other = keyFor(431), probe = keyFor(432);
+  const END = BigInt(HEALTHY_CURVE.realQuoteRaw);   // the reserve after the gap's buy: what the lane's own read finds
+  const BUY = 50_000_000n, STEP = 1_000_000n;       // the buy, and the steady inflow per 10s
+  const E = NOW0 - 45_000;                          // the stream ends here
+  for (let i = 1; i <= 60; i++) {
+    T = NOW0 - 645_000 + i * 10_000;
+    wire.push({ trades: [{ mint: coin, realQuoteRaw: String(END - BUY - STEP * BigInt(60 - i)) }] });
+  }
+  T = E; wire.breakIt("gRPC stream ended");
+  /* E+2s: the buy lands on chain. Nothing delivers it. */
+  T = E + 15_000;
+  const tick = await wd.tick();
+  T = E + 16_000;
+  const early = (await lane.handleNotice(noticeRecord(probe, { firstSeenAtMs: T }))).verdict;
+  ok("resubscribed, nothing on the new stream yet: the lane is told the feed is DOWN, not that it is back",
+    tick.restarts === 1 && early.gate === "volume_spike" && early.detail.reason === "trade_feed_down",
+    `restarts ${tick.restarts}; ${early.gate}: ${early.detail.reason}`);
+  T = E + 20_000;
+  wire.push({ trades: [{ mint: other, realQuoteRaw: "5000000" }] });
+  T = NOW0;
+  const { verdict: v } = await lane.handleNotice(noticeRecord(coin, { firstSeenAtMs: T }));
+  ok("45s after the stream ended, the coin whose only recent inflow sat in the hole is refused as WARMING — spike withdrawn",
+    v.gate === "volume_spike" && v.detail.reason === "trade_feed_warming" && v.detail.measured === null,
+    `${v.gate}: ${v.detail.reason}`);
+  const raw = tape.measure(coin, { nowMs: NOW0 });
+  ok("...and withdrawing it is what saved the buy: the same tape, measured, reads the gap's buy as a spike over 3x",
+    raw.spike > 3, `raw spike ${raw.spike?.toFixed(2)}x off a tape the tap never broke (run since ${(NOW0 - tap.stats().liveSinceMs) / 1000}s ago)`);
+  const st = status();
+  ok("the status the lane read: live, covered from the new subscription's first frame, not the run ten minutes back",
+    st.live === true && st.sinceMs === E + 20_000, JSON.stringify(st));
+  const flips = lines.filter((l) => /snipe trade feed (DOWN|back)/.test(l)).map((l) => (/DOWN/.test(l) ? "DOWN" : "back"));
+  ok("the log says DOWN once and back once, in that order — never 'back' on an empty reconnect",
+    flips.join(",") === "DOWN,back", flips.join(","));
+  await feed.stop();
+}
+{
+  const poller = POLLER_SRC;
+  ok("the poller mounts a watchdog on the gRPC source, and only when there is one",
+    /const grpcWatchdog = grpcSource \? feedMod\.createSourceWatchdog\(\{\s*feed: laneFeed, sourceId: grpcSource\.id, \.\.\.feedMod\.GRPC_WATCHDOG,/.test(poller));
+  ok("...logs every attempt under the [snipe] prefix", /\.\.\.feedMod\.GRPC_WATCHDOG,\s*log: \(m\) => log\(`\[snipe\] \$\{m\}`\),\s*\}\) : null;/.test(poller));
+  ok("...arms it only once the feed is running", poller.indexOf("grpcWatchdog.start();") > poller.indexOf("await lane.start();"));
+  ok("...and hands its counters to the heartbeat's flow block", /snipeStatus\.grpcWatchdog = grpcWatchdog;/.test(poller)
+    && /grpcRestarts: wd \?/.test(poller) && /grpcLastRestartAtMs: wd/.test(poller) && /grpcLastRestartError: wd\?\.lastRestartError/.test(poller));
+  const laneCall = poller.slice(poller.indexOf("const lane = createSnipeLane({"), poller.indexOf("snipeStatus.lane = lane;"));
+  ok("tradeFeedLive (and tradeFeedSince) are passed to createSnipeLane, with the tap",
+    /\.\.\.\(grpcSource \? \{\s*tradeFeedLive: \(\) => grpcFeedStatus\(\)\.live === true,\s*tradeFeedSince: \(\) => grpcFeedStatus\(\)\.sinceMs,/.test(laneCall));
+  ok("...judged on BOTH the feed's WHOLE verdict on the gRPC source and the tap's own stamp",
+    /laneFeed\.health\(nowMs\)\.sources\.find\(\(x\) => x\.id === grpcSource\.id\) \?\? null;/.test(poller)
+      && /volumeMod\.tradeFeedStatus\(\{\s*source, lastNotificationAtMs: tap\.lastNotificationAtMs, liveSinceMs: tap\.liveSinceMs, nowMs,/.test(poller));
+  /* Not the state word alone: that is the check that read an empty reconnect as live. */
+  ok("...and never the state word alone", !/sources\.find\(\(x\) => x\.id === grpcSource\.id\)\?\.state/.test(poller)
+    && !/tradeFeedStatus\(\{\s*sourceState/.test(poller));
+  ok("the heartbeat carries the lane's own tradeFeedLive, strictly boolean or null",
+    /tradeFeedLive: typeof s\.tradeFeedLive === "boolean" \? s\.tradeFeedLive : null,/.test(poller));
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
