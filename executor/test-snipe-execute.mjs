@@ -595,6 +595,107 @@ section("8. A SELL: THE WHOLE POSITION, FLOORED FROM THE CURVE'S OWN QUOTE, ACCO
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════════ */
+section("8b. THE WALLET KEEPS ITS EXIT MONEY, AND THE SELL TAKES ITS RENT BACK (2026-09-27)");
+{
+  const curve = curveState({ mint: MINT });
+  /* A buy that would strand the exit. On 2026-09-27 a buy left 665,323 lamports and the sell
+     after it failed 365 times. The ceiling alone already says no here, so nothing is simulated. */
+  {
+    const h = harness();
+    h.chain.walletLamports = CEILING + 5_000_000n;
+    h.chain.plan = { ...PLAN_BUY };
+    const prepared = h.executor.prepareBuy({ mint: MINT, curve, read: laneRead(), baseOutRaw: BASE_OUT, maxQuoteInRaw: CEILING });
+    const e = await rejects(() => h.executor.buy({ mint: MINT, curve, prepared, baseOutRaw: BASE_OUT, maxQuoteInRaw: CEILING }));
+    ok("a buy that would leave under the reserve is refused as low_balance", e?.clause === "low_balance", e?.message);
+    ok("...before either provider simulates it, and nothing is signed",
+      h.chain.callsTo("primary", "simulateTransaction") === 0 && h.executor.stats().signed === 0);
+    ok("the default reserve is 0.01 SOL", SNIPE_EXECUTE_DEFAULTS.minWalletReserveLamports === 10_000_000);
+  }
+  /* The exact check: the ceiling fits, but the whole transaction (ceiling + fee + the new
+     account's rent) does not leave the reserve. */
+  {
+    const h = harness();
+    h.chain.walletLamports = CEILING + 12_000_000n;
+    h.chain.plan = { ...PLAN_BUY, spend: CEILING };
+    const prepared = h.executor.prepareBuy({ mint: MINT, curve, read: laneRead(), baseOutRaw: BASE_OUT, maxQuoteInRaw: CEILING });
+    const e = await rejects(() => h.executor.buy({ mint: MINT, curve, prepared, baseOutRaw: BASE_OUT, maxQuoteInRaw: CEILING }));
+    ok("fee and rent count too: the simulated spend is judged against the reserve", e?.clause === "low_balance", e?.message);
+    ok("...and it is refused unsigned", h.executor.stats().signed === 0);
+  }
+  /* Reserve 0 is the operator's way back to the old behaviour. */
+  {
+    const h = harness({ cfg: { minWalletReserveLamports: 0 } });
+    h.chain.walletLamports = CEILING + 5_000_000n;
+    h.chain.plan = { ...PLAN_BUY };
+    const prepared = h.executor.prepareBuy({ mint: MINT, curve, read: laneRead(), baseOutRaw: BASE_OUT, maxQuoteInRaw: CEILING });
+    const e = await rejects(() => h.executor.buy({ mint: MINT, curve, prepared, baseOutRaw: BASE_OUT, maxQuoteInRaw: CEILING }));
+    ok("a reserve of 0 is not checked", e === null, e?.message);
+  }
+
+  /* THE SELL CARRIES A CLOSE, and falls back without one. */
+  const spyChain = ({ closeFails = false } = {}) => {
+    const c = makeChain({ wallet: WALLET, mint: MINT });
+    const orig = c.connection;
+    c.sent = [];
+    const hasClose = (tx) => {
+      const ixs = tx.message.compiledInstructions;
+      const last = ixs[ixs.length - 1];
+      return last.data.length === 1 && last.data[0] === 9;
+    };
+    c.connection = (id) => {
+      const conn = orig(id);
+      const sim = conn.simulateTransaction, send = conn.sendRawTransaction;
+      conn.simulateTransaction = async (tx, opts) => (closeFails && hasClose(tx)
+        ? { value: { err: { InstructionError: [3, { Custom: 11 }] }, logs: ["Program log: Error: Non-native account can only be closed if its balance is zero"], accounts: null } }
+        : sim(tx, opts));
+      conn.sendRawTransaction = async (bytes) => { c.sent.push(VersionedTransaction.deserialize(bytes)); return send(bytes); };
+      return conn;
+    };
+    c.hasClose = hasClose;
+    return c;
+  };
+  for (const closeFails of [false, true]) {
+    const h = harness({ chain: spyChain({ closeFails }) });
+    h.chain.plan = { ...PLAN_BUY };
+    const prepared = h.executor.prepareBuy({ mint: MINT, curve, read: laneRead(), baseOutRaw: BASE_OUT, maxQuoteInRaw: CEILING });
+    const bought = await h.executor.buy({ mint: MINT, curve, prepared, baseOutRaw: BASE_OUT, maxQuoteInRaw: CEILING });
+    h.chain.finalizeAll(); await until(() => h.journal.getIntent(bought.intentId).state === "accounted");
+    const quoted = sellExactIn(curve, BASE_OUT).quoteOutRaw;
+    h.chain.plan = { spend: quoted, fee: 1_305_000n, rent: 0n, deliver: BASE_OUT, outcome: "confirm" };
+    const sold = await h.executor.sell({ mint: MINT, curve, qtyRaw: bought.qtyRaw,
+      position: { qtyRaw: bought.qtyRaw, costBasisLamports: bought.spentLamports }, reason: "take" });
+    const sellTx = h.chain.sent[h.chain.sent.length - 1];
+    if (!closeFails) {
+      const ixs = sellTx.message.compiledInstructions;
+      const keys = sellTx.message.staticAccountKeys.map((k) => k.toBase58());
+      const close = ixs[ixs.length - 1];
+      ok("a whole-position sell closes its token account in the same transaction", h.chain.hasClose(sellTx),
+        `last instruction data ${Buffer.from(close.data).toString("hex")}`);
+      ok("...on the mint's own token program, closing the ATA back to the wallet, signed by the wallet",
+        keys[close.programIdIndex] === TOKEN_PROGRAM && keys[close.accountKeyIndexes[0]] === h.chain.ata
+          && keys[close.accountKeyIndexes[1]] === WALLET && keys[close.accountKeyIndexes[2]] === WALLET);
+      ok("the journal records that the sell closed the account", h.journal.latestAttempt(sold.intentId).order.closesAccount === true);
+    } else {
+      ok("a close the program refuses costs nothing: the plain sell goes out instead",
+        sold.qtyRaw === bought.qtyRaw && !h.chain.hasClose(sellTx), sold.qtyRaw);
+      ok("...and says so in the log", h.logs.some((m) => /selling without the close/.test(m)));
+      ok("...with exactly one signed attempt on the exit intent", h.journal.latestAttempt(sold.intentId).attempt === 1);
+    }
+  }
+
+  /* A refund is not proceeds. The closed account's rent comes back to the wallet, and the
+     fill keeps it apart so a realized figure never counts it as profit. */
+  const pre = 100_000_000, fee = 97_207, proceeds = 95_000_000, rent = 1_513_840;
+  const fill = fillFromTransaction({ slot: 1, meta: { err: null, fee,
+    preBalances: [pre, rent, 5_000_000_000], postBalances: [pre + proceeds - fee + rent, 0, 5_000_000_000 - proceeds],
+    preTokenBalances: [{ mint: MINT, owner: WALLET, uiTokenAmount: { amount: "1000" } }], postTokenBalances: [] } },
+    { wallet: WALLET, mint: MINT, side: "sell" });
+  ok("a closed account's rent is reported as refundLamports", fill.refundLamports === String(rent), fill.refundLamports);
+  ok("...and quoteOutRaw is still exactly what the curve paid", fill.quoteOutRaw === String(proceeds), fill.quoteOutRaw);
+  ok("...and the whole position counts as sold when the account is gone", fill.qtyRaw === "1000");
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════════ */
 section("9. RECOVERY: THE SNIPER'S OWN PENDING INTENTS ARE RESOLVED; THE DESK'S ARE STEPPED AROUND");
 {
   const curve = curveState({ mint: MINT });

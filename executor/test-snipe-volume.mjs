@@ -26,7 +26,7 @@
 import fs from "node:fs";
 import {
   SNIPE_VOLUME_VERSION, DEFAULT_WINDOW_MS, DEFAULT_BASELINE_MS, DEFAULT_CAPACITY, DEFAULT_BUCKET_MS,
-  measureSpike, createFlowTape, observeTradeEvents, createTradeTap,
+  measureSpike, measureActivity, DEFAULT_ACTIVITY_MS, createFlowTape, observeTradeEvents, createTradeTap,
 } from "./snipe-volume.mjs";
 import { SNIPE_GATES, SNIPE_PROXY_GATES, SNIPE_GATE_COST } from "./snipe-entry.mjs";
 import { SNIPE_PROXIES } from "./snipe-shadow.mjs";
@@ -408,6 +408,30 @@ console.log("\nwiring");
     tap.stats().recorded === 0 && tap.stats().errors === 0);
   ok("eventsFromLogs is the venue's own export, not a local reimplementation",
     typeof venue.eventsFromLogs === "function" && typeof venue.decodeTradeEvent === "function");
+}
+
+console.log("\nACTIVITY: IS ANYBODY TRADING IT NOW (2026-09-27)");
+{
+  const now = 1_000_000;
+  const at = (s, q) => ({ atMs: now - s * 1000, quoteRaw: String(q) });
+  ok("the default window is five minutes", DEFAULT_ACTIVITY_MS === 300_000);
+  const busy = measureActivity([at(200, 10), at(150, 12), at(100, 11), at(50, 15), at(10, 15)], { nowMs: now });
+  ok("each change of the reserve is a trade; a repeat of the same reserve is not", busy.trades === 3, JSON.stringify(busy));
+  const flat = measureActivity([at(200, 10), at(100, 10), at(5, 10)], { nowMs: now });
+  ok("a coin read three times at the same reserve has had no trades", flat.trades === 0, JSON.stringify(flat));
+  const old = measureActivity([at(900, 10), at(800, 20), at(700, 30), at(10, 30)], { nowMs: now });
+  ok("trades older than the window do not count", old.trades === 0, JSON.stringify(old));
+  const edge = measureActivity([at(400, 10), at(100, 20)], { nowMs: now });
+  ok("a change inside the window counts against the sample before it, even one outside", edge.trades === 1);
+  ok("no samples is zero trades", measureActivity([], { nowMs: now }).trades === 0);
+  ok("no clock is unknown, not zero", measureActivity([at(1, 1)], {}).trades === null);
+
+  const tape = createFlowTape();
+  tape.observe("M", { atMs: now - 100_000, quoteRaw: "100" });
+  tape.observe("M", { atMs: now - 60_000, quoteRaw: "140" });
+  tape.observe("M", { atMs: now - 30_000, quoteRaw: "120" });
+  ok("the tape counts a mint's recent trades", tape.activity("M", { nowMs: now }).trades === 2, JSON.stringify(tape.activity("M", { nowMs: now })));
+  ok("a mint the tape never saw has had no trades reach this process", tape.activity("NEVER", { nowMs: now }).trades === 0);
 }
 
 console.log(`\n${fail === 0 ? "PASS" : "FAIL"} test-snipe-volume  ${pass} passed, ${fail} failed`);

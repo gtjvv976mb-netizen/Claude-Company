@@ -214,10 +214,10 @@ function classicMintBytes({ mintAuthority = null, freezeAuthority = null, decima
 
 /* ════ 1. THE SHAPE OF THE LIST ═══════════════════════════════════════════════════════ */
 
-ok("SNIPE_GATES is a frozen, ordered, duplicate-free list of 26 codes", () => {
+ok("SNIPE_GATES is a frozen, ordered, duplicate-free list of 27 codes", () => {
   assert.equal(Object.isFrozen(SNIPE_GATES), true, "SNIPE_GATES is not frozen");
-  assert.equal(SNIPE_GATES.length, 26, `SNIPE_GATES has ${SNIPE_GATES.length} entries`);
-  assert.equal(new Set(SNIPE_GATES).size, 26, "SNIPE_GATES repeats a code");
+  assert.equal(SNIPE_GATES.length, 27, `SNIPE_GATES has ${SNIPE_GATES.length} entries`);
+  assert.equal(new Set(SNIPE_GATES).size, 27, "SNIPE_GATES repeats a code");
   console.log(`       ${SNIPE_GATES.join(" > ")}`);
 });
 
@@ -297,7 +297,7 @@ ok("a clean launch clears all 22 gates, and the trace names every one", () => {
   const v = snipeContract(baseArgs());
   assert.equal(v.ok, true, `the clean launch was refused at ${v.gate}: ${v.detail.message}`);
   assert.equal(v.gate, null, `gate came back ${v.gate}`);
-  assert.equal(v.trace.length, 26, `the trace holds ${v.trace.length} steps`);
+  assert.equal(v.trace.length, 27, `the trace holds ${v.trace.length} steps`);
   assert.deepEqual(v.trace.map((s) => s.gate), [...SNIPE_GATES], "the trace ran the gates out of order");
   assert.equal(v.trace.every((s) => s.ok), true, "a step in a passing trace is not ok");
   console.log(`       ${v.detail.mint.slice(0, 8)}… buys ${v.detail.baseOutRaw} base units for at most ` +
@@ -381,6 +381,10 @@ const HOSTILE = [
   ["volume_spike", "net inflow is a fifth of the coin's own baseline, against a 2x floor",
     { cfg: { ...LIVE_CFG, minVolumeSpike: 2 },
       flow: { spike: 0.2, recentLamportsPerSec: 200_000, baselineLamportsPerSec: 1_000_000, reason: null } }],
+  /* 2026-09-27: 30 of 46 live market-floor trades sold at exactly their buy price, because
+     nobody traded the coin while the bot held it. Two trades in five minutes is a dead coin. */
+  ["recent_trades", "two trades in the last five minutes, against a floor of eight",
+    { cfg: { ...LIVE_CFG, minRecentTrades: 8 }, flow: { spike: null, reason: "no_baseline", recentTrades: 2, activityWindowMs: 300_000 } }],
   /* THE MARKET FLOOR, 2026-09-26. The launch lane's whole population is minutes old, which is
      why this gate is off by default — and why the hostile fact here is simply a real launch
      judged against bagworkagent.fun's own one-hour floor. */
@@ -494,6 +498,22 @@ ok("the three proxy gates MEASURE on every notice and kill only when a threshold
   assert.match(noBaseline.detail.message, /unverified is not safe/, noBaseline.detail.message);
   const noFlow = snipeContract(baseArgs({ cfg: { ...LIVE_CFG, minVolumeSpike: 2 }, flow: null }));
   assert.equal(noFlow.gate, "volume_spike", `no flow tape at all answered ${noFlow.gate} against a configured floor`);
+
+  /* RECENT TRADES, the same discipline: unset measures, set with nothing to count refuses. */
+  assert.equal(noThreshold.detail.measured.recent_trades, null,
+    `an uncounted coin was recorded as ${noThreshold.detail.measured.recent_trades} trades`);
+  const busy = snipeContract(baseArgs({ cfg: { ...LIVE_CFG, minRecentTrades: 8 }, flow: { spike: null, recentTrades: 40 } }));
+  assert.equal(busy.ok, true, `40 recent trades against a floor of 8 was refused at ${busy.gate}: ${busy.detail.message}`);
+  assert.equal(busy.detail.measured.recent_trades, 40);
+  const flat = snipeContract(baseArgs({ flow: { spike: null, recentTrades: 0 } }));
+  assert.equal(flat.ok, true, `a flat coin was refused with no floor configured (${flat.gate})`);
+  assert.equal(flat.detail.measured.recent_trades, 0);
+  const uncounted = snipeContract(baseArgs({ cfg: { ...LIVE_CFG, minRecentTrades: 8 }, flow: null }));
+  assert.equal(uncounted.gate, "recent_trades", `no tape at all answered ${uncounted.gate} against a trades floor`);
+  assert.match(uncounted.detail.message, /unverified is not safe/);
+  const dead = snipeContract(baseArgs({ cfg: { ...LIVE_CFG, minRecentTrades: 8 }, flow: { spike: null, recentTrades: 0 } }));
+  assert.equal(dead.gate, "recent_trades", `a coin with no trades answered ${dead.gate}`);
+  assert.match(dead.detail.message, /0 trades in the last 5 minutes/, dead.detail.message);
 
   assert.deepEqual([...SNIPE_PROXY_GATES], ["creator_profile", "launch_share", "volume_spike"],
     `the declared proxy gates are ${SNIPE_PROXY_GATES.join(", ")}`);

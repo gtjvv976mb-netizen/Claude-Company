@@ -46,7 +46,7 @@ import bs58 from "bs58";
 import {
   LANE_REFUSED_VENUE_METHODS, LANE_SIGNALS, SNIPE_ENV, SNIPE_LANE_CLAUSES, SNIPE_LANE_DEFAULTS, SNIPE_LANE_MODES, SNIPE_LANE_VERSION,
   SnipeLaneError, bindDeterminer, createSnipeLane, observeOnlyVenue, readAcrossEndpoints, snipeLaneConfig,
-  remoteFilterConfig, LIVE_FILTER_ENV, LIVE_FILTER_KEYS, RISK_MODES,
+  remoteFilterConfig, LIVE_FILTER_ENV, LIVE_FILTER_KEYS, RISK_MODES, MARKET_FLOOR_HOLD,
 } from "./snipe-lane.mjs";
 import {
   PROMOTION_MIN_FLAGGED, PROMOTION_MIN_ROWS, PROMOTION_PRECISION_BAR, SHADOW_FORBIDDEN_MEASURES,
@@ -1454,7 +1454,7 @@ section("19. RISK MODES: ONE CHOICE, A BUNDLE OF FILTERS, NEVER MONEY");
     && LIVE_FILTER_ENV.includes("SNIPE_RISK_MODE"));
   const poller = fs.readFileSync(path.join(HERE, "poller.mjs"), "utf8");
   ok("a wave mode sent to a bot with no gRPC tap is refused, not applied as a floor that refuses everything",
-    /if \(!grpcSource && r\.ok && r\.cfg\.minVolumeSpike !== undefined/.test(poller));
+    /if \(!grpcSource && r\.ok && tapeNeeded\(r\.cfg\)\)/.test(poller) && /c\.minVolumeSpike !== undefined/.test(poller));
 }
 
 section("17. A SPIKE FLOOR ON A TAPE NOBODY FILLS IS REFUSED AT CONSTRUCTION");
@@ -1467,6 +1467,51 @@ section("17. A SPIKE FLOOR ON A TAPE NOBODY FILLS IS REFUSED AT CONSTRUCTION");
   let none = null;
   try { laneFor({}); } catch (e) { none = e; }
   ok("with no spike floor, no tape is required", none === null, String(none?.message ?? ""));
+}
+
+section("20. WHAT THE FIRST 46 LIVE MARKET-FLOOR TRADES TAUGHT (2026-09-27)");
+{
+  /* 30 of 46 sold at exactly their buy price: nobody traded the coin while it was held. */
+  const need = { veteran: 10, proven: 8, wave: 5, early: 8 };
+  ok("every risk mode demands trades in the last five minutes",
+    Object.entries(need).every(([m, n]) => snipeLaneConfig({ SNIPE_RISK_MODE: m }).minRecentTrades === n),
+    JSON.stringify(Object.keys(need).map((m) => snipeLaneConfig({ SNIPE_RISK_MODE: m }).minRecentTrades)));
+  ok("...the floor is live from the page, like the other filters", LIVE_FILTER_ENV.includes("SNIPE_MIN_RECENT_TRADES")
+    && LIVE_FILTER_KEYS.includes("minRecentTrades"));
+  ok("...a typed floor wins over the mode", snipeLaneConfig({ SNIPE_RISK_MODE: "veteran", SNIPE_MIN_RECENT_TRADES: "3" }).minRecentTrades === 3);
+  ok("...unset without a mode: measured, never a kill", snipeLaneConfig({}).minRecentTrades === undefined);
+  for (const bad of ["2.5", "-1", "5000"]) {
+    let e = null; try { snipeLaneConfig({ SNIPE_MIN_RECENT_TRADES: bad }); } catch (x) { e = x; }
+    ok(`SNIPE_MIN_RECENT_TRADES=${bad} is refused`, e instanceof SnipeLaneError, e?.message);
+  }
+  let unfed = null; try { laneFor({ cfg: { minRecentTrades: 5 } }); } catch (e) { unfed = e; }
+  ok("a trades floor with no tape is refused at construction, like the spike", unfed?.clause === "volume_tape_unfed", unfed?.message);
+  const lane = fs.readFileSync(path.join(HERE, "snipe-lane.mjs"), "utf8");
+  ok("a coin's trades are counted BEFORE the bot's own read joins the tape",
+    lane.indexOf("flow.activity(mint, { nowMs: gateAtMs })") > 0
+      && lane.indexOf("flow.activity(mint, { nowMs: gateAtMs })") < lane.indexOf("flow.observe(mint, { atMs: gateAtMs"));
+
+  /* The launch exits sold every hour-old coin at 90s or 3 minutes. */
+  const floored = snipeLaneConfig({ SNIPE_MARKET_FLOOR: "curve" });
+  ok("a market-floor lane holds 10 minutes with no stall exit", floored.timeStopMs === 600_000 && floored.stallMs === 0,
+    `timeStop ${floored.timeStopMs}, stall ${floored.stallMs}`);
+  ok("...so does a risk mode, which arms the floor", snipeLaneConfig({ SNIPE_RISK_MODE: "wave" }).timeStopMs === MARKET_FLOOR_HOLD.timeStopMs);
+  const typed = snipeLaneConfig({ SNIPE_MARKET_FLOOR: "curve", SNIPE_TIME_STOP_MS: "240000", SNIPE_STALL_MS: "60000" });
+  ok("...but exit timing the owner typed always wins", typed.timeStopMs === 240_000 && typed.stallMs === 60_000);
+  const launch = snipeLaneConfig({});
+  ok("a launch lane keeps the launch exits it was measured on", launch.timeStopMs === null && launch.stallMs === null);
+  ok("the 10-minute time stop does not outlast the lane's own hold clock", MARKET_FLOOR_HOLD.timeStopMs <= SNIPE_LANE_DEFAULTS.holdMaxMs);
+
+  /* The reserve that stops a buy from stranding its exit. */
+  ok("the wallet reserve defaults to 0.01 SOL", snipeLaneConfig({}).minWalletReserveSol === 0.01);
+  ok("...and is typed on the Mac, never from the page", !LIVE_FILTER_ENV.includes("SNIPE_MIN_WALLET_RESERVE_SOL"));
+  let big = null; try { snipeLaneConfig({ SNIPE_MIN_WALLET_RESERVE_SOL: "5" }); } catch (e) { big = e; }
+  ok("...a reserve over 1 SOL is refused", big instanceof SnipeLaneError, big?.message);
+  const poller = fs.readFileSync(path.join(HERE, "poller.mjs"), "utf8");
+  ok("the poller hands the reserve to the signing port in lamports",
+    /minWalletReserveLamports: Math\.round\(Number\(laneCfg\.minWalletReserveSol\) \* 1_000_000_000\)/.test(poller));
+  ok("the poller refuses a trades floor on a bot with no gRPC tap, by name",
+    /SNIPE_MIN_RECENT_TRADES=\$\{laneCfg\.minRecentTrades\}/.test(poller));
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
