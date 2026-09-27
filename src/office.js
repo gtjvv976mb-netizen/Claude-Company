@@ -585,6 +585,15 @@ export function sanitizeExecutorSnipe(value) {
         notifications: maybe(v.notifications), trades: maybe(v.trades), recorded: maybe(v.recorded),
         tapErrors: maybe(v.tapErrors),
         lastError: v.lastError == null ? null : String(v.lastError).slice(0, 160),
+        /* IS THE TAPE BEING FED, AND WHO IS REVIVING IT (2026-09-27: a dead gRPC stream froze
+           the counters above for nine hours while every candidate was refused as untraded).
+           A strict boolean or null — "no tap" and "tap down" are different sentences on the
+           page, and a truthy string must not read as either. The restart fields are the
+           watchdog's: a count, a time, and its last error, capped because it is rendered. */
+        tradeFeedLive: typeof v.tradeFeedLive === "boolean" ? v.tradeFeedLive : null,
+        grpcRestarts: maybe(v.grpcRestarts),
+        grpcLastRestartAtMs: timestamp(v.grpcLastRestartAtMs),
+        grpcLastRestartError: v.grpcLastRestartError == null ? null : String(v.grpcLastRestartError).slice(0, 160),
       };
     })(),
     /* WHY THE LAST BUY FAILED. Rendered, so the clause is shape-checked and the text capped. */

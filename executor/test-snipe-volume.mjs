@@ -27,10 +27,12 @@ import fs from "node:fs";
 import {
   SNIPE_VOLUME_VERSION, DEFAULT_WINDOW_MS, DEFAULT_BASELINE_MS, DEFAULT_CAPACITY, DEFAULT_BUCKET_MS,
   measureSpike, measureActivity, DEFAULT_ACTIVITY_MS, createFlowTape, observeTradeEvents, createTradeTap,
+  TRADE_FEED_STALE_MS, tradeFeedStatus,
 } from "./snipe-volume.mjs";
 import { SNIPE_GATES, SNIPE_PROXY_GATES, SNIPE_GATE_COST } from "./snipe-entry.mjs";
 import { SNIPE_PROXIES } from "./snipe-shadow.mjs";
 import { SNIPE_LANE_DEFAULTS, snipeLaneConfig } from "./snipe-lane.mjs";
+import { createSnipeFeed, grpcSubscribeSource, createSourceWatchdog, GRPC_WATCHDOG } from "./snipe-feed.mjs";
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => {
@@ -334,6 +336,13 @@ console.log("\nwiring");
     /flow\.measure\(mint, \{ nowMs: gateAtMs \}\)/.test(lane) && /flow: flowNow,/.test(lane));
   ok("the lane feeds the tape from curve reads it has already paid for",
     (lane.match(/flow\.observe\(mint, \{/g) ?? []).length >= 2);
+  /* The gate-time read of a launch notice tops up a KNOWN mint only; the held position's read
+     still inserts, because a coin we hold must stay measurable whether or not the tap heard it. */
+  ok("the gate-time read of a notice is recorded only for a mint the trade feed already put there",
+    /flow\.observe\(mint, \{ atMs: gateAtMs, quoteRaw: curve\?\.realQuoteRaw \?\? null, onlyIfKnown: true \}\)/.test(lane));
+  ok("...and the held position's read is left inserting, as before",
+    /flow\.observe\(mint, \{ atMs: now, quoteRaw: curve\?\.realQuoteRaw \?\? null \}\)/.test(lane)
+      && (lane.match(/onlyIfKnown: true/g) ?? []).length === 1);
   ok("the gate and the rest of the stack are judged at the SAME instant",
     /const gateAtMs = clock\(\);/.test(lane) && /nowMs: gateAtMs,/.test(lane));
   ok("the tape rides on the lane's stats, so an empty one is visible", /flow: flow\.stats\(\),/.test(lane));
@@ -432,6 +441,180 @@ console.log("\nACTIVITY: IS ANYBODY TRADING IT NOW (2026-09-27)");
   tape.observe("M", { atMs: now - 30_000, quoteRaw: "120" });
   ok("the tape counts a mint's recent trades", tape.activity("M", { nowMs: now }).trades === 2, JSON.stringify(tape.activity("M", { nowMs: now })));
   ok("a mint the tape never saw has had no trades reach this process", tape.activity("NEVER", { nowMs: now }).trades === 0);
+}
+
+console.log("\nTHE BOT'S OWN READS MUST NOT EVICT TRADE HISTORY (2026-09-27)");
+{
+  /* On the owner's Mac the tape sat at its 2,000-mint cap with 6,511 evictions: the lane
+     inserted every launch notice it glanced at, and each insert pushed out the least recently
+     touched mint — which was real trade history. `onlyIfKnown` and `has()` are the fix. */
+  const tape = createFlowTape({ capacity: 4, maxMints: 3, bucketMs: 1, windowMs: 2, baselineMs: 2 });
+  ok("has() is false for a mint the tape never saw", tape.has("A") === false);
+  for (const m of ["A", "B", "C"]) tape.observe(m, { atMs: 10, quoteRaw: "100" });
+  ok("...and true once the trade feed has put it there", tape.has("A") && tape.has("B") && tape.has("C"));
+  for (let i = 0; i < 100; i++) {
+    const took = tape.observe(`OWN${i}`, { atMs: 20 + i, quoteRaw: "5", onlyIfKnown: true });
+    if (took !== null) { ok("an own read of an unknown mint is NOT recorded", false, `OWN${i} -> ${took}`); break; }
+  }
+  const s = tape.stats();
+  ok("a hundred own reads of unknown mints evict nothing", s.evictedMints === 0 && tape.size() === 3,
+    `evicted ${s.evictedMints}, size ${tape.size()}`);
+  ok("...every trade-fed mint is still held", tape.has("A") && tape.has("B") && tape.has("C"));
+  ok("...and every skipped read is COUNTED, not dropped silently", s.skippedUnknown === 100, String(s.skippedUnknown));
+  ok("...and none of them is miscounted as a rejected sample", s.rejected === 0, String(s.rejected));
+  ok("an own read of a KNOWN mint is recorded — the tape still gets its freshest point",
+    tape.observe("A", { atMs: 30, quoteRaw: "120", onlyIfKnown: true }) === 2 && tape.stats().skippedUnknown === 100);
+  ok("a junk read is rejected whichever way it was asked",
+    tape.observe("ZZ", { atMs: 30, quoteRaw: null, onlyIfKnown: true }) === null && tape.stats().rejected === 1
+      && tape.stats().skippedUnknown === 100);
+  /* has() is a read, not a touch: asking about B must not save it from the next eviction. */
+  const lru = createFlowTape({ capacity: 4, maxMints: 2, bucketMs: 1, windowMs: 2, baselineMs: 2 });
+  lru.observe("X", { atMs: 1, quoteRaw: "1" });
+  lru.observe("Y", { atMs: 2, quoteRaw: "1" });
+  lru.has("X");
+  lru.observe("Z", { atMs: 3, quoteRaw: "1" });
+  ok("has() does not refresh a mint's place in the LRU order", lru.has("X") === false && lru.has("Y") && lru.has("Z"));
+  ok("without the option, observe still inserts as it always has (the trade tap's path)",
+    createFlowTape().observe("NEW", { atMs: 1, quoteRaw: "1" }) === 1);
+}
+
+console.log("\nTHE TAP KNOWS WHEN IT LAST HEARD ANYTHING (2026-09-27)");
+{
+  /* The counters froze at 4,748 for nine hours and nothing could tell "the market went quiet"
+     from "the stream died". A stamp can. */
+  const tape = createFlowTape();
+  let clock = 1_000_000;
+  const tap = createTradeTap({ tape, clock: () => clock,
+    tradesFrom: (n) => (n?.boom ? (() => { throw new Error("bad bytes"); })() : (n?.trades ?? [])) });
+  ok("a tap that has heard nothing says so with null, not a zero instant",
+    tap.stats().lastNotificationAtMs === null && tap.stats().liveSinceMs === null);
+  tap.observe({ trades: [] });
+  ok("a notification with no trades still stamps lastNotificationAtMs", tap.stats().lastNotificationAtMs === 1_000_000);
+  clock = 1_030_000;
+  tap.observe({ boom: true });
+  ok("so does one whose bytes do not decode — the wire is up even when the decoder is not",
+    tap.stats().lastNotificationAtMs === 1_030_000 && tap.stats().errors === 1);
+  ok("the run that began at the first notification is unbroken by a 30s gap", tap.stats().liveSinceMs === 1_000_000);
+  clock = 1_030_000 + TRADE_FEED_STALE_MS + 1;
+  tap.observe({ trades: [] });
+  ok("a silence longer than the gap starts a NEW run — the tape's coverage restarts with it",
+    tap.stats().liveSinceMs === clock && tap.stats().lastNotificationAtMs === clock, JSON.stringify({ since: tap.stats().liveSinceMs }));
+  ok("the gap is sixty seconds, stated once", TRADE_FEED_STALE_MS === 60_000 && tap.stats().gapMs === 60_000);
+  ok("a non-positive gap is refused at construction",
+    threw(() => createTradeTap({ tape, tradesFrom: () => [], gapMs: 0 })) !== null);
+}
+{
+  const NOW = 50_000_000;
+  /* The feed's WHOLE verdict on the gRPC source, shaped as classifySource shapes it:
+     subscribed ten minutes ago, first frame a second later, last frame a second ago. */
+  const src = (over = {}) => ({ state: "live", startedAtMs: NOW - 600_000, firstNoticeAtMs: NOW - 599_000,
+    lastNoticeAtMs: NOW - 1_000, ...over });
+  const base = { source: src(), lastNotificationAtMs: NOW - 1_000, liveSinceMs: NOW - 400_000, nowMs: NOW };
+  const live = tradeFeedStatus(base);
+  ok("a live source with a fresh stamp is live, since the start of its run",
+    live.live === true && live.sinceMs === NOW - 400_000 && live.reason === null, JSON.stringify(live));
+  ok("a DEAD source is down even with a fresh stamp — the feed's verdict is half the answer",
+    tradeFeedStatus({ ...base, source: src({ state: "dead" }) }).live === false
+      && tradeFeedStatus({ ...base, source: src({ state: "dead" }) }).reason === "source_dead");
+  ok("so is a DEGRADED one — an errored stream, before any watchdog has acted",
+    tradeFeedStatus({ ...base, source: src({ state: "degraded" }) }).reason === "source_degraded");
+  ok("the state word alone is not an answer: a caller passing only sourceState gets down, by name",
+    tradeFeedStatus({ sourceState: "live", lastNotificationAtMs: NOW - 1_000, nowMs: NOW }).reason === "source_missing");
+  ok("a tap that has never heard anything is down",
+    tradeFeedStatus({ ...base, lastNotificationAtMs: null }).reason === "no_notification");
+
+  /* THE RESTART, which the state word lies about. Resubscribed ten seconds ago, nothing on
+     the new subscription yet — and the tap's last stamp is from the stream that died
+     twenty-five seconds ago, well inside the minute. */
+  const fresh = src({ startedAtMs: NOW - 10_000, firstNoticeAtMs: null, lastNoticeAtMs: null });
+  const empty = tradeFeedStatus({ ...base, source: fresh, lastNotificationAtMs: NOW - 25_000 });
+  ok("a restarted subscription that has delivered nothing is DOWN, though the feed says live and the tap heard something 25s ago",
+    empty.live === false && empty.reason === "no_notification_since_subscribe" && empty.subscribedAtMs === NOW - 10_000,
+    JSON.stringify(empty));
+  ok("...and a late frame from the RETIRED subscription (a tap stamp after the restart, no firstNoticeAtMs) does not change that",
+    tradeFeedStatus({ ...base, source: fresh, lastNotificationAtMs: NOW - 2_000 }).reason === "no_notification_since_subscribe");
+  ok("a verdict with no start stamp cannot say which subscription it describes: down",
+    tradeFeedStatus({ ...base, source: src({ startedAtMs: null }) }).reason === "no_notification_since_subscribe");
+  /* Once the new subscription delivers, coverage starts THERE — not at the tap's run start,
+     which a 25-second hole never broke. */
+  const back = tradeFeedStatus({ ...base, source: src({ startedAtMs: NOW - 10_000, firstNoticeAtMs: NOW - 5_000 }),
+    liveSinceMs: NOW - 900_000 });
+  ok("...once it delivers it is live, covered from ITS first notice, not from the run before the hole",
+    back.live === true && back.sinceMs === NOW - 5_000, JSON.stringify(back));
+
+  ok("exactly sixty seconds of silence is still live…",
+    tradeFeedStatus({ ...base, lastNotificationAtMs: NOW - 60_000 }).live === true);
+  const stale = tradeFeedStatus({ ...base, lastNotificationAtMs: NOW - 60_001 });
+  ok("…and one millisecond more is down, with the silence said", stale.live === false && stale.reason === "silent" && stale.silentMs === 60_001);
+  ok("silence is judged on the OLDER of the two stamps: a feed that stopped hearing is down whatever the tap says",
+    tradeFeedStatus({ ...base, source: src({ lastNoticeAtMs: NOW - 61_000 }) }).reason === "silent");
+  ok("no source at all is down, by name", tradeFeedStatus({ ...base, source: null }).reason === "source_missing");
+  ok("no clock is down, never assumed live", tradeFeedStatus({ ...base, nowMs: undefined }).live === false);
+  ok("down never carries a since", stale.sinceMs === null && empty.sinceMs === null);
+}
+
+console.log("\nA REAL FEED, TAP AND WATCHDOG THROUGH A RESTART (2026-09-27)");
+{
+  /* The reproduction the rule above exists for, with the real modules over a fake transport:
+     ten notifications, the stream ends with an error, the watchdog resubscribes 15s later —
+     and then NOTHING arrives on the new subscription. Before the fix this read
+     `tradeFeedLive true` at +30s and +40s (the feed said live, the tap's stamp was the dead
+     stream's) and only went down at +61s. */
+  let T = 60_000_000;
+  const clock = () => T;
+  const t = { handlers: [], subscribes: 0,
+    subscribe({ onNotice, onError }) {
+      t.subscribes++;
+      const h = { onNotice, onError };
+      t.handlers.push(h);
+      return { unsubscribe() { t.handlers = t.handlers.filter((x) => x !== h); } };
+    },
+    push(n) { for (const h of [...t.handlers]) h.onNotice(n, { slot: 1 }); },
+    breakIt(m) { for (const h of [...t.handlers]) h.onError(new Error(m)); },
+  };
+  const tape = createFlowTape();
+  const tap = createTradeTap({ tape, clock, tradesFrom: (n) => n?.trades ?? [] });
+  const feed = createSnipeFeed({
+    sources: [grpcSubscribeSource({ id: "grpc:pumpfun", programId: "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+      transport: t, extractMint: () => null, observe: (n) => tap.observe(n) })],
+    clock, schedule: () => 0, cancel: () => {},
+  });
+  const wd = createSourceWatchdog({ feed, sourceId: "grpc:pumpfun", setIntervalFn: () => ({}), clearIntervalFn: () => {},
+    ...GRPC_WATCHDOG });
+  const status = () => {
+    const s = tap.stats();
+    return tradeFeedStatus({ source: feed.health(T).sources[0], lastNotificationAtMs: s.lastNotificationAtMs,
+      liveSinceMs: s.liveSinceMs, nowMs: T });
+  };
+  await feed.start();
+  const t0 = T;
+  for (let i = 0; i < 10; i++) { T = t0 + 1_000 + i * 1_000; t.push({ trades: [] }); }
+  const runStart = tap.stats().liveSinceMs;
+  ok("a delivering stream is live, covered from its first notification", status().live === true && status().sinceMs === t0 + 1_000,
+    JSON.stringify(status()));
+  const retired = t.handlers[0];
+  T = t0 + 10_000; t.breakIt("gRPC stream ended");
+  ok("the stream ends with an error: down at once (the feed calls it degraded)", status().reason === "source_degraded");
+  T = t0 + 25_000;
+  const tick = await wd.tick();
+  ok("the watchdog resubscribes it 15s later", tick.restarts === 1 && tick.lastRestartOk === true && t.subscribes === 2,
+    `restarts ${tick.restarts}, subscribes ${t.subscribes}`);
+  ok("...and the feed now reads the source live — the word the old check trusted",
+    feed.health(T).sources[0].state === "live");
+  const results = [];
+  for (const at of [26_000, 40_000, 50_000, 60_000]) {
+    T = t0 + at;
+    if (at === 40_000) retired.onNotice({ trades: [] }, { slot: 2 });   // one late frame from the dead socket
+    results.push(`${at / 1000}s:${status().live ? "LIVE" : status().reason}`);
+  }
+  ok("with nothing on the new subscription it stays DOWN at +26s, +40s, +50s, +60s — even after a stale frame stamps the tap",
+    results.every((r) => /no_notification_since_subscribe$/.test(r)), results.join(" "));
+  T = t0 + 62_000; t.push({ trades: [] });
+  T = t0 + 70_000;
+  const up = status();
+  ok("the new subscription's first frame makes it live — covered from THAT frame, not from the run before the 52s hole",
+    up.live === true && up.sinceMs === t0 + 62_000 && tap.stats().liveSinceMs === runStart, JSON.stringify(up));
+  await feed.stop();
 }
 
 console.log(`\n${fail === 0 ? "PASS" : "FAIL"} test-snipe-volume  ${pass} passed, ${fail} failed`);

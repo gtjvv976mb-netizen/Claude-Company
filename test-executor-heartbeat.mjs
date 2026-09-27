@@ -192,6 +192,34 @@ assert.equal(sanitizeExecutorSnipe({ mode: "execute", state: "bogus" }).state, "
 assert.equal(sanitizeExecutorSnipe({ mode: "execute", state: "disabled", lastError: "tick fault" }).state, "disabled",
   "the other silent stop — disabled after a fault with nothing open — arrives by name");
 
+/* THE TRADE FEED UNDER THE VOLUME TAPE, AND THE WATCHDOG REVIVING IT (2026-09-27). The gRPC
+   stream died, the tap's counters froze at 4,748, and for nine hours every candidate was
+   refused as "0 trades in the last 5 minutes" while nothing on the desk could say the wire
+   was down. The new fields must SURVIVE the sanitizer — a field the bot sends and the desk
+   drops is the same as never sending it — and arrive bounded like everything beside them. */
+const fed = sanitizeExecutorSnipe({ mode: "execute", state: "up", flow: {
+  tapped: true, mints: 2000, observed: 90, rejected: 0, evictedMints: 6511,
+  notifications: 4748, trades: 5100, recorded: 4900, tapErrors: 0, lastError: null,
+  tradeFeedLive: false, grpcRestarts: 3, grpcLastRestartAtMs: 1_790_000_000_000,
+  grpcLastRestartError: "401 invalid x-token" + "y".repeat(400), endpoint: "never-carried",
+} });
+assert.equal(fed.flow.tradeFeedLive, false, "a down trade feed must reach the desk as false");
+assert.equal(fed.flow.grpcRestarts, 3, "the watchdog's restart count is carried");
+assert.equal(fed.flow.grpcLastRestartAtMs, 1_790_000_000_000, "the last restart time is carried");
+assert.match(fed.flow.grpcLastRestartError, /^401 invalid x-token/, "the last restart error is carried");
+assert.equal(fed.flow.grpcLastRestartError.length, 160, "…and capped, because the page renders it");
+assert.equal(fed.flow.evictedMints, 6511, "the evictions that the lane's own reads caused stay visible");
+assert.ok(!JSON.stringify(fed).includes("never-carried"), "the flow block publishes only what it names");
+assert.equal(sanitizeExecutorSnipe({ mode: "execute", state: "up", flow: { tradeFeedLive: true } }).flow.tradeFeedLive, true);
+const junkFlow = sanitizeExecutorSnipe({ mode: "observe", state: "up", flow: {
+  tradeFeedLive: "false", grpcRestarts: "many", grpcLastRestartAtMs: -5, grpcLastRestartError: { nested: "x" } } });
+assert.equal(junkFlow.flow.tradeFeedLive, null, "a truthy string is neither live nor down — only a strict boolean is a verdict");
+assert.equal(junkFlow.flow.grpcRestarts, 0, "a non-numeric count is a number anyway");
+assert.equal(junkFlow.flow.grpcLastRestartAtMs, null, "a negative time is no time");
+const untapped = sanitizeExecutorSnipe({ mode: "observe", state: "up", flow: { tapped: false } });
+assert.equal(untapped.flow.tradeFeedLive, null, "a bot with no tap is not a bot whose tap is down");
+assert.equal(untapped.flow.grpcRestarts, null, "no watchdog is null, not zero restarts");
+
 /* THE BOOK ITSELF: every open position with its levels, every recent close with its
    result. Bounded, and a row without a mint or a close without a result is dropped. */
 const held = sanitizeExecutorHeld([{ mint: "MintPublic", sol: 0.248, openedAt: 1_789_251_886_063, symbol: "EMBER", callId: 60,

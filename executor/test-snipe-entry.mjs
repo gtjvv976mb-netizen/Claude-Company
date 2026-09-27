@@ -65,6 +65,7 @@ import {
   SNIPE_ENTRY_VERSION, SNIPE_GATES, SNIPE_GATE_COST, SNIPE_PROXY_GATES,
   SNIPE_ALLOWED_EXTENSIONS, SNIPE_MINT_KILL_FLAGS, SnipeEntryRefusal,
   snipeContract, planSnipeCeiling, assertSnipeInstruction, jupiterEquivalentWorstCost,
+  FLOW_FEED_REASONS,
 } from "./snipe-entry.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -795,6 +796,56 @@ ok("the ladder is honest about being inert at the live cap, and says so in the r
   console.log(`       impact at 0.005 SOL ${f(plan.rungs[0].impactPct)}% > 5% · at 0.0025 SOL ` +
     `${f(plan.rungs[1].impactPct)}% <= 5% · but 0.002500 SOL < ${f(v.detail.minViableSol, 6)} SOL minimum viable`);
   console.log("       so at the live cap MAX_ROUTE_HALVINGS is inert: a cost-shaped refusal cannot become a smaller fill");
+});
+
+ok("a dead trade feed is refused as the FEED's fault, never blamed on the coin (2026-09-27)", () => {
+  /* NINE HOURS OF THIS LINE, on coins the chain shows traded 2 to 25 times in the window:
+       refused at recent_trades — 0 trades in the last 5 minutes, under the 8 bar — a coin nobody is trading cannot move
+     The gRPC stream that fills the tape had died. Refusing was right; the sentence was not. */
+  const TRADES = { ...LIVE_CFG, minRecentTrades: 8 };
+  const down = { spike: null, reason: "trade_feed_down", recentTrades: null, activityWindowMs: 300_000,
+    activityReason: "trade_feed_down", activityCoverageMs: null, tradeFeedLive: false };
+  const v = snipeContract(baseArgs({ cfg: TRADES, flow: down }));
+  assert.equal(v.gate, "recent_trades", `a down feed against a trades floor answered ${v.gate}`);
+  assert.match(v.detail.message, /the gRPC trade feed is down, so this coin's recent trades cannot be counted/, v.detail.message);
+  assert.match(v.detail.message, /unverified is not safe; the bot is reconnecting it/, v.detail.message);
+  assert.doesNotMatch(v.detail.message, /nobody is trading|0 trades in the last/, `the coin was blamed: ${v.detail.message}`);
+  /* On a refusal, `measured` is the refusing gate's own reading — null, never a zero. */
+  assert.equal(v.detail.measured, null, `an uncounted coin was recorded as ${v.detail.measured} trades`);
+  assert.equal(v.detail.reason, "trade_feed_down");
+
+  /* The no-tape sentence is unchanged — that is a different fact, about configuration. */
+  const noTape = snipeContract(baseArgs({ cfg: TRADES, flow: null }));
+  assert.match(noTape.detail.message, /could not be counted \(no trade tape\) — unverified is not safe/, noTape.detail.message);
+  /* And a feed that is up and covering its window still says the honest thing about the coin. */
+  const quiet = snipeContract(baseArgs({ cfg: TRADES, flow: { spike: null, recentTrades: 0, activityWindowMs: 300_000, activityReason: null } }));
+  assert.match(quiet.detail.message, /0 trades in the last 5 minutes, under the 8 bar — a coin nobody is trading cannot move/);
+
+  /* WARMING: forty seconds of tape after a reconnect. A low count is a floor, not a measurement,
+     and says so; a count that already clears the bar is over the bar and passes. */
+  const warm = (n) => ({ spike: null, reason: "trade_feed_warming", recentTrades: n, activityWindowMs: 300_000,
+    activityReason: "trade_feed_warming", activityCoverageMs: 40_000, tradeFeedLive: true });
+  const low = snipeContract(baseArgs({ cfg: TRADES, flow: warm(2) }));
+  assert.equal(low.gate, "recent_trades", `2 trades in a 40s partial window answered ${low.gate}`);
+  assert.match(low.detail.message, /2 trades counted in the 40s since the gRPC trade feed \(re\)connected, under the 8 bar/, low.detail.message);
+  assert.doesNotMatch(low.detail.message, /nobody is trading/, low.detail.message);
+  assert.equal(low.detail.measured, 2, "a partial count is still recorded as what it is");
+  assert.equal(low.detail.reason, "trade_feed_warming");
+  const high = snipeContract(baseArgs({ cfg: TRADES, flow: warm(12) }));
+  assert.equal(high.ok, true, `12 trades in 40s against a bar of 8 was refused at ${high.gate}: ${high.detail.message}`);
+
+  /* The spike gate, same wire, same honesty. */
+  const spike = snipeContract(baseArgs({ cfg: { ...LIVE_CFG, minVolumeSpike: 2 }, flow: down }));
+  assert.equal(spike.gate, "volume_spike", `a down feed against a spike floor answered ${spike.gate}`);
+  assert.match(spike.detail.message, /the gRPC trade feed is down, so this coin's flow cannot be measured/, spike.detail.message);
+  assert.equal(spike.detail.measured, null);
+  const warmSpike = snipeContract(baseArgs({ cfg: { ...LIVE_CFG, minVolumeSpike: 2 }, flow: warm(12) }));
+  assert.match(warmSpike.detail.message, /\(re\)connected too recently/, warmSpike.detail.message);
+  /* Unset floors still only measure, feed down or not. */
+  assert.equal(snipeContract(baseArgs({ flow: down })).ok, true, "a down feed refused a lane with no flow floor set");
+  assert.deepEqual(Object.keys(FLOW_FEED_REASONS), ["trade_feed_down", "trade_feed_warming"]);
+  console.log(`       down: "${v.detail.message}"`);
+  console.log(`       warming: "${low.detail.message.slice(0, 110)}…" · 12 in 40s clears 8`);
 });
 
 console.log(`\n${pass} passed — the t=0 gate refuses by name, admits a real launch, and its ceiling is tighter than a tolerance\n`);
