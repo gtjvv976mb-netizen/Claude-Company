@@ -58,7 +58,7 @@ const need = ["poller.mjs", "journal.mjs", "jupiter.mjs", "token2022.mjs", "bala
   // the lane branch, and grade-entry-gates.mjs is the command the owner runs by hand.
   "shadow-sink.mjs", "grade-entry-gates.mjs",
   // desk-led-v4: the desk's ruler and the mirror evaluator ship with the trading process.
-  "dexscreener-consensus.mjs", "desk-mirror.mjs",
+  "dexscreener-consensus.mjs", "desk-mirror.mjs", "snipe-trend.mjs",
   "package.json", "package-lock.json", "install.sh", "macos-launchagent.sh", "macos-release.sh", "launchd-runner.mjs"];
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wallste-install-test-"));
 const sources = new Map();
@@ -545,7 +545,7 @@ check("installer never pipes a mutable bootstrap script into a privileged shell"
   const required = ["poller.mjs", "journal.mjs", "jupiter.mjs", "token2022.mjs",
     "balance-verification.mjs", "entry-quote-guard.mjs", "exit-trigger.mjs", "feed-drain.mjs",
     "sol-usd-oracle.mjs", "heartbeat-health.mjs", "sleep-assertion.mjs", "monitor.mjs",
-    "strategy.mjs", "trade-policy.mjs", "dexscreener-consensus.mjs", "desk-mirror.mjs",
+    "strategy.mjs", "trade-policy.mjs", "dexscreener-consensus.mjs", "desk-mirror.mjs", "snipe-trend.mjs",
     /* a key on exactly one disk is a stranded-funds bug waiting for its first dead host */
     "burner-backup.mjs",
     /* and rent locked in empty token accounts is the same bug in slow motion: money in
