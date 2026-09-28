@@ -354,7 +354,7 @@ console.log("\nwiring");
     /const flowTape = volumeMod\.createFlowTape\(\)/.test(poller)
     && /tape: flowTape,/.test(poller) && /^      flowTape,$/m.test(poller));
   ok("the tap is mounted on the gRPC source, where every trade already arrives",
-    /observe: \(notification\) => flowTap\.observe\(notification\)/.test(poller));
+    /observe: \(notification\) => \{\s*flowTap\.observe\(notification\);/.test(poller));
   ok("it decodes trades with the venue's own verified decoder, not a copy",
     /eventsFromLogs\(notification\?\.logs, \{ kind: "trade" \}\)/.test(poller));
   /* snipe-volume.mjs must stay a LANE module: imported dynamically inside the

@@ -243,7 +243,7 @@ const EXECUTOR_FILES = [
      MIRRORS the desk with the desk's own ruler, and the ruler ships with it: the
      DexScreener consensus port and the mirror evaluator are runtime imports of
      poller.mjs, so an install that fetches this list without them dies at boot. */
-  "dexscreener-consensus.mjs", "desk-mirror.mjs",
+  "dexscreener-consensus.mjs", "desk-mirror.mjs", "snipe-trend.mjs",
   /* token2022.mjs is a runtime import of jupiter.mjs (line 37) and the installer has
      always fetched it — but it was never on this list, so the published site 404'd it
      and `curl -f ... || exit 1` aborted EVERY remote install. Exactly the failure the

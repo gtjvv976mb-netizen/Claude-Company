@@ -634,6 +634,42 @@ export function sanitizeExecutorSnipe(value) {
         dropped: Object.fromEntries(CLAUSES.map((k) => [k, count(d[k])])),
       };
     })(),
+    /* THE TREND LANE'S SHADOW SCORECARD (snipe-trend.mjs, 2026-09-28). Shadow only — no row
+       here moved money — but it is rendered, so every string is a capped plain label and every
+       number is clamped: tickers and reasons come from coin launchers, not from this desk. */
+    trend: (() => {
+      const v = value.trend && typeof value.trend === "object" && !Array.isArray(value.trend) ? value.trend : null;
+      if (!v) return null;
+      const num = (x, lo, hi) => (Number.isFinite(Number(x)) ? Math.max(lo, Math.min(hi, Number(x))) : null);
+      const label = (x, n = 24) => (x == null ? null : String(x).replace(/[\u0000-\u001f\u007f<>]/g, "").slice(0, n));
+      const obj = (x) => (x && typeof x === "object" && !Array.isArray(x) ? x : {});
+      const kinds = obj(v.byKind);
+      const det = v.detector && typeof v.detector === "object" ? v.detector : null;
+      return {
+        mode: v.mode === "shadow" ? "shadow" : null,
+        ticketSol: num(v.ticketSol, 0, 10),
+        parents: count(v.parents), launches: count(v.launches), clones: count(v.clones),
+        matched: count(v.matched), entered: count(v.entered), closed: count(v.closed),
+        generic: count(v.generic), open: count(v.open),
+        wins: count(v.wins), losses: count(v.losses), winRate: num(v.winRate, 0, 100),
+        pnlSol: num(v.pnlSol, -1e6, 1e6), bestPct: num(v.bestPct, -100, 1e6), worstPct: num(v.worstPct, -100, 1e6),
+        byKind: Object.fromEntries(["variant", "subtopic"].map((k) => [k, {
+          n: count(obj(kinds[k]).n), wins: count(obj(kinds[k]).wins), pnlSol: num(obj(kinds[k]).pnlSol, -1e6, 1e6) }])),
+        topParents: (Array.isArray(v.topParents) ? v.topParents : []).slice(0, 5).map((p) => ({
+          symbol: label(obj(p).symbol), athUsd: num(obj(p).athUsd, 0, 1e13), hoursToReach: num(obj(p).hoursToReach, 0, 1e4) })),
+        recent: (Array.isArray(v.recent) ? v.recent : []).slice(0, 8).map((r) => ({
+          symbol: label(obj(r).symbol), parent: label(obj(r).parent),
+          kind: ["variant", "subtopic"].includes(obj(r).kind) ? obj(r).kind : null,
+          netPct: num(obj(r).netPct, -100, 1e6), peakX: num(obj(r).peakX, 0, 1e6),
+          reason: label(obj(r).reason, 60), exitAtMs: timestamp(obj(r).exitAtMs) })),
+        openRows: (Array.isArray(v.openRows) ? v.openRows : []).slice(0, 8).map((r) => ({
+          symbol: label(obj(r).symbol), parent: label(obj(r).parent),
+          kind: ["variant", "subtopic"].includes(obj(r).kind) ? obj(r).kind : null,
+          x: num(obj(r).x, 0, 1e6), heldMs: num(obj(r).heldMs, 0, 864e5) })),
+        detector: det ? { parents: count(det.parents), refreshes: count(det.refreshes), failures: count(det.failures),
+          lastRefreshAtMs: timestamp(det.lastRefreshAtMs), lastError: det.lastError == null ? null : label(det.lastError, 160) } : null,
+      };
+    })(),
     /* THE LATENCY BUDGET (owner, 2026-09-18: "the fastest in the market"). Bounded and
        typed like everything else on this block, because it arrives from a machine the
        desk does not control. Milliseconds are clamped to a day: a hop cannot legitimately

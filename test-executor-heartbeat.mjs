@@ -214,6 +214,25 @@ assert.equal(sanitizeExecutorSnipe({ mode: "execute", state: "up", flow: { trade
 const junkFlow = sanitizeExecutorSnipe({ mode: "observe", state: "up", flow: {
   tradeFeedLive: "false", grpcRestarts: "many", grpcLastRestartAtMs: -5, grpcLastRestartError: { nested: "x" } } });
 assert.equal(junkFlow.flow.tradeFeedLive, null, "a truthy string is neither live nor down — only a strict boolean is a verdict");
+/* THE TREND LANE'S SHADOW SCORECARD (2026-09-28): tickers come from coin launchers and are
+   rendered, so they arrive as capped plain labels; numbers are clamped; unknown kinds drop. */
+const trendBeat = sanitizeExecutorSnipe({ mode: "execute", state: "up", trend: {
+  mode: "shadow", ticketSol: 0.05, parents: 3, launches: 900, clones: 4, matched: 12, entered: 11, closed: 9, open: 2,
+  wins: 3, losses: 6, winRate: 33.3, pnlSol: -0.0123, bestPct: 180.5, worstPct: -27.1,
+  byKind: { variant: { n: 4, wins: 2, pnlSol: 0.01 }, subtopic: { n: 5, wins: 1, pnlSol: -0.02 }, evil: { n: 9 } },
+  topParents: [{ symbol: "CALI<script>", athUsd: 3.2e8, hoursToReach: 2.5 }],
+  recent: [{ symbol: "KWS", parent: "swordcat", kind: "subtopic", netPct: -26.2, peakX: 1.1, reason: "stop", exitAtMs: 1_790_000_000_000 },
+           { symbol: "X", parent: "Y", kind: "nonsense", netPct: "lots" }],
+  detector: { parents: 3, refreshes: 10, failures: 1, lastRefreshAtMs: 1_790_000_000_000, lastError: "HTTP 429" },
+} });
+assert.equal(trendBeat.trend.mode, "shadow");
+assert.equal(trendBeat.trend.matched, 12);
+assert.equal(trendBeat.trend.pnlSol, -0.0123, "a shadow loss reaches the page as a signed number");
+assert.equal(trendBeat.trend.topParents[0].symbol, "CALIscript", "angle brackets are stripped from a launcher's ticker");
+assert.equal(trendBeat.trend.recent[1].kind, null, "an unknown kind is dropped, not rendered");
+assert.equal(trendBeat.trend.recent[1].netPct, null, "a non-number is null, not NaN");
+assert.deepEqual(Object.keys(trendBeat.trend.byKind).sort(), ["subtopic", "variant"], "only the two known kinds pass");
+assert.equal(sanitizeExecutorSnipe({ mode: "execute", state: "up" }).trend, null, "no trend block means null, not zeros");
 assert.equal(junkFlow.flow.grpcRestarts, 0, "a non-numeric count is a number anyway");
 assert.equal(junkFlow.flow.grpcLastRestartAtMs, null, "a negative time is no time");
 const untapped = sanitizeExecutorSnipe({ mode: "observe", state: "up", flow: { tapped: false } });
