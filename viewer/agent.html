@@ -241,6 +241,15 @@ async function load() {
     $("trendparents").textContent = (tr.topParents || []).length
       ? "Trending: " + tr.topParents.map((p) => `${p.symbol} ($${(p.athUsd / 1e6).toFixed(1)}M in ${p.hoursToReach}h)`).join(" · ")
       : "No coin has reached the trend bar yet.";
+    /* The strategy against its comparison: with SNIPE_TREND_KINDS=variant the strategy is the
+       variants and the subtopics are the control, both still followed on paper. */
+    const st = tr.strategy, cmp = tr.comparison, ks = tr.kinds || [];
+    if (st && ks.length === 1) {
+      const line = (name, t) => `${name}: ${t.n} closed, ${t.wins} won${t.winRate == null ? "" : ` (${t.winRate}%)`}, net ${sol(t.pnlSol)}`;
+      const other = ks[0] === "variant" ? "subtopics" : "variants";
+      $("trendlede").textContent += ` Strategy — ${line(`${ks[0]}s`, st)}. Comparison — ${line(other, cmp || { n: 0, wins: 0, winRate: null, pnlSol: 0 })}`
+        + `${tr.sinceMs ? ` (since ${new Date(tr.sinceMs).toLocaleString()})` : ""}.`;
+    }
     const box = $("trendrows"); box.textContent = "";
     for (const r of (tr.recent || [])) {
       const div = document.createElement("div"); div.className = "sstat";

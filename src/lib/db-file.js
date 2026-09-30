@@ -82,6 +82,9 @@ export function openJournal(DatabaseSync, file = resolveDbFile()) {
   if (mode.toLowerCase() === "wal") {
     // Safe only because the log above is now the crash-recovery record.
     try { db.exec("PRAGMA synchronous = NORMAL"); } catch { /* keep the FULL default */ }
+    // A WAL that SQLite's own checkpoints have reset is otherwise left at its high-water
+    // size on disk. Cap what it keeps at 64 MB (the disk filled on 2026-09-29).
+    try { db.exec("PRAGMA journal_size_limit = 67108864"); } catch { /* not fatal */ }
   }
   // WAL lets readers and the writer overlap, but a SECOND writer still gets SQLITE_BUSY,
   // and node:sqlite throws on it immediately instead of waiting. The desk API and the

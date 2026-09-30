@@ -10,6 +10,7 @@ import { bus } from "./lib/bus.js";
 import { spend } from "./lib/llm.js";
 import * as store from "./lib/store.js";
 import db from "./lib/store.js";
+import { startStorageCare } from "./lib/storage.js";
 import * as sol from "./data/solana.js";
 import { cfg, maskRpc } from "./config.js";
 
@@ -65,6 +66,9 @@ function startBooks() {
   setTimeout(rent, 30000);
   setInterval(() => chroniclePrune(), 3600000);
   setInterval(() => { import("./data/snapshots.js").then((sn) => sn.prune()).catch(() => {}); }, 3600000);
+  /* The disk filled on 2026-09-29 and the API crash-looped. Hourly: reset the write-ahead
+     log, measure what the database is made of, and warn well before the disk is full. */
+  startStorageCare(db);
 
   const sync = async () => {
     try { const r = await autoSyncAll();

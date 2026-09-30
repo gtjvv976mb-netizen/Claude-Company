@@ -17,7 +17,7 @@ services:
     disk:
       name: claude-company-data
       mountPath: /var/data
-      sizeGB: 1
+      sizeGB: 5                 # resized 2026-09-29 after the 1 GB disk filled; see GET /api/storage
     envVars:
       - key: CLAUDE_CO_DB
         value: /var/data/claude-co.db      # on the disk, not the ephemeral filesystem

@@ -21,6 +21,7 @@ import { cfg } from "./config.js";
 import { CYCLE, MAX_ESCALATION_LEVEL, escalationPlan } from "./config.js";
 import * as store from "./lib/store.js";
 import db from "./lib/store.js";
+import { latestStorageReport } from "./lib/storage.js";
 import { reconcileMissingEntryAlerts, reconcileMissingExitAlerts, heldEntriesFor } from "./alerts.js";
 import crypto from "node:crypto";
 function cryptoTimingEqual(a, b) {
@@ -651,6 +652,14 @@ export function sanitizeExecutorSnipe(value) {
         parents: count(v.parents), launches: count(v.launches), clones: count(v.clones),
         matched: count(v.matched), entered: count(v.entered), closed: count(v.closed),
         generic: count(v.generic), open: count(v.open),
+        /* The strategy (the kinds it would trade) against its comparison (the kinds it follows
+           only on paper). Kind names are matched against the fixed list, never passed through. */
+        kinds: (Array.isArray(v.kinds) ? v.kinds : []).filter((k) => ["variant", "subtopic"].includes(k)).slice(0, 2),
+        strategy: v.strategy && typeof v.strategy === "object" ? { n: count(obj(v.strategy).n), wins: count(obj(v.strategy).wins),
+          winRate: num(obj(v.strategy).winRate, 0, 100), pnlSol: num(obj(v.strategy).pnlSol, -1e6, 1e6) } : null,
+        comparison: v.comparison && typeof v.comparison === "object" ? { n: count(obj(v.comparison).n), wins: count(obj(v.comparison).wins),
+          winRate: num(obj(v.comparison).winRate, 0, 100), pnlSol: num(obj(v.comparison).pnlSol, -1e6, 1e6) } : null,
+        sinceMs: timestamp(v.sinceMs),
         wins: count(v.wins), losses: count(v.losses), winRate: num(v.winRate, 0, 100),
         pnlSol: num(v.pnlSol, -1e6, 1e6), bestPct: num(v.bestPct, -100, 1e6), worstPct: num(v.worstPct, -100, 1e6),
         byKind: Object.fromEntries(["variant", "subtopic"].map((k) => [k, {
@@ -2127,6 +2136,13 @@ export function startOffice(port = Number(process.env.PORT) || 4949) {
         /* ── the building's public books: proof the company works, for everyone ──
            Aggregates only — realised results, the house record, occupancy. The
            live edge stays subscription; the scoreboard is the shop window. */
+        /* WHAT THE DISK IS FULL OF (2026-09-30). Aggregates only: file sizes, the disk, and the
+           biggest tables by bytes and row count — never a row. Served from the hourly shift's
+           last report (src/lib/storage.js), so a request never walks the database itself. */
+        if (url.pathname === "/api/storage") {
+          return json(200, latestStorageReport(db));
+        }
+
         if (url.pathname === "/api/stats/overview") {
           const led = identity.ledger({ limit: 1 });
           const floors = identity.leaderboard(60);

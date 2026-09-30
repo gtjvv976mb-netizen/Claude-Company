@@ -154,6 +154,10 @@ Solana RPC.
 
 After deployment, verify `/api/lease/config`, `/api/stats/overview`, `/api/heartbeat`, and
 `/api/improvements/status`.
+`/api/storage` says what the database disk holds: the file, its write-ahead log, free space
+inside the file, the disk around it and the biggest tables by bytes and rows (aggregates only).
+The API resets the write-ahead log hourly and logs `[storage] WARNING` once the disk or the
+database passes 80% of the disk, naming the biggest tables.
 The tenant dashboard additionally reads `/api/candidates/board` for the immutable
 pre-decision top-five board, `/api/callouts` for exact author-wallet matches to confirmed
 pool-touching token inflows valued at the current market mark (not reconstructed purchase cost), and
