@@ -158,6 +158,10 @@ After deployment, verify `/api/lease/config`, `/api/stats/overview`, `/api/heart
 inside the file, the disk around it and the biggest tables by estimated rows (aggregates only).
 Bytes per table take a walk of every page, which froze the API for over a minute on the 1.4 GB
 file, so that runs only as its own process from the Render shell: `node src/index.js storage`.
+The same hourly job deletes `insufficient_coverage` decisions (fewer than three analyst seats
+returned; excluded from every measurement and never publishable) once they are a day old, with
+their forward marks and simulated outcomes, in small batches. With the Anthropic key disabled
+the research loop wrote ~19,000 of these a day; `PENTHOUSE_ENABLED=0` stops the loop itself.
 The API resets the write-ahead log hourly and logs `[storage] WARNING` once the disk or the
 database passes 80% of the disk, naming the biggest tables.
 The tenant dashboard additionally reads `/api/candidates/board` for the immutable
