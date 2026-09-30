@@ -20,7 +20,20 @@ db.prepare("INSERT INTO small DEFAULT VALUES").run();
 
 assert.equal(String(db.prepare("PRAGMA journal_size_limit").get().journal_size_limit), "67108864", "the WAL keeps at most 64 MB");
 
-const r = storageReport(db, { file });
+const est = storageReport(db, { file });
+assert.equal(est.tables[0].name, "big", "the hourly report ranks tables by estimated rows");
+assert.equal(est.tables[0].rows, 2_000, "the rowid range estimates the row count");
+assert.equal(est.tables[0].bytes, null, "and walks no pages, so it has no byte counts");
+assert.ok(est.tables.some((t) => t.name === "small" && t.rows === 1));
+assert.ok(!est.tables.some((t) => t.name.startsWith("sqlite_")), "system tables are left out");
+/* The hourly shift must stay cheap: no dbstat walk and no COUNT(*) in the "rows" path. */
+const src = fs.readFileSync(new URL("./src/lib/storage.js", import.meta.url), "utf8");
+const rowsPath = src.slice(src.indexOf('tables === "rows"'), src.indexOf('tables === "bytes"'));
+assert.ok(rowsPath.length > 0 && !/dbstat|COUNT\(\*\)/.test(rowsPath), "the hourly path neither walks pages nor counts rows");
+assert.ok(/storageReport\(db\)/.test(src) && !/tables: "bytes"/.test(src.slice(src.indexOf("export function startStorageCare"))),
+  "the shift uses the default (rows) report, never the byte walk");
+
+const r = storageReport(db, { file, tables: "bytes" });
 assert.equal(r.file, "s.db", "the report names the file, not the path");
 assert.ok(r.dbBytes > 0 && r.pageCount > 0 && r.pageSize > 0);
 assert.ok(r.walBytes > 0, "writes are in the log before a checkpoint");
@@ -46,6 +59,8 @@ assert.equal(storageWarning(disk(0.5)), null, "half full is quiet");
 assert.match(storageWarning(disk(STORAGE_WARN_FRAC)), /disk 80% used.*chronicle 0\.90 GB/, "80% full names the biggest table");
 assert.match(storageWarning(disk(0.3, 0.85)) ?? "", /database/, "a database near the disk size warns too");
 assert.equal(storageWarning({ disk: { totalBytes: null } }), null, "no disk figures, no warning");
+assert.match(storageWarning({ ...disk(0.9), tables: [{ name: "decision_runs", bytes: null, rows: 89_523 }] }),
+  /decision_runs ~89523 rows/, "an hourly (rows-only) report names the biggest table by rows");
 
 assert.equal(latestStorageReport(db).tables, null, "with no shift running the endpoint does no table walk");
 const logs = [];
