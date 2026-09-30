@@ -73,43 +73,54 @@ assert.equal(latestStorageReport(db).tables, null, "a stopped shift hands back t
 
 /* THE TRIM: only insufficient_coverage, only unpublished, only older than a day, with its
    forward marks and simulated outcome; everything else stays. */
-db.exec(`CREATE TABLE decision_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, outcome TEXT, decided_at INTEGER NOT NULL,
-           record_json TEXT NOT NULL, published_call_id INTEGER);
-         CREATE TABLE forward_marks (run_id INTEGER NOT NULL, horizon_min INTEGER NOT NULL, PRIMARY KEY (run_id, horizon_min));
-         CREATE TABLE simulated_outcomes (run_id INTEGER PRIMARY KEY, data_status TEXT NOT NULL)`);
+/* On the REAL schema, loaded by src/evaluation.js into a fresh file of its own: its tables
+   declare REFERENCES decision_runs(id) and node:sqlite enforces foreign keys. The first live
+   run failed on exactly that ("FOREIGN KEY constraint failed") against hand-made tables that
+   declared none, which is why this no longer builds its own. */
+process.env.CLAUDE_CO_DB = path.join(dir, "evaluation.db");
+const { default: edb } = await import("./src/lib/store.js");
+await import("./src/evaluation.js");
+assert.equal(Number(edb.prepare("PRAGMA foreign_keys").get().foreign_keys), 1, "the journal enforces foreign keys, as it does live");
+assert.ok(/REFERENCES decision_runs/.test(edb.prepare("SELECT sql FROM sqlite_schema WHERE name='forward_marks'").get().sql),
+  "forward marks point at their decision");
 const NOW = 1_790_000_000_000, DAY = 86_400_000;
+let seq = 0;
 const addRun = (outcome, age, published = null) => {
-  const id = Number(db.prepare("INSERT INTO decision_runs (outcome, decided_at, record_json, published_call_id) VALUES (?,?,?,?)")
-    .run(outcome, NOW - age, "y".repeat(3000), published).lastInsertRowid);
-  for (const h of [15, 60, 360]) db.prepare("INSERT INTO forward_marks VALUES (?,?)").run(id, h);
-  db.prepare("INSERT INTO simulated_outcomes VALUES (?, 'pending')").run(id);
+  const id = Number(edb.prepare(`INSERT INTO decision_runs (run_key, cycle, mint, decided_at, outcome, final_decision,
+      evaluation_version, policy_version, prompt_version, models_json, config_json, weights_json, record_json, published_call_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(`k${seq++}`, "c1", "M", NOW - age, outcome, outcome, "v", "p", "q", "{}", "{}", "{}", "y".repeat(3000), published).lastInsertRowid);
+  for (const h of [15, 60, 360]) edb.prepare("INSERT INTO forward_marks (run_id, horizon_min, due_at) VALUES (?,?,?)").run(id, h, NOW);
+  edb.prepare("INSERT INTO simulated_outcomes (run_id, policy_version, data_status) VALUES (?, 'p', 'pending')").run(id);
   return id;
 };
-const oldJunk = [];
-for (let i = 0; i < 1_200; i++) oldJunk.push(addRun(i % 4 === 0 ? "screened_out" : "insufficient_coverage", 3 * DAY - i * 1000));
+for (let i = 0; i < 1_200; i++) addRun(i % 4 === 0 ? "screened_out" : "insufficient_coverage", 3 * DAY - i * 1000);
 const keptDecided = addRun("decided", 2 * DAY);
 const publishedJunk = addRun("insufficient_coverage", 2 * DAY, 7);
 const freshJunk = addRun("insufficient_coverage", DAY / 2);
 let yields = 0;
-const p = await purgeCoverageJunk(db, { now: NOW, batch: 100, yieldFn: async () => { yields++; } });
-const count = (sql, ...a) => db.prepare(sql).get(...a).n;
-assert.equal(p.deleted, 900, "every old insufficient_coverage row is removed");
+const p = await purgeCoverageJunk(edb, { now: NOW, batch: 100, yieldFn: async () => { yields++; } });
+const count = (sql, ...a) => edb.prepare(sql).get(...a).n;
+assert.equal(p.deleted, 900, `every old insufficient_coverage row is removed (${JSON.stringify(p)})`);
 assert.ok(p.reachedCutoff, "the walk stops at the first row younger than a day");
 assert.ok(yields >= 10, "it yields between batches instead of holding the API");
 assert.equal(count("SELECT COUNT(*) n FROM decision_runs WHERE outcome='screened_out'"), 300, "other outcomes are untouched");
 assert.ok(count("SELECT COUNT(*) n FROM decision_runs WHERE id=?", keptDecided), "a decided run stays");
 assert.ok(count("SELECT COUNT(*) n FROM decision_runs WHERE id=?", publishedJunk), "a published row is never deleted");
+assert.equal(count("SELECT COUNT(*) n FROM forward_marks WHERE run_id=?", publishedJunk), 3, "...nor its forward marks");
 assert.ok(count("SELECT COUNT(*) n FROM decision_runs WHERE id=?", freshJunk), "a row under a day old stays");
 assert.equal(count("SELECT COUNT(*) n FROM forward_marks WHERE run_id NOT IN (SELECT id FROM decision_runs)"), 0,
   "no forward mark is left without its decision");
 assert.equal(count("SELECT COUNT(*) n FROM simulated_outcomes WHERE run_id NOT IN (SELECT id FROM decision_runs)"), 0,
   "no simulated outcome is left without its decision");
-assert.equal((await purgeCoverageJunk(db, { now: NOW })).deleted, 0, "a second pass finds nothing");
+assert.equal(count("SELECT COUNT(*) n FROM forward_marks"), (1_200 - 900 + 3) * 3, "the kept decisions keep every mark");
+assert.equal((await purgeCoverageJunk(edb, { now: NOW })).deleted, 0, "a second pass finds nothing");
 assert.deepEqual(await purgeCoverageJunk(new DatabaseSync(":memory:"), { now: NOW }),
   { scanned: 0, deleted: 0, batches: 0, reachedCutoff: false }, "a database with no decisions table is left alone");
 const src2 = fs.readFileSync(new URL("./src/lib/storage.js", import.meta.url), "utf8");
 assert.match(src2, /SELECT id, outcome, decided_at FROM decision_runs WHERE id > \?/, "the walk goes by primary key and never reads the evidence column");
 
 db.close();
+edb.close();
 fs.rmSync(dir, { recursive: true, force: true });
 console.log("PASS test-storage");

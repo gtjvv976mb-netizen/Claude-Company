@@ -147,9 +147,15 @@ export async function purgeCoverageJunk(db, { olderThanMs = 86_400_000, now = Da
   const have = (t) => !!db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(t);
   if (!have("decision_runs")) return { scanned: 0, deleted: 0, batches: 0, reachedCutoff: false };
   const scan = db.prepare("SELECT id, outcome, decided_at FROM decision_runs WHERE id > ? ORDER BY id LIMIT ?");
+  /* CHILDREN FIRST. forward_marks and simulated_outcomes declare REFERENCES decision_runs(id)
+     and node:sqlite enforces foreign keys, so deleting the decision first fails the whole
+     batch (2026-09-30, the first live run: "FOREIGN KEY constraint failed", nothing removed).
+     So the decision is checked (unpublished, still this outcome), then its marks and outcome
+     go, then it does. */
+  const deletable = db.prepare("SELECT 1 AS ok FROM decision_runs WHERE id = ? AND outcome = ? AND published_call_id IS NULL");
   const delMarks = db.prepare("DELETE FROM forward_marks WHERE run_id = ?");
   const delSim = db.prepare("DELETE FROM simulated_outcomes WHERE run_id = ?");
-  const delRun = db.prepare("DELETE FROM decision_runs WHERE id = ? AND outcome = ? AND published_call_id IS NULL");
+  const delRun = db.prepare("DELETE FROM decision_runs WHERE id = ?");
   let after = 0, scanned = 0, deleted = 0, batches = 0, reachedCutoff = false;
   while (batches < maxBatches) {
     const rows = scan.all(after, batch);
@@ -164,7 +170,9 @@ export async function purgeCoverageJunk(db, { olderThanMs = 86_400_000, now = Da
       db.exec("BEGIN");
       try {
         for (const r of due) {
-          if (delRun.run(r.id, COVERAGE_JUNK_OUTCOME).changes) { delMarks.run(r.id); delSim.run(r.id); deleted++; }
+          if (!deletable.get(r.id, COVERAGE_JUNK_OUTCOME)) continue;
+          delMarks.run(r.id); delSim.run(r.id);
+          if (delRun.run(r.id).changes) deleted++;
         }
         db.exec("COMMIT");
       } catch (error) { try { db.exec("ROLLBACK"); } catch { /* already rolled back */ } throw error; }
