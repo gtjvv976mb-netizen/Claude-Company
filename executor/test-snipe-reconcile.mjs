@@ -146,9 +146,10 @@ console.log("\nthe reader is a PORT, and this lane still reaches no network of i
      already_holding gate was defeated for weeks by an unpassed `state`. */
   const poller = fs.readFileSync(new URL("./poller.mjs", import.meta.url), "utf8");
   ok("the poller actually passes a holdingsReader to the lane",
-    /holdingsReader: \{/.test(poller) && /createSnipeLane\(\{/.test(poller));
+    /holdingsReader: snipeHoldingsReader/.test(poller) && /createSnipeLane\(\{/.test(poller));
   ok("...only on a live install, where a signing wallet exists",
-    /\.\.\.\(snipeExecutor \? \{ holdingsReader/.test(poller));
+    /const snipeHoldingsReader = snipeExecutor \? \{/.test(poller)
+    && /\.\.\.\(snipeHoldingsReader \? \{ holdingsReader: snipeHoldingsReader \} : \{\}\)/.test(poller));
   ok("...and it reads the SIGNING wallet's own accounts for that mint",
     /getParsedTokenAccountsByOwner\(kp\.publicKey, \{ mint:/.test(poller));
   ok("...treating an unparseable amount as unknown rather than as none",

@@ -677,6 +677,33 @@ export function sanitizeExecutorSnipe(value) {
           x: num(obj(r).x, 0, 1e6), heldMs: num(obj(r).heldMs, 0, 864e5) })),
         detector: det ? { parents: count(det.parents), refreshes: count(det.refreshes), failures: count(det.failures),
           lastRefreshAtMs: timestamp(det.lastRefreshAtMs), lastError: det.lastError == null ? null : label(det.lastError, 160) } : null,
+        /* THE REAL-MONEY HALF (snipe-trend-live.mjs, 2026-09-30), when SNIPE_TREND=live. Real
+           SOL moved on every row here, so it is typed as strictly as the paper block. */
+        live: (() => {
+          const l = v.live && typeof v.live === "object" && !Array.isArray(v.live) ? v.live : null;
+          if (!l || l.mode !== "live") return null;
+          const err = obj(l.lastError);
+          return {
+            mode: "live", ticketSol: num(l.ticketSol, 0, 10), maxOpen: count(l.maxOpen), maxDailyLossSol: num(l.maxDailyLossSol, 0, 100),
+            signals: count(l.signals), entered: count(l.entered), exited: count(l.exited), reconciled: count(l.reconciled),
+            entryFailures: count(l.entryFailures), exitFailures: count(l.exitFailures), pending: count(l.pending),
+            skippedFull: count(l.skippedFull), skippedLossStop: count(l.skippedLossStop), skippedLate: count(l.skippedLate),
+            closed: count(l.closed), wins: count(l.wins), losses: count(l.losses),
+            realized24hSol: num(l.realized24hSol, -1e6, 1e6), realizedSumSol: num(l.realizedSumSol, -1e6, 1e6),
+            lossStop: l.lossStop === true,
+            lastError: l.lastError ? { atMs: timestamp(err.atMs), where: label(err.where, 16), clause: label(err.clause, 32),
+              message: label(err.message, 200) } : null,
+            open: (Array.isArray(l.open) ? l.open : []).slice(0, 10).map((p) => ({
+              symbol: label(obj(p).symbol), parent: label(obj(p).parent),
+              kind: ["variant", "subtopic"].includes(obj(p).kind) ? obj(p).kind : null,
+              x: num(obj(p).x, 0, 1e6), heldMs: num(obj(p).heldMs, 0, 864e6), exiting: obj(p).exiting === true,
+              exitError: obj(p).exitError == null ? null : label(obj(p).exitError, 120) })),
+            recent: (Array.isArray(l.recent) ? l.recent : []).slice(0, 8).map((r) => ({
+              symbol: label(obj(r).symbol), parent: label(obj(r).parent),
+              kind: ["variant", "subtopic"].includes(obj(r).kind) ? obj(r).kind : null,
+              realizedSol: num(obj(r).realizedSol, -1e6, 1e6), reason: label(obj(r).reason, 60), exitAtMs: timestamp(obj(r).exitAtMs) })),
+          };
+        })(),
       };
     })(),
     /* THE LATENCY BUDGET (owner, 2026-09-18: "the fastest in the market"). Bounded and
