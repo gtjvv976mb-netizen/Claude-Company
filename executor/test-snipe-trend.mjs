@@ -139,6 +139,43 @@ section("5. THE SHADOW LANE: lottery exits, on paper");
   ok("a throwing sink does not throw out of the lane", bad.stats().closed === 1);
 }
 
+section("5b. THE STRATEGY against its comparison, and the scorecard across restarts");
+{
+  const parents = parentsFromListing([
+    row({ mint: "SW", symbol: "swordcat", name: "cat wif sword" }),
+    row({ mint: "CA", symbol: "CALI", name: "CALI", description: "The dog of Maye Musk." }),
+  ], { nowMs: NOW });
+  const closed = [];
+  let t = NOW;
+  const s = createTrendShadow({ parents: () => parents, clock: () => t, cfg: { kinds: ["variant"] }, onClose: (r) => closed.push(r) });
+  const trade = (mint, x) => ({ kind: "trade", mint, vQuoteRaw: BigInt(Math.round(30e9 * x)), vBaseRaw: 1_073_000_000_000_000n });
+  s.onCreate({ mint: "V1", name: "Baby Cali", symbol: "BABYCALI" }, t);
+  s.onCreate({ mint: "S1", name: "Kitten Wif Sword", symbol: "KWS" }, t);
+  t += 2_500; s.tick(t);
+  t += 1_000; s.onTrade(trade("V1", 0.5), t); s.onTrade(trade("S1", 0.5), t); s.tick(t);
+  ok("both kinds are still followed on paper", closed.length === 2);
+  ok("the variant row is the strategy, the subtopic row is not",
+    closed.find((r) => r.kind === "variant")?.strategy === true && closed.find((r) => r.kind === "subtopic")?.strategy === false);
+  const st = s.stats();
+  ok("stats split the strategy from its comparison", st.kinds.join() === "variant" && st.strategy.n === 1 && st.comparison.n === 1,
+    JSON.stringify({ s: st.strategy, c: st.comparison }));
+  ok("the default strategy is both kinds, with nothing left to compare", (() => {
+    const d = createTrendShadow({ parents: () => parents, clock: () => t }).stats();
+    return d.kinds.length === 2 && d.comparison.n === 0;
+  })());
+
+  /* A restart: the rows written to the JSONL file come back and are judged by the CURRENT kinds. */
+  const fresh = createTrendShadow({ parents: () => parents, clock: () => t, cfg: { kinds: ["subtopic"] } });
+  const back = fresh.seed([...closed, { junk: true }, null, { ...closed[0], kind: "clone" }]);
+  ok("seed restores the valid rows and drops the rest", back === 2 && fresh.history().length === 2);
+  ok("restored rows are re-judged against today's kinds",
+    fresh.history().find((r) => r.kind === "subtopic").strategy === true && fresh.history().find((r) => r.kind === "variant").strategy === false);
+  ok("the scorecard says since when", fresh.stats().sinceMs === Math.min(...closed.map((r) => r.exitAtMs)));
+  const capped = createTrendShadow({ parents: () => parents, clock: () => t, cfg: { historyCap: 3 } });
+  capped.seed(Array.from({ length: 5 }, (_, i) => ({ ...closed[0], exitAtMs: NOW + i })));
+  ok("seed keeps only the newest rows up to the cap", capped.history().length === 3 && capped.history()[0].exitAtMs === NOW + 2);
+}
+
 section("6. THE DETECTOR keeps the last good parents when a refresh fails");
 {
   let calls = 0, failNext = false;
@@ -165,10 +202,15 @@ section("7. WIRING: shadow only, one switch, registered everywhere a setting mus
   let e = null; try { snipeLaneConfig({ SNIPE_TREND: "live" }); } catch (x) { e = x; }
   ok("'live' is refused: this release has no real-money trend lane", e instanceof SnipeLaneError, e?.message);
   ok("it is not a filter the desk can flip", !LIVE_FILTER_ENV.includes("SNIPE_TREND"));
+  ok("SNIPE_TREND_KINDS picks the strategy's kinds, default all", SNIPE_ENV.SNIPE_TREND_KINDS?.key === "trendKinds" && snipeLaneConfig({}).trendKinds === "all");
+  ok("variant is accepted", snipeLaneConfig({ SNIPE_TREND_KINDS: "Variant" }).trendKinds === "variant");
+  let ek = null; try { snipeLaneConfig({ SNIPE_TREND_KINDS: "clone" }); } catch (x) { ek = x; }
+  ok("an unknown kind is refused", ek instanceof SnipeLaneError, ek?.message);
   const runner = fs.readFileSync(path.join(HERE, "launchd-runner.mjs"), "utf8");
   const install = fs.readFileSync(path.join(HERE, "install.sh"), "utf8");
   ok("the runner allows it and ships the module", /"SNIPE_TREND"/.test(runner) && /"snipe-trend\.mjs"/.test(runner));
   ok("the installer carries it and ships the module", /SNIPE_TREND/.test(install) && (install.match(/snipe-trend\.mjs/g) || []).length >= 2);
+  ok("the runner allows SNIPE_TREND_KINDS and the installer carries it", /"SNIPE_TREND_KINDS"/.test(runner) && /SNIPE_TREND_KINDS/.test(install));
   const poller = fs.readFileSync(path.join(HERE, "poller.mjs"), "utf8");
   ok("the poller builds it only in shadow mode", /laneCfg\.trendMode === "shadow"/.test(poller));
   ok("...and feeds it from the gRPC stream's create and trade events",

@@ -224,7 +224,13 @@ const trendBeat = sanitizeExecutorSnipe({ mode: "execute", state: "up", trend: {
   recent: [{ symbol: "KWS", parent: "swordcat", kind: "subtopic", netPct: -26.2, peakX: 1.1, reason: "stop", exitAtMs: 1_790_000_000_000 },
            { symbol: "X", parent: "Y", kind: "nonsense", netPct: "lots" }],
   detector: { parents: 3, refreshes: 10, failures: 1, lastRefreshAtMs: 1_790_000_000_000, lastError: "HTTP 429" },
+  kinds: ["variant", "<b>"], strategy: { n: 4, wins: 2, winRate: 50, pnlSol: 0.01 },
+  comparison: { n: 5, wins: 1, winRate: 20, pnlSol: -0.02 }, sinceMs: 1_789_000_000_000,
 } });
+assert.deepEqual(trendBeat.trend.kinds, ["variant"], "only known kind names pass as the strategy's kinds");
+assert.deepEqual(trendBeat.trend.strategy, { n: 4, wins: 2, winRate: 50, pnlSol: 0.01 }, "the strategy tally reaches the page");
+assert.equal(trendBeat.trend.comparison.pnlSol, -0.02, "the comparison's loss reaches the page as a signed number");
+assert.equal(trendBeat.trend.sinceMs, 1_789_000_000_000);
 assert.equal(trendBeat.trend.mode, "shadow");
 assert.equal(trendBeat.trend.matched, 12);
 assert.equal(trendBeat.trend.pnlSol, -0.0123, "a shadow loss reaches the page as a signed number");
