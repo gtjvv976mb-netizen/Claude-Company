@@ -446,6 +446,17 @@ async function main() {
       console.log(`  Journal      : ${JSON.stringify(store.stats())}`);
       break;
     }
+    case "storage": {
+      /* The full walk, bytes per table, in its OWN process (Render shell: node src/index.js
+         storage). Never inside the API: on the 1.4 GB file it takes over a minute. */
+      const { storageReport } = await import("./lib/storage.js");
+      const r = storageReport(db, { tables: "bytes", top: 30 });
+      const mb = (b) => `${(b / 1e6).toFixed(1)} MB`;
+      console.log(`database ${mb(r.dbBytes)}, log ${mb(r.walBytes)}, free inside the file ${mb(r.freeInFileBytes)}; `
+        + `disk ${Math.round((r.diskUsedFrac ?? 0) * 100)}% used`);
+      for (const t of r.tables || []) console.log(`  ${t.name.padEnd(34)} ${mb(t.bytes).padStart(10)}  ${t.rows ?? "?"} rows`);
+      process.exit(0);
+    }
     case "office": {
       const { url } = startOffice(Number(args[0]) || Number(process.env.PORT) || 4949);
       startScanner();          // watches the treasury for $CLAUDECO; no-ops until TREASURY_OWNER is set

@@ -155,7 +155,9 @@ Solana RPC.
 After deployment, verify `/api/lease/config`, `/api/stats/overview`, `/api/heartbeat`, and
 `/api/improvements/status`.
 `/api/storage` says what the database disk holds: the file, its write-ahead log, free space
-inside the file, the disk around it and the biggest tables by bytes and rows (aggregates only).
+inside the file, the disk around it and the biggest tables by estimated rows (aggregates only).
+Bytes per table take a walk of every page, which froze the API for over a minute on the 1.4 GB
+file, so that runs only as its own process from the Render shell: `node src/index.js storage`.
 The API resets the write-ahead log hourly and logs `[storage] WARNING` once the disk or the
 database passes 80% of the disk, naming the biggest tables.
 The tenant dashboard additionally reads `/api/candidates/board` for the immutable

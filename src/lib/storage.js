@@ -11,8 +11,10 @@ import { resolveDbFile } from "./db-file.js";
  * nothing about WHAT filled it. So three things live here:
  *
  *   1. A report: the database file, its write-ahead log, the free space inside the file,
- *      the disk around it, and the biggest tables by bytes. Aggregates only — table names
- *      and sizes, never a row.
+ *      the disk around it, and the biggest tables (hourly by estimated rows; by bytes only
+ *      from the `storage` command). Aggregates only — table names and sizes, never a row.
+ *      The first measurement by bytes (2026-09-30, 1.38 GB): decision_runs 882 MB (89,523
+ *      rows), snapshots 258 MB (1.1M), forward_marks 78 MB, chronicle 71 MB.
  *   2. A checkpoint that folds the write-ahead log back into the database and truncates it.
  *      SQLite checkpoints on its own, but a busy reader can starve that, and a WAL that is
  *      never reset only grows. Once an hour it is reset on purpose.
@@ -37,10 +39,15 @@ function diskOf(dir) {
 }
 
 /**
- * What the database is made of, right now. `tables: false` skips the per-table walk, which
- * reads every page of the file and is the only part that costs more than a stat.
+ * What the database is made of, right now. `tables`:
+ *   "rows"  (the hourly shift) — every table's row count ESTIMATED from its rowid range: two
+ *           index probes per table, instant at any size. `bytes` is null.
+ *   "bytes" — every page walked (dbstat) and every row counted. On the live 1.4 GB file this
+ *           froze the API process for over a minute on 2026-09-30, so it is NEVER run inside the
+ *           API: only by `node src/index.js storage`, its own process, from the Render shell.
+ *   false   — file and disk sizes only.
  */
-export function storageReport(db, { file = resolveDbFile(), tables = true, top = 15, clock = Date.now } = {}) {
+export function storageReport(db, { file = resolveDbFile(), tables = "rows", top = 15, clock = Date.now } = {}) {
   const pragma = (name) => { try { return Number(Object.values(db.prepare(`PRAGMA ${name}`).get() ?? {})[0]) || 0; } catch { return 0; } };
   const pageSize = pragma("page_size");
   const pageCount = pragma("page_count");
@@ -60,7 +67,19 @@ export function storageReport(db, { file = resolveDbFile(), tables = true, top =
     dbShareOfDisk: disk.totalBytes ? Math.round((usedBytes / disk.totalBytes) * 1000) / 1000 : null,
     tables: null,
   };
-  if (tables) {
+  if (tables === "rows") {
+    try {
+      const names = db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all();
+      out.tables = names.map(({ name }) => {
+        let n = null;
+        try {
+          const r = db.prepare(`SELECT MAX(rowid) - MIN(rowid) + 1 AS n FROM "${String(name).replace(/"/g, '""')}"`).get();
+          n = r?.n == null ? 0 : Number(r.n);
+        } catch { /* a WITHOUT ROWID table: no estimate */ }
+        return { name: String(name), bytes: null, rows: Number.isFinite(n) ? n : null, rowsEstimated: true };
+      }).sort((a, b) => (b.rows ?? -1) - (a.rows ?? -1)).slice(0, top);
+    } catch { out.tables = null; }
+  } else if (tables === "bytes") {
     try {
       /* dbstat is compiled into node:sqlite; aggregate=TRUE is one row per table or index.
          Indexes are folded into the table they belong to, because that is what a trim frees. */
@@ -91,7 +110,8 @@ export function storageWarning(report, frac = STORAGE_WARN_FRAC) {
   const { disk } = report;
   if (!disk.totalBytes) return null;
   if (report.diskUsedFrac >= frac || report.dbShareOfDisk >= frac) {
-    const big = (report.tables || []).slice(0, 3).map((t) => `${t.name} ${gb(t.bytes)}`).join(", ");
+    const big = (report.tables || []).slice(0, 3)
+      .map((t) => (t.bytes != null ? `${t.name} ${gb(t.bytes)}` : `${t.name} ~${t.rows ?? "?"} rows`)).join(", ");
     return `disk ${Math.round(report.diskUsedFrac * 100)}% used (${gb(disk.freeBytes)} free of ${gb(disk.totalBytes)}); `
       + `database ${gb(report.dbBytes)} + log ${gb(report.walBytes)}${big ? `; biggest: ${big}` : ""}. `
       + "Trim a table or grow the disk before it fills — a full disk stops every write.";
