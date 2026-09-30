@@ -21,8 +21,10 @@ import { resolveDbFile } from "./db-file.js";
  *   3. A warning in the log when the database nears the disk, so the next full disk is a
  *      log line hours ahead instead of a crash loop.
  *
- * Deleting rows is NOT here: which table to trim is a decision for after the report has
- * said which one is big, not a guess made before it.
+ * One trim IS here, chosen after the report named the table (purgeCoverageJunk, below):
+ * research attempts with no panel judgement in them, older than a day. Nothing else is
+ * deleted. Row estimates come from the rowid range, so after a trim they overstate a
+ * table's rows by the gaps it left; the byte walk (`node src/index.js storage`) is exact.
  */
 
 /** Warn when the database and its log take this share of the disk, or free space is below it. */
@@ -120,23 +122,84 @@ export function storageWarning(report, frac = STORAGE_WARN_FRAC) {
 }
 
 /**
- * The hourly shift: checkpoint, measure, warn. The last report is kept for the endpoint so a
- * public request never walks the file itself.
+ * THE ONE TRIM (owner, 2026-09-30: "DO IT").
+ *
+ * An `insufficient_coverage` decision is a workup where fewer than three analyst seats
+ * returned, so there is no panel judgement in it. Every measurement the desk makes already
+ * excludes it (seat-alpha.js, the tutor's scoring arms), and it can never be published — a
+ * call comes only from a decided run. Yet each one stores the whole evidence bundle, ~10 KB.
+ * With the Anthropic key disabled (a 401 is not an out-of-credit refusal, so the cycle does
+ * not halt), the research loop wrote ~19,000 of them a day, and they were most of the
+ * 882 MB decision_runs had grown to.
+ *
+ * So: rows of that outcome, never published, older than `olderThanMs` (a day — the tutor
+ * grades at six hours), are deleted with their forward marks and simulated outcome. Nothing
+ * else is touched. The walk goes by primary key and reads only the columns stored before
+ * the evidence (id, outcome, decided_at), in small batches with a yield between them, so
+ * the API never waits on it the way it waited on the page walk. Freed pages stay in the file
+ * and are reused by new rows; the file itself only shrinks with a VACUUM.
  */
-export function startStorageCare(db, { log = console.log, everyMs = 3_600_000, firstAfterMs = 120_000 } = {}) {
-  let last = null;
-  const tick = () => {
+export const COVERAGE_JUNK_OUTCOME = "insufficient_coverage";
+
+export async function purgeCoverageJunk(db, { olderThanMs = 86_400_000, now = Date.now(), batch = 500,
+  maxBatches = 400, yieldFn = () => new Promise((r) => setImmediate(r)) } = {}) {
+  const cutoff = now - olderThanMs;
+  const have = (t) => !!db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(t);
+  if (!have("decision_runs")) return { scanned: 0, deleted: 0, batches: 0, reachedCutoff: false };
+  const scan = db.prepare("SELECT id, outcome, decided_at FROM decision_runs WHERE id > ? ORDER BY id LIMIT ?");
+  const delMarks = db.prepare("DELETE FROM forward_marks WHERE run_id = ?");
+  const delSim = db.prepare("DELETE FROM simulated_outcomes WHERE run_id = ?");
+  const delRun = db.prepare("DELETE FROM decision_runs WHERE id = ? AND outcome = ? AND published_call_id IS NULL");
+  let after = 0, scanned = 0, deleted = 0, batches = 0, reachedCutoff = false;
+  while (batches < maxBatches) {
+    const rows = scan.all(after, batch);
+    if (!rows.length) break;
+    batches++;
+    scanned += rows.length;
+    after = rows[rows.length - 1].id;
+    /* Ids are handed out in time order, so the first row newer than the cutoff ends the walk. */
+    const stopAt = rows.findIndex((r) => Number(r.decided_at) >= cutoff);
+    const due = (stopAt === -1 ? rows : rows.slice(0, stopAt)).filter((r) => r.outcome === COVERAGE_JUNK_OUTCOME);
+    if (due.length) {
+      db.exec("BEGIN");
+      try {
+        for (const r of due) {
+          if (delRun.run(r.id, COVERAGE_JUNK_OUTCOME).changes) { delMarks.run(r.id); delSim.run(r.id); deleted++; }
+        }
+        db.exec("COMMIT");
+      } catch (error) { try { db.exec("ROLLBACK"); } catch { /* already rolled back */ } throw error; }
+    }
+    if (stopAt !== -1) { reachedCutoff = true; break; }
+    await yieldFn();
+  }
+  return { scanned, deleted, batches, reachedCutoff };
+}
+
+/**
+ * The hourly shift: trim, checkpoint, measure, warn. The last report is kept for the endpoint
+ * so a public request never walks the file itself.
+ */
+export function startStorageCare(db, { log = console.log, everyMs = 3_600_000, firstAfterMs = 120_000, purge = {} } = {}) {
+  let last = null, lastPurge = null, running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
     try {
+      try {
+        lastPurge = { atMs: Date.now(), ...(await purgeCoverageJunk(db, purge)) };
+        if (lastPurge.deleted) log(`[storage] removed ${lastPurge.deleted} insufficient_coverage decision(s) older than a day (${lastPurge.scanned} scanned)`);
+      } catch (error) { lastPurge = { atMs: Date.now(), error: String(error?.message ?? error) }; log(`[storage] trim failed: ${lastPurge.error}`); }
       const cp = checkpoint(db);
       if (cp.error) log(`[storage] checkpoint failed: ${cp.error}`);
       else if (cp.busy) log(`[storage] checkpoint was blocked by a reader (${cp.logPages} log pages); next hour tries again`);
-      last = storageReport(db);
+      last = { ...storageReport(db), purge: lastPurge };
       const warn = storageWarning(last);
       if (warn) log(`[storage] WARNING ${warn}`);
     } catch (error) { log(`[storage] ${error?.message ?? error}`); }
+    finally { running = false; }
   };
-  const first = setTimeout(tick, firstAfterMs);
-  const timer = setInterval(tick, everyMs);
+  const first = setTimeout(() => { tick(); }, firstAfterMs);
+  const timer = setInterval(() => { tick(); }, everyMs);
   first.unref?.(); timer.unref?.();
   current = {
     tick,

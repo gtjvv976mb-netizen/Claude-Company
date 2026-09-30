@@ -8,7 +8,8 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openJournal } from "./src/lib/db-file.js";
-import { storageReport, checkpoint, storageWarning, startStorageCare, latestStorageReport, STORAGE_WARN_FRAC } from "./src/lib/storage.js";
+import { storageReport, checkpoint, storageWarning, startStorageCare, latestStorageReport, purgeCoverageJunk,
+  STORAGE_WARN_FRAC } from "./src/lib/storage.js";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-co-storage-"));
 const file = path.join(dir, "s.db");
@@ -65,10 +66,49 @@ assert.match(storageWarning({ ...disk(0.9), tables: [{ name: "decision_runs", by
 assert.equal(latestStorageReport(db).tables, null, "with no shift running the endpoint does no table walk");
 const logs = [];
 const care = startStorageCare(db, { log: (m) => logs.push(m), firstAfterMs: 1e9, everyMs: 1e9 });
-care.tick();
+await care.tick();
 assert.ok(Array.isArray(latestStorageReport(db).tables), "after a shift the endpoint serves the full report");
 care.stop();
 assert.equal(latestStorageReport(db).tables, null, "a stopped shift hands back to the cheap report");
+
+/* THE TRIM: only insufficient_coverage, only unpublished, only older than a day, with its
+   forward marks and simulated outcome; everything else stays. */
+db.exec(`CREATE TABLE decision_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, outcome TEXT, decided_at INTEGER NOT NULL,
+           record_json TEXT NOT NULL, published_call_id INTEGER);
+         CREATE TABLE forward_marks (run_id INTEGER NOT NULL, horizon_min INTEGER NOT NULL, PRIMARY KEY (run_id, horizon_min));
+         CREATE TABLE simulated_outcomes (run_id INTEGER PRIMARY KEY, data_status TEXT NOT NULL)`);
+const NOW = 1_790_000_000_000, DAY = 86_400_000;
+const addRun = (outcome, age, published = null) => {
+  const id = Number(db.prepare("INSERT INTO decision_runs (outcome, decided_at, record_json, published_call_id) VALUES (?,?,?,?)")
+    .run(outcome, NOW - age, "y".repeat(3000), published).lastInsertRowid);
+  for (const h of [15, 60, 360]) db.prepare("INSERT INTO forward_marks VALUES (?,?)").run(id, h);
+  db.prepare("INSERT INTO simulated_outcomes VALUES (?, 'pending')").run(id);
+  return id;
+};
+const oldJunk = [];
+for (let i = 0; i < 1_200; i++) oldJunk.push(addRun(i % 4 === 0 ? "screened_out" : "insufficient_coverage", 3 * DAY - i * 1000));
+const keptDecided = addRun("decided", 2 * DAY);
+const publishedJunk = addRun("insufficient_coverage", 2 * DAY, 7);
+const freshJunk = addRun("insufficient_coverage", DAY / 2);
+let yields = 0;
+const p = await purgeCoverageJunk(db, { now: NOW, batch: 100, yieldFn: async () => { yields++; } });
+const count = (sql, ...a) => db.prepare(sql).get(...a).n;
+assert.equal(p.deleted, 900, "every old insufficient_coverage row is removed");
+assert.ok(p.reachedCutoff, "the walk stops at the first row younger than a day");
+assert.ok(yields >= 10, "it yields between batches instead of holding the API");
+assert.equal(count("SELECT COUNT(*) n FROM decision_runs WHERE outcome='screened_out'"), 300, "other outcomes are untouched");
+assert.ok(count("SELECT COUNT(*) n FROM decision_runs WHERE id=?", keptDecided), "a decided run stays");
+assert.ok(count("SELECT COUNT(*) n FROM decision_runs WHERE id=?", publishedJunk), "a published row is never deleted");
+assert.ok(count("SELECT COUNT(*) n FROM decision_runs WHERE id=?", freshJunk), "a row under a day old stays");
+assert.equal(count("SELECT COUNT(*) n FROM forward_marks WHERE run_id NOT IN (SELECT id FROM decision_runs)"), 0,
+  "no forward mark is left without its decision");
+assert.equal(count("SELECT COUNT(*) n FROM simulated_outcomes WHERE run_id NOT IN (SELECT id FROM decision_runs)"), 0,
+  "no simulated outcome is left without its decision");
+assert.equal((await purgeCoverageJunk(db, { now: NOW })).deleted, 0, "a second pass finds nothing");
+assert.deepEqual(await purgeCoverageJunk(new DatabaseSync(":memory:"), { now: NOW }),
+  { scanned: 0, deleted: 0, batches: 0, reachedCutoff: false }, "a database with no decisions table is left alone");
+const src2 = fs.readFileSync(new URL("./src/lib/storage.js", import.meta.url), "utf8");
+assert.match(src2, /SELECT id, outcome, decided_at FROM decision_runs WHERE id > \?/, "the walk goes by primary key and never reads the evidence column");
 
 db.close();
 fs.rmSync(dir, { recursive: true, force: true });
