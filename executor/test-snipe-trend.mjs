@@ -199,8 +199,10 @@ section("7. WIRING: shadow only, one switch, registered everywhere a setting mus
   ok("SNIPE_TREND is a lane setting", SNIPE_ENV.SNIPE_TREND?.key === "trendMode");
   ok("it defaults to off", snipeLaneConfig({}).trendMode === "off");
   ok("shadow is accepted", snipeLaneConfig({ SNIPE_TREND: "shadow" }).trendMode === "shadow");
-  let e = null; try { snipeLaneConfig({ SNIPE_TREND: "live" }); } catch (x) { e = x; }
-  ok("'live' is refused: this release has no real-money trend lane", e instanceof SnipeLaneError, e?.message);
+  ok("'live' is accepted: the real-money lane is snipe-trend-live.mjs (test-snipe-trend-live.mjs)",
+    snipeLaneConfig({ SNIPE_TREND: "live" }).trendMode === "live");
+  let e = null; try { snipeLaneConfig({ SNIPE_TREND: "yolo" }); } catch (x) { e = x; }
+  ok("an unknown trend mode is refused", e instanceof SnipeLaneError, e?.message);
   ok("it is not a filter the desk can flip", !LIVE_FILTER_ENV.includes("SNIPE_TREND"));
   ok("SNIPE_TREND_KINDS picks the strategy's kinds, default all", SNIPE_ENV.SNIPE_TREND_KINDS?.key === "trendKinds" && snipeLaneConfig({}).trendKinds === "all");
   ok("variant is accepted", snipeLaneConfig({ SNIPE_TREND_KINDS: "Variant" }).trendKinds === "variant");
@@ -212,7 +214,7 @@ section("7. WIRING: shadow only, one switch, registered everywhere a setting mus
   ok("the installer carries it and ships the module", /SNIPE_TREND/.test(install) && (install.match(/snipe-trend\.mjs/g) || []).length >= 2);
   ok("the runner allows SNIPE_TREND_KINDS and the installer carries it", /"SNIPE_TREND_KINDS"/.test(runner) && /SNIPE_TREND_KINDS/.test(install));
   const poller = fs.readFileSync(path.join(HERE, "poller.mjs"), "utf8");
-  ok("the poller builds it only in shadow mode", /laneCfg\.trendMode === "shadow"/.test(poller));
+  ok("the poller builds it in shadow or live mode", /laneCfg\.trendMode === "shadow" \|\| laneCfg\.trendMode === "live"/.test(poller));
   ok("...and feeds it from the gRPC stream's create and trade events",
     /trendShadow\.onTrade\(ev, atMs\)/.test(poller) && /trendShadow\.onCreate\(ev, atMs\)/.test(poller));
   const trend = fs.readFileSync(path.join(HERE, "snipe-trend.mjs"), "utf8");

@@ -231,6 +231,22 @@ assert.deepEqual(trendBeat.trend.kinds, ["variant"], "only known kind names pass
 assert.deepEqual(trendBeat.trend.strategy, { n: 4, wins: 2, winRate: 50, pnlSol: 0.01 }, "the strategy tally reaches the page");
 assert.equal(trendBeat.trend.comparison.pnlSol, -0.02, "the comparison's loss reaches the page as a signed number");
 assert.equal(trendBeat.trend.sinceMs, 1_789_000_000_000);
+assert.equal(trendBeat.trend.live, null, "no live block means null, not zeros");
+const liveBeat = sanitizeExecutorSnipe({ mode: "execute", state: "up", trend: { mode: "shadow", live: {
+  mode: "live", ticketSol: 0.05, maxOpen: 2, maxDailyLossSol: 0.15, entered: 3, exited: 2, wins: 1, losses: 1,
+  realized24hSol: -0.0123, realizedSumSol: -0.0123, lossStop: false,
+  lastError: { atMs: 1_790_000_000_000, where: "exit", clause: "simulation_failed", message: "6001<b>" },
+  open: [{ symbol: "BABY<script>", parent: "CALI", kind: "variant", x: 1.42, heldMs: 30_000, exiting: false }],
+  recent: [{ symbol: "B2", parent: "CALI", kind: "evil", realizedSol: "lots", reason: "stop", exitAtMs: 1_790_000_000_000 }],
+} } });
+assert.equal(liveBeat.trend.live.mode, "live");
+assert.equal(liveBeat.trend.live.realized24hSol, -0.0123, "a real loss reaches the page as a signed number");
+assert.equal(liveBeat.trend.live.open[0].symbol, "BABYscript", "a held coin's ticker is a capped plain label");
+assert.equal(liveBeat.trend.live.recent[0].kind, null, "an unknown kind is dropped");
+assert.equal(liveBeat.trend.live.recent[0].realizedSol, null, "a non-number is null, not NaN");
+assert.equal(liveBeat.trend.live.lastError.message, "6001b", "the error text is stripped of markup");
+assert.equal(sanitizeExecutorSnipe({ mode: "execute", state: "up", trend: { mode: "shadow", live: { mode: "yolo" } } }).trend.live, null,
+  "a live block that does not say live is dropped");
 assert.equal(trendBeat.trend.mode, "shadow");
 assert.equal(trendBeat.trend.matched, 12);
 assert.equal(trendBeat.trend.pnlSol, -0.0123, "a shadow loss reaches the page as a signed number");
