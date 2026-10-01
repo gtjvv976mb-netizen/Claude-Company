@@ -179,7 +179,23 @@ assert.equal(snipe.state, "failed-to-start", "the silent startup failure arrives
 assert.equal(snipe.lastError.length, 200, "the bot's error text is capped");
 assert.equal(snipe.faults, 3);
 assert.equal(snipe.open.length, 2, "a row without a base58 mint is dropped");
-assert.deepEqual(snipe.open[0], { mint: MINT, sizeSol: 0.05, entry: 1.25e-7, openedAt: 1_700_000_000_000, high: 2.5e-7 });
+assert.deepEqual(snipe.open[0], { mint: MINT, sizeSol: 0.05, entry: 1.25e-7, openedAt: 1_700_000_000_000, high: 2.5e-7,
+  exitAttempts: 0, exitError: null, exitBlocked: null, exitLatchedAt: null });
+/* THE EXIT'S OWN STATE RIDES THE ROW (2026-09-30: a graduated coin, 6,196 refused sells, and a
+   page that could only show a climbing count). Bounded, capped, and the block reason is a word. */
+const stuck = sanitizeExecutorSnipe({ mode: "execute", state: "up", open: [
+  { mint: MINT, sizeSol: 0.05, entry: 1, openedAt: 1_700_000_000_000, high: 1, exitAttempts: "6196",
+    exitError: "refused: the curve has graduated — " + "x".repeat(300), exitBlocked: "graduated", exitLatchedAt: 1_700_000_100_000 },
+  { mint: MINT, sizeSol: 0.05, exitBlocked: "<script>alert(1)</script>", exitAttempts: -3, exitError: 42 },
+], counts: { exitBlocked: 1, exitFailures: 6196 } });
+assert.equal(stuck.open[0].exitAttempts, 6196);
+assert.equal(stuck.open[0].exitError.length, 240, "the bot's exit error is capped");
+assert.equal(stuck.open[0].exitBlocked, "graduated");
+assert.equal(stuck.open[0].exitLatchedAt, 1_700_000_100_000);
+assert.equal(stuck.open[1].exitBlocked, null, "a block reason that is not a plain word is dropped, never rendered");
+assert.equal(stuck.open[1].exitAttempts, 0, "a negative attempt count reads as none");
+assert.equal(stuck.open[1].exitError, "42", "a non-string error is stringified, not thrown on");
+assert.equal(stuck.counts.exitBlocked, 1, "blocked positions are counted apart from failed sells");
 assert.equal(snipe.open[1].sizeSol, 1_000, "an absurd size is clamped, not displayed");
 assert.equal(snipe.open[1].entry, null, "a non-positive level is null");
 assert.equal(snipe.open[1].openedAt, null, "a non-numeric time is null");

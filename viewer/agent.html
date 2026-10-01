@@ -104,6 +104,7 @@ footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);color:v
   </header>
   <div class="who" id="who"></div>
   <div class="sstat err" id="buyfail"></div>
+  <div class="sstat err" id="sellfail"></div>
   <div class="sstat wait" id="feeddown"></div>
   <section id="trendbox" hidden>
     <h2 id="trendtitle">Trend lane — shadow</h2>
@@ -226,6 +227,15 @@ async function load() {
   $("buyfail").textContent = lf
     ? `${a.entryFailures ?? "?"} buy attempt(s) failed — last ${lf.at ? ago(Date.now() - lf.at) + " ago" : ""}: ${lf.clause}: ${lf.message}`
     : "";
+  /* A SELL THAT CANNOT HAPPEN IS SAID ON THE PAGE. 2026-09-30: a coin graduated under an open
+     position and the bot refused its own sell 6,196 times, once a tick, with nothing anywhere
+     but the Mac's log to say so. The owner's floor sees the raw snipe block, so the row's own
+     exit state is read straight off it. */
+  const stuck = (a.snipe && Array.isArray(a.snipe.open) ? a.snipe.open : [])
+    .filter((p) => p && typeof p.mint === "string" && (p.exitBlocked || p.exitAttempts > 0));
+  $("sellfail").textContent = stuck.map((p) => `${p.mint.slice(0, 4)}…${p.mint.slice(-4)}: ${p.exitBlocked
+    ? `SELL BY HAND — ${p.exitBlocked}${p.exitError ? ": " + p.exitError : ""}`
+    : `sell failing (${p.exitAttempts} attempt${p.exitAttempts === 1 ? "" : "s"})${p.exitError ? ": " + p.exitError : ""}`}`).join(" · ");
   /* A DEAD TRADE FEED IS SAID ON THE PAGE, as the bot's fault and not the market's. On
      2026-09-27 the gRPC stream died and every candidate was refused as "a coin nobody is
      trading" for nine hours while the page showed nothing. Only a strict false says down —

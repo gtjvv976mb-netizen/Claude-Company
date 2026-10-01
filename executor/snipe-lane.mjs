@@ -97,6 +97,25 @@ import {
 
 export const SNIPE_LANE_VERSION = "snipe-lane-v1";
 
+/**
+ * SELL BEFORE THE CURVE COMPLETES. A pump.fun curve graduates at about 85 SOL of real
+ * reserve, and a completed curve cannot be sold by this executor at all: snipe-execute.mjs
+ * refuses it by name and builds no pool route. On 2026-09-30 a launch-lane position sat
+ * through its coin's graduation and the lane then failed the same sell 6,196 times, once a
+ * tick, with nothing on the heartbeat to say why. The trend lane already sold at this
+ * reserve for exactly that reason (snipe-trend-live.mjs); the launch lane now does too.
+ */
+export const GRADUATION_GUARD_SOL = 75;
+/** A sell the port refuses is retried on a backoff — 2s, 4s, 8s, 16s, 30s — not every tick:
+ *  two simulations a second against the same refusal only spend the providers' patience. */
+export const EXIT_RETRY_BACKOFF = Object.freeze({ baseMs: 1_000, maxMs: 30_000, maxExponent: 5 });
+export function exitRetryDelayMs(attempts) {
+  const n = Math.max(0, Math.min(EXIT_RETRY_BACKOFF.maxExponent, Math.floor(Number(attempts) || 0)));
+  return Math.min(EXIT_RETRY_BACKOFF.maxMs, EXIT_RETRY_BACKOFF.baseMs * 2 ** n);
+}
+/** How often a position the lane can never sell asks the wallet whether the owner sold it. */
+export const BLOCKED_RECONCILE_MS = 60_000;
+
 /** The market-floor presets SNIPE_MARKET_FLOOR admits. "bagwork" is the four thresholds
  *  bagworkagent.fun's own agents run, copied literally; "curve" is the two of those four a
  *  bonding curve can physically meet, and the one to run on this desk — bagwork's liquidity
@@ -1314,6 +1333,10 @@ export function createSnipeLane({
        counters count buys and sells the port refused or could not land, which in observe
        mode stay at zero for the life of the process. */
     entered: 0, exited: 0, entryFailures: 0, exitFailures: 0,
+    /* Positions the port can never sell (the curve graduated under them), marked and left
+       for the owner's hand. Counted apart from exitFailures: a sell that failed and a sell
+       that cannot exist are different facts, and the second one is not retried. */
+    exitBlocked: 0,
     /* Rows closed because the wallet no longer held them. Counted apart from exitFailures
        on purpose: an exit that failed and an exit that had already happened are different
        facts, and folding them together is what let one of them hide for eight hours. */
@@ -1762,6 +1785,10 @@ export function createSnipeLane({
   async function stepOne(pos) {
     const mint = pos.mint;
     const now = clock();
+    /* A POSITION THE PORT CAN NEVER SELL is kept and left alone: no curve read, no sell, no
+       retry. The one thing still asked, once a minute, is whether the wallet still holds it —
+       the owner selling it by hand is the only way this row closes. */
+    if (executing && pos.exitBlocked) return stepBlocked(pos, now);
     /* The management read carries the deployer's two candidate token accounts when the
        adapter offers them and the fill recorded a creator. Falls back to the entry list,
        so an adapter without accountsForHeld simply has no creator signal rather than
@@ -1787,6 +1814,13 @@ export function createSnipeLane({
         });
       } catch { markX = null; }
     }
+
+    /* THE CURVE HAS COMPLETED UNDER THE POSITION. No sell this executor can build will land —
+       snipe-execute.mjs refuses a graduated curve by name — so the lane does not try, once or
+       for ever. It marks the row, says SELL BY HAND once, and stops reading the curve. */
+    if (executing && curve && (curve.complete === true || adapter.isComplete?.(curve) === true))
+      return blockExit({ pos, mint, now, samples: Number(pos.samples ?? 0), creatorBaselineRaw: pos.creatorBaselineRaw ?? null,
+        detail: "refused: the curve has graduated — no pool route exists in this executor; sell by hand" });
 
     /* THE SENTINELS, READ FRESH ON THE MANAGEMENT PATH AND NOT ONLY ON THE ENTRY PATH.
        handleNotice has always consulted control(); stepOne never did, which made the hard
@@ -1922,7 +1956,13 @@ export function createSnipeLane({
        window is a property of the shadow book (a would-have-position needs no exit, so the
        row is closed once its evidence is complete); a real position that has been sampled
        forwardSamples times has simply been held that long, and is sold when a rule fires. */
-    const wantsSell = step?.action === "sell" || aged;
+    /* SELL BEFORE THE CURVE COMPLETES (GRADUATION_GUARD_SOL). Read off the same curve the
+       mark came from, so it costs nothing; armed lanes only, because the shadow book measures
+       what the market did and not what this guard would have done about it. */
+    const reserveSol = curve?.realQuoteRaw === undefined || curve?.realQuoteRaw === null
+      ? null : Number(curve.realQuoteRaw) / LAMPORTS;
+    const guardHit = executing && reserveSol !== null && Number.isFinite(reserveSol) && reserveSol >= GRADUATION_GUARD_SOL;
+    const wantsSell = step?.action === "sell" || aged || guardHit;
     const done = executing ? wantsSell : (wantsSell || samples >= Number(conf.forwardSamples));
 
     if (!done) {
@@ -1935,12 +1975,22 @@ export function createSnipeLane({
     }
 
     const reason = step?.action === "sell" ? step.reason
+      : guardHit ? `graduation guard: ${reserveSol.toFixed(1)} SOL on the curve — selling before it completes, `
+        + "because a completed curve cannot be sold by this executor"
       : aged ? (executing
         ? `clock: the position reached its ${conf.holdMaxMs}ms hold — leaving on the clock`
         : `clock: the forward window closed at ${conf.holdMaxMs}ms`)
         : `the forward path is complete at ${samples} samples`;
-    if (executing)
+    if (executing) {
+      /* A SELL THAT FAILED IS RETRIED ON ITS BACKOFF, not on the next tick. The position is
+         still priced and recorded every tick; only the port is left alone until the time
+         exitForReal set. */
+      if (Number(pos.nextExitAtMs) > now) {
+        updateSnipe(S, { ...pos, ...(isPlainObject(step?.position) ? step.position : {}), mint, samples, creatorBaselineRaw });
+        return Object.freeze({ mint, action: "sell_wait", markX, closed: false, latched: true, retryAtMs: Number(pos.nextExitAtMs) });
+      }
       return exitForReal({ pos, mint, curve, read, reason, now, markX, samples, creatorBaselineRaw, step });
+    }
     closeSnipe(S, mint, { reason, closedAt: now });
     recorder.close(mint, { action: step?.action === "sell" ? "would_have_exited" : "window_closed", reason, atMs: now, slot: read.slot });
     if (step?.action === "sell") counters.wouldHaveExited++;
@@ -1951,9 +2001,11 @@ export function createSnipeLane({
   /**
    * THE REAL EXIT, through the port, always the WHOLE position. A sell the port cannot
    * land keeps the book entry exactly as it was, latched with the reason and the error, and
-   * is retried on the next tick: a position the lane could not sell is not a position the
-   * lane may forget. The book closes only on a fill, and the realized figure is what the
-   * chain paid back less the fee and the basis the entry recorded — never a mark.
+   * is retried on a backoff (exitRetryDelayMs): a position the lane could not sell is not a
+   * position the lane may forget. The one refusal that is NOT retried is a graduated curve,
+   * because no retry can ever land it — that row is blocked (blockExit) and waits for the
+   * owner's hand. The book closes only on a fill, and the realized figure is what the chain
+   * paid back less the fee and the basis the entry recorded — never a mark.
    */
   /**
    * Does the signing wallet hold nothing of this mint?
@@ -2011,15 +2063,22 @@ export function createSnipeLane({
           log(`snipe live ${mint}: could not close the reconciled row (${closeError?.message ?? closeError})`);
         }
       }
-      log(`snipe live ${mint}: EXIT FAILED — ${detail}; the position is kept and the sell is retried next tick`);
+      /* A GRADUATED CURVE IS NOT A FAILURE TO RETRY. The port's refusal names it, and no
+         later attempt can land what no route exists for. */
+      if (/graduated/i.test(detail))
+        return blockExit({ pos, mint, now, detail, step, samples, creatorBaselineRaw, reason });
+      const exitAttempts = Number(pos.exitAttempts || 0) + 1;
+      const nextExitAtMs = now + exitRetryDelayMs(exitAttempts);
+      log(`snipe live ${mint}: EXIT FAILED — ${detail}; the position is kept and the sell is retried in `
+        + `${Math.round((nextExitAtMs - now) / 1000)}s (attempt ${exitAttempts})`);
       try {
         updateSnipe(S, { ...pos, ...(isPlainObject(step?.position) ? step.position : {}), mint, samples,
-          creatorBaselineRaw, exitLatched: true, exitLatchedAt: now, exitLatchReason: reason,
-          exitError: detail.slice(0, 240) });
+          creatorBaselineRaw, exitLatched: true, exitLatchedAt: Number(pos.exitLatchedAt) > 0 ? pos.exitLatchedAt : now,
+          exitLatchReason: reason, exitError: detail.slice(0, 240), exitAttempts, nextExitAtMs });
       } catch (bookError) {
         log(`snipe live ${mint}: could not record the exit latch (${bookError?.message ?? bookError})`);
       }
-      return Object.freeze({ mint, action: "sell", markX, closed: false, latched: true });
+      return Object.freeze({ mint, action: "sell", markX, closed: false, latched: true, retryAtMs: nextExitAtMs });
     }
     const raw = (v) => (/^\d+$/.test(String(v ?? "")) ? BigInt(String(v)) : null);
     const quoteOut = raw(fill?.quoteOutRaw);
@@ -2038,6 +2097,55 @@ export function createSnipeLane({
     log(`snipe live ${mint}: EXITED — ${reason}; ${quoteOut ?? "?"} lamports back for ${pos.qtyRaw} base, `
       + `fee ${fee}, realized ${realized === null ? "?" : realized} lamports, sig ${fill?.signature ?? "?"}`);
     return Object.freeze({ mint, action: "sell", markX, closed: true });
+  }
+
+  /**
+   * MARK A POSITION THE PORT CAN NEVER SELL. The curve completed under it — read off the
+   * curve itself, or named by the port's refusal — so the row is kept with the reason,
+   * every retry stops, and the log and the heartbeat both say SELL BY HAND. Counted once.
+   */
+  function blockExit({ pos, mint, now, detail, step = null, samples = Number(pos.samples ?? 0),
+    creatorBaselineRaw = pos.creatorBaselineRaw ?? null, reason = pos.exitLatchReason ?? "graduated" }) {
+    const error = String(detail).slice(0, 240);
+    const first = !pos.exitBlocked;
+    if (first) counters.exitBlocked++;
+    const { nextExitAtMs: _retry, ...kept } = pos;
+    try {
+      updateSnipe(S, { ...kept, ...(isPlainObject(step?.position) ? step.position : {}), mint, samples, creatorBaselineRaw,
+        exitLatched: true, exitLatchedAt: Number(pos.exitLatchedAt) > 0 ? pos.exitLatchedAt : now, exitLatchReason: reason,
+        exitError: error, exitAttempts: Number(pos.exitAttempts || 0),
+        exitBlocked: "graduated", exitBlockedAt: Number(pos.exitBlockedAt) > 0 ? pos.exitBlockedAt : now,
+        nextReconcileAtMs: now + BLOCKED_RECONCILE_MS });
+    } catch (bookError) {
+      log(`snipe live ${mint}: could not record the blocked exit (${bookError?.message ?? bookError})`);
+    }
+    if (first)
+      log(`snipe live ${mint}: SELL BY HAND — ${error}. The lane keeps the row, stops retrying, and closes it `
+        + "only when the wallet no longer holds the coin.");
+    return Object.freeze({ mint, action: "blocked", blocked: "graduated", markX: null, closed: false });
+  }
+
+  /** One tick over a blocked row: no read, no sell — only, once a minute, "is it still here?" */
+  async function stepBlocked(pos, now) {
+    const mint = pos.mint;
+    if (Number(pos.nextReconcileAtMs) > now)
+      return Object.freeze({ mint, action: "blocked", blocked: pos.exitBlocked, markX: null, closed: false });
+    if (await walletHoldsNothing(mint)) {
+      counters.reconciled++;
+      const why = `reconciled: the wallet holds no ${mint} — sold by hand after the lane could not `
+        + `(${pos.exitBlocked}: ${pos.exitError ?? "no detail"})`;
+      try {
+        closeSnipe(S, mint, { reason: why, closedAt: now, exitSignature: null, quoteOutRaw: null, realizedLamports: null });
+        recorder.close(mint, { action: "reconciled", reason: why, atMs: now, slot: null });
+      } catch (closeError) {
+        log(`snipe live ${mint}: could not close the reconciled row (${closeError?.message ?? closeError})`);
+      }
+      log(`snipe live ${mint}: RECONCILED — the wallet holds none of it; the by-hand sale closed what the lane `
+        + "could not. Its realised result is not read here.");
+      return Object.freeze({ mint, action: "reconciled", markX: null, closed: true, reconciled: true });
+    }
+    try { updateSnipe(S, { ...pos, nextReconcileAtMs: now + BLOCKED_RECONCILE_MS }); } catch { /* the next tick asks again */ }
+    return Object.freeze({ mint, action: "blocked", blocked: pos.exitBlocked, markX: null, closed: false });
   }
 
   /** Consume the feed until it closes. One notice at a time, deliberately: the gate stack

@@ -136,8 +136,10 @@ The bot posts a heartbeat to the desk once a minute. `GET /api/agent/50` returns
 - `snipe.state` — `up`, `faulted` (retrying with a position open), `disabled`,
   `failed-to-start` (a bad `SNIPE_*` value; `lastError` has the bot's reason).
 - `snipe.open[]` — every open launch-lane position: `mint`, `sizeSol`, `entry`, `openedAt`,
-  `high`. **It does not carry the exit error**; a stuck sell shows up as `counts.exitFailures`
-  climbing by one per tick, and the clause is only in the Mac log.
+  `high`, and — from the release built on this branch on — `exitAttempts`, `exitError`,
+  `exitBlocked` (`"graduated"` = sell by hand) and `exitLatchedAt`. **On the release the Mac
+  ran at this writing (PR #55) none of the exit fields exist**: a stuck sell shows up only as
+  `counts.exitFailures` climbing by one per tick, and the clause is only in the Mac log.
 - `snipe.counts` — `entered`, `exited`, `entryFailures`, `exitFailures`, `reconciled`,
   `refused`, `marketReadsSkipped`.
 - `snipe.flow` — `tradeFeedLive` (false = the gRPC tape is down and every trade floor refuses
@@ -240,14 +242,14 @@ since 00:45 UTC.
 ## 7. What to do next
 
 **Engineering (needs no owner decision; propose, build, PR):**
-1. **Give the launch lane what the trend lane has**: a graduation guard that sells before the
-   curve completes (the trend lane's 75 SOL rule, `snipe-trend-live.mjs` line ~234, is the
-   model — the launch lane reads `curve.realQuoteRaw` on every tick already, line ~1899), and a
-   backoff on a failing sell (`exitForReal`, `snipe-lane.mjs` line ~1983, retries every tick).
-   Add a terminal state for a sell the port refuses as *graduated*: keep the row, stop retrying,
-   say "sell by hand" on the heartbeat (today `snipe.open[]` carries no error at all — add
-   `exitError`/`exitAttempts` to the sanitizer in `src/office.js` and to the agent page). Tests:
-   the lane suite and `test-snipe-execute.mjs` already script a graduated curve.
+1. **Give the launch lane what the trend lane has** — **built on this branch, in the same PR
+   as this file** (`executor/snipe-lane.mjs`: `GRADUATION_GUARD_SOL` 75, `exitRetryDelayMs`
+   2 s → 30 s, `blockExit`/`stepBlocked`; the heartbeat's `open[]` now carries `exitAttempts`,
+   `exitError`, `exitBlocked`, `exitLatchedAt`; the HAWK-AI tab and the agent page say
+   SELL BY HAND; `executor/test-snipe-exit-stuck.mjs` pins all of it). It reaches the Mac at
+   the next upgrade; until then the stuck position keeps retrying. After the upgrade the
+   stuck row will be marked blocked on its first tick and stop; it closes on its own once the
+   owner sells the coin by hand.
 2. **Explain the wallet**: run `tools/wallet-report.mjs` with the burner address (from the Mac
    or the owner) and reconcile 0.332 → 0.216 SOL into trend, launch, the stuck ticket and fees.
 3. **Grade the trend lane** with `tools/trend-study.mjs` on the Mac's two JSONL files once
@@ -350,9 +352,10 @@ executor. SOL/USD was $121.69 on 2026-09-26 (the dollar figures above are at tha
   must live inside `executor/`; the handoff tools avoid it on purpose.
 - **`Number(null) === 0`** has produced a confident wrong zero three times in this subsystem.
   Absent check first, always. A close the bot cannot price is "not read", never zero.
-- **The heartbeat's `open[]` carries no exit error** (§4.3). A stuck sell is visible only as
-  `counts.exitFailures` climbing; the clause is in the Mac log
-  (`tail -f ~/Library/Logs/ClaudeCompany/wallste.stdout.log | grep -i "exit failed"`).
+- **Before the release built on this branch, the heartbeat's `open[]` carried no exit error**
+  (§4.3). On older releases a stuck sell is visible only as `counts.exitFailures` climbing; the
+  clause is in the Mac log
+  (`tail -f ~/Library/Logs/ClaudeCompany/wallste.stdout.log | grep -i "exit failed\|sell by hand"`).
 - **Stale tracking refs** can fake a conflict; `git ls-remote origin` before believing one.
 - **This repo runs no PR CI.** The gates are Render's `npm ci && npm ci --prefix executor
   --ignore-scripts && npm test` and `pages.yml`'s `npm test`, both on `main` after merge.
