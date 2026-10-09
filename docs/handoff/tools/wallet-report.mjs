@@ -136,10 +136,13 @@ async function main() {
   for (const s of sigs ?? []) {
     let tx = null;
     let lastError = null;
-    for (let attempt = 0; attempt < 3 && !tx; attempt++) {
+    /* maxSupportedTransactionVersion 1: wallet apps already send version-1 transactions, and an
+       RPC asked for version 0 refuses them outright ("Transaction version (1) is not supported").
+       A 429 from the public endpoint is retried on a growing pause rather than given up on. */
+    for (let attempt = 0; attempt < 5 && !tx; attempt++) {
       try {
-        tx = await rpc("getTransaction", [s.signature, { encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment: "confirmed" }]);
-      } catch (e) { lastError = e; await sleep(600 * (attempt + 1)); }
+        tx = await rpc("getTransaction", [s.signature, { encoding: "jsonParsed", maxSupportedTransactionVersion: 1, commitment: "confirmed" }]);
+      } catch (e) { lastError = e; await sleep(1_000 * (attempt + 1)); }
     }
     if (!tx) { txs.push({ signature: s.signature, time: s.blockTime ? new Date(s.blockTime * 1000).toISOString() : null, error: `read failed: ${lastError?.message ?? "no transaction"}` }); continue; }
     txs.push(summarize(s, tx));

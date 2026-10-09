@@ -1,36 +1,42 @@
-# Handoff — Claude Co / HAWK-AI, as of 2026-10-01
+# Handoff — Claude Co / HAWK-AI, as of 2026-10-09
 
-Written 2026-10-01 (about 03:00 UTC) by the Claude Code session `session_01AnSSHGYh96ikWVKhtV8W6s`
-on branch `claude/practical-rubin-n5w92k`, so that a session on **another Claude account** can
-take this work over with nothing but this repository. It replaces the 2026-09-26 handoff; that
-text is kept at `git show 9f319f5:docs/handoff/HANDOFF.md`, and the facts from it that are still
-worth money are carried in §9.
+**New session on another account: read `docs/handoff/START-HERE.md` first** — it is the message
+the owner pastes to start you, and it says what to do in your first hour.
 
-How it was made, so you can weigh it: the previous session (`session_01F71n8BkTmDSf7vg3XzRX3p`,
-the one that wrote PRs #45–#55) read the live desk and the chain at about 02:40 UTC today and
-drafted this file; its container was then lost before anything was committed, and this session
-rebuilt it from the repository and that session's own progress notes. **This session's cloud
-environment could not reach the desk, Solana RPC, pump.fun or DexScreener (network policy), so
-every live number in §1 and §5 is the previous session's reading and has not been re-checked.**
-§2 says how to give a new session that reach. Read all of this before touching anything.
+Written 2026-10-01 by the Claude Code session `session_01AnSSHGYh96ikWVKhtV8W6s`, and **refreshed
+2026-10-09 at about 16:30 UTC by the same session with live reads of the desk and the chain**
+(its environment could reach them by then). It exists so that a session on **another Claude
+account** can take this work over with nothing but this repository. It replaces the 2026-09-26
+handoff; that text is kept at `git show 9f319f5:docs/handoff/HANDOFF.md`, and the facts from it
+that are still worth money are carried in §9.
+
+Every live number below says when it was read. The raw reads behind §0, §1 and §5 were the
+public `GET /api/heartbeat`, `GET /api/agent/50` and `GET /api/storage` on
+`claude-company-api.onrender.com`, plus `tools/wallet-report.mjs` against the burner wallet on
+mainnet. Re-read them before acting on any number; a week changed almost all of them.
 
 ---
 
-## 0. Read this first — three things that are true right now
+## 0. Read this first — what is true right now (2026-10-09, 16:30 UTC)
 
-1. **HAWK-AI is trading real money on the owner's Mac, on two lanes**: the launch lane
-   (`SNIPE_LANE=execute` behind a market floor) and, since 2026-09-30, the trend lane in live
-   mode (`SNIPE_TREND=live`, variants only). Nothing in this repository can stop it; only the
-   Mac can (§4.4). Every merge to `main` changes what the Mac will run at its next upgrade.
-2. **One launch-lane position is stuck** on a coin that graduated off its pump.fun curve. The
-   bot has retried the sell every tick since about 15:49 UTC on 2026-09-30 (6,196 failures at
-   the last reading) and cannot succeed: the curve sell path refuses a completed curve by
-   design, and the executor builds no pool route. Worth about $0.75. §5.2 explains it; §7 says
-   what to do.
-3. **The desk's Anthropic key is disabled**, so the research pipeline writes an
-   `insufficient_coverage` decision for every coin (about 19,000 a day) and publishes no calls.
-   Storage is under control (hourly trim, §5.4), but the desk is not doing research. Reversing
-   that is the owner's decision, not yours.
+1. **HAWK-AI is running but cannot buy: the wallet is empty.** The bot restarted on the owner's
+   Mac at 09:43 UTC today, both lanes are armed (launch lane `execute`, trend lane `live`), the
+   feed is 4/4 live — and every buy since has been refused as `low_balance`. The wallet holds
+   **0.0278 SOL**; a launch ticket is 0.1 SOL, a trend ticket 0.05, and 0.01 is kept back for
+   exits. The last real trade on either lane was **2026-10-07 09:58 UTC**. Nothing in this
+   repository can fund or stop the bot; only the owner and the Mac can (§4.4).
+2. **The money record is negative everywhere it is measured.** HAWK-AI's journal: 492 closed
+   trades, 87 won, **−3.33 SOL**. The whole wallet's risk ledger since 2026-09-12: **−4.57 SOL**
+   realized on 65.5 SOL deployed. The trend lane for real: 136 trades, 17 won, −0.115 SOL. The
+   trend lane on paper since 2026-09-28: 14% win rate and negative for both kinds (variants
+   −2.93 SOL over 1,351 trades). No strategy in this repo has shown an edge. Say so plainly
+   to the owner before building anything that spends.
+3. **The stuck graduated coin is gone**, sold by hand through Jupiter on 2026-10-02 (§5.2), and
+   **PR #56 is merged**: the launch lane now sells before a curve graduates, backs off a failing
+   sell, and marks an unsellable one SELL BY HAND. It reaches the Mac only when the owner
+   upgrades (§7).
+4. **The desk's research is off** (its public state reads `INACTIVE`, $0 spent today): the
+   Anthropic key is disabled, so it publishes no calls. That is the owner's decision.
 
 ---
 
@@ -39,26 +45,28 @@ every live number in §1 and §5 is the previous session's reading and has not b
 | | |
 |---|---|
 | **Repo** | `gtjvv976mb-netizen/Claude-Company` — the desk and the executor. *Not* `Claude-Company-Solana`, which only republishes the site from this repo's `main` on a schedule and holds none of this work. |
-| **`main`** | `e59d35d`, the merge of PR #55, 2026-09-30 16:23 UTC. A merge to `main` deploys the desk on Render and, through `.github/workflows/pages.yml`, runs `npm test` and rebuilds the public site. There is no PR CI. |
-| **Branches** | This file: `claude/practical-rubin-n5w92k`. The previous session's `claude/eloquent-mayer-3jwcyb` is fully merged (its tip `ad63902` is on `main`). A new session develops on whatever branch it is given; the owner merges to `main` with merge commits. |
-| **Open PRs** | [#44](https://github.com/gtjvv976mb-netizen/Claude-Company/pull/44) "HAWK-AI for Phantom, and stock-quoted launches in the executor" — open since 2026-09-24, base `5646b1c`, 30 commits behind `main`. It is the CoinMarketCat / Cat Intelligence Agency work the owner parked (its last commit moves that product to its own repo). Not merged, not rebased, not this session's. Nothing else is open. |
-| **The Mac** (previous session's reading, ~02:40 UTC) | HAWK-AI restarted at 00:45 UTC 2026-10-01 on the latest release (the PR #55 merge). Launch lane armed with a market floor; trend lane live; gRPC feed on Helius LaserStream `sgp`. |
-| **Trend lane, live, since that restart** | 33 real trades: 4 won, 29 lost, −0.009 SOL. The 0.15 SOL/24 h loss stop was not reached. |
-| **Stuck position** | Launch lane, mint beginning `26QftJYy` (the full mint is `snipe.open[].mint` on `/api/agent/50`), 241,205 tokens ≈ $0.75, graduated to PumpSwap. |
-| **Wallet** | 0.216 SOL, down from 0.332 at the previous session's earlier reading. Only about 0.009 of that drop is the trend lane's realized result; the rest (launch-lane trades, the stuck buy, fees) is not broken down anywhere yet — `tools/wallet-report.mjs` (§8) is how to break it down. |
-| **Tests** | `npm test` (`node scripts/test-all.mjs`): 193 suites at the last recorded run, 2026-09-30. Not run by this session (no network, no `node_modules`). |
+| **`main`** | The merge of PR #56, 2026-10-09 (this file, the handoff tools, and the launch lane's exit fix). A merge to `main` deploys the desk on Render and, through `.github/workflows/pages.yml`, runs `npm test` and rebuilds the public site. There is no PR CI. |
+| **Branches** | All work is on `main`. `claude/practical-rubin-n5w92k` (this session) and `claude/eloquent-mayer-3jwcyb` (the previous one) are fully merged. A new session develops on whatever branch it is given; the owner merges to `main` with merge commits. |
+| **Open PRs** | [#44](https://github.com/gtjvv976mb-netizen/Claude-Company/pull/44) "HAWK-AI for Phantom, and stock-quoted launches in the executor" — open since 2026-09-24, base `5646b1c`, far behind `main`. It is the CoinMarketCat / Cat Intelligence Agency work the owner parked (its last commit moves that product to its own repo). Not merged, not rebased, not this session's. Nothing else is open. |
+| **The Mac** (read 2026-10-09 16:29 UTC) | Heartbeat 21 s old, `live: true`. HAWK-AI up since 09:43 UTC today, `mode: execute`, `state: up`, no faults, no open positions. Since that restart: 17,150 launch notices, 17,121 refused, 0 bought, 29 buys refused `low_balance`; trend lane 39 signals, 0 bought, 39 refused `low_balance`. Feed 4/4 live (`logs`, `poll-list`, `grpc`, `poll-momentum`), trade tape live; the gRPC watchdog has restarted the stream 64 times in under 7 hours. The desk-call lane (WALL-ST-E) is `degraded` with entries off. It runs a release from before PR #56. |
+| **Wallet** (burner, read on chain 2026-10-09 16:31 UTC) | **0.027811 SOL.** 12 empty token accounts hold 0.018 SOL of rent (`executor/reclaim-rent.mjs --send` gets it back). Two dust holdings of Backpack Securities tokenized stocks, NIKE (≈ $0.30) and SpaceX (≈ $0.76), that neither lane buys — origin not established. Its address is deliberately not in this public repo (§5.3 says how to get it). |
+| **Tests** | `npm test` (`node scripts/test-all.mjs`): 197/197 files passed on 2026-10-01 at the PR #56 code commit. |
 
 ---
 
 ## 2. Setting up on a new account
 
-- **Repository access.** Connect GitHub at https://claude.ai/connect-github and make sure the
-  Claude GitHub App is installed on `gtjvv976mb-netizen/Claude-Company` (the repo owner does
-  that from the same page). Start the session with this repo selected; a session's
-  repositories are chosen when it starts.
-- **Network.** The cloud environment this file was written in denied every host the work
-  needs. In the environment's settings (Edit → Network access) choose a broader level or allow
-  these hosts: `claude-company-api.onrender.com` (the desk's API), `claudedotcompany.com` and
+- **Repository access.** The repo is **public**, so any account can read and clone it. To push
+  and open PRs, the new account's Claude must be connected to a GitHub user with write access.
+  Today the only collaborator is the owner's own GitHub user, `gtjvv976mb-netizen`. If the new
+  Claude account connects **the same GitHub user** (https://claude.ai/connect-github), nothing
+  else is needed. If it connects a **different** GitHub user, the owner must first add that user
+  under the repo's Settings → Collaborators. Either way the Claude GitHub App must be installed
+  on the repo (same page). Start the session with this repo selected; a session's repositories
+  are chosen when it starts.
+- **Network.** On 2026-10-01 this session's cloud environment denied every host the work needs;
+  by 2026-10-09 it allowed them. A new environment starts with its own policy: in its settings
+  (Edit → Network access) choose a broader level or allow these hosts: `claude-company-api.onrender.com` (the desk's API), `claudedotcompany.com` and
   `solana.claudedotcompany.com` (the sites), `frontend-api-v3.pump.fun`, `api.dexscreener.com`,
   and a Solana RPC (`api.mainnet-beta.solana.com`, or the owner's private one — never print
   it). Without this a session can read code and nothing else.
@@ -74,8 +82,9 @@ every live number in §1 and §5 is the previous session's reading and has not b
 
 ## 3. Standing rules — the owner set these; keep them
 
-- Develop on the branch the session was given. The **owner merges** to `main`; do not merge,
-  and do not open a PR unless the owner asked for one (they have, for every piece of work so
+- Develop on the branch the session was given. The **owner merges** to `main`; do not merge
+  unless the owner says so in as many words (they did for PR #56: "merge"), and do not open a PR
+  unless the owner asked for one (they have, for every piece of work so
   far — "commit, push and open the PR" is the normal close of a task).
 - **Never print or handle secrets** (`CC_SECRET`, private keys, RPC and gRPC tokens, the burner
   key). The owner's env values are double-quoted; strip with `tr -d '"'` when reading one.
@@ -124,24 +133,24 @@ trade tape (`snipe-volume.mjs`) which `recent_trades` and `volume_spike` are mea
 watchdog (`createSourceWatchdog` in `snipe-feed.mjs`, timings in its `GRPC_WATCHDOG` constant —
 not an env var) restarts the gRPC source when it dies.
 
-All dials the lanes read are in one table, `SNIPE_ENV` in `executor/snipe-lane.mjs` (line ~435);
+All dials the lanes read are in one table, `SNIPE_ENV` in `executor/snipe-lane.mjs`;
 the launchd runner's `ALLOWED_ENV` and the installer's upgrade carry loop must name every one of
 them (§10).
 
 ### 4.3 What the heartbeat says, and where to read it
 The bot posts a heartbeat to the desk once a minute. `GET /api/agent/50` returns it sanitized
-(`sanitizeExecutorSnipe` in `src/office.js`, line ~513), with these fields worth knowing:
+(`sanitizeExecutorSnipe` in `src/office.js`), with these fields worth knowing:
 
 - `live` — true only when the heartbeat is under 150 s old **and** `snipe.state === "up"`.
 - `snipe.state` — `up`, `faulted` (retrying with a position open), `disabled`,
   `failed-to-start` (a bad `SNIPE_*` value; `lastError` has the bot's reason).
 - `snipe.open[]` — every open launch-lane position: `mint`, `sizeSol`, `entry`, `openedAt`,
-  `high`, and — from the release built on this branch on — `exitAttempts`, `exitError`,
-  `exitBlocked` (`"graduated"` = sell by hand) and `exitLatchedAt`. **On the release the Mac
-  ran at this writing (PR #55) none of the exit fields exist**: a stuck sell shows up only as
-  `counts.exitFailures` climbing by one per tick, and the clause is only in the Mac log.
+  `high`, and — from PR #56 on — `exitAttempts`, `exitError`, `exitBlocked` (`"graduated"` =
+  sell by hand) and `exitLatchedAt`. **A Mac release from before PR #56 sends none of the exit
+  fields**: a stuck sell then shows up only as `counts.exitFailures` climbing by one per tick,
+  and the clause is only in the Mac log.
 - `snipe.counts` — `entered`, `exited`, `entryFailures`, `exitFailures`, `reconciled`,
-  `refused`, `marketReadsSkipped`.
+  `refused`, `marketReadsSkipped`, and from PR #56 `exitBlocked`.
 - `snipe.flow` — `tradeFeedLive` (false = the gRPC tape is down and every trade floor refuses
   as `trade_feed_down`), `grpcRestarts`, `grpcLastRestartError`.
 - `snipe.lastEntryFailure` — `clause` + `message` of the last refused buy (`low_balance`,
@@ -149,8 +158,14 @@ The bot posts a heartbeat to the desk once a minute. `GET /api/agent/50` returns
 - `snipe.remote` — whether page-set filters are on and which saved version the bot runs.
 - `snipe.trend` — the trend lane's paper scorecard (`strategy` vs `comparison` tallies) and,
   in live mode, `trend.live` (open book, `closed`, `wins`, `losses`, `realizedSumSol`,
-  `realized24hSol`, `lossStop`, `lastError`, `recent[]`).
-- `fees` — the fee lane's block, never summed with trading.
+  `realized24hSol`, `lossStop`, `lastError`, `recent[]`), plus `trend.detector` (the parent
+  finder's refreshes, failures and `lastError`).
+- `snipe.book` — HAWK-AI's lifetime record from the journal (`trades`, `wins`, `losses`,
+  `realizedSol`, the 20 latest `closed` rows). Both lanes sign through one port, so trend-live
+  trades are in it too.
+- `feeLane` — the fee lane's block, never summed with trading. The desk's own
+  `/api/heartbeat` also carries `houseBot`: the same bot seen from the desk, with the whole
+  wallet's risk `ledger` (every lane).
 
 ### 4.4 How it is stopped — on the Mac only
 ```bash
@@ -167,60 +182,72 @@ battery. Stopping the process never closes an on-chain position.
 
 ---
 
-## 5. Live state in detail (previous session's reading, ~02:40 UTC 2026-10-01)
+## 5. Live state in detail (read 2026-10-09, 16:29–16:31 UTC)
 
-### 5.1 The trend lane, live
-Switched to `SNIPE_TREND=live` on 2026-09-30 with `SNIPE_TREND_KINDS=variant` (PR #55, merged
-16:23 UTC); the Mac was upgraded and the bot restarted at 00:45 UTC. By ~02:40 UTC: **33 real
-trades, 4 won, 29 lost, −0.009 SOL**. For scale: the same strategy on paper was −0.038 SOL over
-178 trades to 2026-09-30, and a real fill pays more than the paper model. The lane stops
-buying after 0.15 SOL of realized loss in 24 h and keeps selling; nothing else stops it. Whether
-to keep it live is the owner's call, on evidence — `tools/trend-study.mjs` produces the evidence
-from the two JSONL files on the Mac, including real-vs-paper on the same coins.
+### 5.1 The trend lane
+- **For real** (`SNIPE_TREND=live`, `SNIPE_TREND_KINDS=variant`, since 2026-09-30): **136 closed
+  trades, 17 won, 119 lost, −0.115 SOL.** Last real trade 2026-10-07 09:58 UTC. The 0.15 SOL/24 h
+  loss stop is not active; the lane is simply out of money (39 `low_balance` refusals since the
+  restart).
+- **On paper** (since 2026-09-28): variants 1,351 trades, 14% won, −2.93 SOL; subtopics (the
+  control) 2,395 trades, 14% won, −3.67 SOL. The early "variants are ahead" reading (§9) did not
+  survive the sample.
+- **Unexplained, worth a look before anyone trusts this lane again:**
+  - Four real trades closed as `trail: 25% off a 35x–259x peak` and still lost about 4% each
+    (FOMOCAT twice, GPU, BPCATE, 2026-10-03 to 10-07). A real 35x peak cannot end in a loss on
+    a 25% trail, so the peak was almost certainly a mis-priced trade print, and the trail then
+    fired at once.
+  - The last real fills cost about 0.0136 SOL each against a configured 0.05 SOL ticket.
+- **The parent detector is being rate-limited**: 74 of 82 refreshes of pump.fun's listing
+  failed with HTTP 429; the last good one was 14:09 UTC. It keeps the last good 23 parents, so
+  the lane still runs, on a stale list.
 
-### 5.2 The stuck position — what is happening and why it will not resolve itself
-- The launch lane bought `26QftJYy…` at about 15:49 UTC on 2026-09-30, on the curve. The coin
-  then completed its curve and moved to PumpSwap. The lane's exit rule fired; every sell since
-  has been refused at the port: `snipe-execute.mjs` (line ~772) throws `refused: the curve has
-  graduated — the position must leave through a pool route, which this path does not build;
-  sell by hand`.
-- `snipe-lane.mjs` `exitForReal` (line ~1983) keeps the position, latches the exit
-  (`exitLatched`, `exitError` on the book row), and **retries on the next tick, every tick, with
-  no backoff** — hence 6,196 failures in about 11 hours, surviving the 00:45 restart because the
-  book is durable. It closes the row only when the wallet holds none of the token
-  (`walletHoldsNothing`), which will never be true on its own.
-- Cost of leaving it: each retry is a curve read and a refused simulation against both RPC
-  providers (provider quota, not SOL); the position stays on the board; 241,205 tokens worth
-  about $0.75 sit in the wallet. The trend lane made 33 trades with it open, so the shared port
-  is not frozen by it. Whether it blocks new *launch-lane* buys is not established — read
-  `snipe.lastEntryFailure` and `counts.entered` since 00:45 to tell.
-- The trend-live lane already has the two things the launch lane lacks: a **graduation guard**
-  (sell at 75 SOL of curve reserve, `snipe-trend-live.mjs` line ~234) and a **backoff** on failed
-  sells (2 s → 30 s). That is the engineering fix, §7.
+### 5.2 The stuck graduated position — resolved
+- The launch lane bought `26QftJYy746GCx6wnV8vMkJRErCtyhChM8hBxY6Hpump` at 15:49:36 UTC on
+  2026-09-30 for 0.0998 SOL. The coin completed its curve and moved to PumpSwap; every sell was
+  refused at the port (`snipe-execute.mjs`: "the curve has graduated — the position must leave
+  through a pool route, which this path does not build; sell by hand"), and the lane retried
+  every tick — 6,196 times by 2026-10-01.
+- **It was sold through Jupiter at 05:55:24 UTC on 2026-10-02**: 241,205 tokens for 0.005856 SOL,
+  about −0.094 SOL on the position. Neither HAWK-AI lane routes through Jupiter, so this was a
+  hand sale with the burner key (a wallet app, or `executor/sell-back.mjs`). The lane then saw
+  the wallet holding none and closed the row through its reconcile path (the only way a live row
+  closes without a fill); nothing is open now.
+- PR #56 (merged 2026-10-09) is the fix, so it cannot recur silently: a graduation guard at
+  75 SOL of curve reserve, a 2 s → 30 s backoff, and a terminal SELL BY HAND state on the
+  heartbeat and both pages. `executor/test-snipe-exit-stuck.mjs` pins it.
 
 ### 5.3 The wallet
-0.216 SOL at the reading, from 0.332 earlier in the previous session (same day). The trend
-lane accounts for ~0.009 of the 0.116 drop. The remainder is launch-lane results since the
-last reading, the stuck position's 0.05 SOL ticket (not realized, so not in any P&L), and fees.
-Nobody has reconciled it. The launch lane's own book is on the HAWK-AI tab (read from the
-journal, `state='accounted' AND kind='snipe_exit'`), and `tools/wallet-report.mjs` reads the
-chain directly. The burner address is **not** in this file or in any public endpoint by
-design; it is on the Mac (`burner.json`'s public key, printed in the log at boot) and on the
-owner's executor status page.
+- **0.027811 SOL** on 2026-10-09 16:31 UTC (`tools/wallet-report.mjs`, public RPC). The bot's own
+  refusal agrees to the lamport: its message says the buy "would leave −72,188,728 lamports",
+  and the launch ticket is 100,000,000.
+- Path since the last handoff: 0.216 SOL on 2026-10-01 → trades → a **0.030 SOL plain transfer
+  out** on 2026-10-03 15:12 UTC (a System-program transfer, not a trade) → 0.0278 now.
+- 12 empty token accounts hold 0.018 SOL of rent. `node executor/reclaim-rent.mjs` on the Mac
+  lists them; `--send` closes them. That is the owner's call (it signs).
+- Two token-2022 dust holdings, both Backpack Securities tokenized stocks on Raydium: NIKE (NKE)
+  0.008673 ≈ $0.30, SpaceX (SPCX) 0.004667 ≈ $0.76. Neither lane buys stock tokens; where they
+  came from is not established.
+- **Finding the burner address.** It is deliberately absent from this public repo and from
+  every public endpoint. Ask the owner (it is printed in the Mac's log at boot and shown on the
+  owner's executor status page), or read it off the chain: it is the signer of any sell in
+  `snipe.book.closed` — `getSignaturesForAddress` on that row's mint, the transaction within
+  about 10 s before its `closedAt`.
 
 ### 5.4 The desk
-- Research is off: `ANTHROPIC_API_KEY` disabled → every cycle writes `insufficient_coverage`
-  (~19,000 rows/day, ~10 KB each). The hourly storage job (`src/lib/storage.js`, PRs #51–#54)
-  deletes those once a day old (forward marks and simulated outcomes first, then the decision —
-  the first version failed on the foreign key). First byte measurement of the 1.38 GB database:
-  `decision_runs` 882 MB, `snapshots` 258 MB, `forward_marks` 78 MB, `chronicle` 71 MB. The
-  Render disk is 5 GB (filled at 1 GB on 2026-09-29). `/api/storage` serves the last report;
-  `node src/index.js storage` walks bytes per table (never inside the API process: on the first
-  boot of `91dd82c` that blocked the API for over a minute).
+- Research is off: public state `INACTIVE`, today's spend $0 of the $200 cap, no calls. All-time
+  research spend $934.42; the desk's own settled calls are 2, both losses (−$0.42).
+- Storage (hourly report, 15:30 UTC): database file 1.43 GB of which **1.08 GB is free pages**
+  inside the file — the trim works, but SQLite does not shrink a file without `VACUUM`. The disk
+  is 27.5% used of 5 GB. Largest tables by rows: `forward_marks` 462k, `chronicle` 200k,
+  `snapshots` 163k, `decision_runs` 102k. The trim's last pass deleted nothing new.
+- `/api/storage` serves the last report; `node src/index.js storage` walks bytes per table
+  (never inside the API process: on the first boot of `91dd82c` that blocked the API for over a
+  minute).
 
 ---
 
-## 6. What was merged since the last handoff (PRs #46–#55, all by the previous session)
+## 6. What was merged since the 2026-09-26 handoff (PRs #45–#56)
 
 | PR | merged | what it is |
 |---|---|---|
@@ -234,40 +261,43 @@ owner's executor status page.
 | [#52](https://github.com/gtjvv976mb-netizen/Claude-Company/pull/52)–[#54](https://github.com/gtjvv976mb-netizen/Claude-Company/pull/54) | 09-30 | Storage: the hourly check made cheap (rowid estimates, no page walk); the hourly trim of day-old `insufficient_coverage` decisions; the trim's foreign-key order fixed (it had deleted nothing on its first run). |
 | [#55](https://github.com/gtjvv976mb-netizen/Claude-Company/pull/55) | 09-30 | **`SNIPE_TREND=live`**: `snipe-trend-live.mjs` buys the strategy's kinds for real through the sniper's port; needs `SNIPE_LANE=execute`; paper lane keeps running as the comparison; its own limits (`SNIPE_TREND_TICKET_SOL` 0.05, hard cap 0.5; `SNIPE_TREND_MAX_OPEN` 2; `SNIPE_TREND_MAX_DAILY_LOSS_SOL` 0.15); graduation guard at 75 SOL; failed sells retried on a 2–30 s backoff and reconciled only on a definite zero; book in `<state-db>.trend-live.json`, closed trades in `<state-db>.trend-live.jsonl`; `trend.live` on the heartbeat. |
 
-Nothing has been merged since. The owner upgraded the Mac to #55 and the bot has been live on it
-since 00:45 UTC.
+| [#56](https://github.com/gtjvv976mb-netizen/Claude-Company/pull/56) | 10-09 | **This handoff, its tools, and the launch lane's exit fix**: `GRADUATION_GUARD_SOL` 75 (sell before the curve completes), `exitRetryDelayMs` 2 s → 30 s, `blockExit`/`stepBlocked` (a graduated position is marked SELL BY HAND, never retried, closed only when the wallet no longer holds it); `open[]` on the heartbeat carries `exitAttempts`, `exitError`, `exitBlocked`, `exitLatchedAt`; the HAWK-AI tab and the agent page show it. Merged by this session on the owner's explicit "merge". |
+
+PRs #45–#55 were written by the previous session (`session_01F71n8BkTmDSf7vg3XzRX3p`), #56 by
+this one. The Mac ran #55 when this file was refreshed; #56 reaches it at the owner's next upgrade.
 
 ---
 
 ## 7. What to do next
 
-**Engineering (needs no owner decision; propose, build, PR):**
-1. **Give the launch lane what the trend lane has** — **built on this branch, in the same PR
-   as this file** (`executor/snipe-lane.mjs`: `GRADUATION_GUARD_SOL` 75, `exitRetryDelayMs`
-   2 s → 30 s, `blockExit`/`stepBlocked`; the heartbeat's `open[]` now carries `exitAttempts`,
-   `exitError`, `exitBlocked`, `exitLatchedAt`; the HAWK-AI tab and the agent page say
-   SELL BY HAND; `executor/test-snipe-exit-stuck.mjs` pins all of it). It reaches the Mac at
-   the next upgrade; until then the stuck position keeps retrying. After the upgrade the
-   stuck row will be marked blocked on its first tick and stop; it closes on its own once the
-   owner sells the coin by hand.
-2. **Explain the wallet**: run `tools/wallet-report.mjs` with the burner address (from the Mac
-   or the owner) and reconcile 0.332 → 0.216 SOL into trend, launch, the stuck ticket and fees.
-3. **Grade the trend lane** with `tools/trend-study.mjs` on the Mac's two JSONL files once
-   there are a few hundred real trades, and put real-vs-paper on the same coins in front of the
-   owner. The question is whether being real costs more than the paper edge was.
+**The owner's decisions first — nothing below spends until these are made:**
+1. **Fund the wallet, or stop the lanes.** At 0.0278 SOL both lanes refuse every buy. Funding
+   it restarts real-money trading on a record that is negative on every lane (§0.2). Stopping
+   is `buys off` on the Mac (§4.4), or `SNIPE_TREND="shadow"` (edit the line in place; a second
+   `SNIPE_TREND` line stops the bot at launch) to keep only the paper scorecard.
+2. **Upgrade the Mac to `main`** so the PR #56 exit fix runs (steps below). With no open
+   positions there is no hurry, but it must be on before the next real buy.
+3. **Reclaim the rent**: `node executor/reclaim-rent.mjs --send` on the Mac returns about
+   0.018 SOL from 12 empty token accounts. It signs, so it is the owner's act.
+4. The two tokenized-stock dust holdings (§5.3): explain or ignore.
+5. Re-enable the desk's Anthropic key, or leave research off. Until it is on, the desk makes no
+   calls and the WALL-ST-E lane has nothing to take.
+6. PR #44: close it or ask for a rebase. It belongs to the parked CoinMarketCat product.
+7. Fee claim at `solana.claudedotcompany.com/fees.html` when the page says the net is worth it.
+   Today it is not: 0.00133 SOL claimable, below the floor on all 14 passes.
 
-**The owner's decisions (these need the owner, not Claude):**
-1. The stuck coin: sell it by hand (the key is on the Mac; pump.fun's own page routes graduated
-   coins through PumpSwap) or leave it. At $0.75 the honest advice is to leave it until item 1
-   above stops the retries.
-2. Keep `SNIPE_TREND=live` running, or set it back to `shadow` (edit the line in place with
-   `sed -i ''`; a second `SNIPE_TREND` line stops the bot at launch).
-3. Re-enable the desk's Anthropic key, or leave research off. Until it is on, the desk makes
-   no calls and the WALL-ST-E lane has nothing to take.
-4. PR #44: close it or ask for a rebase. It is 30 commits behind and belongs to the parked
-   CoinMarketCat product.
-5. Fee claim at `solana.claudedotcompany.com/fees.html` whenever the page says the net is worth
-   it (§9).
+**Engineering (propose, build, PR — no money moves):**
+1. **The trend lane's impossible peaks**: find why four real trades recorded 35x–259x peaks and
+   lost (§5.1). Start at `priceOfTrade` in `executor/snipe-trend.mjs` and the live lane's
+   `onTrade` in `snipe-trend-live.mjs`. A print in a different quote or a decimals mismatch is
+   the first suspect; a test that replays such a print should fail first.
+2. **The fill size**: why real trend fills were ~0.0136 SOL against a 0.05 ticket.
+3. **The parent detector's 429s**: back off and spread its listing reads (`createTrendDetector`
+   in `snipe-trend.mjs`); 74 of 82 refreshes failed today.
+4. **gRPC churn**: 64 watchdog restarts in under 7 hours. Read `grpcLastRestartError` and the
+   Mac log before changing the watchdog's timings (`GRPC_WATCHDOG` in `snipe-feed.mjs`).
+5. **Grade before arming anything new**: `tools/trend-study.mjs` on the Mac's two JSONL files
+   gives real-vs-paper on the same coins.
 
 **Upgrading the Mac** after a merge (the owner does this; the steps are the installer's):
 `git pull`; `unload` from the versioned path; run `install.sh` again (it detects the prior
@@ -289,10 +319,12 @@ or in a cloud session whose environment allows those hosts (§2). None of them i
 | `trend-study.mjs` | `node docs/handoff/tools/trend-study.mjs [--dir ~/claudeco-executor] [--since 24h] [--json]` | the paper and the real trend books: wins/losses/P&L, by kind, by exit reason, by parent, by day; strategy vs comparison; **paper vs real matched by mint** (the cost of being real). Finds the two JSONL files under the install dir, or take `--state-db`, `--shadow`, `--live`. |
 | `stuck-position.mjs` | `node docs/handoff/tools/stuck-position.mjs <MINT> [--wallet WALLET] [--rpc URL] [--json]` | is the curve complete, which pool it graduated to, where it trades and at what price, how much the wallet holds and what that is worth — and the verdict: on the curve (the lane sells it) or graduated (no bot path; by hand or leave it). |
 
-All three were written in a container with no network, so they were syntax-checked and
-exercised against a synthetic JSONL fixture and a local mock RPC (including the path where
-pump.fun and DexScreener do not answer), not against the live chain. The first live run of each
-is a test; a mint or wallet must be 32–44 base58 characters or the usage line is printed.
+`wallet-report.mjs` was run live against the burner on 2026-10-09 and matched the bot's own
+balance to the lamport; that run found that wallet apps send version-1 transactions, which the
+first version refused, and it now reads them. `stuck-position.mjs` and `trend-study.mjs` were
+exercised against a mock RPC and a synthetic JSONL fixture. The public RPC rate-limits hard: for
+more than ~40 transactions pass the owner's private `--rpc`. A mint or wallet must be 32–44
+base58 characters or the usage line is printed.
 
 ---
 
@@ -305,7 +337,8 @@ loss. **The first 46 market-floor trades** (2026-09-26/27): 4 W, 42 L, −0.19 S
 still cost 4.1% (2.4% venue, 0.2% network, 1.5% rent — the rent is now returned).
 
 **Trend lane on paper**: first 103 trades, variants +0.017 SOL (5 of 19), subtopics −0.223
-(11 of 84); 178 trades to 2026-09-30, variants −0.038 SOL. In the 29-minute sample that prompted
+(11 of 84); 178 trades to 2026-09-30, variants −0.038 SOL. By 2026-10-09 both kinds were
+clearly negative (§5.1). In the 29-minute sample that prompted
 the lane, related launches reached ~$30k 2.2x as often as other launches.
 
 **BAGWORK (26 agents, 362 closed trades):** trading −0.077 SOL, creator fees +14.515, rewards
@@ -352,8 +385,7 @@ executor. SOL/USD was $121.69 on 2026-09-26 (the dollar figures above are at tha
   must live inside `executor/`; the handoff tools avoid it on purpose.
 - **`Number(null) === 0`** has produced a confident wrong zero three times in this subsystem.
   Absent check first, always. A close the bot cannot price is "not read", never zero.
-- **Before the release built on this branch, the heartbeat's `open[]` carried no exit error**
-  (§4.3). On older releases a stuck sell is visible only as `counts.exitFailures` climbing; the
+- **Before PR #56, the heartbeat's `open[]` carried no exit error** (§4.3). On older releases a stuck sell is visible only as `counts.exitFailures` climbing; the
   clause is in the Mac log
   (`tail -f ~/Library/Logs/ClaudeCompany/wallste.stdout.log | grep -i "exit failed\|sell by hand"`).
 - **Stale tracking refs** can fake a conflict; `git ls-remote origin` before believing one.
