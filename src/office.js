@@ -528,6 +528,12 @@ export function sanitizeExecutorSnipe(value) {
     entry: level(p.entry),
     openedAt: timestamp(p.openedAt),
     high: level(p.high),
+    /* THE EXIT'S OWN STATE, rendered, so the count is bounded, the text capped and the block
+       reason shape-checked. `exitBlocked` is a word from the bot ("graduated"), never free text. */
+    exitAttempts: count(p.exitAttempts),
+    exitError: p.exitError == null ? null : String(p.exitError).slice(0, 240),
+    exitBlocked: /^[a-z_]{1,40}$/.test(String(p.exitBlocked ?? "")) ? String(p.exitBlocked) : null,
+    exitLatchedAt: timestamp(p.exitLatchedAt),
   })).filter((p) => p.mint) : [];
   const c = value.counts && typeof value.counts === "object" && !Array.isArray(value.counts) ? value.counts : null;
   const f = value.feed && typeof value.feed === "object" && !Array.isArray(value.feed) ? value.feed : null;
@@ -571,6 +577,7 @@ export function sanitizeExecutorSnipe(value) {
       signed: count(c.signed), sent: count(c.sent),
       reconciled: count(c.reconciled),
       marketReadsSkipped: count(c.marketReadsSkipped),
+      exitBlocked: count(c.exitBlocked),
     } : null,
     /* THE VOLUME TAPE, FROM BOTH ENDS, and the momentum source's drop tally. Both were computed
        on the bot and never left it, so a tape recording nothing and a pre-filter keeping nothing

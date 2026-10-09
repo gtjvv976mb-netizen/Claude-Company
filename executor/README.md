@@ -913,8 +913,15 @@ marker, and sent raw to both providers with preflight skipped. The fill is read 
 confirmed transaction's own balances and handed to the lane the moment the cluster confirms
 it; finality is awaited in the background. A sell is the same path with the floor set from
 the curve's own quote less a 10% tolerance. The position leaves in full at the take, the
-stop, the creator's exit, or the clock (ten minutes by default). A curve that has graduated
-to a pool is refused: that position must be sold by hand.
+stop, the creator's exit, the clock (ten minutes by default), or the **graduation guard**: at
+75 SOL of real curve reserve (`GRADUATION_GUARD_SOL`, the trend lane's number) the whole
+position is sold, because a curve that has completed cannot be sold by this executor at all —
+the port refuses it and builds no pool route. A position that completes anyway (2026-09-30:
+one did, and the lane then refused its own sell 6,196 times, once a tick) is marked **sell by
+hand**: the lane stops retrying, says so once in the log, carries it on the heartbeat
+(`open[].exitBlocked`, shown on the HAWK-AI tab and the agent page), stops reading the curve,
+and closes the row only when the wallet no longer holds the coin. Any other failed sell is
+retried on a 2 s → 30 s backoff rather than every tick.
 
 The wallet is one wallet. A sniper deployment counts in the same rolling 24-hour risk the
 desk reads, and an unresolved intent on either lane freezes new exposure on both until

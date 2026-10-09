@@ -2624,6 +2624,12 @@ function snipeHeartbeat() {
       entry: Number(p.entry) > 0 ? Number(p.entry) : null,
       openedAt: Number(p.openedAt) > 0 ? Number(p.openedAt) : null,
       high: Number(p.high) > 0 ? Number(p.high) : null,
+      /* THE EXIT'S OWN STATE. 2026-09-30: a sell failed 6,196 times on a graduated coin and the
+         only visible sign was counts.exitFailures climbing; the row itself said nothing. */
+      exitAttempts: Number(p.exitAttempts) > 0 ? Math.floor(Number(p.exitAttempts)) : 0,
+      exitError: p.exitError ? String(p.exitError).slice(0, 240) : null,
+      exitBlocked: p.exitBlocked ? String(p.exitBlocked).slice(0, 40) : null,
+      exitLatchedAt: Number(p.exitLatchedAt) > 0 ? Number(p.exitLatchedAt) : null,
     }));
   } catch {}
   try {
@@ -2637,6 +2643,7 @@ function snipeHeartbeat() {
         signed: Number(s.signed) || 0, sent: Number(s.sent) || 0,
         reconciled: Number(s.reconciled) || 0,
         marketReadsSkipped: Number(s.marketReadsSkipped) || 0,
+        exitBlocked: Number(s.exitBlocked) || 0,
       };
       /* WHY THE LAST BUY FAILED, if one did — the reason used to live only in the local log. */
       const lf = s.lastEntryFailure;

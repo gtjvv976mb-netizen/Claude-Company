@@ -13464,8 +13464,14 @@ function loadHawkDashboard() {
       const list = dashNode("div", "dashgrid");
       for (const p of snipe.open) {
         const mark = p.high && p.entry ? ` · high ${(p.high / p.entry).toFixed(2)}x` : "";
+        /* A SELL THAT CANNOT HAPPEN IS SAID ON THE ROW. 2026-09-30: a coin graduated under an
+           open position and the bot refused its own sell 6,196 times with nothing here but a
+           climbing failure count to show for it. */
+        const stuck = p.exitBlocked
+          ? ` · SELL BY HAND — ${p.exitBlocked}${p.exitError ? ": " + p.exitError : ""}`
+          : p.exitAttempts > 0 ? ` · sell failing (${p.exitAttempts} attempt${p.exitAttempts === 1 ? "" : "s"})${p.exitError ? ": " + p.exitError : ""}` : "";
         list.append(dashMetric(p.mint.slice(0, 4) + "…" + p.mint.slice(-4), `${p.sizeSol} SOL`,
-          `${p.openedAt ? "opened " + when(p.openedAt) : ""}${mark}`));
+          `${p.openedAt ? "opened " + when(p.openedAt) : ""}${mark}${stuck}`));
       }
       liveBox.appendChild(list);
     }
